@@ -190,6 +190,31 @@ internal sealed class InMemoryConversationStore : IConversationStore
         }
     }
 
+    public Task<bool> TryCommitWrapUpAsync(
+        TenantId tenantId, EntityId conversationId, EntityId ownerAgentId, DateTimeOffset now, CancellationToken ct)
+    {
+        // Mirror the Postgres UPDATE ... WHERE state = ANY(@From) AND owner_kind = Agent AND owner_id = @Owner
+        // single-row CAS (close-chat-without-typification-licence D3) under the stored entity's lock, as
+        // TryConditionalCloseWrapUpAsync does. State is assigned directly, like the SQL: OnHold/Consulting
+        // reach WrapUp here without the in-memory step to Active the switchboard performs.
+        if (!_items.TryGetValue((tenantId, conversationId), out var conv))
+            return Task.FromResult(false);
+
+        lock (conv)
+        {
+            if (!ConversationStateMachine.IsFailoverWork(conv.State) ||
+                conv.Owner is not { Kind: ConversationOwnerKind.Agent } owner ||
+                owner.OwnerId != ownerAgentId)
+            {
+                return Task.FromResult(false);
+            }
+
+            conv.State = ConversationState.WrapUp;
+            conv.UpdatedAt = now;
+            return Task.FromResult(true);
+        }
+    }
+
     public Task<int> CountActiveWorkAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
     {
         var count = _items.Values.Count(c =>

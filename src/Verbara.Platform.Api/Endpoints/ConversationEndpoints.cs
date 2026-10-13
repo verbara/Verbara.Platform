@@ -44,9 +44,13 @@ internal static class ConversationEndpoints
         // requires the owner or a supervisor, and a target that exists.
         group.MapPost("/{id}/transfer", TransferConversation)
             .RequireAuthorization("Permission:contacts:conversation:transfer");
-        group.MapPost("/{id}/close", CloseConversation);
+        // close-chat-without-typification-licence D9: a refused close answers 409 with a stable code
+        // (typification-required, conversation-not-closable), written as a JSON result.
+        group.MapPost("/{id}/close", CloseConversation)
+            .Produces<ErrorResponse>(StatusCodes.Status409Conflict);
         group.MapGet("/{id}/typification-form", GetTypificationForm);
-        group.MapPost("/{id}/typify", TypifyConversation);
+        group.MapPost("/{id}/typify", TypifyConversation)
+            .Produces<ErrorResponse>(StatusCodes.Status409Conflict);
         // D1 — AI auto-disposition suggestion. The conversations group is NOT
         // license-gated (agents must always be able to close work), so the gate is
         // applied to THIS endpoint only, requiring BOTH AdvancedTypification AND
@@ -278,17 +282,31 @@ internal static class ConversationEndpoints
         return TypedResults.Ok(result);
     }
 
-    // The owner, or a supervisor (audited with by_supervisor), closes a conversation.
+    // The owner, or a supervisor (audited with by_supervisor), closes a conversation
+    // (close-chat-without-typification-licence, design D10). The decision is taken from the state and
+    // channel read here, before anything is mutated — never by catching a refused TransitionTo:
+    //   - WrapUp / WaitingForCustomer / Resolved: the existing edge to Closed, now publishing the change
+    //     (from WrapUp as a compare-and-set, D4).
+    //   - Active / OnHold / Consulting, non-voice, agent-held: a bound published schema means typification
+    //     is demanded (409 typification-required, nothing mutated, D5); otherwise the chat wraps up through
+    //     the switchboard (the one place the owner's capacity unit is released, once per won wrap-up — D2/D3) and
+    //     the WrapUp → Closed step runs as a compare-and-set that cannot clobber a concurrent close (D4).
+    //   - Anything else (Queued, Offered, Snoozed, Escalated, terminal, live voice): 409 conversation-not-closable.
     private static async Task<Results<Ok<Conversation>, NotFound, JsonHttpResult<ErrorResponse>>> CloseConversation(
         string id,
         HttpContext context,
         [FromServices] IConversationStore store,
         [FromServices] IAgentStore agents,
         [FromServices] IAuditService audit,
+        [FromServices] ITypificationResolver resolver,
+        [FromServices] IConversationSwitchboard switchboard,
+        PlatformEventBus eventBus,
+        IClock clock,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var conversation = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        var conversationId = EntityId.From(id);
+        var conversation = await store.GetByIdAsync(tenantId, conversationId, ct);
         if (conversation is null)
             return TypedResults.NotFound();
 
@@ -298,21 +316,126 @@ internal static class ConversationEndpoints
             return ConversationActor.Forbidden(ConversationActor.NotOwner);
 
         var owner = conversation.Owner;
+        var fromState = conversation.State;
+
+        if (ConversationStateMachine.IsFailoverWork(fromState))
+        {
+            // Agent-held work. Voice wraps up through the bridge, which owns that edge and its release (D8).
+            if (conversation.Channel == ChannelType.Voice
+                || owner is not { Kind: ConversationOwnerKind.Agent, OwnerId: { } ownerAgentId })
+                return ConversationActor.Conflict(ConversationActor.NotClosable);
+
+            if (await resolver.ResolveForConversationAsync(conversation, ct) is not null)
+                return ConversationActor.Conflict(ConversationActor.TypificationRequired);
+
+            // The wrap-up is predicated on the owner the actor check above was decided against: a transfer
+            // that committed since makes it fail (409) rather than close the new owner's chat (D3).
+            var wrapUp = await switchboard.WrapUpAsync(tenantId, conversationId, ownerAgentId, ct);
+            if (!wrapUp.Success)
+                return await AlreadyClosedOrNotClosableAsync(store, tenantId, conversationId, ct);
+
+            var now = clock.UtcNow;
+            if (!await store.TryConditionalCloseWrapUpAsync(tenantId, conversationId, now, ct))
+            {
+                // The wrap-up was ours but a concurrent close (worker, supervisor, a second request) moved the
+                // row out of WrapUp first. Our wrap-up still released the unit; report what the row is now (D4),
+                // auditing the supervisor's part only when the conversation did end up Closed.
+                var outcome = await AlreadyClosedOrNotClosableAsync(store, tenantId, conversationId, ct);
+                if (outcome.Result is Ok<Conversation>)
+                    await RecordCloseAuditAsync(context, audit, tenantId, conversationId, owner, bySupervisor, skippedTypification: true, ct);
+                return outcome;
+            }
+
+            eventBus.Publish(new ConversationStateChangedEvent(
+                tenantId.Value, conversationId.Value, nameof(ConversationState.WrapUp), nameof(ConversationState.Closed)));
+            await RecordCloseAuditAsync(context, audit, tenantId, conversationId, owner, bySupervisor, skippedTypification: true, ct);
+
+            return TypedResults.Ok(await ReloadClosedAsync(store, tenantId, conversationId, conversation, now, ct));
+        }
+
+        if (!ConversationStateMachine.CanTransition(fromState, ConversationState.Closed))
+            return ConversationActor.Conflict(ConversationActor.NotClosable);
+
+        if (fromState == ConversationState.WrapUp)
+        {
+            // WrapUp → Closed as a compare-and-set (D4): a concurrent close of the same chat (a racing /close
+            // whose wrap-up won, the timeout worker, a supervisor) may get there first. Re-running TransitionTo
+            // on a row another request just closed would throw (the in-memory store shares its entity), and a
+            // full-row save would clobber that close on Postgres.
+            var closedAt = clock.UtcNow;
+            if (!await store.TryConditionalCloseWrapUpAsync(tenantId, conversationId, closedAt, ct))
+                return await AlreadyClosedOrNotClosableAsync(store, tenantId, conversationId, ct);
+
+            eventBus.Publish(new ConversationStateChangedEvent(
+                tenantId.Value, conversationId.Value, nameof(ConversationState.WrapUp), nameof(ConversationState.Closed)));
+            await RecordCloseAuditAsync(context, audit, tenantId, conversationId, owner, bySupervisor, skippedTypification: false, ct);
+            return TypedResults.Ok(await ReloadClosedAsync(store, tenantId, conversationId, conversation, closedAt, ct));
+        }
+
+        // WaitingForCustomer / Resolved. Re-check the live state just before the mutation: the in-memory store
+        // hands out its stored entity, so the state read above can be stale by now.
+        if (!ConversationStateMachine.CanTransition(conversation.State, ConversationState.Closed))
+            return await AlreadyClosedOrNotClosableAsync(store, tenantId, conversationId, ct);
+
         conversation.TransitionTo(ConversationState.Closed);
         await store.SaveAsync(conversation, ct);
 
-        if (bySupervisor)
-        {
-            var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [ConversationAudit.BySupervisor] = CallerIdentity.ResolveUserIdOrSystem(context.User),
-            };
-            ConversationActor.AddOwner(metadata, "owner", owner);
-            await ConversationAudit.TryRecordAsync(
-                context, audit, tenantId, "conversation.closed", conversation.ConversationId, metadata, ct);
-        }
+        eventBus.Publish(new ConversationStateChangedEvent(
+            tenantId.Value, conversationId.Value, fromState.ToString(), nameof(ConversationState.Closed)));
+        await RecordCloseAuditAsync(context, audit, tenantId, conversationId, owner, bySupervisor, skippedTypification: false, ct);
 
         return TypedResults.Ok(conversation);
+    }
+
+    // The store committed → Closed atomically; return the row as stored rather than re-running TransitionTo on
+    // the instance loaded before the conditional update.
+    private static async Task<Conversation> ReloadClosedAsync(
+        IConversationStore store, TenantId tenantId, EntityId conversationId, Conversation loaded, DateTimeOffset now, CancellationToken ct)
+    {
+        var closed = await store.GetByIdAsync(tenantId, conversationId, ct) ?? loaded;
+        if (closed.State != ConversationState.Closed)
+        {
+            closed.State = ConversationState.Closed;
+            closed.ClosedAt ??= now;
+            closed.UpdatedAt = now;
+        }
+
+        return closed;
+    }
+
+    // A close that lost a race: 200 with the row when someone else already closed it (D4), else 409.
+    private static async Task<Results<Ok<Conversation>, NotFound, JsonHttpResult<ErrorResponse>>> AlreadyClosedOrNotClosableAsync(
+        IConversationStore store, TenantId tenantId, EntityId conversationId, CancellationToken ct)
+    {
+        var current = await store.GetByIdAsync(tenantId, conversationId, ct);
+        return current is { State: ConversationState.Closed }
+            ? TypedResults.Ok(current)
+            : ConversationActor.Conflict(ConversationActor.NotClosable);
+    }
+
+    // A supervisor's close of a conversation it does not own is audited with by_supervisor and the owner
+    // before the close; a close that wrapped up without a schema also records typification=skipped-no-schema.
+    private static async Task RecordCloseAuditAsync(
+        HttpContext context,
+        IAuditService audit,
+        TenantId tenantId,
+        EntityId conversationId,
+        ConversationOwner? owner,
+        bool bySupervisor,
+        bool skippedTypification,
+        CancellationToken ct)
+    {
+        if (!bySupervisor)
+            return;
+
+        var metadata = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [ConversationAudit.BySupervisor] = CallerIdentity.ResolveUserIdOrSystem(context.User),
+        };
+        ConversationActor.AddOwner(metadata, "owner", owner);
+        if (skippedTypification)
+            metadata["typification"] = "skipped-no-schema";
+        await ConversationAudit.TryRecordAsync(context, audit, tenantId, "conversation.closed", conversationId, metadata, ct);
     }
 
     private static async Task<Results<Ok<TypificationFormResponse>, NotFound>> GetTypificationForm(
@@ -635,6 +758,7 @@ internal static class ConversationEndpoints
         [FromServices] ITypificationSubmissionStore submissionStore,
         [FromServices] ITypificationProvenanceService provenanceService,
         [FromServices] IAuditService auditService,
+        [FromServices] IConversationSwitchboard switchboard,
         CampaignStoreBase campaignStore,
         DispositionCodeStoreBase dispositionCodeStore,
         PlatformEventBus eventBus,
@@ -691,19 +815,30 @@ internal static class ConversationEndpoints
                 validation.Errors.Select(e => new TypifyFieldError(e.Field, e.Message)).ToArray()));
         }
 
-        // 4. Move to WrapUp (same state-machine guard the old /wrapup handler used)
-        //    only after validation succeeds, then persist.
-        try
+        // 4. Move to WrapUp only after validation succeeds (close-chat-without-typification-licence D6).
+        //    Agent-held digital work goes through the switchboard: a state-and-owner conditional commit that
+        //    releases the owner's capacity unit once, only when it wins (D2/D3). Voice keeps its own path — the voice
+        //    bridge owns that release (D8) — as does a conversation no agent holds (no unit to release).
+        //    Either way the state is checked before any mutation, never with try/catch, and a refusal or a
+        //    lost race is a 409 conversation-not-closable (D9).
+        //    The wrap-up is predicated on the owner the actor check was decided against (`owner`, read before
+        //    the resolver ran): a transfer that committed since is a 409, never a submission attributed to
+        //    the old owner on the new owner's chat (D3).
+        if (conversation.Channel != ChannelType.Voice
+            && owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } ownerAgentId })
         {
-            conversation.TransitionTo(ConversationState.WrapUp);
+            var wrapUp = await switchboard.WrapUpAsync(tenantId, conversationId, ownerAgentId, ct);
+            if (!wrapUp.Success)
+                return ConversationActor.Conflict(ConversationActor.NotClosable);
         }
-        catch (InvalidOperationException ex)
+        else
         {
-            RejectedRequestLog.Write(context, "conversation-wrap-up", ex);
-            return TypedResults.BadRequest(new ErrorResponse("The conversation cannot move to wrap-up from its current state."));
-        }
+            if (!ConversationStateMachine.CanTransition(conversation.State, ConversationState.WrapUp))
+                return ConversationActor.Conflict(ConversationActor.NotClosable);
 
-        await conversationStore.SaveAsync(conversation, ct);
+            conversation.TransitionTo(ConversationState.WrapUp);
+            await conversationStore.SaveAsync(conversation, ct);
+        }
 
         var leafNodeId = path[^1];
 

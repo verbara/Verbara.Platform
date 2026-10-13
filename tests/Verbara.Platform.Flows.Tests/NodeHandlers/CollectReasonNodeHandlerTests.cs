@@ -388,6 +388,10 @@ public sealed class CollectReasonNodeHandlerTests
             TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct) =>
             Task.FromResult(false);
 
+        public Task<bool> TryCommitWrapUpAsync(
+            TenantId tenantId, EntityId conversationId, EntityId ownerAgentId, DateTimeOffset now, CancellationToken ct) =>
+            Task.FromResult(false);
+
         public Task<int> CountActiveWorkAsync(TenantId tenantId, EntityId agentId, CancellationToken ct) =>
             Task.FromResult(0);
 

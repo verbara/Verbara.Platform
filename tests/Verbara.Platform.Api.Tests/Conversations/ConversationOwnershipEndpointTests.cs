@@ -8,6 +8,7 @@ using Verbara.Platform.Identity;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Typification.Stores;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Verbara.Platform.Api.Tests.Conversations;
 
@@ -563,6 +564,31 @@ public sealed class ConversationOwnershipEndpointTests : IClassFixture<Conversat
     }
 
     [Fact]
+    public async Task Close_ShouldReturn409TypificationRequiredAndKeepState_WhenSchemaIsBound()
+    {
+        // Typification is demanded (a published schema is bound): /close refuses with a stable code
+        // so the client opens the wrap-up sheet, and mutates nothing (design D5). The schema-free
+        // close cases live in ConversationCloseWithoutSchemaEndpointTests: this class's host binds a
+        // tenant-wide schema the first time any typify test runs, and that binding cannot be undone.
+        _factory.EnsureTypificationSchema();
+        var (user, agent) = _factory.NewAgent("owner");
+        var conversation = _factory.SeedConversation(ConversationOwner.ForAgent(agent.AgentId), ConversationState.Active);
+        _factory.Reserve(agent.AgentId);
+        using var events = StateChangeRecorder.For(_factory, conversation);
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsync(Route(conversation, "close"), content: null);
+
+        await ShouldBeErrorAsync(response, HttpStatusCode.Conflict, "typification-required");
+        var stored = _factory.Load(conversation.ConversationId)!;
+        stored.State.Should().Be(ConversationState.Active);
+        stored.Owner.Should().Be(ConversationOwner.ForAgent(agent.AgentId));
+        _factory.LoadOf(agent.AgentId).Should().Be(1, "a refused close releases nothing");
+        events.Changes.Should().BeEmpty();
+        (await SubmissionOfAsync(conversation)).Should().BeNull();
+    }
+
+    [Fact]
     public async Task Typify_ShouldReturn403AndKeepState_WhenCallerIsNotOwnerOrSupervisor()
     {
         _factory.EnsureTypificationSchema();
@@ -614,10 +640,10 @@ public sealed class ConversationOwnershipEndpointTests : IClassFixture<Conversat
 
     // ─── helpers ──────────────────────────────────────────────────────────────
 
-    private static string Route(Conversation conversation, string action) =>
+    internal static string Route(Conversation conversation, string action) =>
         $"/api/v1/conversations/{conversation.ConversationId.Value}/{action}";
 
-    private static object TypifyBody() => new
+    internal static object TypifyBody() => new
     {
         selectedNodePath = new[]
         {
@@ -628,7 +654,7 @@ public sealed class ConversationOwnershipEndpointTests : IClassFixture<Conversat
         notes = "done",
     };
 
-    private static async Task ShouldBeErrorAsync(HttpResponseMessage response, HttpStatusCode status, string error)
+    internal static async Task ShouldBeErrorAsync(HttpResponseMessage response, HttpStatusCode status, string error)
     {
         var body = await response.Content.ReadAsStringAsync();
         response.StatusCode.Should().Be(status, because: $"the response was {body}");
@@ -661,5 +687,348 @@ public sealed class ConversationOwnershipEndpointTests : IClassFixture<Conversat
         using var scope = _factory.Services.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<ITypificationSubmissionStore>()
             .GetByConversationIdAsync(ConversationOwnershipApiFactory.Tenant, conversation.ConversationId, CancellationToken.None);
+    }
+}
+
+/// <summary>
+/// <c>POST /conversations/{id}/close</c> on a deployment where no typification schema is bound — what an
+/// unlicensed tenant always is (close-chat-without-typification-licence, design D1-D10). An agent-held
+/// chat closes through <c>Active → WrapUp → Closed</c>, its owner's capacity unit is released exactly
+/// once, both state changes are published, and a refusal carries a stable 409 code.
+/// </summary>
+/// <remarks>
+/// A class of its own so it gets a host of its own: <see cref="ConversationOwnershipEndpointTests"/>
+/// binds a tenant-wide schema (<see cref="ConversationOwnershipApiFactory.EnsureTypificationSchema"/>)
+/// the first time a typify test runs, and these tests need that binding never to exist. Never call
+/// <c>EnsureTypificationSchema</c> here.
+/// </remarks>
+public sealed class ConversationCloseWithoutSchemaEndpointTests : IClassFixture<ConversationOwnershipApiFactory>
+{
+    private readonly ConversationOwnershipApiFactory _factory;
+
+    public ConversationCloseWithoutSchemaEndpointTests(ConversationOwnershipApiFactory factory) => _factory = factory;
+
+    private static string Route(Conversation conversation, string action) =>
+        ConversationOwnershipEndpointTests.Route(conversation, action);
+
+    private static Task ShouldBeErrorAsync(HttpResponseMessage response, HttpStatusCode status, string error) =>
+        ConversationOwnershipEndpointTests.ShouldBeErrorAsync(response, status, error);
+
+    [Fact]
+    public async Task Close_ShouldCloseViaWrapUpAndReleaseCapacityOnce_WhenOwnerClosesActiveChatWithoutSchema()
+    {
+        var (user, agent) = _factory.NewAgent("owner");
+        var conversation = _factory.SeedConversation(ConversationOwner.ForAgent(agent.AgentId), ConversationState.Active);
+        // Two chats held: a release that ran twice would show as 0, one that never ran as 2.
+        _factory.Reserve(agent.AgentId);
+        _factory.Reserve(agent.AgentId);
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsync(Route(conversation, "close"), content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var stored = _factory.Load(conversation.ConversationId)!;
+        stored.State.Should().Be(ConversationState.Closed);
+        stored.ClosedAt.Should().NotBeNull();
+        _factory.LoadOf(agent.AgentId).Should().Be(1, "closing one chat releases exactly its one unit");
+    }
+
+    [Fact]
+    public async Task Close_ShouldCloseViaWrapUp_WhenOwnerClosesOnHoldChatWithoutSchema()
+    {
+        var (user, agent) = _factory.NewAgent("owner");
+        var conversation = _factory.SeedConversation(ConversationOwner.ForAgent(agent.AgentId), ConversationState.OnHold);
+        _factory.Reserve(agent.AgentId);
+        _factory.Reserve(agent.AgentId);
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsync(Route(conversation, "close"), content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _factory.Load(conversation.ConversationId)!.State.Should().Be(ConversationState.Closed);
+        _factory.LoadOf(agent.AgentId).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Close_ShouldReturn409NotClosable_WhenConversationIsQueued()
+    {
+        // Queue-owned, so only a supervisor passes the actor check and reaches the state check.
+        var supervisor = _factory.NewUser(UserRole.Supervisor, "supervisor");
+        var queue = _factory.SeedQueue();
+        var conversation = _factory.SeedConversation(ConversationOwner.ForQueue(queue.QueueId), ConversationState.Queued);
+        using var events = StateChangeRecorder.For(_factory, conversation);
+        using var client = _factory.ClientFor(supervisor);
+
+        var response = await client.PostAsync(Route(conversation, "close"), content: null);
+
+        await ShouldBeErrorAsync(response, HttpStatusCode.Conflict, "conversation-not-closable");
+        var stored = _factory.Load(conversation.ConversationId)!;
+        stored.State.Should().Be(ConversationState.Queued);
+        stored.Owner.Should().Be(ConversationOwner.ForQueue(queue.QueueId));
+        events.Changes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Close_ShouldReturn409NotClosable_WhenVoiceConversationIsActive()
+    {
+        // The voice bridge owns a live call's wrap-up edge and its capacity release (design D8).
+        var (user, agent) = _factory.NewAgent("owner");
+        var conversation = _factory.SeedConversation(
+            ConversationOwner.ForAgent(agent.AgentId), ConversationState.Active, channel: ChannelType.Voice);
+        _factory.Reserve(agent.AgentId, ChannelType.Voice);
+        using var events = StateChangeRecorder.For(_factory, conversation);
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsync(Route(conversation, "close"), content: null);
+
+        await ShouldBeErrorAsync(response, HttpStatusCode.Conflict, "conversation-not-closable");
+        _factory.Load(conversation.ConversationId)!.State.Should().Be(ConversationState.Active);
+        _factory.LoadOf(agent.AgentId, ChannelType.Voice).Should().Be(1);
+        events.Changes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Close_ShouldNotReleaseCapacity_WhenClosingFromWrapUp()
+    {
+        // The unit was released when the chat entered WrapUp (design D2); the close releases nothing.
+        var (user, agent) = _factory.NewAgent("owner");
+        var conversation = _factory.SeedConversation(ConversationOwner.ForAgent(agent.AgentId), ConversationState.WrapUp);
+        _factory.Reserve(agent.AgentId); // another chat this agent still holds
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsync(Route(conversation, "close"), content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _factory.Load(conversation.ConversationId)!.State.Should().Be(ConversationState.Closed);
+        _factory.LoadOf(agent.AgentId).Should().Be(1, "nothing at or after WrapUp → Closed releases again");
+    }
+
+    [Fact]
+    public async Task Close_ShouldReleaseOwnersCapacityAndAudit_WhenSupervisorClosesActiveChat()
+    {
+        var supervisor = _factory.NewUser(UserRole.Supervisor, "supervisor");
+        var (_, owner) = _factory.NewAgent("owner");
+        var conversation = _factory.SeedConversation(ConversationOwner.ForAgent(owner.AgentId), ConversationState.Active);
+        _factory.Reserve(owner.AgentId);
+        _factory.Reserve(owner.AgentId);
+        using var client = _factory.ClientFor(supervisor);
+
+        var response = await client.PostAsync(Route(conversation, "close"), content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _factory.Load(conversation.ConversationId)!.State.Should().Be(ConversationState.Closed);
+        _factory.LoadOf(owner.AgentId).Should().Be(1, "a supervisor close releases the owner's unit");
+        var entry = _factory.AuditOf(conversation.ConversationId).Should()
+            .ContainSingle(e => e.Action == "conversation.closed").Subject;
+        entry.ActorId.Should().Be(supervisor.UserId.Value);
+        entry.Metadata!["by_supervisor"].Should().Be(supervisor.UserId.Value);
+        entry.Metadata["owner_kind"].Should().Be(nameof(ConversationOwnerKind.Agent));
+        entry.Metadata["owner_id"].Should().Be(owner.AgentId.Value);
+        entry.Metadata["typification"].Should().Be("skipped-no-schema");
+    }
+
+    [Fact]
+    public async Task Close_ShouldPublishWrapUpThenClosedStateChanges_WhenClosingFromActive()
+    {
+        var (user, agent) = _factory.NewAgent("owner");
+        var conversation = _factory.SeedConversation(ConversationOwner.ForAgent(agent.AgentId), ConversationState.Active);
+        _factory.Reserve(agent.AgentId);
+        using var events = StateChangeRecorder.For(_factory, conversation);
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsync(Route(conversation, "close"), content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        events.Changes.Should().Equal(
+            (nameof(ConversationState.Active), nameof(ConversationState.WrapUp)),
+            (nameof(ConversationState.WrapUp), nameof(ConversationState.Closed)));
+    }
+
+    [Fact]
+    public async Task Close_ShouldReleaseOnce_WhenTwoClosesRace()
+    {
+        var (user, agent) = _factory.NewAgent("owner");
+        var conversation = _factory.SeedConversation(ConversationOwner.ForAgent(agent.AgentId), ConversationState.Active);
+        _factory.Reserve(agent.AgentId);
+        _factory.Reserve(agent.AgentId);
+        using var first = _factory.ClientFor(user);
+        using var second = _factory.ClientFor(user);
+
+        var responses = await Task.WhenAll(
+            first.PostAsync(Route(conversation, "close"), content: null),
+            second.PostAsync(Route(conversation, "close"), content: null));
+
+        var statuses = responses.Select(r => r.StatusCode).ToList();
+        var bodies = string.Join(" | ", await Task.WhenAll(responses.Select(r => r.Content.ReadAsStringAsync())));
+        // tasks.md 1.1 names "one 200, one 409". Design D4 also allows a loser that read WrapUp after the
+        // winner's wrap-up to finish the close itself (200), so the invariant pinned here is: at least one
+        // 200, nothing but 200/409, the conversation Closed, and the owner's load down by exactly one.
+        statuses.Should().Contain(HttpStatusCode.OK, because: $"the responses were {bodies}");
+        statuses.Should().OnlyContain(s => s == HttpStatusCode.OK || s == HttpStatusCode.Conflict,
+            because: $"the responses were {bodies}");
+        _factory.Load(conversation.ConversationId)!.State.Should().Be(ConversationState.Closed);
+        _factory.LoadOf(agent.AgentId).Should().Be(1, "two racing closes release the one unit exactly once");
+        foreach (var response in responses)
+            response.Dispose();
+    }
+}
+
+/// <summary>
+/// Records the <see cref="ConversationStateChangedEvent"/>s the host publishes for one conversation, as
+/// (old, new) pairs in publish order.
+/// </summary>
+internal sealed class StateChangeRecorder : IDisposable
+{
+    private readonly List<(string Old, string New)> _changes = [];
+    private readonly IDisposable _subscription;
+
+    private StateChangeRecorder(PlatformEventBus bus, string conversationId) =>
+        _subscription = bus.Events.Subscribe(e =>
+        {
+            if (e is ConversationStateChangedEvent changed && changed.ConversationId == conversationId)
+                lock (_changes)
+                    _changes.Add((changed.OldState, changed.NewState));
+        });
+
+    public static StateChangeRecorder For(ConversationOwnershipApiFactory factory, Conversation conversation) =>
+        new(factory.Services.GetRequiredService<PlatformEventBus>(), conversation.ConversationId.Value);
+
+    public IReadOnlyList<(string Old, string New)> Changes
+    {
+        get
+        {
+            lock (_changes)
+                return [.. _changes];
+        }
+    }
+
+    public void Dispose() => _subscription.Dispose();
+}
+
+/// <summary>
+/// The ownership host with a seam between a close's (or typify's) actor check and its wrap-up: the
+/// typification resolver both routes call after the actor check runs <see cref="BeforeResolve"/> once,
+/// so a test can land a transfer exactly there (close-chat-without-typification-licence D3).
+/// </summary>
+public sealed class TransferDuringWrapUpApiFactory : ConversationOwnershipApiFactory
+{
+    private Func<Task>? _beforeResolve;
+
+    /// <summary>Runs once, at the next typification resolve, before the real resolver.</summary>
+    public Func<Task>? BeforeResolve
+    {
+        set => Volatile.Write(ref _beforeResolve, value);
+    }
+
+    /// <inheritdoc />
+    protected override void ConfigureTestServices(IServiceCollection services)
+    {
+        base.ConfigureTestServices(services);
+
+        var real = services.Last(d => d.ServiceType == typeof(Verbara.Platform.Typification.Resolution.ITypificationResolver));
+        services.RemoveAll<Verbara.Platform.Typification.Resolution.ITypificationResolver>();
+        services.AddSingleton<Verbara.Platform.Typification.Resolution.ITypificationResolver>(sp => new HookedResolver(
+            (Verbara.Platform.Typification.Resolution.ITypificationResolver)ActivatorUtilities.CreateInstance(sp, real.ImplementationType!),
+            this));
+    }
+
+    /// <summary>
+    /// What a transfer from <paramref name="from"/> to <paramref name="to"/> commits: the stored owner
+    /// swapped (state kept <c>Active</c>), the old owner's unit released and the new owner's reserved.
+    /// </summary>
+    public async Task TransferAsync(Conversation conversation, Agent from, Agent to)
+    {
+        using var scope = Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IConversationStore>();
+        var stored = (await store.GetByIdAsync(Tenant, conversation.ConversationId, CancellationToken.None))!;
+        stored.Owner = ConversationOwner.ForAgent(to.AgentId);
+        await store.SaveAsync(stored, CancellationToken.None);
+        var capacity = Services.GetRequiredService<Verbara.Platform.Queues.Services.IAgentCapacityService>();
+        await capacity.ReleaseAsync(Tenant, from.AgentId, conversation.Channel, CancellationToken.None);
+        await capacity.ReserveAsync(Tenant, to.AgentId, conversation.Channel, CancellationToken.None);
+    }
+
+    private sealed class HookedResolver(
+        Verbara.Platform.Typification.Resolution.ITypificationResolver inner,
+        TransferDuringWrapUpApiFactory factory) : Verbara.Platform.Typification.Resolution.ITypificationResolver
+    {
+        public async Task<Verbara.Platform.Typification.Resolution.ResolvedTypification?> ResolveForConversationAsync(
+            Conversation conversation, CancellationToken ct)
+        {
+            if (Interlocked.Exchange(ref factory._beforeResolve, null) is { } hook)
+                await hook();
+            return await inner.ResolveForConversationAsync(conversation, ct);
+        }
+    }
+}
+
+/// <summary>
+/// A transfer that commits after <c>/close</c> authorized the old owner but before it wrapped up must
+/// not let the old owner's close wrap up and release the new owner's chat (design D3).
+/// </summary>
+public sealed class CloseDuringTransferEndpointTests : IClassFixture<TransferDuringWrapUpApiFactory>
+{
+    private readonly TransferDuringWrapUpApiFactory _factory;
+
+    public CloseDuringTransferEndpointTests(TransferDuringWrapUpApiFactory factory) => _factory = factory;
+
+    [Fact]
+    public async Task Close_ShouldReturn409AndKeepNewOwnersCapacity_WhenTransferCommitsAfterActorCheck()
+    {
+        var (userA, agentA) = _factory.NewAgent("owner-a");
+        var (_, agentB) = _factory.NewAgent("owner-b");
+        var conversation = _factory.SeedConversation(ConversationOwner.ForAgent(agentA.AgentId), ConversationState.Active);
+        _factory.Reserve(agentA.AgentId);
+        _factory.Reserve(agentB.AgentId); // another chat agent B already holds
+        _factory.BeforeResolve = () => _factory.TransferAsync(conversation, agentA, agentB);
+        using var events = StateChangeRecorder.For(_factory, conversation);
+        using var client = _factory.ClientFor(userA);
+
+        var response = await client.PostAsync(ConversationOwnershipEndpointTests.Route(conversation, "close"), content: null);
+
+        await ConversationOwnershipEndpointTests.ShouldBeErrorAsync(response, HttpStatusCode.Conflict, "conversation-not-closable");
+        var stored = _factory.Load(conversation.ConversationId)!;
+        stored.State.Should().Be(ConversationState.Active);
+        stored.Owner.Should().Be(ConversationOwner.ForAgent(agentB.AgentId));
+        _factory.LoadOf(agentB.AgentId).Should().Be(2, "agent B's units are untouched by agent A's refused close");
+        _factory.LoadOf(agentA.AgentId).Should().Be(0, "only the transfer released agent A");
+        events.Changes.Should().BeEmpty();
+    }
+}
+
+/// <summary>
+/// The same interleaving on <c>/typify</c>: the submission would be attributed to the old owner while the
+/// new owner's chat wrapped up, so it is refused with 409 and nothing is persisted (design D3/D6).
+/// </summary>
+public sealed class TypifyDuringTransferEndpointTests : IClassFixture<TransferDuringWrapUpApiFactory>
+{
+    private readonly TransferDuringWrapUpApiFactory _factory;
+
+    public TypifyDuringTransferEndpointTests(TransferDuringWrapUpApiFactory factory) => _factory = factory;
+
+    [Fact]
+    public async Task Typify_ShouldReturn409AndKeepNewOwnersCapacity_WhenTransferCommitsAfterActorCheck()
+    {
+        _factory.EnsureTypificationSchema();
+        var (userA, agentA) = _factory.NewAgent("owner-a");
+        var (_, agentB) = _factory.NewAgent("owner-b");
+        var conversation = _factory.SeedConversation(ConversationOwner.ForAgent(agentA.AgentId), ConversationState.Active);
+        _factory.Reserve(agentA.AgentId);
+        _factory.Reserve(agentB.AgentId);
+        _factory.BeforeResolve = () => _factory.TransferAsync(conversation, agentA, agentB);
+        using var client = _factory.ClientFor(userA);
+
+        var response = await client.PostAsJsonAsync(
+            ConversationOwnershipEndpointTests.Route(conversation, "typify"), ConversationOwnershipEndpointTests.TypifyBody());
+
+        await ConversationOwnershipEndpointTests.ShouldBeErrorAsync(response, HttpStatusCode.Conflict, "conversation-not-closable");
+        var stored = _factory.Load(conversation.ConversationId)!;
+        stored.State.Should().Be(ConversationState.Active);
+        stored.Owner.Should().Be(ConversationOwner.ForAgent(agentB.AgentId));
+        _factory.LoadOf(agentB.AgentId).Should().Be(2);
+        using var scope = _factory.Services.CreateScope();
+        (await scope.ServiceProvider.GetRequiredService<ITypificationSubmissionStore>()
+            .GetByConversationIdAsync(ConversationOwnershipApiFactory.Tenant, conversation.ConversationId, CancellationToken.None))
+            .Should().BeNull();
     }
 }

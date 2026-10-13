@@ -177,6 +177,32 @@ internal sealed class PostgresConversationStore : IConversationStore
         return affected == 1;
     }
 
+    public async Task<bool> TryCommitWrapUpAsync(
+        TenantId tenantId, EntityId conversationId, EntityId ownerAgentId, DateTimeOffset now, CancellationToken ct)
+    {
+        // State-and-owner compare-and-set (close-chat-without-typification-licence D3): only the caller whose
+        // UPDATE matches the agent-held row of THIS owner wins, so concurrent wrap-ups and closes release the
+        // owner's capacity unit once (see the interface remarks for the gap). owner_kind is an int and owner_id text, as BindSave writes them. @From is
+        // FailoverWorkStates {Active, OnHold, Consulting}; the owner is kept.
+        var from = ConversationStateMachine.FailoverWorkStates.Select(s => (int)s).ToArray();
+        var affected = await _dataSource.ExecuteAsync(
+            "UPDATE conversations SET state = @WrapUpState, updated_at = @Now " +
+            "WHERE conversation_id = @ConversationId AND tenant_id = @TenantId " +
+            "AND state = ANY(@From) AND owner_kind = @AgentKind AND owner_id = @Owner",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("ConversationId", NpgsqlDbType.Text) { Value = conversationId.Value });
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("WrapUpState", NpgsqlDbType.Integer) { Value = (int)ConversationState.WrapUp });
+                p.Add(new NpgsqlParameter("From", NpgsqlDbType.Array | NpgsqlDbType.Integer) { Value = from });
+                p.Add(new NpgsqlParameter("AgentKind", NpgsqlDbType.Integer) { Value = (int)ConversationOwnerKind.Agent });
+                p.Add(new NpgsqlParameter("Owner", NpgsqlDbType.Text) { Value = ownerAgentId.Value });
+                p.Add(new NpgsqlParameter("Now", NpgsqlDbType.TimestampTz) { Value = now.UtcDateTime });
+            },
+            ct);
+        return affected == 1;
+    }
+
     public async Task<Conversation?> FindActiveByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
     {
         // Terminal states: Closed = 3, Abandoned = 4 (check ConversationStateMachine)

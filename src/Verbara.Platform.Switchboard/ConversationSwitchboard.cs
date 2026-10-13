@@ -1,4 +1,6 @@
 using System.Globalization;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
@@ -7,7 +9,7 @@ using Verbara.Platform.Queues.Services;
 
 namespace Verbara.Platform.Switchboard;
 
-public sealed class ConversationSwitchboard : IConversationSwitchboard
+public sealed partial class ConversationSwitchboard : IConversationSwitchboard
 {
     private readonly IConversationStore _store;
     private readonly IAgentCapacityService _capacity;
@@ -16,6 +18,7 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
     private readonly PlatformEventBus _eventBus;
     private readonly IAgentAccountStatusLookup _accountStatus;
     private readonly ILicensedAgentOwnershipWriter? _ownershipWriter;
+    private readonly ILogger<ConversationSwitchboard> _logger;
 
     public ConversationSwitchboard(
         IConversationStore store,
@@ -24,7 +27,8 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         IClock clock,
         PlatformEventBus eventBus,
         IAgentAccountStatusLookup accountStatus,
-        ILicensedAgentOwnershipWriter? ownershipWriter = null)
+        ILicensedAgentOwnershipWriter? ownershipWriter = null,
+        ILogger<ConversationSwitchboard>? logger = null)
     {
         _store = store;
         _capacity = capacity;
@@ -33,6 +37,7 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
         _eventBus = eventBus;
         _accountStatus = accountStatus;
         _ownershipWriter = ownershipWriter;
+        _logger = logger ?? NullLogger<ConversationSwitchboard>.Instance;
     }
 
     public async Task<OwnershipResult> AssignToQueueAsync(
@@ -351,6 +356,81 @@ public sealed class ConversationSwitchboard : IConversationSwitchboard
             tenantId.Value, conversationId.Value, oldState.ToString(), "Active"));
         return new OwnershipResult(true, conversation.Owner, conversation.State, null);
     }
+
+    public async Task<OwnershipResult> WrapUpAsync(
+        TenantId tenantId,
+        EntityId conversationId,
+        EntityId expectedOwnerAgentId,
+        CancellationToken ct)
+    {
+        var conversation = await _store.GetByIdAsync(tenantId, conversationId, ct).ConfigureAwait(false);
+        if (conversation is null)
+            return Fail(ConversationState.WrapUp, "Conversation not found.");
+
+        if (conversation.Channel == ChannelType.Voice)
+            return Fail(conversation.State, "A voice conversation wraps up through the voice bridge.");
+
+        if (conversation.Owner is not { Kind: ConversationOwnerKind.Agent, OwnerId: { } ownerId })
+            return Fail(conversation.State, "Only an agent-held conversation wraps up.");
+
+        // The caller authorized its actor against expectedOwnerAgentId. If a transfer committed since, the
+        // chat is someone else's now: never wrap it up (or release its unit) on the old owner's behalf (D3).
+        if (ownerId != expectedOwnerAgentId)
+            return Fail(conversation.State, "The conversation changed owner before it could wrap up.");
+
+        // OnHold/Consulting have no direct →WrapUp edge: they step to Active first, then Active→WrapUp
+        // (design D1, existing edges only). The step is checked here but NOT applied to the entity before
+        // the commit: the in-memory store hands back its stored object, so mutating it ahead of a lost
+        // update would leave the row at Active. The store's conditional update accepts all three states.
+        var oldState = conversation.State;
+        var viaActive = oldState is ConversationState.OnHold or ConversationState.Consulting;
+        var reachable = viaActive
+            ? ConversationStateMachine.CanTransition(oldState, ConversationState.Active)
+              && ConversationStateMachine.CanTransition(ConversationState.Active, ConversationState.WrapUp)
+            : oldState == ConversationState.Active
+              && ConversationStateMachine.CanTransition(oldState, ConversationState.WrapUp);
+        if (!reachable)
+            return Fail(oldState, $"Cannot transition from {oldState} to WrapUp.");
+
+        var now = _clock.UtcNow;
+        var won = await _store.TryCommitWrapUpAsync(tenantId, conversationId, expectedOwnerAgentId, now, ct).ConfigureAwait(false);
+        if (!won)
+        {
+            // A concurrent wrap-up/close or an owner change got there first: nothing changed, nothing released.
+            LogWrapUpRaceLost(_logger, conversationId.Value, oldState);
+            return Fail(oldState, "The conversation changed before it could wrap up.");
+        }
+
+        // The store committed the transition atomically; mirror it on the entity directly (as the
+        // timeout worker does after its conditional close) rather than re-running TransitionTo.
+        conversation.State = ConversationState.WrapUp;
+        conversation.UpdatedAt = now;
+
+        // Only the winner of the conditional update gets here, so concurrent wrap-ups and closes release once
+        // (D3). Known gap (D12): an ownership move that loaded the row before this commit still saves without
+        // a state predicate afterwards; see IConversationStore.TryCommitWrapUpAsync. A failed release must not
+        // undo a committed wrap-up; it is logged, and the restart reconcile recounts load from Active rows.
+        // The release runs with CancellationToken.None, as the voice bridge's does: the wrap-up is committed,
+        // so a caller that went away (an HTTP request aborted) must not abandon the release halfway.
+        try
+        {
+            await ReleaseOwnerCapacityAsync(conversation, tenantId, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogWrapUpReleaseFailed(_logger, conversationId.Value, ownerId.Value, ex.Message);
+        }
+
+        _eventBus.Publish(new ConversationStateChangedEvent(
+            tenantId.Value, conversationId.Value, oldState.ToString(), nameof(ConversationState.WrapUp)));
+        return new OwnershipResult(true, conversation.Owner, conversation.State, null);
+    }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wrap-up of conversation {ConversationId} lost the conditional update (read as {State}); nothing changed or released.")]
+    private static partial void LogWrapUpRaceLost(ILogger logger, string conversationId, ConversationState state);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Wrap-up of conversation {ConversationId} committed but releasing agent {AgentId}'s capacity failed: {Error}")]
+    private static partial void LogWrapUpReleaseFailed(ILogger logger, string conversationId, string agentId, string error);
 
     private const string OfferedToAnotherAgent = "The conversation was offered to another agent.";
 

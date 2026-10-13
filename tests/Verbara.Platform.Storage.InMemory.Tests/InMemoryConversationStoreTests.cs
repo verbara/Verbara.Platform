@@ -678,6 +678,74 @@ public sealed class InMemoryConversationStoreTests
         won.Should().BeFalse();
     }
 
+    // ─── TryCommitWrapUpAsync — state-and-owner CAS (close-chat-without-typification-licence D3) ──
+
+    private static Conversation MakeAgentHeld(TenantId tenantId, EntityId ownerAgentId, ConversationState state)
+    {
+        var conv = MakeConversation(tenantId, state);
+        conv.Owner = ConversationOwner.ForAgent(ownerAgentId);
+        return conv;
+    }
+
+    [Fact]
+    public async Task TryCommitWrapUpAsync_ShouldCommit_WhenStateAndOwnerMatch()
+    {
+        var store = new InMemoryConversationStore();
+        var owner = EntityId.New();
+        var conv = MakeAgentHeld(Tenant1, owner, ConversationState.Active);
+        await store.SaveAsync(conv, CancellationToken.None);
+        var now = new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero);
+
+        var won = await store.TryCommitWrapUpAsync(Tenant1, conv.ConversationId, owner, now, CancellationToken.None);
+
+        won.Should().BeTrue("the conversation is still agent-held by this owner");
+        var refreshed = await store.GetByIdAsync(Tenant1, conv.ConversationId, CancellationToken.None);
+        refreshed!.State.Should().Be(ConversationState.WrapUp);
+        refreshed.UpdatedAt.Should().Be(now);
+        refreshed.Owner.Should().Be(ConversationOwner.ForAgent(owner), "wrap-up keeps the owner");
+    }
+
+    [Fact]
+    public async Task TryCommitWrapUpAsync_ShouldReturnFalseAndNotChangeRow_WhenStateMoved()
+    {
+        var store = new InMemoryConversationStore();
+        var owner = EntityId.New();
+        var conv = MakeAgentHeld(Tenant1, owner, ConversationState.WrapUp);
+        var earlier = new DateTimeOffset(2026, 10, 12, 11, 0, 0, TimeSpan.Zero);
+        conv.UpdatedAt = earlier;
+        await store.SaveAsync(conv, CancellationToken.None);
+
+        var won = await store.TryCommitWrapUpAsync(
+            Tenant1, conv.ConversationId, owner, earlier.AddHours(1), CancellationToken.None);
+
+        won.Should().BeFalse("another caller already moved the conversation to WrapUp");
+        var refreshed = await store.GetByIdAsync(Tenant1, conv.ConversationId, CancellationToken.None);
+        refreshed!.State.Should().Be(ConversationState.WrapUp);
+        refreshed.UpdatedAt.Should().Be(earlier, "a lost update writes nothing");
+    }
+
+    [Fact]
+    public async Task TryCommitWrapUpAsync_ShouldReturnFalseAndNotChangeRow_WhenOwnerDiffers()
+    {
+        // A transfer keeps Active and swaps the owner: the old owner's wrap-up must not win.
+        var store = new InMemoryConversationStore();
+        var oldOwner = EntityId.New();
+        var newOwner = EntityId.New();
+        var conv = MakeAgentHeld(Tenant1, newOwner, ConversationState.Active);
+        var earlier = new DateTimeOffset(2026, 10, 12, 11, 0, 0, TimeSpan.Zero);
+        conv.UpdatedAt = earlier;
+        await store.SaveAsync(conv, CancellationToken.None);
+
+        var won = await store.TryCommitWrapUpAsync(
+            Tenant1, conv.ConversationId, oldOwner, earlier.AddHours(1), CancellationToken.None);
+
+        won.Should().BeFalse("the conversation is no longer held by the owner the caller read");
+        var refreshed = await store.GetByIdAsync(Tenant1, conv.ConversationId, CancellationToken.None);
+        refreshed!.State.Should().Be(ConversationState.Active);
+        refreshed.Owner.Should().Be(ConversationOwner.ForAgent(newOwner));
+        refreshed.UpdatedAt.Should().Be(earlier);
+    }
+
     private static Conversation MakeCallbackStuck(TenantId tenantId, ConversationState state, string? marker = "true")
     {
         var conv = new Conversation

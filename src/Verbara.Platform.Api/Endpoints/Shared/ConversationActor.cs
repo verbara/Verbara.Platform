@@ -37,6 +37,18 @@ internal sealed class ConversationActor
     public const string TargetQueueNotFound = "target-queue-not-found";
 
     /// <summary>
+    /// A close refused because typification is demanded: a published schema is bound to the conversation,
+    /// so the client opens the wrap-up sheet and posts <c>/typify</c> (close-chat-without-typification-licence D5).
+    /// </summary>
+    public const string TypificationRequired = "typification-required";
+
+    /// <summary>
+    /// The conversation cannot be closed (or wrapped up) from its current state or channel, or a concurrent
+    /// change got there first (close-chat-without-typification-licence D9).
+    /// </summary>
+    public const string NotClosable = "conversation-not-closable";
+
+    /// <summary>
     /// The policy whose holders may act on a conversation they do not own (transfer, close, typify).
     /// The same named policy the <c>/supervisor</c> routes require, evaluated rather than restated so
     /// the two cannot drift.
