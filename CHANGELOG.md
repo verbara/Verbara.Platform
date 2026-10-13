@@ -21,6 +21,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`/metrics` shows how full each Postgres pool is and what the auth write queue does.** The API now
+  exports the `Npgsql` meter: per connection pool, connections by state (`idle`, `used`), the pool's maximum
+  size, requests waiting for a connection, connection timeouts, and database operation duration as a
+  histogram, each series labelled with `db_client_connection_pool_name` (see **Fixed**). The duration
+  histogram also carries Npgsql's own `db_system_name`, `server_address` and `server_port` labels. The
+  waiting and timeout series appear only once a pool has first waited or timed out. The API also exports the
+  auth write-queue counters `auth_write_enqueued_total`, `auth_write_dropped_total`,
+  `auth_write_processed_total` and `auth_write_failed_total`.
 - **Supervisors can listen to a live voice call silently.** `POST /api/v1/supervisor/conversations/{id}/listen`
   with `{"destination":"endpoint"|"phone"}` rings the supervisor and connects them to the agent's leg of the
   call. The agent and the customer hear nothing, and nothing is sent to the agent's console.
@@ -60,6 +68,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   successful `POST /conversations/{id}/close` emits a state change to `Closed`, including closes from
   wrap-up, waiting-for-customer and resolved, which emitted nothing before; an agent-held `/typify` emits the
   change to `WrapUp`. Realtime consoles now see the close or the wrap-up as it happens.
+- **The compose Prometheus scrapes each API replica as its own target.** The `platform-api` job in
+  `docker/observability/prometheus.yml` finds the replicas through Docker's DNS (`dns_sd_configs`, A records,
+  port `5000`) instead of the single static target `platform-api:5000`. Under `--scale platform-api=N` there
+  are N targets, each labelled `instance="<replica IP>:5000"`, so a dashboard or query that assumed one
+  `instance` now sees N series, and a replica that restarts on a new IP starts a new series. A query that sums
+  by `job`, as the shipped Grafana dashboard does, is unaffected, and a single replica is still one target.
+  The blackbox health probes still go to the service name.
 
 ### Fixed
 
@@ -74,6 +89,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Wrap-up now releases it once, even when two closes race. A close or typify by an agent whose chat was
   transferred away after the request was authorized answers `409 conversation-not-closable` and leaves the
   new owner's chat and capacity alone.
+- **The Postgres pool and slow-query alerts read series the API exports.** `PgConnectionPoolHigh` and
+  `SlowQueriesHigh`, in `docs/operations/alerts.yml` and `infra/k8s/manifests/prometheusrules-r55.yaml`,
+  read `db_client_connections_usage` and `db_client_commands_duration`, which Npgsql 10 does not emit and the
+  API did not export, so neither could fire. They now read `db_client_connection_count` with
+  `db_client_connection_state="used"` over `db_client_connection_max`, and the `le="0.5"` bucket of
+  `db_client_operation_duration_seconds`; thresholds, durations and labels are unchanged. A deployment that
+  copied either file must take the new version. `docs/operations/slos.md` names the same instruments, and the
+  `PgConnectionPoolHigh` runbook entry shows how to find the pool by `db_client_connection_pool_name`.
+- **Postgres pool labels carry a fixed name, never connection-string material.** Without a name, Npgsql
+  labels a pool with its connection string minus the password, host, port, database and user included. The
+  API's core pool is now `core`, and a role with its own connection string gets `dialer`, `cluster`,
+  `realtime`, `analytics` or `analytics-live`; a role on the core connection string shares `core`.
+- **The start-up migration runner disposes its Postgres data source when it fails.** A failed connection or
+  migration used to skip the dispose and leave that pool open, still reporting on the `Npgsql` meter under its
+  connection string.
 
 ## [2.28.0] - 2026-10-11
 
