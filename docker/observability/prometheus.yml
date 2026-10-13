@@ -15,10 +15,17 @@ scrape_configs:
     static_configs:
       - targets: [localhost:9090]
 
+  # One target per Api replica. Docker's embedded DNS returns one A record per
+  # replica under `--scale platform-api=N`, so each replica is scraped on its own
+  # `instance` (its IP) and per-replica counters never merge into one series.
+  # With a single replica this is still exactly one target. The blackbox jobs
+  # below keep the service name on purpose: they probe what a client sees.
   - job_name: platform-api
     metrics_path: /metrics
-    static_configs:
-      - targets: [platform-api:5000]
+    dns_sd_configs:
+      - names: [platform-api]
+        type: A
+        port: 5000
 
   - job_name: node-exporter
     static_configs:
