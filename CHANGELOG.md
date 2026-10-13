@@ -22,10 +22,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`Asterisk:Outbound:DefaultTrunk` must name a stored trunk.** The default trunk is now looked up by name among
   the tenant's trunks created through `/admin/trunks`, and dialed through that trunk's Asterisk endpoint. A value
   that names no stored trunk of the tenant (an endpoint id such as `t-1`, or a static `pjsip.conf` endpoint) now
-  refuses the call with `no-trunk`. Set it to the trunk's name. (#376)
+  refuses the call with `no-trunk`. Set it to the trunk's name. (#386)
 - **Deploy the API and the Asterisk image from the same release.** The `[outbound-agent]` dialplan context now
   dials `PJSIP/${TRUNK}/sip:${EXTEN}@${TRUNK_HOST}` and needs the new `TRUNK_HOST` channel variable, which only this
-  API sets. A deployment that loads its own dialplan must copy the shipped context, both extensions included. (#376)
+  API sets. A deployment that loads its own dialplan must copy the shipped context, both extensions included. (#386)
 
 ### Added
 
@@ -67,7 +67,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   listen start answers the same 409 refusal on a phone listen, after `no-trunk` and before `originate-failed`. The
   voice callback rescue logs the trunk id and does not originate. `VoiceDialResponse`, `VoiceTransferResponse` and
   every silent-listen refusal body gain `trunkId` (integer or null, always written). The OpenAPI document declares
-  the 409 of both voice routes, marks `correlationId` and `error` optional, and `trunkId` required and nullable. (#376)
+  the 409 of both voice routes, marks `correlationId` and `error` optional, and `trunkId` required and nullable. (#386)
 
 ### Changed
 
@@ -103,14 +103,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   name. The call is dialed as `PJSIP/t-{id}/sip:{number}@{host}`, where `t-{id}` is the trunk's Asterisk endpoint
   and the host is its registration URI's host (and port), else its single-address `MatchHost`. Before, Platform
   dialed the trunk's name, which names no Asterisk endpoint, and `PJSIP/${TRUNK}/${EXTEN}` never reached a
-  carrier. (#376)
+  carrier. (#386)
 - **A number written with a leading `+` is dialed with its `+`.** `[outbound-agent]` matches `_+X.` next to
   `_X.`, so an E.164 number no longer fails the Originate with "Extension does not exist." (which, repeated, opened
   the originate circuit breaker for every caller). Every dialed number keeps its digits and a single leading `+`.
-  (#376)
+  (#386)
 - **The carrier sees the tenant's outbound caller ID as the display name too.** `[outbound-agent]` sets
   `CALLERID(name)` to the same value as `CALLERID(num)`, so neither the agent's name (click-to-dial) nor the
-  transferred caller's name (external transfer) reaches the called party. (#376)
+  transferred caller's name (external transfer) reaches the called party. (#386)
 
 - **An agent can close a chat when no typification schema is bound.** `POST /conversations/{id}/close`
   on an `Active`, on-hold or consulting chat used to answer `400`, so a deployment without a published
