@@ -5,11 +5,12 @@ using Verbara.Platform.Api.Endpoints;
 namespace Verbara.Platform.Api.OpenApi;
 
 /// <summary>
-/// Makes the emitted OpenAPI schemas of <see cref="VoiceDialResponse"/> and <see cref="VoiceTransferResponse"/> say
-/// which members are always written (outbound-calls-reach-the-trunk, design D4). <see cref="Serialization.ApiJsonContext"/>
+/// Makes the emitted OpenAPI schemas of <see cref="VoiceDialResponse"/>, <see cref="VoiceTransferResponse"/> and
+/// <see cref="Endpoints.Shared.SupervisorListenRefusal"/> say which members are always written (outbound-calls-reach-the-trunk, design D4). <see cref="Serialization.ApiJsonContext"/>
 /// omits a null member (<c>WhenWritingNull</c>), so <c>correlationId</c> and <c>error</c> are optional, while
 /// <c>trunkId</c> opts out (<c>JsonIgnoreCondition.Never</c>) and is required. The .NET 10 schema exporter instead lists
-/// every constructor parameter without a default as required, and the defaulted <c>trunkId</c> as optional.
+/// every constructor parameter without a default as required, and the defaulted <c>trunkId</c> as optional. The listen
+/// refusal omits nothing (every member is <c>JsonIgnoreCondition.Never</c>), so only its <c>trunkId</c> changes.
 /// </summary>
 /// <remarks>
 /// Document-only, the posture of <see cref="NullableCredentialValuesTransformer"/>. AOT-safe: the targets are identified
@@ -20,6 +21,7 @@ internal sealed class VoiceResponseMembersTransformer : IOpenApiSchemaTransforme
     private const string AlwaysWritten = "trunkId";
     private static readonly string[] DialOmittedWhenNull = ["correlationId", "error"];
     private static readonly string[] TransferOmittedWhenNull = ["error"];
+    private static readonly string[] ListenRefusalOmittedWhenNull = [];
 
     public Task TransformAsync(
         OpenApiSchema schema,
@@ -31,6 +33,8 @@ internal sealed class VoiceResponseMembersTransformer : IOpenApiSchemaTransforme
             Apply(schema, DialOmittedWhenNull);
         else if (type == typeof(VoiceTransferResponse))
             Apply(schema, TransferOmittedWhenNull);
+        else if (type == typeof(Endpoints.Shared.SupervisorListenRefusal))
+            Apply(schema, ListenRefusalOmittedWhenNull);
 
         return Task.CompletedTask;
     }

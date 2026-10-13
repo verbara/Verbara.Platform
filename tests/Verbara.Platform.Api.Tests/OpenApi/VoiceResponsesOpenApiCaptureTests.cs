@@ -10,7 +10,7 @@ namespace Verbara.Platform.Api.Tests.OpenApi;
 
 /// <summary>
 /// outbound-calls-reach-the-trunk (design D4): the emitted OpenAPI document of the voice dial and transfer routes.
-/// Both declare 200 and 409; <c>trunkId</c> is a required, nullable integer, and the members the serializer omits when
+/// Both declare 200 and 409; <c>trunkId</c> is a required, nullable integer there and on the silent-listen refusal, and the members the serializer omits when
 /// null (<c>correlationId</c>, <c>error</c>) are optional. Boots the Api host in-memory with
 /// <c>Platform:OpenApi:Enabled=true</c> and an AMI host name, which maps the voice routes (nothing connects to it).
 /// </summary>
@@ -48,6 +48,7 @@ public sealed class VoiceResponsesOpenApiCaptureTests
     [Theory]
     [InlineData("VoiceDialResponse", new[] { "accepted", "trunkId" }, new[] { "correlationId", "error" })]
     [InlineData("VoiceTransferResponse", new[] { "accepted", "trunkId" }, new[] { "error" })]
+    [InlineData("SupervisorListenRefusal", new[] { "error", "conversationId", "listenId", "trunkId" }, new string[0])]
     public async Task VoiceResponseSchema_ShouldRequireTrunkId_AndLeaveTheOmittedMembersOptional(
         string name, string[] required, string[] optional)
     {
