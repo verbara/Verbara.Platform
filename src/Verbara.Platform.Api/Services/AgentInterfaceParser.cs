@@ -13,10 +13,17 @@ namespace Verbara.Platform.Api.Services;
 internal static class AgentInterfaceParser
 {
     /// <summary>
+    /// The reserved slot prefix of a supervisor's silent-listen endpoint (<c>PJSIP/{tenant}-agent-sup-{userId}</c>,
+    /// supervisor-silent-listen design D3/D14). That endpoint is never an agent: an agent id is 32 hex characters, so
+    /// it can never start with this prefix.
+    /// </summary>
+    public const string ListenSlotPrefix = "sup-";
+
+    /// <summary>
     /// Returns the platform agent id embedded in <paramref name="agentInterface"/> for the given
     /// <paramref name="tenant"/>, or <see langword="null"/> when the interface is absent, not a
-    /// tenant agent endpoint, or carries a blank id (a whitespace-only suffix would otherwise throw
-    /// in <see cref="EntityId.From"/>).
+    /// tenant agent endpoint, a supervisor listen endpoint (<see cref="ListenSlotPrefix"/>), or carries a
+    /// blank id (a whitespace-only suffix would otherwise throw in <see cref="EntityId.From"/>).
     /// </summary>
     public static EntityId? ExtractAgentId(string tenant, string? agentInterface)
     {
@@ -28,6 +35,8 @@ internal static class AgentInterfaceParser
             return null;
 
         var id = agentInterface[prefix.Length..];
+        if (id.StartsWith(ListenSlotPrefix, StringComparison.Ordinal))
+            return null;
         return string.IsNullOrWhiteSpace(id) ? null : EntityId.From(id);
     }
 }

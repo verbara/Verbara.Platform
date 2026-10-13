@@ -1233,6 +1233,8 @@ if (!string.IsNullOrEmpty(clusterConn))
             // cluster connection): the leader gate inside SweepOnceAsync ensures exactly one pod
             // originates rescue callbacks cluster-wide. Mirrors the W5 worker, but voice-gated.
             builder.Services.AddHostedService<Verbara.Platform.Api.Services.CallbackRescueWorker>();
+            // supervisor-silent-listen (Platform/ADR-0042) — leader-gated silent audio listen; AMI observed on first use.
+            builder.Services.AddSupervisorListen(builder.Configuration);
         }
     }
 }

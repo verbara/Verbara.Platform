@@ -1,0 +1,32 @@
+{
+  "_comment": "NET-NEW wire shapes (supervisor-silent-listen, design D1/D6/D12). (1) start: POST /api/v1/supervisor/conversations/{conversationId}/listen with request body {destination} where destination is exactly `endpoint` (option B: ring the caller's receive-only listen endpoint, see fixtures/supervisor-sip-credentials.v1.json) or `phone` (option C: ring the caller's admin-set listen phone, see fixtures/supervisor-listen-phone.v1.json; the request NEVER carries a number). 200 means the originate was accepted and the supervisor's leg is ringing: state is `dialing`, listeningSince is null. (2) current: GET /api/v1/supervisor/listen returns the caller's one active listen in the same shape; state is `dialing` until the audio is connected, then `listening` with listeningSince set (string|null, ISO-8601). A supervisor has at most one active listen at a time. On a phone listen the supervisor must press 1 on the phone within 10 seconds before any audio flows; until then state stays `dialing`. Nothing is sent to the agent or the customer: no hub event, no SSE event, no beep. Refusals (ErrorResponse convention, kebab code in `error`) are in fixtures/supervisor-listen-refusals.json; GET answers 404 listen-not-found when the caller has no active listen. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "start": {
+    "method": "POST",
+    "path": "/api/v1/supervisor/conversations/4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a/listen",
+    "request": {
+      "destination": "endpoint"
+    },
+    "status": 200,
+    "body": {
+      "listenId": "b3e1f0a9c8d74e6f9a1b2c3d4e5f6a7b",
+      "conversationId": "4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a",
+      "destination": "endpoint",
+      "state": "dialing",
+      "startedAt": "2026-10-12T15:04:05.123+00:00",
+      "listeningSince": null
+    }
+  },
+  "current": {
+    "method": "GET",
+    "path": "/api/v1/supervisor/listen",
+    "status": 200,
+    "body": {
+      "listenId": "b3e1f0a9c8d74e6f9a1b2c3d4e5f6a7b",
+      "conversationId": "4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a",
+      "destination": "phone",
+      "state": "listening",
+      "startedAt": "2026-10-12T15:04:05.123+00:00",
+      "listeningSince": "2026-10-12T15:04:09.870+00:00"
+    }
+  }
+}

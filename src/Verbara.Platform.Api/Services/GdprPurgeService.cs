@@ -22,6 +22,7 @@ internal sealed class GdprPurgeService : IGdprPurgeService
     private readonly IAuditService _audit;
     private readonly ILicensedUserChangeWriter _userWriter;
     private readonly ILogger<GdprPurgeService> _logger;
+    private readonly ISupervisorListenProfileStore? _listenProfiles;
 
     public GdprPurgeService(
         IContactStore contactStore,
@@ -36,7 +37,8 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         IQueueMembershipStore membershipStore,
         IAuditService audit,
         ILicensedUserChangeWriter userWriter,
-        ILogger<GdprPurgeService> logger)
+        ILogger<GdprPurgeService> logger,
+        ISupervisorListenProfileStore? listenProfiles = null)
     {
         _contactStore = contactStore;
         _conversationStore = conversationStore;
@@ -51,6 +53,7 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         _audit = audit;
         _userWriter = userWriter;
         _logger = logger;
+        _listenProfiles = listenProfiles;
     }
 
 
@@ -145,6 +148,11 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         var authEventsDeleted = await _authEventStore.DeleteByUserAsync(tenantId, userId, ct);
         if (authEventsDeleted > 0)
             entitiesDeleted["authEvents"] = authEventsDeleted;
+
+        // 1b. supervisor-silent-listen (design D8): the listen profile holds a personal phone number and the listen
+        //     endpoint's credentials; deleting it also takes the endpoint out of the desired state.
+        if (_listenProfiles is not null)
+            await _listenProfiles.DeleteAsync(tid, uid, ct);
 
         // 2. licensed-agent-metering (Q1, design D4/D5) — the purge is never refused for an agent the user owns
         //    (the admin delete is): its queue memberships go first, then the agent and the user are deleted in

@@ -403,6 +403,28 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         await _capacity.DidNotReceive().ReserveAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task HandleEventAsync_ShouldSetNoOwnerAndNoBusy_WhenTheConnectedInterfaceIsAListenEndpoint()
+    {
+        // supervisor-silent-listen 2.8 (a), design D14: a supervisor listen endpoint is PJSIP/{t}-agent-sup-{userId};
+        // read as an agent it would become the owner (the connect sets the owner with no existence check).
+        var session = MakeSession("link-listen", Tenant, $"PJSIP/{Tenant}-agent-sup-7d2c9e4b1a5f4c3e8b6d0f1a2c3e4b5d");
+        _sessions.GetById("s-link-listen").Returns(session);
+        var conversation = VoiceConversation("link-listen", ConversationState.Queued);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-listen", Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        var events = CaptureEvents();
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallConnectedEvent("s-link-listen", "primary", _clock.UtcNow, null, "acme-Support", TimeSpan.FromSeconds(2)));
+
+        conversation.Owner.Should().BeNull("a listen slot is never an agent");
+        await _capacity.DidNotReceive().ReserveAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
+        await _agents.DidNotReceive().SaveAsync(Arg.Any<Agent>(), Arg.Any<CancellationToken>());
+        events.OfType<AgentStateChangedEvent>().Should().BeEmpty();
+        events.OfType<VoiceScreenPopEvent>().Should().BeEmpty();
+    }
+
     // ─── ResolveTenantFromChannelAsync (the AMI GetVar wire — the tenant-resolution linchpin) ───
 
     private void StubGetVar(string? response, string? value)

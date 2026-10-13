@@ -1,0 +1,22 @@
+{
+  "_comment": "EXTENDED wire shape (supervisor-silent-listen, boundary gap 1). GET /api/v1/supervisor/sessions/active answers 200 with an array of ActiveSessionDto. Existing fields keep their meaning (sessionId: Agent Assist session id; agentId, queueName, callerIdNum, connectedAt from the SDK call session, each string|null). NEW: conversationId (string|null, always written) is the tracked voice conversation of the session's call in the CALLER's tenant, resolved by the call's linked id exactly as AgentAssistBridge resolves it (AgentAssistBridge.cs:148-154); null when none resolves. Web uses it to start POST /api/v1/supervisor/conversations/{conversationId}/listen. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "status": 200,
+  "body": [
+    {
+      "sessionId": "1712345678.42",
+      "agentId": "0651f84b6f284a1c9b8d658330fa8310",
+      "queueName": "acme-support",
+      "callerIdNum": "+573009876543",
+      "connectedAt": "2026-10-12T15:01:00.000+00:00",
+      "conversationId": "4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a"
+    },
+    {
+      "sessionId": "1712345699.07",
+      "agentId": null,
+      "queueName": null,
+      "callerIdNum": null,
+      "connectedAt": null,
+      "conversationId": null
+    }
+  ]
+}

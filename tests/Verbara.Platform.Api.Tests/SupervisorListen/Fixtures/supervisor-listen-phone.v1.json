@@ -1,0 +1,31 @@
+{
+  "_comment": "NET-NEW wire shapes (supervisor-silent-listen, design D8/D12, option C). A tenant administrator (AdminOnly) reads and sets the number a supervisor's phone listen rings. GET /api/v1/admin/users/{userId}/listen-phone (entry get) and PUT /api/v1/admin/users/{userId}/listen-phone (entry set) with request {phoneNumber} both answer 200 with {userId, phoneNumber}. phoneNumber is string|null: null clears it. A stored number is strict E.164: a leading '+', then 7 to 15 digits, the first non-zero (the request is trimmed; spaces, dashes and parentheses are NOT stripped, so they are refused). A supervisor can never set or read their own number through this route, and no listen route accepts a number. 400 listen-phone-invalid (body below; phoneNumber echoes the value received, string|null) when the value is not E.164; nothing is saved. 404 with no body when the user is not in the tenant. Every change of the number is audited as user.listen_phone_set with only its last four digits. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "get": {
+    "method": "GET",
+    "path": "/api/v1/admin/users/7d2c9e4b1a5f4c3e8b6d0f1a2c3e4b5d/listen-phone",
+    "status": 200,
+    "body": {
+      "userId": "7d2c9e4b1a5f4c3e8b6d0f1a2c3e4b5d",
+      "phoneNumber": "+573001234567"
+    }
+  },
+  "set": {
+    "method": "PUT",
+    "path": "/api/v1/admin/users/7d2c9e4b1a5f4c3e8b6d0f1a2c3e4b5d/listen-phone",
+    "request": {
+      "phoneNumber": "+573001234567"
+    },
+    "status": 200,
+    "body": {
+      "userId": "7d2c9e4b1a5f4c3e8b6d0f1a2c3e4b5d",
+      "phoneNumber": "+573001234567"
+    }
+  },
+  "invalid": {
+    "status": 400,
+    "body": {
+      "error": "listen-phone-invalid",
+      "phoneNumber": "300 123 4567"
+    }
+  }
+}
