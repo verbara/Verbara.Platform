@@ -1,13 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <!-- measure-api-multi-replica-baseline: the red tests of task 1.3 compile only with
-         -p:MrbPending=true until the named data-source helper lands and removes their guard. Appends to
-         DefineConstants; never pass -p:DefineConstants on the command line, which replaces the SDK's own
-         symbols. -->
-    <DefineConstants Condition="'$(MrbPending)'=='true'">$(DefineConstants);MRB_PENDING</DefineConstants>
-  </PropertyGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\..\src\Verbara.Platform.Storage.Postgres\Verbara.Platform.Storage.Postgres.csproj" />
     <!-- The inbound pipeline races on these stores (InboundPipelineRaceTests). -->

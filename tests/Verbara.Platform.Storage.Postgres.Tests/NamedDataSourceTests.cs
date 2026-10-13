@@ -1,4 +1,3 @@
-#if MRB_PENDING
 using System.Diagnostics.Metrics;
 using Npgsql;
 
@@ -8,8 +7,7 @@ namespace Verbara.Platform.Storage.Postgres.Tests;
 /// measure-api-multi-replica-baseline (D2, D5): a data source built by <see cref="NamedDataSource"/>
 /// publishes the Npgsql pool and operation instruments under the name it was given, never under its
 /// connection string. Pins the instrument names the shipped alert rules read, so an Npgsql upgrade that
-/// renames them fails this lane instead of silencing the alerts. Guarded by <c>MRB_PENDING</c> until the
-/// helper exists (task 2.2 removes the guard).
+/// renames them fails this lane instead of silencing the alerts.
 /// </summary>
 public sealed class NamedDataSourceTests : IClassFixture<NamedDataSourceFixture>
 {
@@ -71,7 +69,7 @@ public sealed class NamedDataSourceTests : IClassFixture<NamedDataSourceFixture>
         {
             var deadline = DateTime.UtcNow.AddSeconds(10);
             while (recorder.PendingRequests(name) < 1 && !waiting.IsCompleted && DateTime.UtcNow < deadline)
-                await Task.Delay(20);
+                await Task.Delay(20); // fence-allow: LOOP-DRIVER — poll pacing until the waiting open shows on the pool's pending-requests counter
             pendingWhileExhausted = recorder.PendingRequests(name);
         }
         finally
@@ -158,4 +156,3 @@ public sealed class NamedDataSourceTests : IClassFixture<NamedDataSourceFixture>
         }
     }
 }
-#endif

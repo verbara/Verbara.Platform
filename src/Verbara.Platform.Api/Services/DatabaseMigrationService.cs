@@ -11,7 +11,10 @@ internal static class DatabaseMigrationService
     /// </summary>
     public static void ApplyMigrations(string connectionString)
     {
-        var dataSource = NpgsqlDataSource.Create(connectionString);
+        // `using`, so the source is disposed on every exit, a failed connection or migration included:
+        // an undisposed data source keeps reporting its pool on /metrics, labelled with its connection
+        // string, for the life of the process (measure-api-multi-replica-baseline D2).
+        using var dataSource = NpgsqlDataSource.Create(connectionString);
         using var conn = dataSource.OpenConnection();
 
         ExecuteNonQuery(conn, null,
@@ -44,8 +47,6 @@ internal static class DatabaseMigrationService
                     $"Migration '{migration.Name}' failed: {ex.Message}", ex);
             }
         }
-
-        dataSource.Dispose();
     }
 
     private static void ExecuteNonQuery(
