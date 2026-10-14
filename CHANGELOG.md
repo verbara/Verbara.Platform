@@ -26,6 +26,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Deploy the API and the Asterisk image from the same release.** The `[outbound-agent]` dialplan context now
   dials `PJSIP/${TRUNK}/sip:${EXTEN}@${TRUNK_HOST}` and needs the new `TRUNK_HOST` channel variable, which only this
   API sets. A deployment that loads its own dialplan must copy the shipped context, both extensions included. (#386)
+- **Platform's AMI user gains the `reporting` write class.** The shipped `manager.conf` template, the demo
+  overrides, the Helm Asterisk config map and the SMB manual now write
+  `system,call,agent,user,config,originate,command,reporting`. Asterisk authorizes an AMI action when the user
+  holds any one class the action lists; the table listings an SDK reload uses after a reconnect
+  (`CoreShowChannels`, `ConfbridgeList`, `ConfbridgeListRooms`) list only `system`/`reporting`, and the next SDK
+  relies on them. A deployment that connects Verbara to **its own Asterisk** must add `reporting` to that user's
+  `write` line by hand before upgrading the SDK pin.
 
 ### Added
 
