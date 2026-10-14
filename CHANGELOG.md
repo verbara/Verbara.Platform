@@ -33,6 +33,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`CoreShowChannels`, `ConfbridgeList`, `ConfbridgeListRooms`) list only `system`/`reporting`, and the next SDK
   relies on them. A deployment that connects Verbara to **its own Asterisk** must add `reporting` to that user's
   `write` line by hand before upgrading the SDK pin.
+- **Redis-backed MFA challenges move to a new key namespace.** They are now stored as a hash under
+  `{prefix}mfa:challenge:{token}` instead of a string under `{prefix}mfa:pending:{token}`, and the Redis server
+  must allow scripting (`EVAL`). During a rolling deploy a user whose password step and code step reach
+  different versions is asked to sign in again, for at most the challenge's five minutes. Old keys expire on
+  their own.
 
 ### Added
 
@@ -156,6 +161,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The start-up migration runner disposes its Postgres data source when it fails.** A failed connection or
   migration used to skip the dispose and leave that pool open, still reporting on the `Npgsql` meter under its
   connection string.
+
+### Security
+
+- **`POST /auth/mfa/verify` has its own rate limit, and a challenge allows three attempts.** The route had no
+  limit. It now allows 300 requests per minute per tenant and client address
+  (`Auth:MfaVerify:RateLimit:PerMinutePerClient`, `Auth__MfaVerify__RateLimit__PerMinutePerClient` in compose),
+  plus 600 per minute per client address across every tenant
+  (`Auth:MfaVerify:RateLimit:AllTenantsPerMinutePerClient`), so naming a new `X-Tenant-Id` on each request does
+  not escape it; a rejected request gets `429` with `Retry-After` and never reaches the challenge. One
+  challenge now survives two wrong codes: each attempt is reserved atomically before the code is checked, on
+  every replica, and the third attempt or a success spends it. A locked-out account is refused with `423`
+  before any code is checked, as `/auth/login` does, so a challenge issued before the lockout no longer
+  bypasses it, whether the password or SSO issued it. Each attempt is counted toward the lockout before its
+  code is checked (a correct code takes it back), so codes sent in parallel across many challenges for one
+  account never get more checks than the lockout threshold. A token that names no live challenge, or whose
+  account no longer exists, gets `400 {"error":"mfa-challenge-expired"}` (it was a prose message or a bare
+  `401`), the wrong code that spends a challenge gets `401 {"error":"mfa-challenge-exhausted"}`, and a wrong
+  code on a challenge that is still live keeps its bare `401`. With the Redis cache, an empty token
+  now gets the `400` instead of a `500`.
 
 ## [2.28.0] - 2026-10-11
 

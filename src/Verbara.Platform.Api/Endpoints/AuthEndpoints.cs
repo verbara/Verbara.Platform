@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
@@ -37,8 +38,9 @@ internal static class AuthEndpoints
         group.MapPost("/forgot-password", ForgotPassword).AllowAnonymous();
         group.MapPost("/reset-password", ResetPassword).AllowAnonymous();
 
-        // MFA verification during login (anonymous — uses challenge token)
-        group.MapPost("/mfa/verify", MfaVerify).AllowAnonymous();
+        // MFA verification during login (anonymous — uses challenge token). Its own limit per tenant and
+        // client, plus a per-client backstop across tenants (MfaVerifyRateLimitPolicy).
+        group.MapPost("/mfa/verify", MfaVerify).AllowAnonymous().RequireMfaVerifyRateLimit();
 
         // Authenticated endpoints
         group.MapPost("/logout", Logout).RequireAuthorization();
@@ -203,56 +205,109 @@ internal static class AuthEndpoints
         [FromServices] IRecoveryCodeService recoveryCodes,
         CancellationToken ct)
     {
-        var pending = await mfaCache.TakeAsync(body.MfaToken, ct);
-        if (pending is null)
-            return Results.BadRequest(new ErrorResponse("Invalid or expired challenge token"));
+        // A challenge allows MfaChallenge.MaxAttempts factors (IMfaPendingCache states the lifecycle).
+        // Each attempt is reserved before its factor is evaluated, so racing requests can never evaluate
+        // more than that; the reservation that reaches the limit has already removed the challenge. A
+        // correct factor on an earlier attempt must still win TryConsumeAsync, so of racing correct
+        // factors at most one gets a session. The trade — a stolen mfaToken gives up to three guesses in
+        // its five minutes instead of one — is bounded by the account lockout across every outstanding
+        // challenge: each attempt is counted as a failure before its factor is checked (see the
+        // reservation below), so racing guesses on many challenges cannot all pass the lock check.
+        var attempt = await mfaCache.TryBeginAttemptAsync(body.MfaToken, ct);
+        if (attempt is null)
+            return MfaChallengeRefusals.ExpiredResult();
 
+        var pending = attempt.Entry;
         var tenantId = new TenantId(pending.TenantId);
         var user = await userStore.GetByIdAsync(tenantId, EntityId.From(pending.UserId), ct);
+        // A bare 401 would say "wrong factor, the challenge is still live"; this challenge is spent and
+        // names no account that can sign in, which is what the expired code tells a client.
         if (user is null)
-            return Results.Unauthorized();
+        {
+            await SpendChallengeAsync(mfaCache, body.MfaToken, attempt, ct);
+            return MfaChallengeRefusals.ExpiredResult();
+        }
 
         // The challenge was minted while the account could sign in; it may have been suspended in
         // the minutes since. Refused before the factor is evaluated, so no recovery code is burned
-        // and no lockout attempt is recorded.
+        // and no lockout attempt is recorded. The challenge is spent.
         if (!user.CanAuthenticate)
         {
+            await SpendChallengeAsync(mfaCache, body.MfaToken, attempt, ct);
             await AccountStatusGate.RecordRefusedSignInAsync(authEvents, user, "mfa", context, ct);
             return AccountStatusGate.Forbidden();
         }
 
-        // Try TOTP code first, then recovery code
-        var verified = false;
-        if (!string.IsNullOrEmpty(body.Code) && !string.IsNullOrEmpty(user.MfaSecret))
+        // The lockout is enforced where the guesses happen: a challenge minted before the account was
+        // locked must not keep it open after. Refused before evaluation (same response as Login), so a
+        // correct factor on a locked account neither signs in nor resets the lockout. The challenge is
+        // spent. CachedUserStore writes RecordFailedSignInAsync through and evicts this user's entry
+        // (locally and on every replica), so the read above sees the current LockedUntil.
+        if (user.IsLockedOut(DateTimeOffset.UtcNow))
         {
-            verified = MfaService.VerifyCode(user.MfaSecret, body.Code);
+            await SpendChallengeAsync(mfaCache, body.MfaToken, attempt, ct);
+            return AccountLocked();
         }
 
-        if (!verified && !string.IsNullOrEmpty(body.RecoveryCode) && user.MfaRecoveryCodes is { Count: > 0 })
+        // The check above reads a copy of the account; racing guesses (on this challenge or on others
+        // minted for the same account) all read it before any of them is counted. So the attempt is
+        // counted first, atomically, and evaluated only if its count is within the threshold: however the
+        // requests interleave, the account lockout bounds the factors evaluated. A proven factor takes the
+        // count back; a refused one leaves it (and extends the lock, as the count is past the threshold).
+        if (await lockoutService.ReserveFailedAttemptAsync(user, ct) is not { } reservation)
         {
-            // The salt MUST be user.UserId.Value — IRecoveryCodeService.Hash salts
-            // with it, so verification cannot reconstruct it from anything else.
-            var (isValid, index) = MfaService.ValidateRecoveryCode(
-                recoveryCodes, body.RecoveryCode, user.MfaRecoveryCodes, user.UserId.Value);
-            // A code is single-use: it counts only if this request is the one that removes it from
-            // the stored set. Of two redemptions racing on one code, the second removes nothing and
-            // fails like any invalid factor.
-            if (isValid && await userStore.ConsumeRecoveryCodeAsync(
-                    tenantId, user.UserId, user.MfaRecoveryCodes[index], ct))
+            await SpendChallengeAsync(mfaCache, body.MfaToken, attempt, ct);
+            return MfaChallengeRefusals.ExpiredResult();
+        }
+
+        if (!reservation.MayEvaluate)
+        {
+            await SpendChallengeAsync(mfaCache, body.MfaToken, attempt, ct);
+            return AccountLocked();
+        }
+
+        var factor = EvaluateFactor(body, user, recoveryCodes);
+        var challengeSpent = attempt.IsFinal;
+        var verified = false;
+
+        if (factor.Proven)
+        {
+            // The factor is proven, so this attempt must never be left counted against the user: if the
+            // bookkeeping below fails (a cache or store error, an aborted request), the reservation is taken
+            // back before the error propagates. Releases run with CancellationToken.None so a client that
+            // went away cannot leave the account locked behind a proven factor.
+            try
             {
-                verified = true;
+                // Claim the challenge before anything is spent on it. A non-final winner must remove it; a
+                // final attempt already did. Losing here means a racing request on this challenge got there
+                // first: no session, no bookkeeping — the factor was not wrong.
+                if (!attempt.IsFinal && !await mfaCache.TryConsumeAsync(body.MfaToken, ct))
+                {
+                    await lockoutService.ReleaseReservedAttemptAsync(user, reservation, CancellationToken.None);
+                    return MfaChallengeRefusals.ExpiredResult();
+                }
+                challengeSpent = true;
+
+                // A recovery code is single-use: it counts only if this request is the one that removes it
+                // from the stored set. Claiming the challenge first means the worst race outcome is a spent
+                // challenge (sign in again), never a burnt recovery code with no session. Of two redemptions
+                // racing on one code across challenges, the second removes nothing and fails like any
+                // invalid factor.
+                verified = factor.RecoveryCodeIndex is not { } index
+                    || await userStore.ConsumeRecoveryCodeAsync(tenantId, user.UserId, user.MfaRecoveryCodes![index], ct);
+            }
+            catch (Exception)
+            {
+                await lockoutService.ReleaseReservedAttemptAsync(user, reservation, CancellationToken.None);
+                throw;
             }
         }
 
         if (!verified)
         {
-            // Failure bookkeeping — closes the audit-checklist Scope 3.4 gap. Until
-            // now this endpoint recorded NOTHING on any failure path: no lockout
-            // attempt, no auth event. Second-factor guessing was therefore both
-            // unaudited and unthrottled beyond the global rate-limit bucket, even
-            // though Login has recorded exactly this since it shipped. Mirrors
-            // Login's invalid-password branch, including the synchronous LogAsync
-            // — failure events are never deferred to AuthWriteQueue (ADR-0011).
+            // Failure bookkeeping — closes the audit-checklist Scope 3.4 gap: every rejected factor
+            // records a lockout attempt and an auth event, exactly as Login's invalid-password branch.
+            // Failure events are logged synchronously and never deferred to AuthWriteQueue (ADR-0011).
             var ip = GetIpAddress(context);
             var ua = GetUserAgent(context);
 
@@ -265,15 +320,66 @@ internal static class AuthEndpoints
                 : !string.IsNullOrEmpty(body.Code) ? "invalid_totp"
                 : "no_factor_supplied";
 
-            await lockoutService.RecordFailedAttemptAsync(user, ip, ua, ct);
+            // The failure was counted by the reservation; only its lockout event is left.
+            await lockoutService.CompleteReservedFailureAsync(user, reservation, ip, ua, ct);
             await authEvents.LogAsync(pending.TenantId, user.UserId.Value, AuthEventTypes.MfaVerificationFailure, ip, ua,
                 new Dictionary<string, string> { ["reason"] = reason }, ct);
-            return Results.Unauthorized();
+
+            // A bare 401 means the challenge is still live; when this request spent it, say so.
+            return challengeSpent ? MfaChallengeRefusals.ExhaustedResult() : Results.Unauthorized();
         }
 
-        // Success path needs no bookkeeping here: IssueTokensAsync already resets
-        // the lockout counter (ResetAttemptsAsync) and emits the success event.
+        // IssueTokensAsync resets the lockout counter (ResetAttemptsAsync) and emits the success event.
+        // That reset lifts no lock in force, so a reservation that itself reached the threshold — and
+        // locked the account — is taken back here first.
+        if (reservation.ReachedThreshold)
+            await lockoutService.ReleaseReservedAttemptAsync(user, reservation, CancellationToken.None);
         return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, configStore, ct);
+    }
+
+    /// <summary>
+    /// The outcome of checking a second factor, with no side effect: whether it is proven and, for a
+    /// recovery code, which stored code matched (it still has to be consumed).
+    /// </summary>
+    private readonly record struct MfaFactorCheck(bool Proven, int? RecoveryCodeIndex);
+
+    /// <summary>
+    /// Checks the submitted factor against the user: the TOTP code first, then a recovery code. Pure — it
+    /// writes nothing, so the caller decides what a proven factor spends. Every factor check of
+    /// <c>/auth/mfa/verify</c> goes through here.
+    /// </summary>
+    private static MfaFactorCheck EvaluateFactor(MfaVerifyRequest body, User user, IRecoveryCodeService recoveryCodes)
+    {
+        if (!string.IsNullOrEmpty(body.Code) && !string.IsNullOrEmpty(user.MfaSecret)
+            && MfaService.VerifyCode(user.MfaSecret, body.Code))
+        {
+            return new MfaFactorCheck(Proven: true, RecoveryCodeIndex: null);
+        }
+
+        if (!string.IsNullOrEmpty(body.RecoveryCode) && user.MfaRecoveryCodes is { Count: > 0 })
+        {
+            // The salt MUST be user.UserId.Value — IRecoveryCodeService.Hash salts
+            // with it, so verification cannot reconstruct it from anything else.
+            var (isValid, index) = MfaService.ValidateRecoveryCode(
+                recoveryCodes, body.RecoveryCode, user.MfaRecoveryCodes, user.UserId.Value);
+            if (isValid)
+                return new MfaFactorCheck(Proven: true, RecoveryCodeIndex: index);
+        }
+
+        return new MfaFactorCheck(Proven: false, RecoveryCodeIndex: null);
+    }
+
+    /// <summary>The <c>/auth/login</c> response for a locked account.</summary>
+    private static IResult AccountLocked() =>
+        Results.Json(new ErrorResponse("Account is locked"),
+            ApiJsonContext.Default.ErrorResponse, statusCode: StatusCodes.Status423Locked);
+
+    /// <summary>Spends a challenge on a refusal that evaluates no factor; a final attempt already removed it.</summary>
+    private static async ValueTask SpendChallengeAsync(
+        IMfaPendingCache mfaCache, string? challengeToken, MfaChallengeAttempt attempt, CancellationToken ct)
+    {
+        if (!attempt.IsFinal)
+            await mfaCache.TryConsumeAsync(challengeToken, ct);
     }
 
     // ─── Refresh ────────────────────────────────────────────────────────────────

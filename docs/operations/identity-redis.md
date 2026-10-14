@@ -21,9 +21,12 @@ safe and zero-ops.
 In a horizontally scaled deploy (load balancer + N Platform API pods) a token
 issued by pod A cannot be verified by pod B, so MFA and password-reset flows
 silently fail on any follow-up request that hits a different pod.
-`Verbara.Platform.Identity.Redis` stores the tokens in Redis with atomic
-`StringGetDeleteAsync` so the `TakeAsync` contract (single-consumption)
-continues to hold across the fleet.
+`Verbara.Platform.Identity.Redis` stores the tokens in Redis so their
+contracts hold across the fleet: an MFA challenge allows three attempts,
+reserved atomically by a Lua script before each factor is checked and deleted
+by the third reservation or by a successful verify; a password-reset token is
+consumed exactly once (atomic `StringGetDeleteAsync`). Redis must allow
+scripting (`EVAL`/`EVALSHA`).
 
 ## Enable
 
@@ -73,23 +76,28 @@ Hit the Redis CLI after issuing a login:
 ```sh
 docker compose -f docker/docker-compose.full.yml exec redis redis-cli \
   KEYS 'asterisk:identity:*'
-# asterisk:identity:mfa:pending:0b3c...
+# asterisk:identity:mfa:challenge:0b3c...
 # asterisk:identity:mfa:passwordreset:aa42...
 ```
 
-After the corresponding verify / reset endpoint fires, the key should be gone
-(atomic `StringGetDeleteAsync`).
+After a successful verify / reset, or the third wrong MFA factor, the key
+should be gone.
 
 ## Key schema
 
 | Purpose | Key | TTL |
 |--|--|--|
-| MFA pending challenge | `{prefix}mfa:pending:{challengeToken}` | `ExpiresAt - UtcNow` (~5 min) |
+| MFA challenge (hash: `e` = entry JSON, `n` = attempts used) | `{prefix}mfa:challenge:{challengeToken}` | `ExpiresAt - UtcNow` (~5 min) |
 | Password-reset token | `{prefix}mfa:passwordreset:{resetToken}` | `ExpiresAt - UtcNow` (~1 h) |
 
-Redis TTL handles natural expiry. `TakeAsync` additionally re-checks
-`ExpiresAt` after read so a clock-skewed node never returns a technically
-expired entry.
+Redis TTL handles natural expiry. Every read additionally re-checks
+`ExpiresAt` so a clock-skewed node never returns a technically expired entry.
+
+Earlier versions kept a one-shot MFA challenge as a JSON string under
+`{prefix}mfa:pending:{challengeToken}`. Those keys are no longer read (reading
+a key of the other type would fail with `WRONGTYPE`): during a rolling deploy a
+challenge minted by the other version is unknown for at most five minutes and
+the user signs in again. Old keys expire on their own TTL.
 
 ## Sharing a multiplexer
 
@@ -103,20 +111,26 @@ registrations point at the same endpoint.
 
 - **Redis down at startup** — `ConnectionMultiplexer.Connect(...)` throws, the
   host fails fast. (Desired: operators notice misconfiguration immediately.)
-- **Redis goes down at runtime** — `StoreAsync` / `TakeAsync` surface the
+- **Redis goes down at runtime** — the cache calls surface the
   StackExchange.Redis exception to the `AuthEndpoints` handler, which returns
   `500`. The user sees a failed MFA / reset attempt; no silent fall-back to
   in-memory (that would break the single-consumption contract across nodes).
-- **Token consumed on another node while this one was reading** —
-  `StringGetDeleteAsync` is atomic on a single Redis instance, so the first
-  `TakeAsync` wins and the second returns `null` (same as `InMemory`).
+- **Concurrent requests on one token from several nodes** — each MFA
+  reservation and each delete is atomic on a single Redis instance, so racing
+  requests evaluate at most three factors and at most one signs in; a reset
+  token's first `TakeAsync` wins and the second returns `null` (same as
+  `InMemory`).
+- **Scripting disabled on a Redis-compatible store** — the MFA reservation
+  throws and the verify step fails with `500`.
 
 ## Tests
 
 Testcontainers-backed integration tests live in
 `tests/Verbara.Platform.Identity.Redis.Tests/`. They spin up a throw-away
-`redis:7-alpine` container per test class and cover: put+take roundtrip,
-single-consumption, stored-expired short-circuit, TTL eviction, key-prefix
+`redis:7-alpine` container per test class. The MFA cache runs the same contract
+suite as the in-memory cache (three attempts, consume-once, expiry, empty
+tokens, re-store, and the concurrency cases raced over two connections), plus
+TTL eviction, key layout and TTL, the ignored old namespace, key-prefix
 isolation, and the DI replace behavior.
 
 Run locally (requires Docker):

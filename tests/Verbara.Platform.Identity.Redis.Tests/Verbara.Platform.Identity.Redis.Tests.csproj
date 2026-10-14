@@ -21,6 +21,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The IMfaPendingCache contract suite, linked (not referenced) so the Redis cache runs the very
+         same assertions as the in-memory cache without a test-to-test project reference. -->
+    <Compile Include="..\Verbara.Platform.Identity.Tests\Mfa\MfaPendingCacheContractTests.cs" Link="Mfa\MfaPendingCacheContractTests.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- This project has ONE Testcontainers Redis fixture, and Redis's image has no
          analogous bootstrap-then-restart cycle, so it never showed the readiness race
          that Storage.Postgres.Tests did (34/34 in every configuration measured).

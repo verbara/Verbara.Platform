@@ -272,6 +272,35 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
                      return Task.CompletedTask;
                  });
         SubstituteUserWrites.ApplyTo(userStore, testUser);
+        // A user created through the substitute is readable by id (above), so the lockout counters act
+        // on it too, as in the real stores: /auth/mfa/verify counts an attempt before checking its factor
+        // and treats "no such user" as a spent challenge. Overrides the admin-only writers; the admin is
+        // in usersById as the same instance.
+        userStore.RecordFailedSignInAsync(default, default, default, default, default).ReturnsForAnyArgs(ci =>
+        {
+            if (!usersById.TryGetValue((ci.ArgAt<TenantId>(0), ci.ArgAt<EntityId>(1)), out var u))
+                return Task.FromResult<FailedSignInResult?>(null);
+            lock (u)
+            {
+                u.FailedLoginAttempts++;
+                if (u.FailedLoginAttempts >= ci.ArgAt<int>(2))
+                    u.LockedUntil = ci.ArgAt<DateTimeOffset>(3);
+                return Task.FromResult<FailedSignInResult?>(new FailedSignInResult(u.FailedLoginAttempts, u.LockedUntil));
+            }
+        });
+        userStore.ResetLockoutAsync(default, default, default, default, default).ReturnsForAnyArgs(ci =>
+        {
+            if (!usersById.TryGetValue((ci.ArgAt<TenantId>(0), ci.ArgAt<EntityId>(1)), out var u))
+                return Task.FromResult(false);
+            lock (u)
+            {
+                if (ci.ArgAt<bool>(3) && u.LockedUntil > ci.ArgAt<DateTimeOffset>(2))
+                    return Task.FromResult(false);
+                u.FailedLoginAttempts = 0;
+                u.LockedUntil = null;
+                return Task.FromResult(true);
+            }
+        });
         services.AddSingleton(userStore);
     }
 
