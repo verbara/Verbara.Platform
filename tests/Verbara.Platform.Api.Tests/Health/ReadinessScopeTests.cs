@@ -30,6 +30,9 @@ public sealed class ReadinessScopeTests
 
     private static readonly TimeSpan PastEscalationThreshold = TimeSpan.FromMinutes(6);
 
+    /// <summary>The circuit keys the <c>services</c> check watches: the two dependency circuits the Api executes.</summary>
+    private static readonly string[] WatchedDependencyCircuits = ["webhook.delivery", "oidc.token-exchange"];
+
     /// <summary>
     /// The readiness host: AMI configured, Asterisk hosted services stubbed, in-memory stores, unlicensed (the
     /// community boot). <paramref name="extraServices"/> registers the stub checks a test needs.
@@ -189,6 +192,28 @@ public sealed class ReadinessScopeTests
         var heartbeats = Checks(doc).GetProperty("services").GetProperty("data").GetProperty("heartbeats");
         heartbeats.TryGetProperty(nameof(StasisInboundConsumer), out _).Should().BeFalse(
             "the services heartbeat data does not list the voice inbound worker; body: {0}", body);
+    }
+
+    // ─── services watches only the circuits the Api executes (task 2.3, design D3; spec requirement 3) ──────────
+
+    [Fact]
+    public async Task HealthReady_ShouldWatchOnlyWebhookAndOidcCircuits_WhenKeysTheApiNeverExecutesAreObservedOpen()
+    {
+        // `smtp.send` runs only in the Mail service and `worker.asterisk-capacity-sync` has no caller. Seeded open past
+        // the old threshold, neither may reach the `services` entry, its status or its circuit data.
+        await using var factory = new ReadinessFactory();
+        var since = DateTimeOffset.UtcNow - PastEscalationThreshold;
+        factory.Observer.SetForTest("smtp.send", ResilienceCircuitState.Open, since);
+        factory.Observer.SetForTest("worker.asterisk-capacity-sync", ResilienceCircuitState.Open, since);
+
+        var (status, body) = await GetReadyAsync(factory);
+
+        status.Should().Be(HttpStatusCode.OK, "a key the Api never executes is not watched; body: {0}", body);
+        using var doc = JsonDocument.Parse(body);
+        var services = Checks(doc).GetProperty("services");
+        services.GetProperty("status").GetString().Should().Be("Healthy", "body: {0}", body);
+        services.GetProperty("data").GetProperty("circuits").EnumerateObject().Select(p => p.Name)
+            .Should().BeEquivalentTo(WatchedDependencyCircuits, "body: {0}", body);
     }
 
     // ─── Poles that are green before and after the fix ───────────────────────────────────────────────

@@ -11,13 +11,16 @@ internal static class CircuitHealthEvaluator
 {
     /// <summary>
     /// Healthy when every watched key is closed or unobserved, Degraded when one is open for less than
-    /// <paramref name="unhealthyThreshold"/>, Unhealthy when one has been open for longer. The data carries each
-    /// key's state, <c>stateSince</c> and duration, or <c>unobserved</c>.
+    /// <paramref name="unhealthyThreshold"/>, Unhealthy when one has been open for longer. With no threshold
+    /// (<see langword="null"/>), an open key is Degraded at most, whatever its duration, and the message names every
+    /// open key: the <c>services</c> check passes that, because a dependency circuit never gates readiness
+    /// (readiness-without-asterisk, design D3). The data carries each key's state, <c>stateSince</c> and duration, or
+    /// <c>unobserved</c>.
     /// </summary>
     internal static (HealthStatus Status, string Message, IReadOnlyDictionary<string, object> Data)
         EvaluateCircuits(
             IList<string> watchedKeys,
-            TimeSpan unhealthyThreshold,
+            TimeSpan? unhealthyThreshold,
             IResilienceStateObserver observer)
     {
         var openRecent = new List<string>();
@@ -43,17 +46,18 @@ internal static class CircuitHealthEvaluator
             if (!snap.IsOpen)
                 continue;
 
-            if (snap.Duration >= unhealthyThreshold)
+            if (unhealthyThreshold is { } threshold && snap.Duration >= threshold)
                 openLong.Add(key);
             else
                 openRecent.Add(key);
         }
 
+        // openLong is filled only when a threshold was given.
         if (openLong.Count > 0)
         {
             return (
                 HealthStatus.Unhealthy,
-                $"Circuit open >{unhealthyThreshold.TotalMinutes:0}min: {string.Join(", ", openLong)}",
+                $"Circuit open >{unhealthyThreshold.GetValueOrDefault().TotalMinutes:0}min: {string.Join(", ", openLong)}",
                 data);
         }
 
