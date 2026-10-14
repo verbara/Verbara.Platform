@@ -113,7 +113,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   different tenant on each request no longer buys a fresh bucket. When a request carries both a tenant subdomain
   and an `X-Tenant-Id` header, the subdomain now decides the bucket, as it already did for the rest of the request.
   The ceiling is unchanged, and no other endpoint becomes rate limited. The `X-RateLimit-*` response headers, which
-  were never emitted, stay off until rate limiting covers the whole API.
+  were never emitted, stay off until rate limiting covers the whole API. (#390)
 - **Outbound calls reach the trunk an administrator created.** Click-to-dial, the external blind transfer, the
   voice callback rescue and the silent listen by phone now share one trunk resolution: the tenant's outbound
   routes (not campaign-scoped, pattern a prefix of the number) are matched in ascending priority, then id; the
