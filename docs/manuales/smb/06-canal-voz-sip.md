@@ -71,7 +71,7 @@ port = 5038
 [platform]
 secret = <tu-password-AMI>
 read = system,call,agent,user,config,originate,reporting,command
-write = system,call,agent,user,config,originate,command
+write = system,call,agent,user,config,originate,command,reporting
 deny = 0.0.0.0/0.0.0.0
 permit = 0.0.0.0/0.0.0.0
 ```
