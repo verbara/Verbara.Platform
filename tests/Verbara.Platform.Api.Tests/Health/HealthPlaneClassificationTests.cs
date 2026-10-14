@@ -30,6 +30,7 @@ public sealed class HealthPlaneClassificationTests
     private sealed record Row(Plane Plane, string[] ProducerTags);
 
     private static readonly string[] Ready = ["ready"];
+    private static readonly string[] VoiceOnly = ["voice"];
     private static readonly string[] Untagged = [];
 
     /// <summary>
@@ -44,9 +45,9 @@ public sealed class HealthPlaneClassificationTests
         ["services"] = new(Plane.Readiness, Ready),
         ["retention"] = new(Plane.Readiness, Ready),
         ["postgres"] = new(Plane.Readiness, Ready),
-        // `asterisk` is still tagged `ready` here; task 2.2 registers it with the tag `voice` only (design D2) and
-        // moves this row to Plane.Voice in the same edit.
-        ["asterisk"] = new(Plane.Readiness, Ready),
+        // `asterisk` is registered with the tag `voice` only (design D2): this pod's primary AMI connection and the
+        // voice heartbeats, reported on /health/voice and never on /health/ready.
+        ["asterisk"] = new(Plane.Voice, VoiceOnly),
 
         // Pro engine checks, all tagged `ready` by their producer (Pro/ADR-0017). `dialer-engine` stays in
         // readiness because of the community-boot contract.

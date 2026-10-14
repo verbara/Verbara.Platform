@@ -112,9 +112,11 @@ public static class PlatformHealthExtensions
         services
             .PromoteHostedServiceToSingleton<RetentionService>();
 
+        // `asterisk` is the voice plane (design D2): this pod's primary AMI connection and the voice heartbeats,
+        // tagged `voice` only, so it is reported on /health/voice and never gates /health/ready.
         var healthBuilder = services.AddHealthChecks()
             .AddCheck<BackgroundServiceHealthCheck>("services", tags: [ReadyTag])
-            .AddCheck<AsteriskAmiHealthCheck>("asterisk", tags: [ReadyTag])
+            .AddCheck<AsteriskAmiHealthCheck>("asterisk", tags: [VoiceTag])
             .AddCheck<RetentionService>("retention", tags: [ReadyTag]);
 
         // Only add Postgres health check if NpgsqlDataSource is registered

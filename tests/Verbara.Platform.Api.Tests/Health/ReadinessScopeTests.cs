@@ -7,6 +7,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Verbara.Platform.Api.Health;
 using Verbara.Platform.Api.Services;
+using Verbara.Sdk.Enums;
 
 namespace Verbara.Platform.Api.Tests.Health;
 
@@ -32,13 +33,15 @@ public sealed class ReadinessScopeTests
     /// <summary>
     /// The readiness host: AMI configured, Asterisk hosted services stubbed, in-memory stores, unlicensed (the
     /// community boot). <paramref name="extraServices"/> registers the stub checks a test needs.
+    /// <paramref name="amiHostname"/> is <c>Asterisk:Ami:Hostname</c>; an empty value is a digital-only pod.
     /// </summary>
-    internal sealed class ReadinessFactory(Action<IServiceCollection>? extraServices = null)
+    internal sealed class ReadinessFactory(
+        Action<IServiceCollection>? extraServices = null, string amiHostname = AmiHostname)
         : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseSetting("Asterisk:Ami:Hostname", AmiHostname);
+            builder.UseSetting("Asterisk:Ami:Hostname", amiHostname);
         }
 
         protected override IHost CreateHost(IHostBuilder builder)
@@ -74,6 +77,15 @@ public sealed class ReadinessScopeTests
 
     private static Action<IServiceCollection> ReadyStub(string name, Func<HealthCheckResult> result) =>
         services => services.AddHealthChecks().AddCheck(name, new DelegateHealthCheck(result), tags: ["ready"]);
+
+    /// <summary>Replaces the voice connection seam with a fixed reading (the Testing host holds no primary server).</summary>
+    private static Action<IServiceCollection> VoiceConnection(FixedVoiceConnectionStatus connection) =>
+        services =>
+        {
+            foreach (var descriptor in services.Where(d => d.ServiceType == typeof(IVoiceConnectionStatus)).ToList())
+                services.Remove(descriptor);
+            services.AddSingleton<IVoiceConnectionStatus>(connection);
+        };
 
     private static Task<(HttpStatusCode Status, string Body)> GetReadyAsync(ReadinessFactory factory) =>
         GetAsync(factory, "/health/ready");
@@ -223,10 +235,15 @@ public sealed class ReadinessScopeTests
     public async Task HealthVoice_ShouldReturn503WithOnlyTheVoiceEntries_WhenSessionFedEngineCheckUnhealthy()
     {
         // Spec requirement 1, the session-fed scenario's last line: the entry readiness no longer shows is
-        // reported on /health/voice, which answers 503. The readiness entries are not part of that body.
-        await using var factory = new ReadinessFactory(ReadyStub(
-            "eventstore-subscriber",
-            () => HealthCheckResult.Unhealthy("eventstore-subscriber: no session event for 31s")));
+        // reported on /health/voice, which answers 503. The readiness entries are not part of that body. AMI reads
+        // Connected, so `asterisk` is Healthy and the 503 can only come from the stub (design D8).
+        await using var factory = new ReadinessFactory(services =>
+        {
+            VoiceConnection(FixedVoiceConnectionStatus.Configured(AmiConnectionState.Connected))(services);
+            ReadyStub(
+                "eventstore-subscriber",
+                () => HealthCheckResult.Unhealthy("eventstore-subscriber: no session event for 31s"))(services);
+        });
 
         var (status, body) = await GetAsync(factory, "/health/voice");
 
@@ -235,6 +252,8 @@ public sealed class ReadinessScopeTests
         using var doc = JsonDocument.Parse(body);
         Checks(doc).GetProperty("eventstore-subscriber").GetProperty("status").GetString().Should().Be("Unhealthy",
             "the session-fed engine is reported on /health/voice; body: {0}", body);
+        Checks(doc).GetProperty("asterisk").GetProperty("status").GetString().Should().Be("Healthy",
+            "the 503 is the session-fed engine's, not the asterisk entry's; body: {0}", body);
         foreach (var readinessEntry in new[] { "services", "retention", "csatrunner-orchestrator" })
         {
             Checks(doc).TryGetProperty(readinessEntry, out _).Should().BeFalse(
@@ -245,10 +264,15 @@ public sealed class ReadinessScopeTests
     [Fact]
     public async Task HealthVoice_ShouldReturn200_WhenSessionFedEngineCheckDegraded()
     {
-        // The default status mapping, as on /health/ready: Degraded answers 200, only Unhealthy answers 503.
-        await using var factory = new ReadinessFactory(ReadyStub(
-            "analytics-aggregator",
-            () => HealthCheckResult.Degraded("analytics-aggregator: no session event yet")));
+        // The default status mapping, as on /health/ready: Degraded answers 200, only Unhealthy answers 503. AMI reads
+        // Connected, so the stub is the only voice-plane entry that is not Healthy.
+        await using var factory = new ReadinessFactory(services =>
+        {
+            VoiceConnection(FixedVoiceConnectionStatus.Configured(AmiConnectionState.Connected))(services);
+            ReadyStub(
+                "analytics-aggregator",
+                () => HealthCheckResult.Degraded("analytics-aggregator: no session event yet"))(services);
+        });
 
         var (status, body) = await GetAsync(factory, "/health/voice");
 
@@ -256,5 +280,153 @@ public sealed class ReadinessScopeTests
         using var doc = JsonDocument.Parse(body);
         Checks(doc).GetProperty("analytics-aggregator").GetProperty("status").GetString().Should().Be("Degraded",
             "body: {0}", body);
+    }
+
+    // ─── /health/voice, the `asterisk` entry (task 2.2, design D2; spec requirement 4) ───────────────────────
+
+    [Fact]
+    public async Task HealthVoice_ShouldReturn200WithAsteriskHealthy_WhenAmiNotConfigured()
+    {
+        // A digital-only pod: `Asterisk:Ami:Hostname` empty, read through the real seam.
+        await using var factory = new ReadinessFactory(amiHostname: string.Empty);
+
+        var (status, body) = await GetAsync(factory, "/health/voice");
+
+        status.Should().Be(HttpStatusCode.OK, "a digital-only pod has a healthy voice plane; body: {0}", body);
+        using var doc = JsonDocument.Parse(body);
+        var asterisk = Checks(doc).GetProperty("asterisk");
+        asterisk.GetProperty("status").GetString().Should().Be("Healthy", "body: {0}", body);
+        asterisk.GetProperty("description").GetString().Should().Contain("not configured", "body: {0}", body);
+    }
+
+    [Fact]
+    public async Task HealthVoice_ShouldReturn503WithTheConnectionStateAndNoHostOrPort_WhenPrimaryConnectionReconnecting()
+    {
+        await using var factory = new ReadinessFactory(
+            VoiceConnection(FixedVoiceConnectionStatus.Configured(AmiConnectionState.Reconnecting)));
+
+        var (status, body) = await GetAsync(factory, "/health/voice");
+
+        status.Should().Be(HttpStatusCode.ServiceUnavailable,
+            "a down AMI connection makes /health/voice answer 503; body: {0}", body);
+        using var doc = JsonDocument.Parse(body);
+        var asterisk = Checks(doc).GetProperty("asterisk");
+        asterisk.GetProperty("status").GetString().Should().Be("Unhealthy", "body: {0}", body);
+        asterisk.GetProperty("data").GetProperty("connectionState").GetString().Should().Be("Reconnecting",
+            "the entry's data carries the connection state; body: {0}", body);
+        AssertNoAmiEndpoint(doc, body);
+    }
+
+    [Fact]
+    public async Task HealthVoice_ShouldReturn503WithNoPrimaryServerAndNoHostOrPort_WhenAmiConfiguredAndPoolHoldsNoPrimary()
+    {
+        // The real seam over the real configuration: the Testing host sets `Asterisk:Ami:Hostname` but its stubbed
+        // hosted services never seed the pool, so it holds no primary server. This is the path that can read the
+        // configured endpoint, so it is the one that must not print it.
+        await using var factory = new ReadinessFactory();
+
+        var (status, body) = await GetAsync(factory, "/health/voice");
+
+        status.Should().Be(HttpStatusCode.ServiceUnavailable,
+            "AMI configured with no primary server is a down voice plane; body: {0}", body);
+        using var doc = JsonDocument.Parse(body);
+        var asterisk = Checks(doc).GetProperty("asterisk");
+        asterisk.GetProperty("status").GetString().Should().Be("Unhealthy", "body: {0}", body);
+        asterisk.GetProperty("data").GetProperty("connectionState").GetString()
+            .Should().Be(VoiceConnectionSnapshot.NoPrimaryServer, "body: {0}", body);
+        AssertNoAmiEndpoint(doc, body);
+    }
+
+    [Fact]
+    public async Task HealthVoice_ShouldReturn200_WhenPrimaryConnectionConnectedAndOtherVoiceChecksDegraded()
+    {
+        await using var factory = new ReadinessFactory(services =>
+        {
+            VoiceConnection(FixedVoiceConnectionStatus.Configured(AmiConnectionState.Connected))(services);
+            ReadyStub("analytics-aggregator", () => HealthCheckResult.Degraded("analytics-aggregator: no session event yet"))(services);
+        });
+
+        var (status, body) = await GetAsync(factory, "/health/voice");
+
+        status.Should().Be(HttpStatusCode.OK, "a connected AMI is a healthy voice plane; body: {0}", body);
+        using var doc = JsonDocument.Parse(body);
+        Checks(doc).GetProperty("asterisk").GetProperty("status").GetString().Should().Be("Healthy", "body: {0}", body);
+    }
+
+    [Fact]
+    public async Task HealthVoice_ShouldReturn503NamingTheWorker_WhenConnectedButVoiceInboundHeartbeatStale()
+    {
+        await using var factory = new ReadinessFactory(
+            VoiceConnection(FixedVoiceConnectionStatus.Configured(AmiConnectionState.Connected)));
+        factory.Heartbeat.RecordTickAt(
+            nameof(StasisInboundConsumer), TimeSpan.FromSeconds(1), DateTimeOffset.UtcNow - TimeSpan.FromHours(2));
+
+        var (status, body) = await GetAsync(factory, "/health/voice");
+
+        status.Should().Be(HttpStatusCode.ServiceUnavailable,
+            "a stalled voice inbound worker is a down voice plane; body: {0}", body);
+        using var doc = JsonDocument.Parse(body);
+        var asterisk = Checks(doc).GetProperty("asterisk");
+        asterisk.GetProperty("status").GetString().Should().Be("Unhealthy", "body: {0}", body);
+        asterisk.GetProperty("description").GetString().Should().Contain(nameof(StasisInboundConsumer),
+            "the entry names the voice inbound worker; body: {0}", body);
+    }
+
+    [Fact]
+    public async Task HealthVoice_ShouldReturn200WithNoCircuitData_WhenConnectedAndAmiCircuitOpenPastThreshold()
+    {
+        // The dead circuit overlay is gone (design D2): a seeded `asterisk.ami` key no longer reaches the check.
+        await using var factory = new ReadinessFactory(
+            VoiceConnection(FixedVoiceConnectionStatus.Configured(AmiConnectionState.Connected)));
+        factory.Observer.SetForTest(
+            "asterisk.ami", ResilienceCircuitState.Open, DateTimeOffset.UtcNow - PastEscalationThreshold);
+
+        var (status, body) = await GetAsync(factory, "/health/voice");
+
+        status.Should().Be(HttpStatusCode.OK, "no circuit feeds the asterisk check; body: {0}", body);
+        using var doc = JsonDocument.Parse(body);
+        var asterisk = Checks(doc).GetProperty("asterisk");
+        asterisk.GetProperty("status").GetString().Should().Be("Healthy", "body: {0}", body);
+        asterisk.GetProperty("data").TryGetProperty("asterisk.ami", out _).Should().BeFalse(
+            "the circuit keys are no longer part of the entry; body: {0}", body);
+    }
+
+    /// <summary>
+    /// The endpoint is anonymous, so no string in the body may carry the AMI endpoint: neither the hostname the host
+    /// configures nor the defaults the old check printed (<c>localhost:5038</c>, see tasks.md, Notes for Phase B).
+    /// Numbers are left out of the port check: a duration such as <c>0.15038</c> is not a port.
+    /// </summary>
+    private static void AssertNoAmiEndpoint(JsonDocument doc, string body)
+    {
+        body.Should().NotContain(AmiHostname, "the configured AMI hostname must not reach the body");
+        body.Should().NotContain("localhost", "the default AMI hostname must not reach the body");
+        foreach (var text in Strings(doc.RootElement))
+            text.Should().NotContain("5038", "no string in the body carries the AMI port; body: {0}", body);
+    }
+
+    /// <summary>Every property name and string value in <paramref name="element"/>, depth first.</summary>
+    private static IEnumerable<string> Strings(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                yield return element.GetString()!;
+                break;
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    yield return property.Name;
+                    foreach (var text in Strings(property.Value))
+                        yield return text;
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    foreach (var text in Strings(item))
+                        yield return text;
+                }
+                break;
+        }
     }
 }

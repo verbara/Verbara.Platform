@@ -6,18 +6,6 @@ namespace Verbara.Platform.Api.Health;
 public sealed class PlatformHealthCheckOptions
 {
     /// <summary>
-    /// Policy keys whose circuit state contributes to the <c>asterisk</c> health check.
-    /// Used to surface AMI/ARI-dependent worker failures as Degraded/Unhealthy even
-    /// when the raw AMI socket is nominally reachable.
-    /// </summary>
-    public IList<string> AmiWatchedPolicyKeys { get; } = new List<string>
-    {
-        "asterisk.ami",
-        "asterisk.ari",
-        "worker.asterisk-capacity-sync",
-    };
-
-    /// <summary>
     /// Policy keys whose circuit state contributes to the <c>postgres</c> health check.
     /// </summary>
     public IList<string> PostgresWatchedPolicyKeys { get; } = new List<string>

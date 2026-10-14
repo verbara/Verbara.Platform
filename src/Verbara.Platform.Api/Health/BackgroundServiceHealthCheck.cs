@@ -25,7 +25,7 @@ internal sealed class BackgroundServiceHealthCheck : IHealthCheck
         var heartbeats = _heartbeat.GetAll();
         var unhealthyHeartbeats = heartbeats.Where(kv => !kv.Value.IsHealthy).ToList();
 
-        var (circuitStatus, circuitMessage, circuitData) = AsteriskAmiHealthCheck.EvaluateCircuits(
+        var (circuitStatus, circuitMessage, circuitData) = CircuitHealthEvaluator.EvaluateCircuits(
             _healthOptions.WorkerWatchedPolicyKeys,
             _healthOptions.UnhealthyOpenThreshold,
             _observer);
