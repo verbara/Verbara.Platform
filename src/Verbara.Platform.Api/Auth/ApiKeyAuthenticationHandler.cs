@@ -34,16 +34,7 @@ internal sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authen
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        string? apiKeyValue = null;
-
-        if (Request.Headers.TryGetValue("Authorization", out var authHeader))
-        {
-            var header = authHeader.ToString();
-            if (header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-                apiKeyValue = header["Bearer ".Length..].Trim();
-        }
-
-        if (string.IsNullOrWhiteSpace(apiKeyValue))
+        if (!TryReadBearerCredential(Request, out var apiKeyValue))
             return AuthenticateResult.NoResult();
 
         var hashedKey = HashKey(apiKeyValue);
@@ -127,7 +118,26 @@ internal sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authen
         return apiKey.ExpiresAt is { } keyExpiry && keyExpiry < until ? keyExpiry : until;
     }
 
-    private static string HashKey(string rawKey)
+    /// <summary>
+    /// Reads the credential this handler authenticates: the non-blank value after <c>Bearer </c> in the
+    /// <c>Authorization</c> header. Shared with the <c>llm</c> rate-limit partition, which must recognise the
+    /// same credential before authentication runs.
+    /// </summary>
+    internal static bool TryReadBearerCredential(HttpRequest request, out string credential)
+    {
+        credential = string.Empty;
+        if (!request.Headers.TryGetValue("Authorization", out var authHeader))
+            return false;
+
+        var header = authHeader.ToString();
+        if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        credential = header["Bearer ".Length..].Trim();
+        return credential.Length > 0;
+    }
+
+    internal static string HashKey(string rawKey)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(rawKey));
         return Convert.ToHexStringLower(bytes);

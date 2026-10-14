@@ -10,24 +10,20 @@ namespace Verbara.Platform.Api.Middleware;
 internal static class TenantRateLimitPolicy
 {
     /// <summary>
-    /// E3 — per-tenant permit limit for the dedicated <c>llm</c> policy (sliding 1-minute window).
-    /// LLM calls are expensive at EVERY tier, so this policy is NOT tier-bypassed (it applies to
-    /// every tenant, regardless of rate-limit tier — cost control is universal). Deliberately modest.
-    /// The partition is keyed per tenant via the request (see <see cref="ResolveTenantKey"/>), so each
-    /// tenant gets its own 30/min bucket — not a single shared global cap.
+    /// E3 — per-tenant permit limit for the <c>llm</c> policy (sliding 1-minute window), the only policy of this
+    /// limiter (<c>RequireRateLimiting</c>) attached to an endpoint (the AI typification suggestion); the anonymous
+    /// WebChat and webhook routes have their own endpoint-filter limiter (<see cref="AnonymousRateLimitPolicy"/>).
+    /// LLM calls cost money at every tier, so this policy ignores the tenant's rate-limit tier. Each API key, and
+    /// otherwise each resolved tenant, gets its own bucket (see <see cref="ResolveLlmTarget"/>).
     /// </summary>
     internal const int LlmPermitLimit = 30;
 
     /// <summary>
-    /// E3 — permit limit for the shared <c>"__global__"</c> fallback partition of the <c>llm</c>
-    /// policy. Set equal to <see cref="LlmPermitLimit"/> (30): a header-less authenticated caller
-    /// (JWT-<c>tid</c>-only, no <c>X-Tenant-Id</c> header, no tenant subdomain) still cannot be
-    /// partitioned per tenant — even though <c>UseRateLimiter()</c> now runs after
-    /// <c>TenantResolutionMiddleware</c>, it must stay BEFORE <c>UseAuthentication</c> (throttle
-    /// before auth work), and the JWT <c>tid</c> claim is only applied to <c>Items["TenantId"]</c>
-    /// during authentication — so that caller lands in this shared bucket. Capping it at the
-    /// per-tenant limit (rather than a punitive low value) keeps cost control without starving
-    /// that real caller class.
+    /// E3 — permit limit for the shared <c>t?:</c> partition of the <c>llm</c> policy: requests whose tenant is
+    /// unknown when the limiter runs and that carry no API key. That includes a header-less, subdomain-less JWT
+    /// caller identified only by its <c>tid</c>: the limiter runs before <c>UseAuthentication()</c> (throttle
+    /// before auth work), and authentication is what writes that caller's <c>Items["TenantId"]</c>.
+    /// Equal to <see cref="LlmPermitLimit"/> so the bucket stays bounded without starving that caller class.
     /// </summary>
     internal const int GlobalFallbackPermitLimit = 30;
 
@@ -35,32 +31,48 @@ internal static class TenantRateLimitPolicy
     internal static readonly TimeSpan LlmWindow = TimeSpan.FromMinutes(1);
 
     /// <summary>
-    /// Resolves the <c>per-tenant</c> partition key + tier for the current request.
-    /// Reads the tenant from <c>Items["TenantId"]</c> (a string, written by
-    /// <see cref="TenantResolutionMiddleware"/>); a request whose tenant could not be
-    /// resolved lands in the shared <c>"__global__"</c> partition at the Unlimited tier
-    /// (NoLimiter). Because <c>UseRateLimiter()</c> now runs AFTER tenant resolution
-    /// (see the middleware-order note in <c>Program.cs</c>), <c>Items["TenantId"]</c> is
-    /// populated here for every header/subdomain-identified tenant, so each gets its own
-    /// partition instead of all collapsing to <c>"__global__"</c>.
+    /// Resolves the partition key and tier of the <c>per-tenant</c> policy. A resolved tenant
+    /// (<see cref="RateLimitPartitionKeys.TryGetResolvedTenant"/>) gets <c>t:{tenantId}</c> at its tier from
+    /// <see cref="Services.TenantTierCache"/> (or <see cref="RateLimitTier.Standard"/>); an unknown tenant gets the
+    /// shared <c>t?:</c> partition at <see cref="RateLimitTier.Standard"/> — limited at least as strictly as a
+    /// known tenant, never <see cref="RateLimitTier.Unlimited"/>.
     /// </summary>
     internal static (string PartitionKey, RateLimitTier Tier) ResolvePerTenantTarget(HttpContext context)
     {
-        var tenantId = context.Items.TryGetValue("TenantId", out var val) && val is string s
-            ? s : "__global__";
+        if (!RateLimitPartitionKeys.TryGetResolvedTenant(context, out var tenantId))
+            return (RateLimitPartitionKeys.UnknownTenant, RateLimitTier.Standard);
 
-        var tier = tenantId == "__global__"
-            ? RateLimitTier.Unlimited
-            : context.RequestServices.GetService<Services.TenantTierCache>()?.GetTier(tenantId) ?? RateLimitTier.Standard;
+        var tier = context.RequestServices.GetService<Services.TenantTierCache>()?.GetTier(tenantId.Value)
+            ?? RateLimitTier.Standard;
+        return (RateLimitPartitionKeys.ForTenant(tenantId), tier);
+    }
 
-        return (tenantId, tier);
+    /// <summary>
+    /// Resolves the partition key and permit limit of the <c>llm</c> policy. A request carrying an API key is
+    /// keyed on the key (<see cref="RateLimitPartitionKeys.TryGetApiKeyPartition"/>) at <see cref="LlmPermitLimit"/>:
+    /// the API-key handler replaces the tenant afterwards, so keying it on the tenant the request named would let
+    /// one key buy a fresh bucket per <c>X-Tenant-Id</c> or Host. Otherwise the tenant the pipeline resolved
+    /// (<c>Items["TenantId"]</c>, from the subdomain or the <c>X-Tenant-Id</c> header — the header is not read
+    /// again here): resolved → <c>t:{tenantId}</c> at <see cref="LlmPermitLimit"/>; unknown → the shared
+    /// <c>t?:</c> partition at <see cref="GlobalFallbackPermitLimit"/>. That tenant is not yet verified (the
+    /// limiter runs before authentication), so an anonymous caller can still name another tenant's bucket.
+    /// </summary>
+    internal static (string PartitionKey, int PermitLimit) ResolveLlmTarget(HttpContext context)
+    {
+        if (RateLimitPartitionKeys.TryGetApiKeyPartition(context, out var keyPartition))
+            return (keyPartition, LlmPermitLimit);
+
+        return RateLimitPartitionKeys.TryGetResolvedTenant(context, out var tenantId)
+            ? (RateLimitPartitionKeys.ForTenant(tenantId), LlmPermitLimit)
+            : (RateLimitPartitionKeys.UnknownTenant, GlobalFallbackPermitLimit);
     }
 
     public static void ConfigureRateLimiting(RateLimiterOptions options)
     {
         options.RejectionStatusCode = 429;
 
-        // Global safety net
+        // Registered but attached to no endpoint, and no global limiter is configured: this policy limits nothing.
+        // It is kept until the change wire-api-rate-limiting-enforcement replaces it with a per-IP backstop.
         options.AddSlidingWindowLimiter("global-safety", o =>
         {
             o.Window = TimeSpan.FromMinutes(1);
@@ -68,21 +80,17 @@ internal static class TenantRateLimitPolicy
             o.PermitLimit = 3000;
         });
 
-        // Per-tenant partitioned policy. UseRateLimiter() now runs AFTER
-        // TenantResolutionMiddleware (the sole writer of Items["TenantId"]) — see the
-        // middleware-order note in Program.cs — so Items["TenantId"] IS populated at this
-        // pipeline position for every header/subdomain-identified tenant. Each such tenant
-        // gets its own partition (a request with no resolvable tenant still lands in the
-        // shared "__global__" → Unlimited → NoLimiter bucket). Partition+tier resolution is
-        // extracted into ResolvePerTenantTarget so it can be unit-tested directly.
+        // Per-tenant tier policy: registered but attached to no endpoint, so it limits nothing. Its partition
+        // resolution (ResolvePerTenantTarget, unit-tested) is correct so that whoever attaches it gets a policy that
+        // fails closed. wire-api-rate-limiting-enforcement replaces it with a verified-tenant stage.
         options.AddPolicy("per-tenant", context =>
         {
-            var (tenantId, tier) = ResolvePerTenantTarget(context);
+            var (partitionKey, tier) = ResolvePerTenantTarget(context);
 
             if (tier.IsUnlimited())
-                return RateLimitPartition.GetNoLimiter(tenantId);
+                return RateLimitPartition.GetNoLimiter(partitionKey);
 
-            return RateLimitPartition.GetSlidingWindowLimiter(tenantId, _ => new SlidingWindowRateLimiterOptions
+            return RateLimitPartition.GetSlidingWindowLimiter(partitionKey, _ => new SlidingWindowRateLimiterOptions
             {
                 Window = TimeSpan.FromMinutes(1),
                 SegmentsPerWindow = 6,
@@ -91,31 +99,16 @@ internal static class TenantRateLimitPolicy
             });
         });
 
-        // E3 — dedicated per-tenant LLM rate-limit policy. Applied to the expensive
-        // AI-suggestion route ONLY (in addition to the generic per-tenant limiter). Unlike
-        // "per-tenant" this policy is NOT tier-bypassed: an LLM call costs real money at every
-        // tier, so even an Unlimited-tier tenant is throttled here.
-        //
-        // ResolveTenantKey reads Items["TenantId"] first (now populated, since UseRateLimiter()
-        // runs after TenantResolutionMiddleware) and falls back to the X-Tenant-Id request
-        // header, so each tenant gets its own 30/min bucket. A caller with no resolvable tenant
-        // shares the bounded "__global__" bucket (GlobalFallbackPermitLimit == LlmPermitLimit).
+        // E3 — the per-tenant LLM policy, attached to the AI-suggestion route only; it is the only policy of this
+        // limiter applied to any endpoint (the anonymous WebChat and webhook routes use the endpoint-filter
+        // AnonymousRateLimitPolicy). It ignores the tier (an Unlimited-tier tenant is throttled too).
+        // ResolveLlmTarget keys it on the API key when one is sent, else on the tenant TenantResolutionMiddleware
+        // resolved before UseRateLimiter(); a request with neither shares the bounded t?: bucket.
         options.AddPolicy("llm", context =>
         {
-            var tenantId = ResolveTenantKey(context);
+            var (partitionKey, permitLimit) = ResolveLlmTarget(context);
 
-            // The "__global__" fallback is NOT only pre-auth traffic: a header-less authenticated
-            // caller (JWT-tid-only, no X-Tenant-Id header, no tenant subdomain) DOES land here and
-            // shares this single bucket — the route's primary caller (the Web app) sends the header,
-            // so this is an edge case, but a real one. Cap the shared bucket at the per-tenant limit
-            // (GlobalFallbackPermitLimit == LlmPermitLimit) so it stays bounded without punitively
-            // starving that caller class. These header-less JWT-tid callers still can't be
-            // partitioned per tenant: UseRateLimiter() now runs AFTER TenantResolutionMiddleware but
-            // stays BEFORE UseAuthentication (throttle before auth work), so the JWT tid claim is not
-            // yet applied to Items["TenantId"] at this pipeline position.
-            var permitLimit = tenantId == "__global__" ? GlobalFallbackPermitLimit : LlmPermitLimit;
-
-            return RateLimitPartition.GetSlidingWindowLimiter(tenantId, _ => new SlidingWindowRateLimiterOptions
+            return RateLimitPartition.GetSlidingWindowLimiter(partitionKey, _ => new SlidingWindowRateLimiterOptions
             {
                 Window = LlmWindow,
                 SegmentsPerWindow = 6,
@@ -155,35 +148,5 @@ internal static class TenantRateLimitPolicy
         problem.Extensions["retryAfter"] = retryAfter;
         await httpContext.Response.WriteAsync(
             JsonSerializer.Serialize(problem, ApiJsonContext.Default.ProblemDetails), ct);
-    }
-
-    /// <summary>
-    /// Resolves the rate-limit partition key for the <c>llm</c> policy. Resolution order:
-    /// <list type="number">
-    ///   <item><c>Items["TenantId"]</c> as string — honored first; <c>UseRateLimiter()</c> now runs
-    ///   after <see cref="TenantResolutionMiddleware"/>, so this is populated for every
-    ///   header/subdomain-identified tenant.</item>
-    ///   <item>the <c>X-Tenant-Id</c> request header — fallback / belt-and-suspenders (same value
-    ///   TenantResolutionMiddleware reads).</item>
-    ///   <item><c>"__global__"</c> — the bounded shared fallback. Note this is NOT only pre-auth /
-    ///   no-tenant traffic: a header-less authenticated caller (JWT-<c>tid</c>-only, no
-    ///   <c>X-Tenant-Id</c> header, no tenant subdomain) also lands here and shares this bucket
-    ///   (capped at <see cref="GlobalFallbackPermitLimit"/>) — the limiter stays before auth, so
-    ///   its <c>tid</c> claim is not yet applied to <c>Items["TenantId"]</c>.</item>
-    /// </list>
-    /// </summary>
-    private static string ResolveTenantKey(HttpContext context)
-    {
-        if (context.Items.TryGetValue("TenantId", out var val) && val is string s && !string.IsNullOrWhiteSpace(s))
-            return s;
-
-        if (context.Request.Headers.TryGetValue("X-Tenant-Id", out var header))
-        {
-            var headerValue = header.ToString();
-            if (!string.IsNullOrWhiteSpace(headerValue))
-                return headerValue;
-        }
-
-        return "__global__";
     }
 }

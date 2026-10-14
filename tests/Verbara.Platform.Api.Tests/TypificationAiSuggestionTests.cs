@@ -637,28 +637,24 @@ public sealed class TypificationAiSuggestionTests : IDisposable
 
     // ─── E3 — dedicated per-tenant "llm" rate-limit policy ──────────────────────
 
-    /// <summary>The OLD punitive "__global__" fallback permit (5) — used here purely as a lower-bound
+    /// <summary>The OLD punitive shared-fallback permit (5) — used here purely as a lower-bound
     /// sentinel. Proving a single tenant's burst yields strictly MORE than this rules out the old
-    /// "everything collapses to a 5/min __global__ bucket" bug, regardless of the current fallback
-    /// value (raised to <see cref="TenantRateLimitPolicy.GlobalFallbackPermitLimit"/> == 30 by the
-    /// E3 review hedge). The per-tenant bucket under test is <see cref="TenantRateLimitPolicy.LlmPermitLimit"/> (30).</summary>
+    /// "everything collapses to a 5/min shared bucket" bug, regardless of the current fallback
+    /// value (<see cref="TenantRateLimitPolicy.GlobalFallbackPermitLimit"/> == 30, partition <c>t?:</c>). The per-tenant bucket under test is <see cref="TenantRateLimitPolicy.LlmPermitLimit"/> (30).</summary>
     private const int OldPunitiveGlobalFallback = 5;
 
     [Fact]
     public async Task Suggestion_ShouldRateLimit_PerTenant()
     {
         // The suggestion route carries the dedicated "llm" policy (PermitLimit = 30 / 1-min sliding
-        // window), partitioned per tenant by the X-Tenant-Id request header. Firing more than the
-        // limit from one tenant must eventually yield a 429.
+        // window). This caller sends an API key, so its partition is the key (key:{sha256}); a caller
+        // without one is partitioned on the tenant TenantResolutionMiddleware wrote to Items["TenantId"].
+        // Firing more than the limit from one caller must eventually yield a 429.
         //
-        // NOTE on tiers: the base factory's tenant is on the ENTERPRISE tier (permit 1200), NOT
-        // Unlimited. The 429 observed here therefore comes from the per-tenant "llm" 30/min bucket,
-        // not from the generic "per-tenant" limiter (Enterprise would allow 1200, and that limiter
-        // is also currently a no-op — see the pre-existing flaw documented in TenantRateLimitPolicy).
-        // Critically, the success count proves the PER-TENANT 30 bucket and NOT the old global 5
-        // bucket: before Fix 1, Items["TenantId"] was unset at the UseRateLimiter() position so every
-        // request collapsed into "__global__" (permit 5). Reading X-Tenant-Id directly gives this
-        // tenant its own 30/min partition.
+        // NOTE on tiers: the 429 observed here comes from the per-tenant "llm" 30/min bucket. The
+        // "per-tenant" tier policy is attached to no endpoint, so it limits nothing.
+        // The success count proves the PER-TENANT 30 bucket and NOT the old punitive 5/min shared
+        // bucket the route once collapsed into.
         var classification = new AiClassification(
             NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
             FieldValues: new Dictionary<string, string>(),
@@ -692,20 +688,21 @@ public sealed class TypificationAiSuggestionTests : IDisposable
             "no more than the per-tenant permit limit (30) may succeed inside one sliding window");
         okCount.Should().BeGreaterThan(OldPunitiveGlobalFallback,
             "the per-tenant 30 bucket (not the old punitive global 5 bucket) must absorb the burst — "
-            + "proving the limiter partitions on X-Tenant-Id, not the unset Items[\"TenantId\"]");
+            + "proving the limiter partitions on the resolved tenant");
     }
 
     [Fact]
     public async Task Suggestion_ShouldNotShareRateLimitBucket_AcrossTenants()
     {
-        // Per-tenant ISOLATION: after tenant A trips its own "llm" 30/min 429, a single request for a
-        // DIFFERENT tenant B (different X-Tenant-Id) must NOT be 429 — it has its own partition.
+        // ISOLATION: after caller A (the test API key, tenant A) trips its own "llm" 30/min 429, a single
+        // request for a DIFFERENT tenant B (its own X-Tenant-Id, no API key, so the resolved Items["TenantId"]
+        // decides the partition) must NOT be 429 — it has its own t:{tenantId} partition.
         //
-        // B is intentionally unseeded (no customer-tenant / feature-gate / license rows), so once the
-        // request clears the rate limiter it hits the later operational-tenant + license gates and
-        // returns THEIR status (e.g. 409/402/401), never 200. That's fine: the assertion is precisely
-        // "B is NOT 429", which proves B did not inherit A's exhausted bucket. Asserting 200 for B
-        // would require fully seeding B and is not needed to prove isolation.
+        // B is a different subject on purpose: the same API key sent with B's header would be the same key
+        // bucket (the key's tenant is what the LLM call is billed to — see
+        // Suggestion_ShouldNotGrantExtraBudget_WhenApiKeyCallerVariesTenantHeaderOrHost). B's request is
+        // anonymous, so once it clears the rate limiter it is refused by authentication (401), never 200.
+        // The assertion is precisely "B is NOT 429", which proves B did not inherit A's exhausted bucket.
         var classification = new AiClassification(
             NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
             FieldValues: new Dictionary<string, string>(),
@@ -732,13 +729,170 @@ public sealed class TypificationAiSuggestionTests : IDisposable
         // A single request for tenant B (its own X-Tenant-Id) — same factory, same route — must land
         // in B's own (empty) partition and therefore NOT be throttled.
         using var clientB = factory.CreateClient();
-        clientB.DefaultRequestHeaders.Add("Authorization", $"Bearer {AuthenticatedPlatformApiFactory.TestApiKey}");
         clientB.DefaultRequestHeaders.Add("X-Tenant-Id", "tenant-isolation-B");
 
         var tenantBResponse = await clientB.PostAsync(url, content: null);
 
         tenantBResponse.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests,
             "tenant B has its own llm partition and must not inherit tenant A's exhausted 30/min bucket");
+    }
+
+    // ─── RL1 (wire-api-rate-limiting tranche 1) — the "llm" partition reads the resolved tenant ──
+
+    /// <summary>Test host whose first label TenantResolutionMiddleware resolves as the tenant.</summary>
+    private const string TenantHostSuffix = "verbara.test";
+
+    private static HttpRequestMessage SuggestionRequest(string url, string? host = null, string? tenantHeader = null)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, url);
+        if (host is not null)
+            request.Headers.Host = host;
+        if (tenantHeader is not null)
+            request.Headers.Add("X-Tenant-Id", tenantHeader);
+        return request;
+    }
+
+    private static AiClassification CannedClassification() => new(
+        NodePath: [EntityId.From(RootNodeId), EntityId.From(LeafNodeId)],
+        FieldValues: new Dictionary<string, string>(),
+        Confidence: 0.9,
+        Sentiment: "positive");
+
+    [Fact]
+    public async Task Suggestion_ShouldPartitionPerTenant_WhenTenantResolvedBySubdomainWithoutHeader()
+    {
+        // Anonymous on purpose: UseRateLimiter() runs before UseAuthentication(), so the limiter decides
+        // before the 401. Tenant A is identified ONLY by its subdomain (no X-Tenant-Id header), so the
+        // partition must come from Items["TenantId"] (a boxed TenantId written by TenantResolutionMiddleware).
+        using var factory = WithFakeClassifier(new FakeAiClassifier(CannedClassification()));
+        using var client = factory.CreateClient();
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfig(enabled: true, suggestThreshold: 0.5));
+        var url = $"/api/conversations/{convId.Value}/typification-suggestion";
+
+        HttpResponseMessage? rejected = null;
+        for (var i = 0; i < TenantRateLimitPolicy.LlmPermitLimit + 5; i++)
+        {
+            using var request = SuggestionRequest(url, host: $"tenant-a.{TenantHostSuffix}");
+            var resp = await client.SendAsync(request);
+            if (resp.StatusCode == HttpStatusCode.TooManyRequests && rejected is null)
+                rejected = resp;
+        }
+
+        var hit = rejected ?? throw new Xunit.Sdk.XunitException(
+            "tenant A fired more than its llm permit limit inside one window, yet no request was rejected");
+        hit.Headers.Contains("Retry-After").Should().BeTrue("a rejection carries Retry-After");
+        var problem = JsonNode.Parse(await hit.Content.ReadAsStringAsync());
+        problem!["type"]!.GetValue<string>().Should().Be("rate_limit_exceeded");
+
+        using var requestB = SuggestionRequest(url, host: $"tenant-b.{TenantHostSuffix}");
+        var tenantBResponse = await client.SendAsync(requestB);
+
+        tenantBResponse.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests,
+            "tenant B (resolved by subdomain) has its own llm partition and must not share tenant A's bucket");
+    }
+
+    [Fact]
+    public async Task Suggestion_ShouldNotShareFallbackBucket_WhenTenantIdHeaderIsGlobalSentinel()
+    {
+        // Exhaust the unresolved-tenant bucket (no header, no tenant subdomain), then a caller that sends
+        // X-Tenant-Id: __global__ must be treated as an ordinary tenant named "__global__" — not be mapped
+        // into the shared fallback bucket.
+        using var factory = WithFakeClassifier(new FakeAiClassifier(CannedClassification()));
+        using var client = factory.CreateClient();
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfig(enabled: true, suggestThreshold: 0.5));
+        var url = $"/api/conversations/{convId.Value}/typification-suggestion";
+
+        var sawFallback429 = false;
+        for (var i = 0; i < TenantRateLimitPolicy.GlobalFallbackPermitLimit + 10 && !sawFallback429; i++)
+        {
+            using var request = SuggestionRequest(url);
+            var resp = await client.SendAsync(request);
+            sawFallback429 = resp.StatusCode == HttpStatusCode.TooManyRequests;
+        }
+
+        sawFallback429.Should().BeTrue("the unresolved-tenant bucket must be exhausted before the sentinel check");
+
+        using var sentinelRequest = SuggestionRequest(url, tenantHeader: "__global__");
+        var sentinelResponse = await client.SendAsync(sentinelRequest);
+
+        sentinelResponse.StatusCode.Should().NotBe(HttpStatusCode.TooManyRequests,
+            "X-Tenant-Id: __global__ must not select the shared fallback bucket");
+    }
+
+    [Fact]
+    public async Task Suggestion_ShouldStillRateLimit_WhenTenantUnresolved()
+    {
+        // Fail closed: a caller with no resolvable tenant is still throttled on the llm route.
+        using var factory = WithFakeClassifier(new FakeAiClassifier(CannedClassification()));
+        using var client = factory.CreateClient();
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfig(enabled: true, suggestThreshold: 0.5));
+        var url = $"/api/conversations/{convId.Value}/typification-suggestion";
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < TenantRateLimitPolicy.GlobalFallbackPermitLimit + 5; i++)
+        {
+            using var request = SuggestionRequest(url);
+            statuses.Add((await client.SendAsync(request)).StatusCode);
+        }
+
+        statuses.Should().Contain(HttpStatusCode.TooManyRequests,
+            "an unknown tenant is limited at least as strictly as a known one");
+    }
+
+    [Fact]
+    public async Task Suggestion_ShouldNotGrantExtraBudget_WhenApiKeyCallerVariesTenantHeaderOrHost()
+    {
+        // The API-key handler overwrites Items["TenantId"] with the key's own tenant AFTER the limiter ran, so
+        // TenantBoundaryValidationMiddleware sees a match and the LLM call runs for the key's tenant whatever
+        // X-Tenant-Id / Host the request named. Naming a fresh tenant on every request must therefore not buy
+        // a fresh llm bucket: the key's budget stays at LlmPermitLimit per window.
+        using var factory = WithFakeClassifier(new FakeAiClassifier(CannedClassification()));
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {AuthenticatedPlatformApiFactory.TestApiKey}");
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfig(enabled: true, suggestThreshold: 0.5));
+        var url = $"/api/conversations/{convId.Value}/typification-suggestion";
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < TenantRateLimitPolicy.LlmPermitLimit + 5; i++)
+        {
+            using var request = i % 2 == 0
+                ? SuggestionRequest(url, tenantHeader: $"rotating-{i}")
+                : SuggestionRequest(url, host: $"rotating-{i}.{TenantHostSuffix}");
+            statuses.Add((await client.SendAsync(request)).StatusCode);
+        }
+
+        statuses.Should().Contain(HttpStatusCode.TooManyRequests,
+            "an API-key caller must not escape its own llm cap by naming a different tenant on each request");
+        statuses.Count(s => s == HttpStatusCode.OK).Should().BeLessThanOrEqualTo(TenantRateLimitPolicy.LlmPermitLimit,
+            "the LLM call runs for the key's tenant on every accepted request, so at most one window's budget may succeed");
+    }
+
+    [Fact]
+    public async Task Responses_ShouldCarryNoRateLimitHeaders_WhenTenantResolved()
+    {
+        // DQ2 = B: no X-RateLimit-* header may state a ceiling that is not enforced, so none is emitted
+        // in tranche 1 — even for an authenticated request whose tenant is resolved.
+        using var factory = WithFakeClassifier(new FakeAiClassifier(CannedClassification()));
+        using var client = AuthenticatedClient(factory);
+
+        var convId = await SeedSchemaAndConversationAsync(
+            factory, AiConfig(enabled: true, suggestThreshold: 0.5));
+
+        var response = await client.PostAsync(
+            $"/api/conversations/{convId.Value}/typification-suggestion", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.Contains("X-RateLimit-Limit").Should().BeFalse();
+        response.Headers.Contains("X-RateLimit-Reset").Should().BeFalse();
+        response.Headers.Contains("X-RateLimit-Tenant").Should().BeFalse();
     }
 
     // ─── D2 — typify provenance (B3 — server-authoritative) ─────────────────────

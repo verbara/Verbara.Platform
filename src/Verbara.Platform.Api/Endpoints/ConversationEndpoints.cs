@@ -56,8 +56,8 @@ internal static class ConversationEndpoints
         // applied to THIS endpoint only, requiring BOTH AdvancedTypification AND
         // TypificationAi: the LicenseGateMiddleware reads one LicenseFeatureMetadata and
         // checks HasFlag, so a combined flags value gates on EVERY set bit (402 unless both).
-        // E3 — also apply the dedicated per-tenant "llm" rate-limit policy (separate from the
-        // generic per-tenant limiter and NOT tier-bypassed): LLM calls are expensive at every tier.
+        // E3 — also apply the "llm" policy (the only RequireRateLimiting policy on any route — WebChat and webhooks
+        // use the endpoint-filter AnonymousRateLimitPolicy; NOT tier-bypassed): LLM calls are expensive at every tier.
         group.MapPost("/{id}/typification-suggestion", GetTypificationSuggestion)
             .RequireLicenseFeature(LicenseFeature.AdvancedTypification | LicenseFeature.TypificationAi)
             .RequireRateLimiting("llm");
