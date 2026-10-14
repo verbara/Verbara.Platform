@@ -269,6 +269,8 @@ jobs:
         env:
           IMAGE_KIND: ${{ matrix.name }}
           IMAGE_REF: ${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}@${{ steps.build.outputs.digest }}
+        # bash without -e (GitHub's default shell adds it): a failed jq or inspect must still print a line.
+        shell: bash {0}
         run: |
           # No `set -e`: every path below ends in `exit 0`.
           set -u
@@ -283,7 +285,8 @@ jobs:
             if has("config") then (.config.Labels // {})
             else (.["linux/amd64"].config.Labels // ([.[] | .config.Labels // empty] | first) // {})
             end' 2>/dev/null || echo '{}')"
-          label() { printf '%s' "$labels" | jq -r --arg k "org.opencontainers.image.$1" '.[$k] // "(absent)"'; }
+          [ -n "$labels" ] || labels='{}'
+          label() { printf '%s' "$labels" | jq -r --arg k "org.opencontainers.image.$1" '.[$k] // "(absent)"' 2>/dev/null || echo '(unreadable)'; }
           revision="$(label revision)"
           version="$(label version)"
           created="$(label created)"
@@ -291,7 +294,7 @@ jobs:
           echo "[${IMAGE_KIND}] revision = ${revision}"
           echo "[${IMAGE_KIND}] version  = ${version}"
           echo "[${IMAGE_KIND}] created  = ${created}"
-          if [ "$revision" = "(absent)" ] || [ "$revision" = "unknown" ]; then
+          if [ -z "$revision" ] || [ "$revision" = "(absent)" ] || [ "$revision" = "(unreadable)" ] || [ "$revision" = "unknown" ]; then
             echo "::warning::[${IMAGE_KIND}] org.opencontainers.image.revision is ${revision} on ${IMAGE_REF}"
           fi
           {
