@@ -1,112 +1,170 @@
-using Verbara.Platform.Api.Health;
-using Verbara.Sdk.Ami.Connection;
-using Verbara.Sdk.Hosting;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Options;
+using Verbara.Platform.Api.Health;
+using Verbara.Platform.Api.Services;
+using Verbara.Sdk.Enums;
 
 namespace Verbara.Platform.Api.Tests.Health;
 
-public class AsteriskAmiHealthCheckTests
+/// <summary>
+/// readiness-without-asterisk, design D2 (spec <c>api-readiness-scope</c>, requirement 4): the <c>asterisk</c> check
+/// reads this pod's primary AMI connection through <see cref="IVoiceConnectionStatus"/> and the voice-plane worker
+/// heartbeats with the three-interval rule.
+///
+/// <para>The circuit cases these tests used to hold encoded a dead path: no code executes a policy under
+/// <c>asterisk.ami</c> or <c>asterisk.ari</c>, and <c>worker.asterisk-capacity-sync</c> has no caller (design,
+/// Context). The overlay is gone, so the check takes no circuit observer at all.</para>
+/// </summary>
+public sealed class AsteriskAmiHealthCheckTests
 {
+    private static Task<HealthCheckResult> CheckAsync(
+        FixedVoiceConnectionStatus connection, ServiceHeartbeat? heartbeat = null) =>
+        new AsteriskAmiHealthCheck(connection, heartbeat ?? new ServiceHeartbeat())
+            .CheckHealthAsync(new HealthCheckContext());
+
+    /// <summary>A registry whose voice inbound worker last beat two hours ago against a one-second interval.</summary>
+    private static ServiceHeartbeat StaleVoiceInboundHeartbeat()
+    {
+        var heartbeat = new ServiceHeartbeat();
+        heartbeat.RecordTickAt(
+            nameof(StasisInboundConsumer), TimeSpan.FromSeconds(1), DateTimeOffset.UtcNow - TimeSpan.FromHours(2));
+        return heartbeat;
+    }
+
+    private static IReadOnlyDictionary<string, object> Heartbeats(HealthCheckResult result) =>
+        (IReadOnlyDictionary<string, object>)result.Data[AsteriskAmiHealthCheck.HeartbeatsDataKey];
+
+    /// <summary>Every <see cref="AmiConnectionState"/> but <c>Connected</c>, so a state the Sdk adds is covered too.</summary>
+    public static TheoryData<AmiConnectionState> NotConnectedStates
+    {
+        get
+        {
+            var states = new TheoryData<AmiConnectionState>();
+            foreach (var state in Enum.GetValues<AmiConnectionState>().Where(s => s != AmiConnectionState.Connected))
+                states.Add(state);
+            return states;
+        }
+    }
+
     [Fact]
     public async Task CheckHealthAsync_ShouldReturnHealthy_WhenAmiNotConfigured()
     {
-        var services = new ServiceCollection().BuildServiceProvider();
-        var observer = new ResilienceStateObserver();
-        var options = Options.Create(new PlatformHealthCheckOptions());
-
-        var check = new AsteriskAmiHealthCheck(services, observer, options);
-
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        var result = await CheckAsync(FixedVoiceConnectionStatus.NotConfigured());
 
         result.Status.Should().Be(HealthStatus.Healthy);
+        result.Description.Should().Contain("not configured");
+        result.Data[AsteriskAmiHealthCheck.ConnectionStateDataKey].Should().Be(AsteriskAmiHealthCheck.NotConfiguredState);
     }
 
     [Fact]
-    public async Task CheckHealthAsync_ShouldReturnDegraded_WhenAmiConfiguredAndNoCircuitsOpen()
+    public async Task CheckHealthAsync_ShouldReturnHealthy_WhenPrimaryConnectionIsConnected()
     {
-        var services = BuildServicesWithAmi();
-        var observer = new ResilienceStateObserver();
-        var options = Options.Create(new PlatformHealthCheckOptions());
+        var result = await CheckAsync(FixedVoiceConnectionStatus.Configured(AmiConnectionState.Connected));
 
-        var check = new AsteriskAmiHealthCheck(services, observer, options);
-
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
-
-        result.Status.Should().Be(HealthStatus.Degraded);
-        result.Description.Should().Contain("AMI configured");
+        result.Status.Should().Be(HealthStatus.Healthy);
+        result.Data[AsteriskAmiHealthCheck.ConnectionStateDataKey].Should().Be("Connected");
     }
 
-    [Fact]
-    public async Task CheckHealthAsync_ShouldReturnDegraded_WhenCircuitOpenLessThan5Min()
+    [Theory]
+    [MemberData(nameof(NotConnectedStates))]
+    public async Task CheckHealthAsync_ShouldReturnUnhealthyWithTheState_WhenPrimaryConnectionIsNotConnected(
+        AmiConnectionState state)
     {
-        var services = BuildServicesWithAmi();
-        var observer = new ResilienceStateObserver();
-        observer.SetForTest(
-            "worker.asterisk-capacity-sync",
-            ResilienceCircuitState.Open,
-            DateTimeOffset.UtcNow.AddMinutes(-2));
-        var options = Options.Create(new PlatformHealthCheckOptions());
-
-        var check = new AsteriskAmiHealthCheck(services, observer, options);
-
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
-
-        result.Status.Should().Be(HealthStatus.Degraded);
-        result.Description.Should().Contain("Circuit open");
-        result.Description.Should().Contain("worker.asterisk-capacity-sync");
-    }
-
-    [Fact]
-    public async Task CheckHealthAsync_ShouldReturnUnhealthy_WhenCircuitOpenMoreThan5Min()
-    {
-        var services = BuildServicesWithAmi();
-        var observer = new ResilienceStateObserver();
-        observer.SetForTest(
-            "worker.asterisk-capacity-sync",
-            ResilienceCircuitState.Open,
-            DateTimeOffset.UtcNow.AddMinutes(-6));
-        var options = Options.Create(new PlatformHealthCheckOptions());
-
-        var check = new AsteriskAmiHealthCheck(services, observer, options);
-
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        var result = await CheckAsync(FixedVoiceConnectionStatus.Configured(state));
 
         result.Status.Should().Be(HealthStatus.Unhealthy);
-        result.Description.Should().Contain("Circuit open >5min");
+        result.Description.Should().Contain(state.ToString());
+        result.Data[AsteriskAmiHealthCheck.ConnectionStateDataKey].Should().Be(state.ToString());
     }
 
     [Fact]
-    public async Task CheckHealthAsync_ShouldReturnDegraded_WhenClosedCircuitsDoNotContribute()
+    public async Task CheckHealthAsync_ShouldReturnUnhealthy_WhenConfiguredButPoolHasNoPrimaryServer()
     {
-        var services = BuildServicesWithAmi();
-        var observer = new ResilienceStateObserver();
-        observer.SetForTest("asterisk.ami", ResilienceCircuitState.Closed, DateTimeOffset.UtcNow);
-        var options = Options.Create(new PlatformHealthCheckOptions());
+        var result = await CheckAsync(FixedVoiceConnectionStatus.Configured(state: null));
 
-        var check = new AsteriskAmiHealthCheck(services, observer, options);
-
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
-
-        result.Status.Should().Be(HealthStatus.Degraded);
-        result.Description.Should().Contain("AMI configured");
-        result.Description.Should().NotContain("Circuit open");
+        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Description.Should().Contain("no primary server");
+        result.Data[AsteriskAmiHealthCheck.ConnectionStateDataKey].Should().Be(VoiceConnectionSnapshot.NoPrimaryServer);
     }
 
-    private static ServiceProvider BuildServicesWithAmi()
+    [Fact]
+    public async Task CheckHealthAsync_ShouldReturnUnhealthyNamingTheWorker_WhenConnectedButVoiceInboundHeartbeatStale()
     {
-        var services = new ServiceCollection();
-        services.Configure<VerbaraOptions>(o =>
-        {
-            o.Ami = new AmiConnectionOptions
-            {
-                Hostname = "test-ami",
-                Port = 5038,
-                Username = "admin",
-                Password = "secret",
-            };
-        });
-        return services.BuildServiceProvider();
+        var result = await CheckAsync(
+            FixedVoiceConnectionStatus.Configured(AmiConnectionState.Connected), StaleVoiceInboundHeartbeat());
+
+        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Description.Should().Contain(nameof(StasisInboundConsumer));
+        var worker = (IReadOnlyDictionary<string, object>)Heartbeats(result)[nameof(StasisInboundConsumer)];
+        worker["isHealthy"].Should().Be(false);
+        worker["expectedIntervalSeconds"].Should().Be(1.0);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ShouldReturnHealthy_WhenConnectedAndVoiceInboundHeartbeatFresh()
+    {
+        // A one-hour interval, so a slow or single-core runner cannot make the tick stale between record and read.
+        var heartbeat = new ServiceHeartbeat();
+        heartbeat.RecordTickAt(nameof(StasisInboundConsumer), TimeSpan.FromHours(1), DateTimeOffset.UtcNow);
+
+        var result = await CheckAsync(FixedVoiceConnectionStatus.Configured(AmiConnectionState.Connected), heartbeat);
+
+        result.Status.Should().Be(HealthStatus.Healthy);
+        var worker = (IReadOnlyDictionary<string, object>)Heartbeats(result)[nameof(StasisInboundConsumer)];
+        worker["isHealthy"].Should().Be(true);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ShouldIgnoreDigitalWorkerHeartbeats_WhenTheyAreStale()
+    {
+        // A digital worker's heartbeat belongs to `services` (readiness), never to the voice plane.
+        var heartbeat = new ServiceHeartbeat();
+        heartbeat.RecordTickAt(
+            nameof(QueueDistributionWorker), TimeSpan.FromSeconds(1), DateTimeOffset.UtcNow - TimeSpan.FromHours(2));
+
+        var result = await CheckAsync(FixedVoiceConnectionStatus.Configured(AmiConnectionState.Connected), heartbeat);
+
+        result.Status.Should().Be(HealthStatus.Healthy);
+        Heartbeats(result).Should().NotContainKey(nameof(QueueDistributionWorker));
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ShouldNameBothTheStateAndTheWorker_WhenNotConnectedAndVoiceInboundHeartbeatStale()
+    {
+        var result = await CheckAsync(
+            FixedVoiceConnectionStatus.Configured(AmiConnectionState.Reconnecting), StaleVoiceInboundHeartbeat());
+
+        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Description.Should().Contain("Reconnecting").And.Contain(nameof(StasisInboundConsumer));
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ShouldReturnHealthyAndKeepTheHeartbeatInData_WhenAmiNotConfiguredAndVoiceHeartbeatStale()
+    {
+        // Spec requirement 4's first row is unconditional: AMI not configured reads Healthy (digital-only). A voice
+        // heartbeat that is still recorded stays visible in the data, so nothing is hidden from an operator.
+        var result = await CheckAsync(FixedVoiceConnectionStatus.NotConfigured(), StaleVoiceInboundHeartbeat());
+
+        result.Status.Should().Be(HealthStatus.Healthy);
+        Heartbeats(result).Should().ContainKey(nameof(StasisInboundConsumer));
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ShouldReadTheConnectionOnEveryCheck_WhenTheStateChanges()
+    {
+        // The check holds no state of its own: each run reads the seam again.
+        var connection = new SwitchableVoiceConnection(AmiConnectionState.Connected);
+        var check = new AsteriskAmiHealthCheck(connection, new ServiceHeartbeat());
+
+        (await check.CheckHealthAsync(new HealthCheckContext())).Status.Should().Be(HealthStatus.Healthy);
+        connection.State = AmiConnectionState.Disconnected;
+
+        (await check.CheckHealthAsync(new HealthCheckContext())).Status.Should().Be(HealthStatus.Unhealthy);
+    }
+
+    private sealed class SwitchableVoiceConnection(AmiConnectionState state) : IVoiceConnectionStatus
+    {
+        public AmiConnectionState State { get; set; } = state;
+
+        public VoiceConnectionSnapshot Read() => new(IsConfigured: true, State);
     }
 }

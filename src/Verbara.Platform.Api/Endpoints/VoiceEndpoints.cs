@@ -22,19 +22,31 @@ internal static class VoiceEndpoints
 
     public static void MapVoiceEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/conversations").RequireAuthorization("Authenticated").RequireOperationalTenant();
+        // readiness-without-asterisk D5: both groups answer 503 voice-unavailable with Retry-After while this pod's
+        // primary AMI connection is not Connected (VoiceAvailabilityGateExtensions), with the route's own typed body.
+        var group = app.MapGroup("/conversations").RequireAuthorization("Authenticated").RequireOperationalTenant()
+            .RequireVoiceConnection(static () => TypedResults.Json(
+                new VoiceTransferResponse(false, VoiceAvailabilityGateExtensions.VoiceUnavailable),
+                ApiJsonContext.Default.VoiceTransferResponse,
+                statusCode: StatusCodes.Status503ServiceUnavailable));
         // outbound-calls-reach-the-trunk: 409 trunk-not-dialable is declared explicitly, so the 200 is too (an explicit
         // Produces may suppress the inferred success response — SuccessResponseCaptureTests).
         group.MapPost("/{id}/voice-transfer", BlindTransfer)
             .Produces<VoiceTransferResponse>(StatusCodes.Status200OK)
-            .Produces<VoiceTransferResponse>(StatusCodes.Status409Conflict);
+            .Produces<VoiceTransferResponse>(StatusCodes.Status409Conflict)
+            .Produces<VoiceTransferResponse>(StatusCodes.Status503ServiceUnavailable);
 
         // Outbound click-to-dial (3B.2d) — not conversation-scoped (the Conversation is created by the
         // dial), so it lives under /voice rather than /conversations/{id}.
-        var voice = app.MapGroup("/voice").RequireAuthorization("Authenticated").RequireOperationalTenant();
+        var voice = app.MapGroup("/voice").RequireAuthorization("Authenticated").RequireOperationalTenant()
+            .RequireVoiceConnection(static () => TypedResults.Json(
+                new VoiceDialResponse(false, null, VoiceAvailabilityGateExtensions.VoiceUnavailable),
+                ApiJsonContext.Default.VoiceDialResponse,
+                statusCode: StatusCodes.Status503ServiceUnavailable));
         voice.MapPost("/dial", Dial)
             .Produces<VoiceDialResponse>(StatusCodes.Status200OK)
-            .Produces<VoiceDialResponse>(StatusCodes.Status409Conflict);
+            .Produces<VoiceDialResponse>(StatusCodes.Status409Conflict)
+            .Produces<VoiceDialResponse>(StatusCodes.Status503ServiceUnavailable);
     }
 
     private static async Task<Results<Ok<VoiceTransferResponse>, BadRequest<VoiceTransferResponse>, NotFound, JsonHttpResult<VoiceTransferResponse>>> BlindTransfer(
@@ -160,8 +172,8 @@ internal static class VoiceEndpoints
 internal sealed record VoiceTransferRequest(string Kind, string Target);
 
 /// <summary>
-/// <c>Error</c> is a stable machine code (e.g. "channel-unknown", "not-owner") on failure. <c>TrunkId</c> is always
-/// written: the resolved trunk's id on 409 <c>trunk-not-dialable</c>, null otherwise.
+/// <c>Error</c> is a stable machine code (e.g. "channel-unknown", "not-owner", "voice-unavailable" on 503) on failure.
+/// <c>TrunkId</c> is always written: the resolved trunk's id on 409 <c>trunk-not-dialable</c>, null otherwise.
 /// </summary>
 internal sealed record VoiceTransferResponse(
     bool Accepted,
@@ -172,7 +184,8 @@ internal sealed record VoiceTransferResponse(
 internal sealed record VoiceDialRequest(string? ToNumber, string? ContactId);
 
 /// <summary>
-/// <c>CorrelationId</c> is the tracked outbound Conversation id on success; <c>Error</c> a stable code otherwise.
+/// <c>CorrelationId</c> is the tracked outbound Conversation id on success; <c>Error</c> a stable code otherwise
+/// (<c>voice-unavailable</c> on 503).
 /// <c>TrunkId</c> is always written: the resolved trunk's id on 409 <c>trunk-not-dialable</c>, null otherwise.
 /// </summary>
 internal sealed record VoiceDialResponse(

@@ -48,7 +48,7 @@ internal sealed class PostgresHealthCheck : IHealthCheck
         // Consult watched circuits first — a long-open Postgres circuit is authoritative
         // even if a probe would succeed; it surfaces operator-visible backpressure that
         // the probe alone wouldn't catch.
-        var (circuitStatus, circuitMessage, circuitData) = AsteriskAmiHealthCheck.EvaluateCircuits(
+        var (circuitStatus, circuitMessage, circuitData) = CircuitHealthEvaluator.EvaluateCircuits(
             _healthOptions.PostgresWatchedPolicyKeys,
             _healthOptions.UnhealthyOpenThreshold,
             _observer);
@@ -81,7 +81,7 @@ internal sealed class PostgresHealthCheck : IHealthCheck
                 ex,
                 data: circuitData);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return HealthCheckResult.Unhealthy("PostgreSQL connection failed", ex, data: circuitData);
         }

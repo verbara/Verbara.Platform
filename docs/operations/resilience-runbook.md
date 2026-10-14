@@ -130,7 +130,7 @@ For a clean ratio, the new v1.9.2+ release is planned to add `policy_executions_
 Circuit state is **per-process** — a 3-replica Platform API deployment has 3 independent circuits per policy key. This is by design (each instance protects itself). Implications:
 
 - A circuit-open alert for `channel.whatsapp` on one replica doesn't necessarily mean others are broken — inspect per-instance.
-- For tenant-facing operations, a failing replica causes load to shift to healthy ones; Kubernetes readiness probe (`/health/ready`) should remove a replica whose aggregate worker circuits are open >5min.
+- Circuit state never takes a replica out of the Service. The readiness probe (`/health/ready`) reports an open `webhook.delivery` or `oidc.token-exchange` circuit as the `services` entry `Degraded` (HTTP 200), however long it stays open: draining heals no outbound integration, and both keys are global to every tenant. Readiness drains a replica only for what the HTTP plane needs (see [HealthCheckUnhealthy](alerts-runbook.md#healthcheckunhealthy); Platform/ADR-0025, addendum 2026-10-13).
 - There is currently NO cross-instance policy shared state. A future release (v2.x) may add Redis-backed distributed circuit tracking via Pro.Push backplane.
 
 ---
