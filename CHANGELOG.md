@@ -26,6 +26,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Deploy the API and the Asterisk image from the same release.** The `[outbound-agent]` dialplan context now
   dials `PJSIP/${TRUNK}/sip:${EXTEN}@${TRUNK_HOST}` and needs the new `TRUNK_HOST` channel variable, which only this
   API sets. A deployment that loads its own dialplan must copy the shipped context, both extensions included. (#386)
+- **Platform's AMI user gains the `reporting` write class.** The shipped `manager.conf` template, the demo
+  overrides, the Helm Asterisk config map and the SMB manual now write
+  `system,call,agent,user,config,originate,command,reporting`. Asterisk authorizes an AMI action when the user
+  holds any one class the action lists; the table listings an SDK reload uses after a reconnect
+  (`CoreShowChannels`, `ConfbridgeList`, `ConfbridgeListRooms`) list only `system`/`reporting`, and the next SDK
+  relies on them. A deployment that connects Verbara to **its own Asterisk** must add `reporting` to that user's
+  `write` line by hand before upgrading the SDK pin.
 
 - **`/health/ready` no longer carries the voice plane: read `/health/voice` for it.** The readiness probe keeps its
   path, timings and status mapping, but its body no longer holds `asterisk` or the session-fed Pro engine checks
@@ -124,6 +131,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The AI typification suggestion's rate limit now uses the tenant the request resolved.** On
+  `POST /api/v1/conversations/{id}/typification-suggestion`, a tenant identified by its subdomain without an
+  `X-Tenant-Id` header now gets its own 30-per-minute bucket. Before, it shared one bucket with every other request
+  whose tenant was not read. `X-Tenant-Id: __global__` no longer selects that shared bucket: `__global__` is treated
+  as an ordinary tenant name. A request that authenticates with an API key is now counted against that key, not
+  against the tenant its `X-Tenant-Id` header or host names: the call runs for the key's own tenant, so naming a
+  different tenant on each request no longer buys a fresh bucket. When a request carries both a tenant subdomain
+  and an `X-Tenant-Id` header, the subdomain now decides the bucket, as it already did for the rest of the request.
+  The ceiling is unchanged, and no other endpoint becomes rate limited. The `X-RateLimit-*` response headers, which
+  were never emitted, stay off until rate limiting covers the whole API. (#390)
 - **Outbound calls reach the trunk an administrator created.** Click-to-dial, the external blind transfer, the
   voice callback rescue and the silent listen by phone now share one trunk resolution: the tenant's outbound
   routes (not campaign-scoped, pattern a prefix of the number) are matched in ascending priority, then id; the
