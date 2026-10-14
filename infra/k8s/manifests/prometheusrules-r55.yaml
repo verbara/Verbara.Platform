@@ -180,7 +180,7 @@ spec:
             service: healthcheck
           annotations:
             summary: "Health check '{{ $labels.name }}' Unhealthy > 5min"
-            description: "One of the platform health checks (postgres / asterisk-ami / background-service / pro pipelines) is reporting Unhealthy."
+            description: "One of the platform health checks (postgres / services / retention / asterisk / the Pro engine checks) is reporting Unhealthy. asterisk and the session-fed engines are voice-plane: read /health/voice, not /health/ready."
             runbook_url: "alerts-runbook.md#healthcheckunhealthy"
 
     # =================================================================

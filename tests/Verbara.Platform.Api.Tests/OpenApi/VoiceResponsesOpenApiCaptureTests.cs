@@ -45,6 +45,22 @@ public sealed class VoiceResponsesOpenApiCaptureTests
         }
     }
 
+    /// <summary>
+    /// readiness-without-asterisk (design D5): both routes also declare the 503 <c>voice-unavailable</c> refusal, with
+    /// the route's own response schema.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/v{version}/voice/dial", "VoiceDialResponse")]
+    [InlineData("/api/v{version}/conversations/{id}/voice-transfer", "VoiceTransferResponse")]
+    public async Task VoiceRoutes_ShouldDocumentTheVoiceUnavailableRefusal_WithTheRouteResponseSchema(string path, string schema)
+    {
+        var responses = (await FetchOpenApiDocumentAsync())["paths"]![path]!["post"]!["responses"]!;
+
+        responses["503"].Should().NotBeNull($"{path} documents the 503 voice-unavailable refusal");
+        responses["503"]!["content"]!["application/json"]!["schema"]!["$ref"]!.GetValue<string>()
+            .Should().Be($"#/components/schemas/{schema}");
+    }
+
     [Theory]
     [InlineData("VoiceDialResponse", new[] { "accepted", "trunkId" }, new[] { "correlationId", "error" })]
     [InlineData("VoiceTransferResponse", new[] { "accepted", "trunkId" }, new[] { "error" })]
