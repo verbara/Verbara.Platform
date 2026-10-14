@@ -1503,54 +1503,9 @@ builder.Services.AddSingleton<IAuthorizationHandler, PartnerAdminAuthorizationHa
 
 // ─── Health Checks ───────────────────────────────────────────────────────────
 
-builder.Services.AddSingleton<Verbara.Platform.Api.Health.IServiceHeartbeat, Verbara.Platform.Api.Health.ServiceHeartbeat>();
-
-// Frente D (v1.9.1): resilience-state-aware health checks. The observer listens
-// to the Verbara.Sdk.Resilience meter's circuit.state observable gauge and
-// caches per-policy-key state + timestamp so HealthCheck implementations can
-// distinguish Healthy / Degraded / Unhealthy based on how long a circuit has
-// been open.
-builder.Services.Configure<Verbara.Platform.Api.Health.PlatformHealthCheckOptions>(_ => { });
-builder.Services.AddSingleton<Verbara.Platform.Api.Health.ResilienceStateObserver>();
-builder.Services.AddSingleton<Verbara.Platform.Api.Health.IResilienceStateObserver>(
-    sp => sp.GetRequiredService<Verbara.Platform.Api.Health.ResilienceStateObserver>());
-builder.Services.AddHostedService(
-    sp => sp.GetRequiredService<Verbara.Platform.Api.Health.ResilienceStateObserver>());
-
-// Dedicated HealthCheck-owned resilience policy: 2s timeout, no retry, no
-// circuit (we want every probe to run). Surfaces Postgres-under-load as
-// Unhealthy with a clear reason instead of hanging on the outer HealthCheck
-// timeout.
-builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
-    Verbara.Platform.Api.Health.PostgresHealthCheck.ResiliencePolicyKey,
-    (_, _) => new Verbara.Sdk.Resilience.ResiliencePolicyBuilder()
-        .WithTimeout(TimeSpan.FromSeconds(2))
-        .Build());
-
-// R5.3 A.5.b — promote 4 Pro BackgroundServices to concrete singletons so the
-// IHealthCheck implementations on those classes (added by Pro task A.5,
-// Pro 1.13.0-pro commit 05adeb8) can be resolved by the health-check
-// registry. Pro DI extensions register the services as
-// AddHostedService<T> only (binding T -> IHostedService directly, no
-// concrete singleton); without this swap, AddCheck<T>() below would resolve
-// a *second* instance whose heartbeat never ticks and would always report
-// Unhealthy. The pattern mirrors AnalyticsLiveServiceCollectionExtensions
-// (R5.1 LiveQueueSnapshotWriter): register T as Singleton, then forward
-// IHostedService via factory so both resolve to the same instance.
-// ADR-0022 Phase A — Presence health checks moved to Verbara.Platform.Realtime
-// along with the Pro.Push.SignalR services that host them. RetentionService
-// remains in Platform.Api.
-builder.Services
-    .PromoteHostedServiceToSingleton<RetentionService>();
-
-var healthBuilder = builder.Services.AddHealthChecks()
-    .AddCheck<Verbara.Platform.Api.Health.BackgroundServiceHealthCheck>("services", tags: ["ready"])
-    .AddCheck<Verbara.Platform.Api.Health.AsteriskAmiHealthCheck>("asterisk", tags: ["ready"])
-    .AddCheck<RetentionService>("retention", tags: ["ready"]);
-
-// Only add Postgres health check if NpgsqlDataSource is registered
-if (builder.Services.Any(d => d.ServiceType == typeof(NpgsqlDataSource)))
-    healthBuilder.AddCheck<Verbara.Platform.Api.Health.PostgresHealthCheck>("postgres", tags: ["ready"]);
+// Registrations live in PlatformHealthExtensions (Platform/ADR-0025); kept at this position so the
+// postgres check still sees every NpgsqlDataSource registered above.
+builder.Services.AddPlatformHealthChecks();
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
@@ -1728,36 +1683,8 @@ if (openApiEnabled)
     // /scalar/v1 — Scalar UI rendering the spec.
     app.MapScalarApiReference();
 }
-// K8s liveness vs readiness contract:
-//   /health (liveness) → process-alive only. NO dependency checks. Returns
-//     200 OK in <1 ms as long as the .NET host is responsive. Kubernetes
-//     uses this to decide whether to RESTART the pod — restarting because a
-//     dependency (Postgres / Asterisk / Redis) is degraded never helps; it
-//     just amplifies the outage by cycling pods that would have recovered.
-//   /health/ready (readiness) → process AND its dependencies. Returns 200
-//     only if all "ready"-tagged checks pass. Kubernetes uses this to
-//     decide whether to ROUTE TRAFFIC to the pod. Failures stop traffic but
-//     leave the pod alive to recover.
-//
-// Before this split, both endpoints ran the FULL check suite (Postgres SQL
-// ping, Asterisk AMI ping, background-service heartbeats, retention). Under
-// burst load, the per-request /health latency exceeded the chart's default
-// `livenessProbe.timeoutSeconds: 1` and Kubernetes restart-cascaded pods
-// during otherwise-survivable traffic spikes (R5.5 Phase B-LK 2026-05-24:
-// 4 pod restarts during VU=1500 presence + 250-500 RPS bursts, evidence
-// `docs/operations/r55-blk-evidence/2026-05-24-v251-baseline/`).
-//
-// Predicate = _ => false → run NO checks; default formatter returns plain
-// text "Healthy" with HTTP 200. <1 ms response, immune to dependency state.
-app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
-{
-    Predicate = _ => false,
-});
-app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
-{
-    Predicate = r => r.Tags.Contains("ready"),
-    ResponseWriter = Verbara.Platform.Api.Health.HealthReportJsonWriter.WriteAsync,
-});
+// Liveness (/health) vs readiness (/health/ready), Platform/ADR-0025 — PlatformHealthExtensions.
+app.MapPlatformHealthEndpoints();
 // Prometheus scraping endpoint at /metrics — exposes the full SDK/Pro meter
 // catalog (resilience, licensing, cluster, push, etc.) registered via
 // AddVerbaraOpenTelemetry(...).WithPrometheusExporter() above.
