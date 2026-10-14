@@ -6,13 +6,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.13" />
   </ItemGroup>
 
   <ItemGroup>
@@ -80,8 +80,8 @@
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.23.0" />
     <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="8.23.0" />
     <PackageVersion Include="Otp.NET" Version="1.4.1" />
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.13" />
   </ItemGroup>
 
   <ItemGroup>
@@ -107,7 +107,12 @@
          walking-skeleton harness for ADR-0022 Phase A.5 exactly-once verification).
          Reflection-based — incompatible with Native AOT, but the harness itself is
          NO-AOT per ADR-0023; deliverables (Api + Realtime images) remain AOT-clean. -->
-    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.13" />
+    <!-- Transitive-pin override: Microsoft.AspNetCore.SignalR.Common <= 10.0.12 carries GHSA-334f-vvp4-7g6p
+         (HIGH, CVE-2026-70159, ASP.NET Core denial of service), published 2026-10-13 after the last green
+         main run. 10.0.13 is the first patched .NET 10 release. Pinned so no project resolves an older
+         Common through another SignalR package. Advisory drift, like the crypto pins below. -->
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Common" Version="10.0.13" />
     <!-- Transitive-pin override (CentralPackageTransitivePinningEnabled=true): SignalR's
          MessagePack protocol pulls MessagePack transitively into Realtime + Realtime.Tests.
          The version it would otherwise resolve (2.5.187) carries CVE-2026-48109 — a HIGH
@@ -155,7 +160,7 @@
     <PackageVersion Include="coverlet.collector" Version="10.1.0" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.13" />
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
     <PackageVersion Include="Scalar.AspNetCore" Version="2.17.14" />
     <PackageVersion Include="Testcontainers" Version="4.15.0" />
