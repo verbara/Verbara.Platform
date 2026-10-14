@@ -241,12 +241,15 @@ public sealed class VoiceConfigurationRoutesUngatedTests : IClassFixture<VoiceCo
     public async Task TrunkList_ShouldAnswerAsWithAmiConnected_WhenThePrimaryAmiConnectionIsNotConnected()
     {
         using var admin = _factory.CreateAuthenticatedClient();
-        var create = await admin.PostAsJsonAsync("/api/v1/admin/trunks", new
-        {
-            name = "carrier-gate-probe", displayName = (string?)null, type = "pjsip", isActive = true, maxChannels = 10,
-            transport = "transport-udp", codecs = "ulaw,alaw", authUsername = (string?)null, authPassword = (string?)null,
-            registrationUri = (string?)null, clientUri = (string?)null, context = "from-trunk", matchHost = (string?)null,
-        });
+        using var body = new StringContent(
+            """
+            {"name":"carrier-gate-probe","displayName":null,"type":"pjsip","isActive":true,"maxChannels":10,
+             "transport":"transport-udp","codecs":"ulaw,alaw","authUsername":null,"authPassword":null,
+             "registrationUri":null,"clientUri":null,"context":"from-trunk","matchHost":null}
+            """,
+            System.Text.Encoding.UTF8,
+            "application/json");
+        var create = await admin.PostAsync("/api/v1/admin/trunks", body);
         create.StatusCode.Should().Be(HttpStatusCode.Created);
 
         var (connected, connectedBody, down, downBody) = await ReadBothWaysAsync(admin, "/api/v1/admin/trunks");

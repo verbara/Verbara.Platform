@@ -39,11 +39,8 @@ public sealed class AsteriskAmiHealthCheckTests
         get
         {
             var states = new TheoryData<AmiConnectionState>();
-            foreach (var state in Enum.GetValues<AmiConnectionState>())
-            {
-                if (state != AmiConnectionState.Connected)
-                    states.Add(state);
-            }
+            foreach (var state in Enum.GetValues<AmiConnectionState>().Where(s => s != AmiConnectionState.Connected))
+                states.Add(state);
             return states;
         }
     }

@@ -81,7 +81,7 @@ internal sealed class PostgresHealthCheck : IHealthCheck
                 ex,
                 data: circuitData);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return HealthCheckResult.Unhealthy("PostgreSQL connection failed", ex, data: circuitData);
         }
