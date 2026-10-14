@@ -126,8 +126,15 @@
          HIGH-severity advisories (GHSA-23rf-6693-g89p / GHSA-8q5v-6pqq-x66h / GHSA-cvvh-rhrc-wg4q /
          GHSA-g8r8-53c2-pm3f) that NuGet audit (NU1903) escalates to a build error under TWAE.
          10.0.10 is the latest .NET 10 servicing patch, clearing all four. Advisory drift — published
-         after the last green main run (01560e4); pinned here to unblock every Platform build. -->
-    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+         after the last green main run (01560e4); pinned here to unblock every Platform build.
+         2026-10-14: raised to 10.0.13 for three more HIGH advisories (GHSA-7hqp-7c5m-4vq6 /
+         GHSA-c399-9853-6jmj / GHSA-r955-8q5j-3h83, all <= 10.0.12), published 2026-10-13 after the
+         last green main run (7997540a). -->
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.13" />
+    <!-- Transitive-pin override: System.Security.Cryptography.Pkcs 10.0.10 comes in with the same
+         stack (DataProtection / Xml) and carries GHSA-846f-f764-76mx (HIGH, <= 10.0.12), published
+         2026-10-13. 10.0.13 is the first patched .NET 10 release. Advisory drift, like the Xml pin. -->
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <!-- Transitive-pin override (CentralPackageTransitivePinningEnabled=true): Testcontainers
          pulls SSH.NET transitively into the container-backed test projects. 2025.1.0 carries
          GHSA-q939-rpr3-3284 — a HIGH (CVSS 7.1) arbitrary-file-write via server-controlled

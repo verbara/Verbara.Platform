@@ -66,7 +66,8 @@ Servicios `Up (healthy)`:
 - ☐ `verbara-mail`
 
 Healthchecks:
-- ☐ `curl http://localhost:5000/health/ready` → 200 OK con todas las entries `Healthy`
+- ☐ `curl http://localhost:5000/health/ready` → 200 OK y ninguna entry `Unhealthy` (`Degraded` también responde 200: un motor Pro sin licencia aparece `Degraded`, p. ej. `dialer license blocked: …`)
+- ☐ `curl -s http://localhost:5000/health/voice | jq -r .checks.asterisk.status` → `Healthy` (la conexión AMI del Api está arriba; Asterisk ya no forma parte de `/health/ready`)
 - ☐ `curl http://localhost/` → 200 OK
 - ☐ `docker exec verbara-asterisk asterisk -rx 'pjsip show transports'` → UDP+TCP+WS+WSS bound
 

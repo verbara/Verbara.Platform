@@ -39,6 +39,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   different versions is asked to sign in again, for at most the challenge's five minutes. Old keys expire on
   their own.
 
+- **`/health/ready` no longer carries the voice plane: read `/health/voice` for it.** The readiness probe keeps its
+  path, timings and status mapping, but its body no longer holds `asterisk` or the session-fed Pro engine checks
+  `eventstore-subscriber`, `analytics-aggregator`, `callanalytics-engine` and `agentassist-engine`. They are on the
+  new `GET /health/voice` (see **Added**). A dashboard, script or alert that read the AMI state from `/health/ready`
+  must read `/health/voice`. Point no probe at `/health/voice`: on a licensed engine it can read Unhealthy after 30 s
+  without calls. (Platform/ADR-0025, addendum of 2026-10-13)
+
 ### Added
 
 - **`/metrics` shows how full each Postgres pool is and what the auth write queue does.** The API now
@@ -82,6 +89,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the 409 of both voice routes, marks `correlationId` and `error` optional, and `trunkId` required and nullable, there
   and on every silent-listen refusal. (#386)
 
+- **`GET /health/voice` reports the voice plane.** It is anonymous and has the `/health/ready` JSON shape and status
+  mapping (Healthy and Degraded give 200, Unhealthy gives 503). It holds `asterisk` and the four session-fed Pro
+  engine checks. `asterisk` now reads this pod's primary AMI connection: Healthy when AMI is not configured
+  (digital-only) or the connection is `Connected`; otherwise Unhealthy, with the state (or `NoPrimaryServer`) in
+  `data.connectionState`; and Unhealthy, naming the worker, when the Stasis inbound worker's heartbeat is older than
+  three intervals. The body never shows the AMI host or port. Before, the check watched the `asterisk.ami`,
+  `asterisk.ari` and `worker.asterisk-capacity-sync` circuits, which nothing executes, and read `Degraded` with the
+  Sdk default `localhost:5038` on every pod. (Platform/ADR-0025, addendum of 2026-10-13)
+
 ### Changed
 
 - **Refused closes and typifications answer `409` with a stable code instead of `400`.**
@@ -106,6 +122,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `instance` now sees N series, and a replica that restarts on a new IP starts a new series. A query that sums
   by `job`, as the shipped Grafana dashboard does, is unaffected, and a single replica is still one target.
   The blackbox health probes still go to the service name.
+
+- **Voice transfer and click-to-dial answer `503 voice-unavailable` while AMI is down.** While this pod's primary AMI
+  connection is not `Connected`, including on a pod with no primary server,
+  `POST /api/v1/conversations/{id}/voice-transfer` and `POST /api/v1/voice/dial` answer 503 with `Retry-After: 30`
+  and their usual body, `{"accepted":false,"error":"voice-unavailable","trunkId":null}`, and send nothing to
+  Asterisk. A connection that drops while the request is in flight gets the same answer. Before, the transfer
+  answered 500 (connection down) or `400 ami-unavailable` (no primary server), and the dial `400 originate-failed`.
+  The check runs before the ownership check, so during an outage a caller who does not own the call gets 503, not
+  `403 not-owner`. Trunks, DID routes and the other routes that send no AMI action answer as before, and the
+  silent-listen routes keep their own refusals. The OpenAPI document declares the 503 on both routes.
+  (Platform/ADR-0025, addendum of 2026-10-13)
 
 ### Fixed
 
@@ -161,6 +188,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The start-up migration runner disposes its Postgres data source when it fails.** A failed connection or
   migration used to skip the dispose and leave that pool open, still reporting on the `Npgsql` meter under its
   connection string.
+
+- **An Asterisk outage, or a pause in calls, no longer takes the API out of service.** `/health/ready`, the
+  Kubernetes readiness probe, now answers one question: can this pod serve login, the digital channels and the
+  console. The voice plane no longer gates it. The `asterisk` check, the session-fed Pro engine checks (a licensed
+  engine can report Unhealthy 30 s after its last call event, so an AMI outage or a quiet half-minute could drain the
+  pod) and the Stasis inbound worker's heartbeat moved to `/health/voice`. Postgres, retention, the digital workers'
+  heartbeats and the other Pro engine checks still gate readiness, and an unlicensed community boot still answers 200
+  with `dialer-engine` `Degraded`. (Platform/ADR-0025, addendum of 2026-10-13)
+- **An unreachable webhook receiver or identity provider no longer drains the pod.** The `services` readiness check
+  reports an open `webhook.delivery` or `oidc.token-exchange` circuit as `Degraded` (HTTP 200), however long it has
+  been open, and keeps each key's state in `data.circuits`. Before, one tenant's receiver or identity provider,
+  unreachable for five minutes, made readiness answer 503 for every tenant; and because the circuit-state gauge reads
+  open until the next successful call, an idle tripped circuit kept the pod out. The check no longer watches
+  `smtp.send` (only the Mail service executes it) or `worker.asterisk-capacity-sync` (nothing calls it).
+  (Platform/ADR-0025, addendum of 2026-10-13)
 
 ### Security
 

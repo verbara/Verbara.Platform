@@ -200,16 +200,24 @@ verbara-web             Up 2 minutes            0.0.0.0:80->80/tcp
 ### 5.1 Healthchecks individuales
 
 ```bash
-# Platform.Api responde + DB + Redis OK
-$ curl -sS http://localhost:5000/health/ready | jq
+# Platform.Api listo para el plano HTTP (login, canales digitales, consola):
+# Postgres, retention y los workers digitales. Responde 200 con "Healthy" o
+# "Degraded" (un motor Pro sin licencia aparece "Degraded") y 503 solo si una
+# entry está "Unhealthy". Asterisk ya no aparece aquí (ver /health/voice abajo).
+$ curl -sS http://localhost:5000/health/ready | jq '{status, checks: (.checks | map_values(.status))}'
 {
   "status": "Healthy",
-  "totalDuration": "00:00:00.0123456",
-  "entries": {
-    "postgres": { "status": "Healthy", "duration": "00:00:00.001" },
-    "asterisk-ami": { "status": "Healthy" }
+  "checks": {
+    "services": "Healthy",
+    "retention": "Healthy",
+    "postgres": "Healthy"
   }
 }
+# (más una entry por cada motor Pro registrado, p. ej. "dialer-engine")
+
+# Plano de voz: la conexión AMI de este pod. Ningún probe consulta /health/voice.
+$ curl -sS http://localhost:5000/health/voice | jq -r '.checks.asterisk.status'
+Healthy
 
 # Web sirve la SPA
 $ curl -sI http://localhost/ | head -3

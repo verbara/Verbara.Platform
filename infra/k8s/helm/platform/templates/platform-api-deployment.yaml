@@ -203,11 +203,14 @@ spec:
             limits:
               cpu: {{ .Values.api.resources.limits.cpu }}
               memory: {{ .Values.api.resources.limits.memory }}
-          # K8s liveness vs readiness contract (R5.5 Phase B-LK 2026-05-24
-          # hardening — ADR-0026): /health (liveness) is a no-op check after
-          # the matching Program.cs change; /health/ready runs the full
-          # "ready"-tagged suite (Postgres ping, Asterisk AMI ping, background
-          # service heartbeats). Probe timeouts widened defensively:
+          # K8s liveness vs readiness contract (Platform/ADR-0025 and its
+          # 2026-10-13 addendum): /health (liveness) runs no check; /health/ready
+          # asks only "can this pod serve the HTTP plane" (Postgres ping,
+          # retention, digital background-service heartbeats, the non-voice Pro
+          # engine checks). The voice plane (Asterisk AMI, the session-fed Pro
+          # engines, the Stasis worker heartbeat) is reported on /health/voice,
+          # which no probe reads, and dependency circuits never fail readiness.
+          # Probe timeouts widened defensively (R5.5 Phase B-LK 2026-05-24):
           #   timeoutSeconds: 3 — gives /health/ready headroom under burst
           #     when Postgres pool is hot. /health responds <1 ms so the 3 s
           #     ceiling never bites for liveness.

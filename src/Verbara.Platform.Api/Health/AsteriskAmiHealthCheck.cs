@@ -1,106 +1,93 @@
-using Verbara.Sdk.Hosting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Options;
 
 namespace Verbara.Platform.Api.Health;
 
+/// <summary>
+/// The <c>asterisk</c> check: this pod's voice plane (readiness-without-asterisk, design D2; Platform/ADR-0025
+/// addendum 2026-10-13). It is registered with the tag <c>voice</c> only, so it is reported on <c>/health/voice</c>
+/// and never gates <c>/health/ready</c>.
+/// </summary>
+/// <remarks>
+/// <para>Its status comes from the primary AMI connection, read through <see cref="IVoiceConnectionStatus"/> (the seam
+/// the voice route gate shares), and from the voice-plane worker heartbeats (<see cref="VoicePlaneHeartbeats"/>),
+/// stale past three intervals as in <see cref="ServiceHeartbeat"/>:</para>
+/// <list type="bullet">
+/// <item>AMI not configured: Healthy (digital-only);</item>
+/// <item><c>Connected</c>, every voice heartbeat fresh: Healthy;</item>
+/// <item>any other state, or no primary server: Unhealthy, with the state in the data;</item>
+/// <item><c>Connected</c>, a voice heartbeat stale: Unhealthy, naming the worker.</item>
+/// </list>
+/// <para>No circuit state feeds it. Nothing executes a policy under <c>asterisk.ami</c> or <c>asterisk.ari</c>, and
+/// <c>worker.asterisk-capacity-sync</c> has no caller, so the old overlay could never trip. The body never carries the
+/// AMI host or port, because the endpoint is anonymous.</para>
+/// </remarks>
 internal sealed class AsteriskAmiHealthCheck : IHealthCheck
 {
-    private readonly VerbaraOptions? _options;
-    private readonly IResilienceStateObserver _observer;
-    private readonly PlatformHealthCheckOptions _healthOptions;
+    /// <summary>The data key holding the primary connection's state, <see cref="NotConfiguredState"/> or
+    /// <see cref="VoiceConnectionSnapshot.NoPrimaryServer"/>.</summary>
+    internal const string ConnectionStateDataKey = "connectionState";
 
-    public AsteriskAmiHealthCheck(
-        IServiceProvider services,
-        IResilienceStateObserver observer,
-        IOptions<PlatformHealthCheckOptions> healthOptions)
+    /// <summary>The data key holding each recorded voice-plane heartbeat.</summary>
+    internal const string HeartbeatsDataKey = "heartbeats";
+
+    /// <summary>The <see cref="ConnectionStateDataKey"/> value when <c>Asterisk:Ami:Hostname</c> is not set.</summary>
+    internal const string NotConfiguredState = "NotConfigured";
+
+    private readonly IVoiceConnectionStatus _connection;
+    private readonly IServiceHeartbeat _heartbeat;
+
+    public AsteriskAmiHealthCheck(IVoiceConnectionStatus connection, IServiceHeartbeat heartbeat)
     {
-        _options = services.GetService<IOptions<VerbaraOptions>>()?.Value;
-        _observer = observer;
-        _healthOptions = healthOptions.Value;
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(heartbeat);
+        _connection = connection;
+        _heartbeat = heartbeat;
     }
 
     public Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context, CancellationToken ct = default)
     {
-        // If AMI is not configured, report healthy (digital-only deployment)
-        if (_options is null || string.IsNullOrWhiteSpace(_options.Ami?.Hostname))
-            return Task.FromResult(HealthCheckResult.Healthy("Asterisk AMI not configured (digital-only mode)"));
+        var snapshot = _connection.Read();
+        var voiceHeartbeats = _heartbeat.GetAll()
+            .Where(kv => VoicePlaneHeartbeats.Names.Contains(kv.Key))
+            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .ToList();
 
-        // AMI connectivity is checked by the SDK AmiClient; Platform does not own a probe
-        // here. The base signal (configured but unprobeable) remains Degraded, and we
-        // overlay circuit-state awareness on top so a stuck AMI worker surfaces clearly.
-        var baseMessage =
-            $"AMI configured at {_options.Ami.Hostname}:{_options.Ami.Port} — connectivity depends on SDK AmiClient";
+        var data = new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            [ConnectionStateDataKey] = snapshot.IsConfigured ? snapshot.StateName : NotConfiguredState,
+            [HeartbeatsDataKey] = voiceHeartbeats.ToDictionary(
+                kv => kv.Key, kv => (object)HeartbeatData(kv.Value), StringComparer.Ordinal),
+        };
 
-        var (status, circuitMessage, data) = EvaluateCircuits(
-            _healthOptions.AmiWatchedPolicyKeys,
-            _healthOptions.UnhealthyOpenThreshold,
-            _observer);
+        if (!snapshot.IsConfigured)
+            return Task.FromResult(HealthCheckResult.Healthy("Asterisk AMI not configured (digital-only mode)", data));
 
-        if (status == HealthStatus.Unhealthy)
-            return Task.FromResult(HealthCheckResult.Unhealthy($"{baseMessage}. {circuitMessage}", data: data));
+        var stale = voiceHeartbeats.Where(kv => !kv.Value.IsHealthy).Select(kv => kv.Key).ToList();
+        var staleSuffix = stale.Count > 0 ? $"; voice workers stale: {string.Join(", ", stale)}" : string.Empty;
 
-        if (status == HealthStatus.Degraded)
-            return Task.FromResult(HealthCheckResult.Degraded($"{baseMessage}. {circuitMessage}", data: data));
+        if (!snapshot.IsConnected)
+        {
+            var reason = snapshot.State is null
+                ? "AMI configured but the server pool holds no primary server"
+                : $"AMI primary connection is {snapshot.StateName}";
+            return Task.FromResult(HealthCheckResult.Unhealthy(reason + staleSuffix, data: data));
+        }
 
-        // No circuits open for AMI-adjacent work — keep the historical Degraded signal
-        // when AMI is configured (Platform can't confirm liveness from here) but hand
-        // back an empty circuit-breakdown so /health/ready JSON remains consistent.
-        return Task.FromResult(HealthCheckResult.Degraded(baseMessage, data: data));
+        if (stale.Count > 0)
+        {
+            return Task.FromResult(HealthCheckResult.Unhealthy(
+                $"AMI primary connection is Connected{staleSuffix}", data: data));
+        }
+
+        return Task.FromResult(HealthCheckResult.Healthy("AMI primary connection is Connected", data));
     }
 
-    internal static (HealthStatus Status, string Message, IReadOnlyDictionary<string, object> Data)
-        EvaluateCircuits(
-            IList<string> watchedKeys,
-            TimeSpan unhealthyThreshold,
-            IResilienceStateObserver observer)
-    {
-        var openRecent = new List<string>();
-        var openLong = new List<string>();
-        var data = new Dictionary<string, object>(StringComparer.Ordinal);
-
-        foreach (var key in watchedKeys)
+    private static Dictionary<string, object> HeartbeatData(ServiceHeartbeatInfo info) =>
+        new(StringComparer.Ordinal)
         {
-            var snap = observer.GetSnapshot(key);
-            if (snap is null)
-            {
-                data[key] = "unobserved";
-                continue;
-            }
-
-            data[key] = new
-            {
-                state = snap.State.ToString(),
-                stateSince = snap.StateSince,
-                durationSeconds = Math.Round(snap.Duration.TotalSeconds, 1),
-            };
-
-            if (!snap.IsOpen)
-                continue;
-
-            if (snap.Duration >= unhealthyThreshold)
-                openLong.Add(key);
-            else
-                openRecent.Add(key);
-        }
-
-        if (openLong.Count > 0)
-        {
-            return (
-                HealthStatus.Unhealthy,
-                $"Circuit open >{unhealthyThreshold.TotalMinutes:0}min: {string.Join(", ", openLong)}",
-                data);
-        }
-
-        if (openRecent.Count > 0)
-        {
-            return (
-                HealthStatus.Degraded,
-                $"Circuit open: {string.Join(", ", openRecent)}",
-                data);
-        }
-
-        return (HealthStatus.Healthy, "All watched circuits closed", data);
-    }
+            ["isHealthy"] = info.IsHealthy,
+            ["lastTick"] = info.LastTick,
+            ["expectedIntervalSeconds"] = Math.Round(info.ExpectedInterval.TotalSeconds, 1),
+        };
 }
