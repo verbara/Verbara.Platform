@@ -73,13 +73,13 @@ public sealed class OidcMfaEnforcementTests
         redirect.Url.Should().StartWith(ReturnUrl);
 
         // Verify the pending cache contains an entry for this challenge token
-        // by consuming it via TakeAsync — this also validates the entry's tenantId.
+        // by reserving an attempt on it — this also validates the entry's tenantId.
         var fragmentPart = redirect.Url[(redirect.Url.IndexOf('#') + 1)..];
         var challengeToken = ParseQueryParam(fragmentPart, "challenge_token");
         challengeToken.Should().NotBeNullOrEmpty(because: "challenge token must be present in the redirect URL");
-        var entry = await fixture.MfaCache.TakeAsync(challengeToken!, CancellationToken.None);
-        entry.Should().NotBeNull(because: "IMfaPendingCache must hold the entry so /auth/mfa/verify can validate it");
-        entry!.TenantId.Should().Be(TenantId);
+        var attempt = await fixture.MfaCache.TryBeginAttemptAsync(challengeToken!, CancellationToken.None);
+        attempt.Should().NotBeNull(because: "IMfaPendingCache must hold the entry so /auth/mfa/verify can validate it");
+        attempt!.Entry.TenantId.Should().Be(TenantId);
     }
 
     // ─── Test 6: no MFA required + user not enrolled → tokens issued normally ──

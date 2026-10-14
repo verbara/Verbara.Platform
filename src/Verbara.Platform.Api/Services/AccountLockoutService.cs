@@ -49,17 +49,90 @@ internal sealed class AccountLockoutService
         user.LockedUntil = stored.LockedUntil;
 
         if (stored.FailedAttempts >= config.LockoutThreshold)
-        {
-            await _authEvents.LogAsync(
-                user.TenantId.Value,
-                user.UserId.Value,
-                AuthEventTypes.Lockout,
-                ipAddress,
-                userAgent,
-                new Dictionary<string, string> { ["threshold"] = config.LockoutThreshold.ToString(System.Globalization.CultureInfo.InvariantCulture) },
-                ct);
-        }
+            await LogLockoutAsync(user, config.LockoutThreshold, ipAddress, userAgent, ct);
     }
+
+    /// <summary>
+    /// Records one failed sign-in for <paramref name="user"/> <em>before</em> the factor is checked, and
+    /// says whether the factor may be checked at all. Checking the lock first and recording the failure
+    /// after leaves a window: racing guesses all read the account before any of them is counted, so all
+    /// of them pass the lock check. Counting first closes it — the store hands out each count once, so of
+    /// any number of racing attempts only those whose count is within the threshold are evaluated (or,
+    /// once a lock has expired with the count already at or past it, only the first one, as a wrong
+    /// password after expiry gets one try). <paramref name="user"/> must have been read just before.
+    /// </summary>
+    /// <returns>
+    /// <see langword="null"/> when the account no longer exists. A proven factor hands the reservation to
+    /// <see cref="ReleaseReservedAttemptAsync"/>; a rejected one hands it to
+    /// <see cref="CompleteReservedFailureAsync"/>, never to <see cref="RecordFailedAttemptAsync"/>, which
+    /// would count it twice.
+    /// </returns>
+    public async Task<FailedAttemptReservation?> ReserveFailedAttemptAsync(User user, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+
+        var config = await _configStore.GetAsync(user.TenantId.Value, ct)
+            ?? new TenantAuthConfig { TenantId = user.TenantId.Value };
+
+        var countBefore = user.FailedLoginAttempts;
+        var recorded = await _userStore.RecordFailedSignInAsync(
+            user.TenantId, user.UserId, config.LockoutThreshold,
+            DateTimeOffset.UtcNow.AddMinutes(config.LockoutDurationMinutes), ct);
+        if (recorded is not { } stored)
+            return null;
+
+        user.FailedLoginAttempts = stored.FailedAttempts;
+        user.LockedUntil = stored.LockedUntil;
+
+        var mayEvaluate = stored.FailedAttempts <= config.LockoutThreshold
+            || stored.FailedAttempts == countBefore + 1;
+        return new FailedAttemptReservation(
+            mayEvaluate, ReachedThreshold: stored.FailedAttempts >= config.LockoutThreshold, config.LockoutThreshold);
+    }
+
+    /// <summary>
+    /// Completes a reservation whose factor was rejected: the failure is already counted, so only the
+    /// lockout event is left, emitted as <see cref="RecordFailedAttemptAsync"/> emits it.
+    /// </summary>
+    public Task CompleteReservedFailureAsync(
+        User user, FailedAttemptReservation reservation, string? ipAddress, string? userAgent, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        return reservation.ReachedThreshold
+            ? LogLockoutAsync(user, reservation.Threshold, ipAddress, userAgent, ct)
+            : Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Takes back a reservation whose factor was proven. When the reservation itself reached the
+    /// threshold it locked the account, and <see cref="ResetAttemptsAsync"/> lifts no lock in force, so the
+    /// lock is lifted here, at once: the account holder has just proven both factors. Below the threshold
+    /// the ordinary reset clears the count.
+    /// </summary>
+    public async Task ReleaseReservedAttemptAsync(User user, FailedAttemptReservation reservation, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+
+        if (!reservation.ReachedThreshold)
+        {
+            await ResetAttemptsAsync(user, ct);
+            return;
+        }
+
+        user.FailedLoginAttempts = 0;
+        user.LockedUntil = null;
+        await _userStore.ResetLockoutAsync(user.TenantId, user.UserId, DateTimeOffset.UtcNow, onlyIfUnlocked: false, ct);
+    }
+
+    private Task LogLockoutAsync(User user, int threshold, string? ipAddress, string? userAgent, CancellationToken ct) =>
+        _authEvents.LogAsync(
+            user.TenantId.Value,
+            user.UserId.Value,
+            AuthEventTypes.Lockout,
+            ipAddress,
+            userAgent,
+            new Dictionary<string, string> { ["threshold"] = threshold.ToString(System.Globalization.CultureInfo.InvariantCulture) },
+            ct);
 
     /// <summary>
     /// Reset the user's lockout counters on a successful login. AHH Phase 2:
@@ -128,3 +201,11 @@ internal sealed class AccountLockoutService
             ct);
     }
 }
+
+/// <summary>
+/// A failed sign-in counted before its factor is checked (<see cref="AccountLockoutService.ReserveFailedAttemptAsync"/>).
+/// </summary>
+/// <param name="MayEvaluate">Whether the factor may be checked; otherwise the account is refused as locked.</param>
+/// <param name="ReachedThreshold">Whether this count reached the lockout threshold, so the store locked the account.</param>
+/// <param name="Threshold">The tenant's lockout threshold the count was compared with.</param>
+internal readonly record struct FailedAttemptReservation(bool MayEvaluate, bool ReachedThreshold, int Threshold);

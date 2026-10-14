@@ -72,7 +72,7 @@ public sealed class IdentityRedisServiceCollectionExtensionsTests
             ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(1),
         }, CancellationToken.None);
 
-        var result = await cache.TakeAsync("reuse-token", CancellationToken.None);
+        var result = await cache.TryBeginAttemptAsync("reuse-token", CancellationToken.None);
         result.Should().NotBeNull();
     }
 }
