@@ -31,8 +31,8 @@
        Platform.Api host can publish Native AOT. Versions match the .NET 10 SDK
        band. -->
   <ItemGroup>
-    <PackageVersion Include="Microsoft.AspNetCore.DataProtection" Version="10.0.7" />
-    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="10.0.7" />
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>
