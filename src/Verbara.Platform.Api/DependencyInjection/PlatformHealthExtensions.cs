@@ -1,4 +1,6 @@
+using System.Collections.Frozen;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
 using Verbara.Platform.Api.Health;
 using Verbara.Platform.Core.DependencyInjection;
@@ -9,13 +11,52 @@ namespace Verbara.Platform.Api.DependencyInjection;
 
 /// <summary>
 /// The Api's health wiring (readiness-without-asterisk, design D6; contract Platform/ADR-0025): the health-check
-/// registrations and the <c>/health</c> and <c>/health/ready</c> mapping, moved out of <c>Program.cs</c> because of
-/// its LOC budget (<c>scripts/check-endpoint-invariants.py</c> gate #9). <c>Program.cs</c> spends one call on each,
-/// at the positions the inline blocks held, so registration order and the predicate's view of the container are
-/// unchanged.
+/// registrations, the plane classification (design D1) and the <c>/health</c>, <c>/health/ready</c> and
+/// <c>/health/voice</c> mapping, moved out of <c>Program.cs</c> because of its LOC budget
+/// (<c>scripts/check-endpoint-invariants.py</c> gate #9). <c>Program.cs</c> spends one call on each, at the positions
+/// the inline blocks held, so registration order and the predicate's view of the container are unchanged.
 /// </summary>
 public static class PlatformHealthExtensions
 {
+    /// <summary>The tag a check carries to be a readiness candidate (<c>/health/ready</c>).</summary>
+    internal const string ReadyTag = "ready";
+
+    /// <summary>The tag a check carries to be reported on <c>/health/voice</c>; it never gates readiness.</summary>
+    internal const string VoiceTag = "voice";
+
+    /// <summary>
+    /// The voice-plane check names (readiness-without-asterisk D1; owner decision 2026-10-13): the session-fed Pro
+    /// engine checks. Pro registers them with the tag <c>ready</c> (Pro/ADR-0017), but their input is the
+    /// call-session event stream that AMI feeds, and a licensed engine reports a stale event-driven heartbeat as
+    /// Unhealthy (Pro spec <c>engine-health-semantics</c>), so an AMI outage, or a pause with no calls, would drain
+    /// the pod. This is a denylist on purpose: a new Pro check tagged <c>ready</c> gates readiness until it is
+    /// classified, which is the safe way to fail (<c>HealthPlaneClassificationTests</c> fails on any unclassified
+    /// registration). The set can go once the consumed Pro pin tags these engines <c>voice</c> itself. Names are
+    /// compared case-insensitively, as the health-check service compares them.
+    /// </summary>
+    internal static readonly FrozenSet<string> VoicePlaneCheckNames = new[]
+    {
+        "eventstore-subscriber",
+        "analytics-aggregator",
+        "callanalytics-engine",
+        "agentassist-engine",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The <c>/health/voice</c> predicate: a check tagged <c>voice</c>, or one named in
+    /// <see cref="VoicePlaneCheckNames"/>.
+    /// </summary>
+    internal static bool IsVoicePlaneCheck(HealthCheckRegistration registration) =>
+        registration.Tags.Contains(VoiceTag) || VoicePlaneCheckNames.Contains(registration.Name);
+
+    /// <summary>
+    /// The <c>/health/ready</c> predicate (the HTTP plane): a check tagged <c>ready</c> that is not voice-plane.
+    /// Excluding a <c>voice</c>-tagged check as well as the named set keeps the two predicates disjoint, so a
+    /// producer that tags a check both <c>ready</c> and <c>voice</c> still never gates readiness.
+    /// </summary>
+    internal static bool IsReadinessCheck(HealthCheckRegistration registration) =>
+        registration.Tags.Contains(ReadyTag) && !IsVoicePlaneCheck(registration);
+
     /// <summary>
     /// Registers the heartbeat registry, the resilience-state observer, the voice connection seam, the Postgres
     /// probe's policy and the Platform checks (<c>services</c>, <c>asterisk</c>, <c>retention</c>, and
@@ -72,18 +113,18 @@ public static class PlatformHealthExtensions
             .PromoteHostedServiceToSingleton<RetentionService>();
 
         var healthBuilder = services.AddHealthChecks()
-            .AddCheck<BackgroundServiceHealthCheck>("services", tags: ["ready"])
-            .AddCheck<AsteriskAmiHealthCheck>("asterisk", tags: ["ready"])
-            .AddCheck<RetentionService>("retention", tags: ["ready"]);
+            .AddCheck<BackgroundServiceHealthCheck>("services", tags: [ReadyTag])
+            .AddCheck<AsteriskAmiHealthCheck>("asterisk", tags: [ReadyTag])
+            .AddCheck<RetentionService>("retention", tags: [ReadyTag]);
 
         // Only add Postgres health check if NpgsqlDataSource is registered
         if (services.Any(d => d.ServiceType == typeof(NpgsqlDataSource)))
-            healthBuilder.AddCheck<PostgresHealthCheck>("postgres", tags: ["ready"]);
+            healthBuilder.AddCheck<PostgresHealthCheck>("postgres", tags: [ReadyTag]);
 
         return services;
     }
 
-    /// <summary>Maps <c>/health</c> (liveness) and <c>/health/ready</c> (readiness).</summary>
+    /// <summary>Maps <c>/health</c> (liveness), <c>/health/ready</c> (readiness) and <c>/health/voice</c>.</summary>
     public static IEndpointRouteBuilder MapPlatformHealthEndpoints(this IEndpointRouteBuilder app)
     {
         ArgumentNullException.ThrowIfNull(app);
@@ -94,10 +135,16 @@ public static class PlatformHealthExtensions
         //     uses this to decide whether to RESTART the pod — restarting because a
         //     dependency (Postgres / Asterisk / Redis) is degraded never helps; it
         //     just amplifies the outage by cycling pods that would have recovered.
-        //   /health/ready (readiness) → process AND its dependencies. Returns 200
-        //     only if all "ready"-tagged checks pass. Kubernetes uses this to
-        //     decide whether to ROUTE TRAFFIC to the pod. Failures stop traffic but
-        //     leave the pod alive to recover.
+        //   /health/ready (readiness) → can this pod serve the HTTP plane (login,
+        //     digital channels, console)? Runs the "ready"-tagged checks that are
+        //     not voice-plane (IsReadinessCheck). Kubernetes uses this to decide
+        //     whether to ROUTE TRAFFIC to the pod. Failures stop traffic but leave
+        //     the pod alive to recover.
+        //   /health/voice → the voice plane (Asterisk AMI, the session-fed engines),
+        //     IsVoicePlaneCheck. Diagnostic only: no probe reads it, because
+        //     draining HTTP traffic heals nothing there (Platform/ADR-0025 addendum
+        //     2026-10-13). Same writer, same default mapping as /health/ready:
+        //     Healthy and Degraded → 200, Unhealthy → 503.
         //
         // Before this split, both endpoints ran the FULL check suite (Postgres SQL
         // ping, Asterisk AMI ping, background-service heartbeats, retention). Under
@@ -115,7 +162,12 @@ public static class PlatformHealthExtensions
         });
         app.MapHealthChecks("/health/ready", new HealthCheckOptions
         {
-            Predicate = r => r.Tags.Contains("ready"),
+            Predicate = IsReadinessCheck,
+            ResponseWriter = HealthReportJsonWriter.WriteAsync,
+        });
+        app.MapHealthChecks("/health/voice", new HealthCheckOptions
+        {
+            Predicate = IsVoicePlaneCheck,
             ResponseWriter = HealthReportJsonWriter.WriteAsync,
         });
 

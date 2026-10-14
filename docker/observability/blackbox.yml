@@ -11,8 +11,11 @@ modules:
     timeout: 5s
     http:
       preferred_ip_protocol: ip4
-      # /health and /health/ready return 200 when Healthy / 503 when Degraded.
-      # During staging the dialer-engine grace window expects 503 to be tolerated.
+      # /health runs no check and returns 200. /health/ready returns 200 when every
+      # readiness check is Healthy or Degraded, and 503 when one is Unhealthy
+      # (Platform/ADR-0025). Accepting 503 means this module proves the Api answers,
+      # not that it is ready. During staging the dialer-engine grace window expects
+      # 503 to be tolerated.
       valid_status_codes: [200, 503]
 
   tcp_connect:

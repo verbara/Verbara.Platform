@@ -33,7 +33,7 @@ public sealed class ReadinessScopeTests
     /// The readiness host: AMI configured, Asterisk hosted services stubbed, in-memory stores, unlicensed (the
     /// community boot). <paramref name="extraServices"/> registers the stub checks a test needs.
     /// </summary>
-    private sealed class ReadinessFactory(Action<IServiceCollection>? extraServices = null)
+    internal sealed class ReadinessFactory(Action<IServiceCollection>? extraServices = null)
         : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -75,10 +75,13 @@ public sealed class ReadinessScopeTests
     private static Action<IServiceCollection> ReadyStub(string name, Func<HealthCheckResult> result) =>
         services => services.AddHealthChecks().AddCheck(name, new DelegateHealthCheck(result), tags: ["ready"]);
 
-    private static async Task<(HttpStatusCode Status, string Body)> GetReadyAsync(ReadinessFactory factory)
+    private static Task<(HttpStatusCode Status, string Body)> GetReadyAsync(ReadinessFactory factory) =>
+        GetAsync(factory, "/health/ready");
+
+    private static async Task<(HttpStatusCode Status, string Body)> GetAsync(ReadinessFactory factory, string path)
     {
         using var client = factory.CreateClient();
-        using var response = await client.GetAsync("/health/ready");
+        using var response = await client.GetAsync(path);
         return (response.StatusCode, await response.Content.ReadAsStringAsync());
     }
 
@@ -212,5 +215,46 @@ public sealed class ReadinessScopeTests
         services.GetProperty("status").GetString().Should().Be("Unhealthy", "body: {0}", body);
         services.GetProperty("description").GetString().Should().Contain(nameof(QueueDistributionWorker),
             "the services entry names the stalled worker; body: {0}", body);
+    }
+
+    // ─── /health/voice (new capability, task 2.1): the voice plane, reported where no probe reads it ──────────
+
+    [Fact]
+    public async Task HealthVoice_ShouldReturn503WithOnlyTheVoiceEntries_WhenSessionFedEngineCheckUnhealthy()
+    {
+        // Spec requirement 1, the session-fed scenario's last line: the entry readiness no longer shows is
+        // reported on /health/voice, which answers 503. The readiness entries are not part of that body.
+        await using var factory = new ReadinessFactory(ReadyStub(
+            "eventstore-subscriber",
+            () => HealthCheckResult.Unhealthy("eventstore-subscriber: no session event for 31s")));
+
+        var (status, body) = await GetAsync(factory, "/health/voice");
+
+        status.Should().Be(HttpStatusCode.ServiceUnavailable,
+            "an Unhealthy voice-plane check makes /health/voice answer 503; body: {0}", body);
+        using var doc = JsonDocument.Parse(body);
+        Checks(doc).GetProperty("eventstore-subscriber").GetProperty("status").GetString().Should().Be("Unhealthy",
+            "the session-fed engine is reported on /health/voice; body: {0}", body);
+        foreach (var readinessEntry in new[] { "services", "retention", "csatrunner-orchestrator" })
+        {
+            Checks(doc).TryGetProperty(readinessEntry, out _).Should().BeFalse(
+                "{0} is a readiness check and is not reported on /health/voice; body: {1}", readinessEntry, body);
+        }
+    }
+
+    [Fact]
+    public async Task HealthVoice_ShouldReturn200_WhenSessionFedEngineCheckDegraded()
+    {
+        // The default status mapping, as on /health/ready: Degraded answers 200, only Unhealthy answers 503.
+        await using var factory = new ReadinessFactory(ReadyStub(
+            "analytics-aggregator",
+            () => HealthCheckResult.Degraded("analytics-aggregator: no session event yet")));
+
+        var (status, body) = await GetAsync(factory, "/health/voice");
+
+        status.Should().Be(HttpStatusCode.OK, "Degraded maps to 200 on /health/voice; body: {0}", body);
+        using var doc = JsonDocument.Parse(body);
+        Checks(doc).GetProperty("analytics-aggregator").GetProperty("status").GetString().Should().Be("Degraded",
+            "body: {0}", body);
     }
 }

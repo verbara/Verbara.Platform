@@ -6,7 +6,7 @@ namespace Verbara.Platform.Api.Health;
 
 /// <summary>
 /// Writes a <see cref="HealthReport"/> as JSON with a per-check circuit-state
-/// breakdown for operator visibility on <c>/health/ready</c>.
+/// breakdown for operator visibility on <c>/health/ready</c> and <c>/health/voice</c>.
 /// </summary>
 internal static class HealthReportJsonWriter
 {

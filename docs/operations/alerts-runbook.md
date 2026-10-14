@@ -203,11 +203,17 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 
 **What:** Any health check exposed via `aspnetcore_healthcheck_status` reports value 0 (Unhealthy) for ≥ 5 min.
 
-**Why:** A registered `IHealthCheck` (postgres / asterisk-ami / dialer-engine / eventstore-subscriber / analytics-aggregator / agentassist-engine / callanalytics-engine / analytics-live-queue-writer / presence-heartbeat / fanout / merge / retention) reports a problem.
+**Why:** A registered `IHealthCheck` reports a problem. The Api's checks belong to two planes (Platform/ADR-0025, addendum 2026-10-13):
+
+- **Readiness, the HTTP plane, on `/health/ready`:** `postgres`, `retention`, `services` (the digital background-service heartbeats), `dialer-engine`, `csatrunner-orchestrator` and `analytics-live-queue-writer`. One of them Unhealthy makes the readiness probe answer 503, and the pod leaves the Service.
+- **The voice plane, on `/health/voice`:** `asterisk` (this pod's primary AMI connection and the Stasis inbound worker's heartbeat) and the session-fed Pro engines `eventstore-subscriber`, `analytics-aggregator`, `callanalytics-engine` and `agentassist-engine`. No probe reads this endpoint, so a voice-plane check never drains the pod. While AMI is down, voice transfer and click-to-dial answer 503 `voice-unavailable` with `Retry-After: 30`.
+
+A dependency circuit (`webhook.delivery`, `oidc.token-exchange`) never makes a check Unhealthy: an open one shows as `services` `Degraded` (see [CircuitBreakerOpen](#circuitbreakeropen)).
 
 **First response:**
 - Look up the health check by `name` label.
-- Curl `/health/ready` against the affected instance to see structured `HealthReportJsonWriter` output (R3b shipped).
+- Curl the endpoint of its plane against the affected instance, `/health/ready` or `/health/voice`, to see the structured `HealthReportJsonWriter` output.
+- For `asterisk`, the entry's data carries the AMI connection state: check Asterisk itself and the AMI credentials. A session-fed engine that is Unhealthy while `asterisk` is Healthy may only mean no call-session event for 30 s on a licensed engine (Pro/ADR-0017), for example a quiet period with no calls.
 - Cross-reference with related P0/P1 alerts firing on the same instance.
 - If `postgres` health check fails, escalate to P0 immediately even if no other alert has fired yet.
 
