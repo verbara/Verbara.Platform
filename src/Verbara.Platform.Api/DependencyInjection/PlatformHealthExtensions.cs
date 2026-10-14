@@ -17,8 +17,8 @@ namespace Verbara.Platform.Api.DependencyInjection;
 public static class PlatformHealthExtensions
 {
     /// <summary>
-    /// Registers the heartbeat registry, the resilience-state observer, the Postgres probe's policy and the
-    /// Platform checks (<c>services</c>, <c>asterisk</c>, <c>retention</c>, and
+    /// Registers the heartbeat registry, the resilience-state observer, the voice connection seam, the Postgres
+    /// probe's policy and the Platform checks (<c>services</c>, <c>asterisk</c>, <c>retention</c>, and
     /// <c>postgres</c> when an <see cref="NpgsqlDataSource"/> is registered by the time this runs).
     /// </summary>
     public static IServiceCollection AddPlatformHealthChecks(this IServiceCollection services)
@@ -38,6 +38,12 @@ public static class PlatformHealthExtensions
             sp => sp.GetRequiredService<ResilienceStateObserver>());
         services.AddHostedService(
             sp => sp.GetRequiredService<ResilienceStateObserver>());
+
+        // readiness-without-asterisk D2/D5: the one view of this pod's primary AMI connection, shared by the
+        // asterisk check and the voice route gate. Construction touches no connection (defer-external-seams).
+        services.AddSingleton<IVoiceConnectionStatus>(sp => new PrimaryAmiVoiceConnectionStatus(
+            sp.GetRequiredService<Verbara.Sdk.Live.Server.VerbaraServerPool>(),
+            sp.GetRequiredService<IConfiguration>()));
 
         // Dedicated HealthCheck-owned resilience policy: 2s timeout, no retry, no
         // circuit (we want every probe to run). Surfaces Postgres-under-load as
