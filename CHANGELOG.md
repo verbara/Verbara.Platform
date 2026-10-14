@@ -104,6 +104,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The AI typification suggestion's rate limit now uses the tenant the request resolved.** On
+  `POST /api/v1/conversations/{id}/typification-suggestion`, a tenant identified by its subdomain without an
+  `X-Tenant-Id` header now gets its own 30-per-minute bucket. Before, it shared one bucket with every other request
+  whose tenant was not read. `X-Tenant-Id: __global__` no longer selects that shared bucket: `__global__` is treated
+  as an ordinary tenant name. A request that authenticates with an API key is now counted against that key, not
+  against the tenant its `X-Tenant-Id` header or host names: the call runs for the key's own tenant, so naming a
+  different tenant on each request no longer buys a fresh bucket. When a request carries both a tenant subdomain
+  and an `X-Tenant-Id` header, the subdomain now decides the bucket, as it already did for the rest of the request.
+  The ceiling is unchanged, and no other endpoint becomes rate limited. The `X-RateLimit-*` response headers, which
+  were never emitted, stay off until rate limiting covers the whole API.
 - **Outbound calls reach the trunk an administrator created.** Click-to-dial, the external blind transfer, the
   voice callback rescue and the silent listen by phone now share one trunk resolution: the tenant's outbound
   routes (not campaign-scoped, pattern a prefix of the number) are matched in ascending priority, then id; the

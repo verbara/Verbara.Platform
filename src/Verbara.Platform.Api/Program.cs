@@ -1702,14 +1702,12 @@ app.UseMiddleware<VersionRedirectMiddleware>();
 app.UseRouting();
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseCors();
-// Middleware-order invariant: TenantResolutionMiddleware MUST run BEFORE UseRateLimiter()
-// so the "per-tenant" partition resolver sees Items["TenantId"] (otherwise every request
-// collapses to the shared "__global__" bucket). UseRateLimiter() MUST stay BEFORE
-// UseAuthentication() so throttling happens before the (expensive) auth work.
+// Middleware-order invariant: TenantResolutionMiddleware runs BEFORE UseRateLimiter() so the "llm" policy
+// partitions on Items["TenantId"]; UseRateLimiter() stays BEFORE UseAuthentication() (throttle before auth work).
+// RateLimitHeadersMiddleware is deliberately not registered: no tier limiter is attached, so no ceiling to state.
 // ImpersonationGuardMiddleware MUST run AFTER UseAuthentication() (it reads the principal).
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseRateLimiter();
-app.UseMiddleware<RateLimitHeadersMiddleware>();
 app.UseAuthentication();
 app.UseMiddleware<ImpersonationGuardMiddleware>();
 app.UseAuthorization();
