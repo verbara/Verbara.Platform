@@ -114,6 +114,35 @@ jobs:
           echo "release_tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "image_name=verbara/platform/${{ matrix.name }}" >> "$GITHUB_OUTPUT"
 
+          # Provenance build-args (stamp-ci-image-provenance). All three derive from the
+          # TAG, never from wall-clock, so the four matrix legs stamp identical values and
+          # a re-run stamps the same ones:
+          #   vcs_ref    = full SHA of the commit the tag points to (`^{commit}` derefs an
+          #                annotated tag to its commit; a lightweight tag already is one)
+          #   version    = the tag verbatim, the same string as the image tag
+          #   build_date = the tag's creatordate in UTC (a lightweight tag yields the
+          #                commit date) — the same rule `released_at` uses below
+          # The tag ref is expected locally (fetch-depth: 0); if it is not, fall back to
+          # GITHUB_SHA (the tagged commit on a tag push) rather than red the release.
+          VCS_REF="$(git rev-parse --verify --quiet "refs/tags/${TAG}^{commit}" || true)"
+          BUILD_DATE="$(TZ=UTC git for-each-ref \
+            --format='%(creatordate:format-local:%Y-%m-%dT%H:%M:%SZ)' "refs/tags/${TAG}" || true)"
+          if [ -z "$VCS_REF" ]; then
+            echo "::warning::refs/tags/${TAG} not found locally; stamping revision from GITHUB_SHA"
+            VCS_REF="${GITHUB_SHA}"
+          fi
+          if [ -z "$BUILD_DATE" ]; then
+            BUILD_DATE="$(TZ=UTC git log -1 --format='%cd' \
+              --date=format-local:%Y-%m-%dT%H:%M:%SZ "$VCS_REF" || true)"
+          fi
+          BUILD_DATE="${BUILD_DATE:-unknown}"
+          {
+            echo "vcs_ref=${VCS_REF}"
+            echo "version=${TAG}"
+            echo "build_date=${BUILD_DATE}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Provenance: revision=${VCS_REF} version=${TAG} created=${BUILD_DATE}"
+
       - name: Set up Docker Buildx
         if: steps.retro.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v4.4.1
@@ -142,6 +171,12 @@ jobs:
           # packages). Rotation 90d — see Verbara.Sdk.Pro/docs/operations/2026-05-10-*.md.
           secrets: |
             nuget_auth_token=${{ secrets.PACKAGES_PAT }}
+          # OCI provenance labels (org.opencontainers.image.*): every Dockerfile in the
+          # matrix declares these ARGs in its final stage, default `unknown`.
+          build-args: |
+            VCS_REF=${{ steps.tag.outputs.vcs_ref }}
+            VERSION=${{ steps.tag.outputs.version }}
+            BUILD_DATE=${{ steps.tag.outputs.build_date }}
           provenance: false
 
       - name: Install cosign
@@ -221,6 +256,53 @@ jobs:
         run: |
           echo "Signed ${{ matrix.name }} manifest-list digest: ${{ steps.build.outputs.digest }}"
           echo "Final image reference: $IMAGE_REF"
+
+      - name: Print image provenance labels
+        # Prints the org.opencontainers.image.* labels the registry holds for the digest
+        # this leg just pushed, so the release log shows what every image carries.
+        # PRINT-ONLY by design (stamp-ci-image-provenance): it must never red a release
+        # whose image is already pushed and signed. The gate that fails the release on a
+        # missing or `unknown` revision is the separate, later change
+        # fail-release-on-missing-image-provenance, written against this step's log.
+        if: steps.retro.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          IMAGE_KIND: ${{ matrix.name }}
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}@${{ steps.build.outputs.digest }}
+        run: |
+          # No `set -e`: every path below ends in `exit 0`.
+          set -u
+          if ! config="$(docker buildx imagetools inspect "$IMAGE_REF" --format '{{json .Image}}' 2>&1)"; then
+            echo "::warning::[${IMAGE_KIND}] could not inspect ${IMAGE_REF}: ${config}"
+            exit 0
+          fi
+          # `.Image` is the image config for a single-platform manifest, or a map of
+          # platform -> config for an index; read the labels from either shape,
+          # preferring linux/amd64 and skipping entries without labels.
+          labels="$(printf '%s' "$config" | jq -c '
+            if has("config") then (.config.Labels // {})
+            else (.["linux/amd64"].config.Labels // ([.[] | .config.Labels // empty] | first) // {})
+            end' 2>/dev/null || echo '{}')"
+          label() { printf '%s' "$labels" | jq -r --arg k "org.opencontainers.image.$1" '.[$k] // "(absent)"'; }
+          revision="$(label revision)"
+          version="$(label version)"
+          created="$(label created)"
+          echo "[${IMAGE_KIND}] image    = ${IMAGE_REF}"
+          echo "[${IMAGE_KIND}] revision = ${revision}"
+          echo "[${IMAGE_KIND}] version  = ${version}"
+          echo "[${IMAGE_KIND}] created  = ${created}"
+          if [ "$revision" = "(absent)" ] || [ "$revision" = "unknown" ]; then
+            echo "::warning::[${IMAGE_KIND}] org.opencontainers.image.revision is ${revision} on ${IMAGE_REF}"
+          fi
+          {
+            echo "#### Provenance — \`${IMAGE_KIND}\`"
+            echo
+            echo "| revision | version | created |"
+            echo "|---|---|---|"
+            echo "| \`${revision}\` | \`${version}\` | \`${created}\` |"
+            echo
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}" || true
+          exit 0
 
       - name: Hand this leg's digest to the release-notes job
         # A matrix job cannot pass a PER-LEG value downstream through `outputs` —

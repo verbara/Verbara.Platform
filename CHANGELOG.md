@@ -76,6 +76,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every silent-listen refusal body gain `trunkId` (integer or null, always written). The OpenAPI document declares
   the 409 of both voice routes, marks `correlationId` and `error` optional, and `trunkId` required and nullable, there
   and on every silent-listen refusal. (#386)
+- **Released images say which commit and release they were built from.** The release workflow passes the
+  commit the tag points to, the tag, and the tag's date to all four images (`api`, `realtime`, `renderer`,
+  `mail`), and the `realtime`, `renderer` and `mail` Dockerfiles gain the `org.opencontainers.image.*` labels the
+  `api` Dockerfile already had, so `docker inspect` shows `revision`, `version` and `created` on every image
+  instead of `unknown` or nothing. A new release step prints those labels for each pushed image in the run log and
+  summary; it only reports, and never fails the release. A local build without the build arguments labels the image
+  `unknown`.
 
 ### Changed
 
