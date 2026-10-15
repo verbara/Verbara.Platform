@@ -194,7 +194,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `realtime`, `analytics` or `analytics-live`; a role on the core connection string shares `core`. (#382)
 - **The start-up migration runner disposes its Postgres data source when it fails.** A failed connection or
   migration used to skip the dispose and leave that pool open, still reporting on the `Npgsql` meter under its
-  connection string.
+  connection string. (#382)
 
 - **An Asterisk outage, or a pause in calls, no longer takes the API out of service.** `/health/ready`, the
   Kubernetes readiness probe, now answers one question: can this pod serve login, the digital channels and the
