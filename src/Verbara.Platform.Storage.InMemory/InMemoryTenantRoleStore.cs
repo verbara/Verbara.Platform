@@ -25,6 +25,25 @@ internal sealed class InMemoryTenantRoleStore : ITenantRoleStore
 
     public Task SaveAsync(TenantRole role, CancellationToken ct)
     {
+        // An update keeps the template the role was cloned from, as the Postgres upsert does (it never
+        // writes source_template_id on conflict): a rename must not change which template a role came from.
+        var existing = _roles.FirstOrDefault(r => r.TenantId == role.TenantId && r.RoleId == role.RoleId);
+        if (existing is not null && !string.Equals(existing.SourceTemplateId, role.SourceTemplateId, StringComparison.Ordinal))
+        {
+            role = new TenantRole
+            {
+                RoleId = role.RoleId,
+                TenantId = role.TenantId,
+                Name = role.Name,
+                Description = role.Description,
+                SourceTemplateId = existing.SourceTemplateId,
+                IsDefault = role.IsDefault,
+                CreatedAt = role.CreatedAt,
+                UpdatedAt = role.UpdatedAt,
+                Permissions = role.Permissions,
+            };
+        }
+
         _roles.RemoveAll(r => r.TenantId == role.TenantId && r.RoleId == role.RoleId);
         _roles.Add(role);
         return Task.CompletedTask;

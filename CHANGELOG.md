@@ -184,6 +184,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   role with any other id may receive the template's role as well after that role is renamed: they then hold two
   equivalent roles (two admin roles for an Admin), gain no permission beyond what their user role already grants,
   and later starts change nothing. (#403)
+- **A role change removes the role the previous one granted, also after that role was renamed.** A role the
+  migration at startup or user creation granted is now recognised through the template it was cloned from (its
+  source template, which a rename keeps), not only through its id or its name. Changing a user's role through the
+  API removes such a role when it came with the previous role: an Admin made an Agent holds only the Agent role,
+  also when the tenant renamed its admin role. A change of the user's role that only the migration at startup
+  reconciles reaches the same state in one start, and the migration now also recognises the previous role's
+  provisioned (`role_{template}_{tenant}`) and setup (`admin-{tenant}`, `platform-admin-{tenant}`) ids, as the API's
+  role change already did. A user attached to a renamed role cloned from the template is no longer given the
+  template's role as well, which narrows the case noted above to roles not cloned from a template of the user's
+  role. A role an administrator assigned is never removed this way. When the migration attaches a role to a user
+  who holds a role that the migration or user creation granted and that no template's id, name or source template
+  matches any more, it logs a warning (event `3703`, naming the tenant, the user, the attached role and the held
+  roles).
 
 - **The AI typification suggestion's rate limit now uses the tenant the request resolved.** On
   `POST /api/v1/conversations/{id}/typification-suggestion`, a tenant identified by its subdomain without an

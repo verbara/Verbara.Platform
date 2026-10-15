@@ -24,4 +24,10 @@ internal static partial class RbacMigrationLog
     [LoggerMessage(EventId = 3702, Level = LogLevel.Error,
         Message = "RBAC migration: {FailedCount} of {TenantCount} tenants failed and were rolled back: {FailedTenants}.")]
     public static partial void MigrationIncomplete(ILogger logger, int failedCount, int tenantCount, string failedTenants);
+
+    [LoggerMessage(EventId = 3703, Level = LogLevel.Warning,
+        Message = "RBAC migration: tenant {TenantId} user {UserId} was attached to role {RoleId} while holding " +
+                  "{HeldRoleIds}, granted by the migration or at user creation on a role that no template's id, name or " +
+                  "source template matches any more; such a role was recognised by its former name only.")]
+    public static partial void NameDependentAttach(ILogger logger, string tenantId, string userId, string roleId, string heldRoleIds);
 }

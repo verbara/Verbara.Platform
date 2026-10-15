@@ -35,6 +35,12 @@ public static class DefaultTenantRole
     /// </summary>
     public const string AssignedBy = "default-role";
 
+    /// <summary>
+    /// The <c>assigned_by</c> of a grant the boot-time role migration made; like <see cref="AssignedBy"/>,
+    /// the role follows from the user's <see cref="UserRole"/>.
+    /// </summary>
+    public const string MigrationAssignedBy = "migration";
+
     /// <summary>The role template <paramref name="role"/> maps to — the map the boot-time role migration applies.</summary>
     public static string TemplateIdFor(UserRole role) => role switch
     {
@@ -109,13 +115,21 @@ public static class DefaultTenantRole
             .ToList();
     }
 
-    // The ids setup gives the roles it creates for the first administrators (SetupEndpoints).
-    private static string? SetupRoleIdFor(string templateId, TenantId tenantId) => templateId switch
+    /// <summary>
+    /// The prefix of the id setup gives the tenant's copy of <paramref name="templateId"/> when it creates
+    /// the roles for the first administrators (SetupEndpoints): the id is the prefix followed by the
+    /// tenant id (<c>admin-{tenant}</c>, <c>platform-admin-{tenant}</c>). <see langword="null"/> for a
+    /// template setup does not copy.
+    /// </summary>
+    public static string? SetupRoleIdPrefixFor(string templateId) => templateId switch
     {
-        "admin" => $"admin-{tenantId.Value}",
-        "platform_admin" => $"platform-admin-{tenantId.Value}",
+        "admin" => "admin-",
+        "platform_admin" => "platform-admin-",
         _ => null,
     };
+
+    private static string? SetupRoleIdFor(string templateId, TenantId tenantId) =>
+        SetupRoleIdPrefixFor(templateId) is { } prefix ? prefix + tenantId.Value : null;
 
     /// <summary>
     /// Grants <paramref name="userId"/> the tenant role <paramref name="role"/> maps to, cloning the role
@@ -153,10 +167,11 @@ public static class DefaultTenantRole
     /// <summary>
     /// Moves <paramref name="userId"/>, whose role changed from <paramref name="previousRole"/> to
     /// <paramref name="role"/>, from the tenant roles that come with the former
-    /// (<see cref="RolesGrantedWith"/>) to the one the latter maps to — cloning its template into the
-    /// tenant first when the tenant has no such role — in one write of the user's roles. Roles that do
-    /// not come with the former role (an administrator's custom ones, or another template's copy) are
-    /// kept.
+    /// (<see cref="RolesGrantedWith"/>, plus a grant made at user creation or by the migration on a role
+    /// cloned from one of its templates, however that role was renamed since) to the one the latter maps
+    /// to — cloning its template into the tenant first when the tenant has no such role — in one write of
+    /// the user's roles. Roles that do not come with the former role (an administrator's custom ones, or
+    /// another template's copy) are kept.
     /// </summary>
     /// <remarks>
     /// The move changes the user's permissions; the caller must drop what it has cached for that user.
@@ -183,12 +198,34 @@ public static class DefaultTenantRole
         var templateNames = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var template in await templates.GetAllAsync(ct).ConfigureAwait(false))
             templateNames[template.TemplateId] = template.Name;
-        var former = RolesGrantedWith(
-            await tenantRoles.ListAsync(tenantId, ct).ConfigureAwait(false), tenantId, previousRole, templateNames);
+        var roles = await tenantRoles.ListAsync(tenantId, ct).ConfigureAwait(false);
+        var former = new HashSet<string>(RolesGrantedWith(roles, tenantId, previousRole, templateNames), StringComparer.Ordinal);
+
+        // A grant that followed from the former role (made at user creation or by the migration) on a role
+        // cloned from one of its templates came with it, whatever that role is called now: a rename keeps
+        // the role's source template. One that also comes with the new role stays, and an administrator's
+        // grant on such a role is that administrator's custom role and is never taken.
+        var previousTemplates = TemplatesGrantedWith(previousRole);
+        var templatesOfRole = TemplatesGrantedWith(role);
+        var sources = roles
+            .Where(r => r.TenantId == tenantId && r.SourceTemplateId is not null)
+            .ToDictionary(r => r.RoleId, r => r.SourceTemplateId!, StringComparer.Ordinal);
+        former.UnionWith((await userRoles.GetRolesForUserAsync(tenantId, userId, ct).ConfigureAwait(false))
+            .Where(grant => FollowsFromUserRole(grant.AssignedBy)
+                && sources.TryGetValue(grant.RoleId, out var source)
+                && previousTemplates.Contains(source)
+                && !templatesOfRole.Contains(source))
+            .Select(grant => grant.RoleId));
 
         var removed = await userRoles.MoveAsync(tenantId, userId, former, granted, AssignedBy, ct).ConfigureAwait(false);
         return new DefaultRoleMove(removed, granted);
     }
+
+    // A grant made here or by the boot-time migration follows from the user's role; any other assigner
+    // (an administrator's id, setup's none) made a choice of its own.
+    private static bool FollowsFromUserRole(string? assignedBy) =>
+        string.Equals(assignedBy, AssignedBy, StringComparison.Ordinal)
+        || string.Equals(assignedBy, MigrationAssignedBy, StringComparison.Ordinal);
 
     /// <summary>
     /// The id of the tenant role <paramref name="role"/> maps to, cloning the template into the tenant

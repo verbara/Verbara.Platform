@@ -4,7 +4,12 @@ namespace Verbara.Platform.Identity;
 
 public interface IUserRoleStore
 {
+    /// <summary>
+    /// The user's role grants, each with who made it (<see cref="UserRoleAssignment.AssignedBy"/>:
+    /// <c>migration</c>, <see cref="DefaultTenantRole.AssignedBy"/>, an administrator's id, or none).
+    /// </summary>
     Task<IReadOnlyList<UserRoleAssignment>> GetRolesForUserAsync(TenantId tenantId, EntityId userId, CancellationToken ct);
+
     Task AssignAsync(TenantId tenantId, EntityId userId, string roleId, string? assignedBy, CancellationToken ct);
     Task RemoveAsync(TenantId tenantId, EntityId userId, string roleId, CancellationToken ct);
     Task ReplaceAllAsync(TenantId tenantId, EntityId userId, IReadOnlyList<string> roleIds, string? assignedBy, CancellationToken ct);

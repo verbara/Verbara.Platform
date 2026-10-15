@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Data.Npgsql;
 
@@ -122,7 +123,9 @@ internal static class RbacMigrationSeeder
         {
             if (s_roleEnumToTemplate.TryGetValue(roleEnum, out var templateId))
             {
-                await conn.ExecuteAsync(
+                // RETURNING names the role this run attached (null when the user was settled), which the
+                // name-dependent check below needs; the facade's ExecuteAsync returns a count only.
+                await using var attach = new NpgsqlCommand(
                     "INSERT INTO user_roles (tenant_id, user_id, role_id, assigned_at, assigned_by) " +
                     // Resolve the role rather than assume the clone landed under @RoleId. When
                     // the tenant already owned an equivalent role the clone above was skipped,
@@ -145,6 +148,10 @@ internal static class RbacMigrationSeeder
                     // is settled. Without this, a run after the tenant creates the exact template id, or
                     // renames the equivalent role, resolves through the other branch and adds a second
                     // row that ON CONFLICT cannot catch (the role_id differs).
+                    // A grant the migration or user creation made is also settled when its role was cloned
+                    // from one of the templates that come with the user's role (source_template_id), whatever
+                    // the role is called now: a rename keeps the source. An administrator's grant on such a
+                    // role is that administrator's custom role and settles nothing through its source.
                     "  AND NOT EXISTS (" +
                     "    SELECT 1 FROM user_roles held " +
                     "    JOIN tenant_roles htr ON htr.tenant_id = held.tenant_id AND htr.role_id = held.role_id " +
@@ -152,25 +159,33 @@ internal static class RbacMigrationSeeder
                     "      AND (htr.role_id = @RoleId " +
                     "           OR htr.role_id = 'role_' || @RoleId || '_' || @TenantId " +
                     "           OR (@RoleId = 'admin' AND htr.role_id = 'admin-' || @TenantId) " +
-                    "           OR lower(htr.name) = lower((SELECT name FROM role_templates WHERE template_id = @RoleId)))) " +
+                    "           OR lower(htr.name) = lower((SELECT name FROM role_templates WHERE template_id = @RoleId)) " +
+                    "           OR (held.assigned_by IN (@Migration, @DefaultRole) AND htr.source_template_id = ANY(@Templates)))) " +
                     // Exact id wins over the name match when both are present.
                     "ORDER BY (tr.role_id = @RoleId) DESC " +
                     "LIMIT 1 " +
-                    "ON CONFLICT (tenant_id, user_id, role_id) DO NOTHING",
-                    p =>
-                    {
-                        p.Add(new NpgsqlParameter("TenantId", tenantId));
-                        p.Add(new NpgsqlParameter("UserId", userId));
-                        p.Add(new NpgsqlParameter("RoleId", templateId));
-                        p.Add(new NpgsqlParameter("Migration", MigrationAssigner));
-                    },
-                    tx, ct);
+                    "ON CONFLICT (tenant_id, user_id, role_id) DO NOTHING " +
+                    "RETURNING role_id",
+                    conn, tx);
+                attach.Parameters.Add(new NpgsqlParameter("TenantId", tenantId));
+                attach.Parameters.Add(new NpgsqlParameter("UserId", userId));
+                attach.Parameters.Add(new NpgsqlParameter("RoleId", templateId));
+                attach.Parameters.Add(new NpgsqlParameter("Migration", MigrationAssigner));
+                attach.Parameters.Add(new NpgsqlParameter("DefaultRole", DefaultTenantRole.AssignedBy));
+                attach.Parameters.Add(new NpgsqlParameter("Templates", NpgsqlDbType.Array | NpgsqlDbType.Text)
+                {
+                    Value = DefaultTenantRole.TemplatesGrantedWith((UserRole)roleEnum).ToArray(),
+                });
+
+                if (await attach.ExecuteScalarAsync(ct) is string attachedRoleId
+                    && await NameDependentGrantsAsync(conn, tx, tenantId, userId, attachedRoleId, ct) is { } heldRoleIds)
+                    RbacMigrationLog.NameDependentAttach(logger, tenantId, userId, attachedRoleId, heldRoleIds);
             }
         }
 
         // 4. Take back the grants step 3 or user creation made for a role the user no longer has.
         await conn.ExecuteAsync(
-            RemoveGrantsOfFormerRolesSql,
+            s_removeGrantsOfFormerRolesSql,
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", tenantId));
@@ -213,29 +228,90 @@ internal static class RbacMigrationSeeder
         return await cmd.ExecuteScalarAsync(ct) as string;
     }
 
-    private const string MigrationAssigner = "migration";
+    // The grants this user holds that the migration or user creation made on a role other than the one
+    // just attached, which no id shape, name or source template ties to any UserRole any more
+    // (default_roles): a grant only its role's former name tied to one. Every grant step 3 and user
+    // creation make is on a role resolved by the template's id or name, so a grant default_roles does not
+    // contain lost its tie through a rename (of a role with no source template, or one cloned from a
+    // template no UserRole comes with). Null when there is none.
+    private static async Task<string?> NameDependentGrantsAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, string tenantId, string userId, string attachedRoleId, CancellationToken ct)
+    {
+        await using var cmd = new NpgsqlCommand(
+            "WITH " + s_defaultRolesCte + " " +
+            "SELECT string_agg(held.role_id, ', ' ORDER BY held.role_id) " +
+            "FROM user_roles held " +
+            "WHERE held.tenant_id = @TenantId AND held.user_id = @UserId AND held.role_id <> @AttachedRoleId " +
+            "  AND held.assigned_by IN (@Migration, @DefaultRole) " +
+            "  AND NOT EXISTS (SELECT 1 FROM default_roles d WHERE d.role_id = held.role_id)",
+            conn, tx);
+        cmd.Parameters.Add(new NpgsqlParameter("TenantId", tenantId));
+        cmd.Parameters.Add(new NpgsqlParameter("UserId", userId));
+        cmd.Parameters.Add(new NpgsqlParameter("AttachedRoleId", attachedRoleId));
+        cmd.Parameters.Add(new NpgsqlParameter("Migration", MigrationAssigner));
+        cmd.Parameters.Add(new NpgsqlParameter("DefaultRole", DefaultTenantRole.AssignedBy));
+        return await cmd.ExecuteScalarAsync(ct) as string;
+    }
+
+    private const string MigrationAssigner = DefaultTenantRole.MigrationAssignedBy;
+
+    // default_roles: for each UserRole, the tenant roles that come with it — the shapes
+    // DefaultTenantRole.RolesGrantedWith recognises for each of its templates (the template id,
+    // role_{template}_{tenant}, the id setup gives it, the template's name) and every role cloned from one
+    // of those templates (source_template_id, which a rename keeps). Its readers only ever apply it to
+    // grants the migration or user creation made: the source alone does not make an administrator's
+    // custom role a default. role_templates_of is generated from DefaultTenantRole (TemplatesGrantedWith
+    // and SetupRoleIdPrefixFor over every UserRole), so the C# and SQL sides share one list.
+    private static readonly string s_defaultRolesCte =
+        "role_templates_of (role, template_id, setup_prefix) AS (VALUES " + RoleTemplatesOfRows() + "), " +
+        "default_roles AS (" +
+        "  SELECT m.role, tr.role_id " +
+        "  FROM role_templates_of m " +
+        "  LEFT JOIN role_templates rt ON rt.template_id = m.template_id " +
+        "  JOIN tenant_roles tr ON tr.tenant_id = @TenantId " +
+        "   AND (tr.role_id = m.template_id " +
+        "        OR tr.role_id = 'role_' || m.template_id || '_' || @TenantId " +
+        "        OR tr.role_id = m.setup_prefix || @TenantId " +
+        "        OR lower(tr.name) = lower(rt.name) " +
+        "        OR tr.source_template_id = m.template_id))";
+
+    // One VALUES row per (UserRole, template) pair: (0, 'agent', NULL), (2, 'admin', 'admin-'), ...
+    // The values are compile-time literals of DefaultTenantRole, never input; a quote in one would be a
+    // programming error, so it fails the type's initialisation rather than reach the SQL.
+    private static string RoleTemplatesOfRows()
+    {
+        var rows = new List<string>();
+        foreach (var role in Enum.GetValues<UserRole>())
+        {
+            foreach (var templateId in DefaultTenantRole.TemplatesGrantedWith(role))
+            {
+                var prefix = DefaultTenantRole.SetupRoleIdPrefixFor(templateId);
+                rows.Add($"({(int)role}, {SqlLiteral(templateId)}, {(prefix is null ? "NULL::text" : SqlLiteral(prefix))})");
+            }
+        }
+
+        return string.Join(", ", rows);
+    }
+
+    private static string SqlLiteral(string value) =>
+        value.Contains('\'', StringComparison.Ordinal)
+            ? throw new InvalidOperationException($"Role template literal '{value}' must not contain a quote.")
+            : $"'{value}'";
 
     // A grant this migration (assigned_by 'migration') or a user-creation path ('default-role') made
     // follows from users.role, so once users.role changes it is stale. A role change used to write
     // users.role only, and step 3 then added the new role's grant beside the old one, at every start.
-    // Removed: such a grant on the role step 3 resolves for another UserRole (the template's id, or the
-    // role named like the template), unless that role is also the one it resolves for the user's own.
-    // Kept: grants anyone else made — an administrator's (its id), and setup's (no assigner) — which
-    // say nothing about following users.role, and roles no UserRole resolves to. Idempotent.
-    private const string RemoveGrantsOfFormerRolesSql =
-        "WITH role_templates_of (role, template_id) AS (" +
-        "  VALUES (0, 'agent'), (1, 'supervisor'), (2, 'admin'), (3, 'api')), " +
-        "default_roles AS (" +
-        "  SELECT m.role, tr.role_id " +
-        "  FROM role_templates_of m " +
-        "  JOIN role_templates rt ON rt.template_id = m.template_id " +
-        "  JOIN tenant_roles tr ON tr.tenant_id = @TenantId " +
-        "   AND (tr.role_id = m.template_id OR lower(tr.name) = lower(rt.name))) " +
+    // Removed: such a grant on a default role of another UserRole (default_roles), unless that role is
+    // also a default role of the user's own. Kept: grants anyone else made — an administrator's (its id),
+    // and setup's (no assigner) — which say nothing about following users.role, and roles no UserRole
+    // claims. Step 3 settles only on a grant this keeps, so a demotion converges in one run. Idempotent.
+    private static readonly string s_removeGrantsOfFormerRolesSql =
+        "WITH " + s_defaultRolesCte + " " +
         "DELETE FROM user_roles ur " +
         "USING users u " +
         "WHERE ur.tenant_id = @TenantId " +
         "  AND u.tenant_id = ur.tenant_id AND u.user_id = ur.user_id " +
-        "  AND u.role IN (0, 1, 2, 3) " +
+        "  AND u.role IN (SELECT role FROM role_templates_of) " +
         "  AND ur.assigned_by IN (@Migration, @DefaultRole) " +
         "  AND EXISTS (SELECT 1 FROM default_roles d WHERE d.role_id = ur.role_id AND d.role <> u.role) " +
         "  AND NOT EXISTS (SELECT 1 FROM default_roles d WHERE d.role_id = ur.role_id AND d.role = u.role)";

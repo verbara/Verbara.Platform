@@ -135,6 +135,73 @@ public sealed class DefaultTenantRoleMoveTests
         (await PermissionsOfAsync(dataSource, tenant, user)).Should().Contain(s_administratorPermissions);
     }
 
+    // Both assigners whose grant follows from the user's role: user creation (DefaultTenantRole.GrantAsync,
+    // "default-role") and the boot-time migration ("migration").
+    [Theory]
+    [InlineData("default-role")]
+    [InlineData("migration")]
+    public async Task MoveAsync_ShouldLeaveADemotedAdministratorOnlyTheAgentRole_WhenTheRoleGrantedWithTheUserRoleWasClonedFromTheAdminTemplateAndRenamed(
+        string assignedBy)
+    {
+        await using var dataSource = await SeededAsync();
+        var tenant = new TenantId("renamed");
+        var user = await NewUserAsync(dataSource, tenant, UserRole.Admin);
+        await new PostgresTenantRoleStore(dataSource).CloneFromTemplateAsync(
+            tenant, "owners", "admin", "Admin", null, CancellationToken.None);
+        if (assignedBy == "default-role")
+            (await DefaultTenantRole.GrantAsync(
+                new PostgresTenantRoleStore(dataSource), new PostgresRoleTemplateStore(dataSource), new PostgresUserRoleStore(dataSource),
+                tenant, user, UserRole.Admin, CancellationToken.None)).Should().Be("owners");
+        else
+            await new PostgresUserRoleStore(dataSource).AssignAsync(tenant, user, "owners", assignedBy, CancellationToken.None);
+        (await new PostgresUserRoleStore(dataSource).GetRolesForUserAsync(tenant, user, CancellationToken.None))
+            .Should().ContainSingle().Which.AssignedBy.Should().Be(assignedBy);
+        await RenameAsync(dataSource, tenant, "owners", "Owners");
+
+        var move = await MoveAsync(dataSource, tenant, user, UserRole.Admin, UserRole.Agent);
+
+        move.Removed.Should().Equal("owners");
+        (await RoleIdsOfAsync(dataSource, tenant, user)).Should().Equal(
+            ["agent"], "the grant came with the former role, and its role still names the admin template after the rename");
+        (await PermissionsOfAsync(dataSource, tenant, user)).Should().NotContain(s_administratorPermissions);
+    }
+
+    [Fact]
+    public async Task MoveAsync_ShouldKeepTheAdministratorsGrant_WhenTheRoleAnAdministratorGrantedWasClonedFromTheAdminTemplateAndRenamed()
+    {
+        await using var dataSource = await SeededAsync();
+        var tenant = new TenantId("renamed");
+        var user = await NewUserAsync(dataSource, tenant, UserRole.Admin);
+        await new PostgresTenantRoleStore(dataSource).CloneFromTemplateAsync(
+            tenant, "owners", "admin", "Admin", null, CancellationToken.None);
+        await new PostgresUserRoleStore(dataSource).AssignAsync(tenant, user, "owners", "an-administrator", CancellationToken.None);
+        await RenameAsync(dataSource, tenant, "owners", "Owners");
+
+        await MoveAsync(dataSource, tenant, user, UserRole.Admin, UserRole.Agent);
+
+        (await RoleIdsOfAsync(dataSource, tenant, user)).Should().BeEquivalentTo(
+            ["agent", "owners"], "an administrator's grant is that administrator's choice, not the former role's");
+    }
+
+    [Fact]
+    public async Task MoveAsync_ShouldTakeNothing_WhenTheRoleGrantedAtCreationWasClonedFromATemplateOfTheNewRoleToo()
+    {
+        await using var dataSource = await SeededAsync();
+        var tenant = new TenantId("renamed");
+        var user = await NewUserAsync(dataSource, tenant, UserRole.Admin);
+        await new PostgresTenantRoleStore(dataSource).CloneFromTemplateAsync(
+            tenant, "owners", "admin", "Admin", null, CancellationToken.None);
+        await DefaultTenantRole.GrantAsync(
+            new PostgresTenantRoleStore(dataSource), new PostgresRoleTemplateStore(dataSource), new PostgresUserRoleStore(dataSource),
+            tenant, user, UserRole.Admin, CancellationToken.None);
+        await RenameAsync(dataSource, tenant, "owners", "Owners");
+
+        var move = await MoveAsync(dataSource, tenant, user, UserRole.Admin, UserRole.Admin);
+
+        move.Removed.Should().BeEmpty("a role cloned from a template of the role the user moves to comes with that role too");
+        (await RoleIdsOfAsync(dataSource, tenant, user)).Should().Contain("owners");
+    }
+
     // ─── PostgresUserRoleStore.MoveAsync, the one statement ──────────────────
 
     [Fact]
@@ -203,6 +270,15 @@ public sealed class DefaultTenantRoleMoveTests
             new PostgresRoleTemplateStore(dataSource),
             new PostgresUserRoleStore(dataSource),
             tenant, user, previousRole, role, CancellationToken.None);
+
+    // The rename an administrator makes through the API: read the role, change its name, save it.
+    private static async Task RenameAsync(NpgsqlDataSource dataSource, TenantId tenant, string roleId, string name)
+    {
+        var roles = new PostgresTenantRoleStore(dataSource);
+        var role = (await roles.GetByIdAsync(tenant, roleId, CancellationToken.None))!;
+        role.Name = name;
+        await roles.SaveAsync(role, CancellationToken.None);
+    }
 
     private static async Task<EntityId> NewUserAsync(NpgsqlDataSource dataSource, TenantId tenant, UserRole role)
     {

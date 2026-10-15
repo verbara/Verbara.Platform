@@ -15,6 +15,7 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Seeds;
 [Collection("PostgresRbac")]
 public sealed class RbacMigrationResilienceTests
 {
+    private const int AgentRole = 0;
     private const int AdminRole = 2;
     private const int TemplatesPerTenant = 7;
 
@@ -180,8 +181,9 @@ public sealed class RbacMigrationResilienceTests
     // The migration attaches a user to a same-named role under any id, but recognises a held role
     // afterwards only by the template's shapes. Renaming such a role frees the name, the template is
     // cloned, and the next run attaches it too: two admin-equivalent roles, no permission beyond what
-    // users.role declares, and stable from then on. The follow-up change
-    // rbac-role-provenance-survives-renames owns the fix; these tests pin today's behaviour.
+    // users.role declares, and stable from then on. A role cloned from a template is recognised by its
+    // source template instead (next section), so this stays only for a role with no source template;
+    // these tests pin it.
 
     [Fact]
     public async Task MigrateExistingUsersAsync_ShouldAttachTheTemplateRoleAlongsideAndThenHoldSteady_WhenARoleWithAnArbitraryIdTheMigrationGrantedIsRenamed()
@@ -261,6 +263,232 @@ public sealed class RbacMigrationResilienceTests
             ["admin-demo"], "whoever granted it, the setup admin role is a shape of template 'admin', so the user is settled");
     }
 
+    // ─── A role cloned from a template is recognised by its source after a rename ─
+    // A grant the migration or user creation made follows from users.role. Its role's
+    // source_template_id survives a rename, so it still names the UserRole the grant came with when
+    // neither the role's id nor its name is a shape of the template any more.
+
+    // With a source the grant on 'crew' is a default of the former role and step 4 takes it back in the same
+    // run; with none it is a hand-made role that no shape names any more, and stays beside the admin role.
+    [Theory]
+    [InlineData("agent", new[] { "admin" })]
+    [InlineData(null, new[] { "admin", "crew" })]
+    public async Task MigrateExistingUsersAsync_ShouldAttachTheAdminRole_WhenAnAgentOnARenamedRoleBecameAdminWithoutItsRolesMoving(
+        string? sourceTemplateId, string[] expected)
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "acme", "crew", "Agent", sourceTemplateId);
+        await GivenUserAsync(dataSource, "acme", "user-acme", AgentRole);
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal("crew");
+
+        await ExecuteAsync(dataSource, "UPDATE tenant_roles SET name = 'Crew' WHERE tenant_id = 'acme' AND role_id = 'crew'");
+        // users.role written, the role move not made: what a failed move leaves behind.
+        await ExecuteAsync(dataSource, $"UPDATE users SET role = {AdminRole} WHERE tenant_id = 'acme' AND user_id = 'user-acme'");
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(
+            expected, "the grant on 'crew' came with the user's former role, so it does not settle the user on the new one");
+    }
+
+    [Fact]
+    public async Task MigrateExistingUsersAsync_ShouldLeaveOnlyTheAgentRoleInOneRun_WhenAnAdministratorOnTheRenamedSetupRoleBecomesAnAgent()
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "t9", "admin-t9", "Admin", sourceTemplateId: "admin");
+        await GivenUserAsync(dataSource, "t9", "user-t9", AdminRole);
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+        (await RoleIdsOfAsync(dataSource, "t9", "user-t9")).Should().Equal("admin-t9");
+
+        await ExecuteAsync(dataSource, "UPDATE tenant_roles SET name = 'Owners' WHERE tenant_id = 't9' AND role_id = 'admin-t9'");
+        await ExecuteAsync(dataSource, $"UPDATE users SET role = {AgentRole} WHERE tenant_id = 't9' AND user_id = 'user-t9'");
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+
+        (await RoleIdsOfAsync(dataSource, "t9", "user-t9")).Should().Equal(
+            ["agent"], "the migration's grant on the renamed setup role came with the former role, and one run both " +
+            "removes it and attaches the agent role");
+    }
+
+    [Theory]
+    [InlineData("migration")]
+    [InlineData("default-role")]
+    public async Task MigrateExistingUsersAsync_ShouldKeepOnlyTheRenamedRole_WhenARoleClonedFromTheAdminTemplateGrantedWithTheUserRoleIsRenamed(
+        string assignedBy)
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "acme", "owners", "Admin", sourceTemplateId: "admin");
+        await GivenUserAsync(dataSource, "acme", "user-acme", AdminRole);
+        if (assignedBy == "migration")
+            await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+        else
+            await GivenAssignmentAsync(dataSource, "acme", "user-acme", "owners", assignedBy);
+        (await AssignersOfAsync(dataSource, "acme", "user-acme")).Should().Equal($"owners:{assignedBy}");
+
+        await ExecuteAsync(dataSource, "UPDATE tenant_roles SET name = 'Administrators' WHERE tenant_id = 'acme' AND role_id = 'owners'");
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(
+            ["owners"], "'owners' was cloned from template 'admin', so the user is settled on it whatever it is called");
+
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal("owners");
+    }
+
+    [Fact]
+    public async Task MigrateExistingUsersAsync_ShouldLogTheNameDependentAttachOnce_WhenARoleWithNoSourceTemplateTheMigrationGrantedIsRenamed()
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "acme", "owners", "Admin");
+        await GivenUserAsync(dataSource, "acme", "user-acme", AdminRole);
+        var logger = new CapturingLogger();
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, logger, CancellationToken.None);
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal("owners");
+
+        await ExecuteAsync(dataSource, "UPDATE tenant_roles SET name = 'Administrators' WHERE tenant_id = 'acme' AND role_id = 'owners'");
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, logger, CancellationToken.None);
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(
+            ["admin", "owners"], "a role with no source template is recognised by its name only, so the renamed 'owners' " +
+            "does not settle the user");
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, logger, CancellationToken.None);
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(["admin", "owners"]);
+
+        var attach = logger.Entries.Should().ContainSingle(e => e.EventId.Id == 3703,
+            "the attach that depends on a role's name is recorded when it happens, and only then").Subject;
+        attach.Level.Should().Be(LogLevel.Warning);
+        attach.State.Should().Contain(new KeyValuePair<string, object?>("TenantId", "acme"))
+            .And.Contain(new KeyValuePair<string, object?>("UserId", "user-acme"))
+            .And.Contain(new KeyValuePair<string, object?>("RoleId", "admin"))
+            .And.Contain(new KeyValuePair<string, object?>("HeldRoleIds", "owners"));
+    }
+
+    [Fact]
+    public async Task MigrateExistingUsersAsync_ShouldNotLogTheAttach_WhenTheHeldRoleWithNoSourceTemplateIsStillNamedLikeAnotherUserRolesTemplate()
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "acme", "crew", "Agent");
+        await GivenUserAsync(dataSource, "acme", "user-acme", AgentRole);
+        await GivenAssignmentAsync(dataSource, "acme", "user-acme", "crew", "default-role");
+        await ExecuteAsync(dataSource, $"UPDATE users SET role = {AdminRole} WHERE tenant_id = 'acme' AND user_id = 'user-acme'");
+        var logger = new CapturingLogger();
+
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, logger, CancellationToken.None);
+
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(
+            ["admin"], "'crew' is still named like the agent template, so it came with the former role and is taken back");
+        logger.Entries.Should().NotContain(e => e.EventId.Id == 3703,
+            "the held role is recognised by its name as a default of another user role; nothing depended on a former name");
+    }
+
+    [Fact]
+    public async Task MigrateExistingUsersAsync_ShouldNotLogTheAttach_WhenTheOnlyOtherRoleHeldIsAnAdministratorsCustomRole()
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "acme", "auditors", "Auditors");
+        await GivenUserAsync(dataSource, "acme", "user-acme", AdminRole);
+        await GivenAssignmentAsync(dataSource, "acme", "user-acme", "auditors", "some-administrator");
+        var logger = new CapturingLogger();
+
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, logger, CancellationToken.None);
+
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(["admin", "auditors"]);
+        logger.Entries.Should().NotContain(e => e.EventId.Id == 3703,
+            "an administrator's grant never followed from the user's role, so the attach beside it depends on no name");
+    }
+
+    [Fact]
+    public async Task MigrateExistingUsersAsync_ShouldLogTheNameDependentAttach_WhenTheRenamedRoleWasClonedFromATemplateNoUserRoleComesWith()
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "acme", "owners", "Admin", sourceTemplateId: "manager");
+        await GivenUserAsync(dataSource, "acme", "user-acme", AdminRole);
+        var logger = new CapturingLogger();
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, logger, CancellationToken.None);
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(
+            ["owners"], "named like the admin template, 'owners' is the tenant's admin role whatever template it was cloned from");
+
+        await ExecuteAsync(dataSource, "UPDATE tenant_roles SET name = 'Administrators' WHERE tenant_id = 'acme' AND role_id = 'owners'");
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, logger, CancellationToken.None);
+
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(
+            ["admin", "owners"], "its source names no template of any user role, so only its former name tied the grant to Admin");
+        logger.Entries.Should().ContainSingle(e => e.EventId.Id == 3703,
+                "the attach depended on the role's former name, as for a role with no source template")
+            .Which.State.Should().Contain(new KeyValuePair<string, object?>("HeldRoleIds", "owners"));
+    }
+
+    [Theory]
+    [InlineData("role_admin_acme")]
+    [InlineData("admin-acme")]
+    public async Task MigrateExistingUsersAsync_ShouldKeepOneAdminAssignment_WhenATemplateShapedRoleClonedFromTheAdminTemplateIsRenamed(string roleId)
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "acme", roleId, "Admin", sourceTemplateId: "admin");
+        await GivenUserAsync(dataSource, "acme", "user-acme", AdminRole);
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(roleId);
+
+        await ExecuteAsync(dataSource, $"UPDATE tenant_roles SET name = 'Administrators' WHERE tenant_id = 'acme' AND role_id = '{roleId}'");
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(
+            [roleId], "both the id shape and the source template name the role, and they agree");
+    }
+
+    // Each row is recognised as a default role of UserRole Admin by one mark only: the template id, one of
+    // the id shapes the tenant's copies come in, the template's name, or the source template.
+    [Theory]
+    [InlineData("admin", "Owners", null)]
+    [InlineData("role_admin_t9", "Owners", null)]
+    [InlineData("admin-t9", "Owners", null)]
+    [InlineData("platform-admin-t9", "Owners", null)]
+    [InlineData("owners", "Admin", null)]
+    [InlineData("owners", "Owners", "admin")]
+    public async Task MigrateExistingUsersAsync_ShouldLeaveOnlyTheAgentRoleInOneRun_WhenTheFormerRoleIsRecognisedByOneMarkAlone(
+        string roleId, string name, string? sourceTemplateId)
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "t9", roleId, name, sourceTemplateId);
+        await GivenUserAsync(dataSource, "t9", "user-t9", AgentRole);
+        await GivenAssignmentAsync(dataSource, "t9", "user-t9", roleId, "default-role");
+
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+
+        (await RoleIdsOfAsync(dataSource, "t9", "user-t9")).Should().Equal(
+            ["agent"], $"'{roleId}' came with the user's former role, and that one mark is enough to take it back in the run " +
+            "that attaches the agent role");
+    }
+
+    [Fact]
+    public async Task MigrateExistingUsersAsync_ShouldKeepOneAdminAssignment_WhenTheHeldRoleIsNamedLikeTheTemplateAndTheTemplateIdExists()
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "acme", "owners", "Admin");
+        await GivenRoleAsync(dataSource, "acme", "admin", "Administrator");
+        await GivenUserAsync(dataSource, "acme", "user-acme", AdminRole);
+        await GivenAssignmentAsync(dataSource, "acme", "user-acme", "owners", "default-role");
+
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(
+            ["owners"], "the held role is named like the template, which settles the user although the exact template " +
+            "id would be resolved first");
+    }
+
+    [Fact]
+    public async Task MigrateExistingUsersAsync_ShouldAttachTheAdminRoleAndKeepTheAdministratorsGrant_WhenTheRenamedRoleWasClonedFromTheAdminTemplate()
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "acme", "owners", "Owners", sourceTemplateId: "admin");
+        await GivenUserAsync(dataSource, "acme", "user-acme", AdminRole);
+        await GivenAssignmentAsync(dataSource, "acme", "user-acme", "owners", "some-administrator");
+
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(
+            ["admin", "owners"], "a role an administrator granted is that administrator's custom role even when it was " +
+            "cloned from the admin template, so it does not stand in for the default role and is not taken back");
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     private async Task<NpgsqlDataSource> SeededAsync()
@@ -303,13 +531,15 @@ public sealed class RbacMigrationResilienceTests
             new NpgsqlParameter("TenantId", tenantId),
             new NpgsqlParameter("Role", role));
 
-    private static Task GivenRoleAsync(NpgsqlDataSource dataSource, string tenantId, string roleId, string name) =>
+    private static Task GivenRoleAsync(
+        NpgsqlDataSource dataSource, string tenantId, string roleId, string name, string? sourceTemplateId = null) =>
         ExecuteAsync(dataSource,
             "INSERT INTO tenant_roles (role_id, tenant_id, name, description, source_template_id, is_default) " +
-            "VALUES (@RoleId, @TenantId, @Name, 'provisioned outside RbacMigrationSeeder', NULL, false)",
+            "VALUES (@RoleId, @TenantId, @Name, 'provisioned outside RbacMigrationSeeder', @SourceTemplateId, false)",
             new NpgsqlParameter("RoleId", roleId),
             new NpgsqlParameter("TenantId", tenantId),
-            new NpgsqlParameter("Name", name));
+            new NpgsqlParameter("Name", name),
+            new NpgsqlParameter("SourceTemplateId", NpgsqlTypes.NpgsqlDbType.Text) { Value = (object?)sourceTemplateId ?? DBNull.Value });
 
     private static Task GivenAssignmentAsync(NpgsqlDataSource dataSource, string tenantId, string userId, string roleId, string? assignedBy) =>
         ExecuteAsync(dataSource,
@@ -331,6 +561,20 @@ public sealed class RbacMigrationResilienceTests
     {
         await using var cmd = dataSource.CreateCommand(sql);
         return (long)(await cmd.ExecuteScalarAsync())!;
+    }
+
+    private static async Task<List<string>> AssignersOfAsync(NpgsqlDataSource dataSource, string tenantId, string userId)
+    {
+        await using var cmd = dataSource.CreateCommand(
+            "SELECT role_id || ':' || coalesce(assigned_by, '') FROM user_roles " +
+            "WHERE tenant_id = @TenantId AND user_id = @UserId ORDER BY role_id");
+        cmd.Parameters.Add(new NpgsqlParameter("TenantId", tenantId));
+        cmd.Parameters.Add(new NpgsqlParameter("UserId", userId));
+        var rows = new List<string>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            rows.Add(reader.GetString(0));
+        return rows;
     }
 
     private static async Task<List<string>> RoleIdsOfAsync(NpgsqlDataSource dataSource, string tenantId, string userId)
