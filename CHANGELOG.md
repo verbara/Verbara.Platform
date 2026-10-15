@@ -46,6 +46,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   must read `/health/voice`. Point no probe at `/health/voice`: on a licensed engine it can read Unhealthy after 30 s
   without calls. (Platform/ADR-0025, addendum of 2026-10-13) (#392)
 
+- **Migration `023` adds two nullable columns to `webhook_deliveries`.** `claim_id` and `claim_expires_at` hold the
+  claim an outbound webhook delivery takes before each POST (see **Fixed**). It is additive, with no backfill and no
+  new index. Rolling back leaves nothing stuck: an older API ignores the columns, and a delivery left claimed is still
+  `Pending` and due for its retry poll. Until every replica runs this release, an older replica does not honour the
+  claims, so a delivery can still be POSTed twice during the rolling deploy. (Platform/ADR-0043)
+
 ### Added
 
 - **`/metrics` shows how full each Postgres pool is and what the auth write queue does.** The API now
@@ -237,6 +243,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `smtp.send` (only the Mail service executes it) or `worker.asterisk-capacity-sync` (nothing calls it).
   (Platform/ADR-0025, addendum of 2026-10-13) (#392)
 
+- **An outbound webhook delivery is no longer POSTed twice when the retry poll overlaps the immediate send, or when
+  replicas poll together.** Before, the 30-second retry poll could send a delivery whose first POST was still waiting
+  for the receiver, on the same pod, and two replicas could both send the same due retry. Now the immediate send and
+  every replica's retry poll claim a delivery on its row before each POST, so at most one attempt of a delivery is in
+  flight, and only the attempt that holds the claim records the outcome. A delivery whose pod stops mid-attempt is
+  sent again after up to 5 minutes, once its claim lapses, by the next poll of any replica. Delivery is at-least-once:
+  receivers deduplicate on `X-Webhook-Id`, which is stable across attempts and retries. Every request of a delivery
+  now carries the same body bytes: the immediate send POSTs the stored payload, as retries already did, so its JSON
+  takes the stored key order and spacing (the JSON is equivalent, and the signature covers the bytes sent). While a
+  subscription's circuit is open, a due delivery is deferred to the circuit's next probe without counting an attempt,
+  instead of being picked up and skipped on every poll. (Platform/ADR-0043)
 - **A corrupt Argon2id password hash is a failed login, not an exception.** A stored hash with a zero time
   cost, zero lanes or an empty salt made the cryptography library throw, so `/auth/login` and every
   other password check answered `400 Bad Request` instead of the wrong-password response. A stored hash whose
