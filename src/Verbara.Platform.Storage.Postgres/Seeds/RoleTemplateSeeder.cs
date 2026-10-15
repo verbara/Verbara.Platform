@@ -19,7 +19,7 @@ public static class RoleTemplateSeeder
     /// <summary>Role id used inside <c>tenant_roles</c> for the platform-admin role.</summary>
     /// <remarks>
     /// Matches the <c>template_id</c> seeded by <see cref="GetTemplates"/> and the
-    /// <c>role_id</c> cloned per-tenant by <see cref="RbacMigrationSeeder.MigrateExistingUsersAsync"/>.
+    /// <c>role_id</c> cloned per-tenant by <see cref="RbacMigrationSeeder.MigrateExistingUsersAsync(Npgsql.NpgsqlDataSource, System.Threading.CancellationToken)"/>.
     /// </remarks>
     public const string PlatformAdminRoleId = "platform_admin";
 
