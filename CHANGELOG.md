@@ -32,7 +32,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holds any one class the action lists; the table listings an SDK reload uses after a reconnect
   (`CoreShowChannels`, `ConfbridgeList`, `ConfbridgeListRooms`) list only `system`/`reporting`, and the next SDK
   relies on them. A deployment that connects Verbara to **its own Asterisk** must add `reporting` to that user's
-  `write` line by hand before upgrading the SDK pin.
+  `write` line by hand before upgrading the SDK pin. (#389)
 - **Redis-backed MFA challenges move to a new key namespace.** They are now stored as a hash under
   `{prefix}mfa:challenge:{token}` instead of a string under `{prefix}mfa:pending:{token}`, and the Redis server
   must allow scripting (`EVAL`). During a rolling deploy a user whose password step and code step reach
@@ -56,7 +56,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   host and port) are dropped, so the unauthenticated `/metrics` never shows them. The waiting and timeout
   series appear only once a pool has first waited or timed out. The API also exports the auth write-queue
   counters `auth_write_enqueued_total`, `auth_write_dropped_total`, `auth_write_processed_total` and
-  `auth_write_failed_total`.
+  `auth_write_failed_total`. (#382)
 - **Supervisors can listen to a live voice call silently.** `POST /api/v1/supervisor/conversations/{id}/listen`
   with `{"destination":"endpoint"|"phone"}` rings the supervisor and connects them to the agent's leg of the
   call. The agent and the customer hear nothing, and nothing is sent to the agent's console.
@@ -128,7 +128,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   are N targets, each labelled `instance="<replica IP>:5000"`, so a dashboard or query that assumed one
   `instance` now sees N series, and a replica that restarts on a new IP starts a new series. A query that sums
   by `job`, as the shipped Grafana dashboard does, is unaffected, and a single replica is still one target.
-  The blackbox health probes still go to the service name.
+  The blackbox health probes still go to the service name. (#382)
 
 - **Voice transfer and click-to-dial answer `503 voice-unavailable` while AMI is down.** While this pod's primary AMI
   connection is not `Connected`, including on a pod with no primary server,
@@ -187,11 +187,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `db_client_connection_state="used"` over `db_client_connection_max`, and the `le="0.5"` bucket of
   `db_client_operation_duration_seconds`; thresholds, durations and labels are unchanged. A deployment that
   copied either file must take the new version. `docs/operations/slos.md` names the same instruments, and the
-  `PgConnectionPoolHigh` runbook entry shows how to find the pool by `db_client_connection_pool_name`.
+  `PgConnectionPoolHigh` runbook entry shows how to find the pool by `db_client_connection_pool_name`. (#382)
 - **Postgres pool labels carry a fixed name, never connection-string material.** Without a name, Npgsql
   labels a pool with its connection string minus the password, host, port, database and user included. The
   API's core pool is now `core`, and a role with its own connection string gets `dialer`, `cluster`,
-  `realtime`, `analytics` or `analytics-live`; a role on the core connection string shares `core`.
+  `realtime`, `analytics` or `analytics-live`; a role on the core connection string shares `core`. (#382)
 - **The start-up migration runner disposes its Postgres data source when it fails.** A failed connection or
   migration used to skip the dispose and leave that pool open, still reporting on the `Npgsql` meter under its
   connection string.
