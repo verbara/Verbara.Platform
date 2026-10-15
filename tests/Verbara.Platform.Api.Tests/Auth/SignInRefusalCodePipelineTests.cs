@@ -34,42 +34,49 @@ public sealed partial class SignInRefusalCodePipelineTests : IClassFixture<Accou
 
     // ─── The sign-in endpoints answer the tenant code ────────────────────────
 
-    [Fact]
-    public async Task Login_ShouldAnswerTenantSuspendedCode_WhenNamedTenantIsSuspended()
+    private const string ViaHeader = "header";
+    private const string ViaSubdomain = "subdomain";
+
+    /// <summary>
+    /// Every sign-in route × both refused statuses with the tenant named by <c>X-Tenant-Id</c>; the API-key and
+    /// MFA routes again with the tenant resolved from the request's subdomain; and the unversioned login path
+    /// the version rewrite routes to <c>/api/v1/auth/login</c>.
+    /// </summary>
+    public static TheoryData<string, TenantStatus, string> RefusedSignInRequests()
     {
-        var tenant = NewTenant(TenantStatus.Suspended);
-        using var client = _factory.CreateClient();
+        var data = new TheoryData<string, TenantStatus, string>();
+        foreach (var status in new[] { TenantStatus.Suspended, TenantStatus.PendingDeletion })
+        {
+            data.Add("/api/v1/auth/login", status, ViaHeader);
+            data.Add("/api/v1/auth/login/apikey", status, ViaHeader);
+            data.Add("/api/v1/auth/mfa/verify", status, ViaHeader);
+            data.Add("/api/v1/auth/login/apikey", status, ViaSubdomain);
+            data.Add("/api/v1/auth/mfa/verify", status, ViaSubdomain);
+            data.Add("/api/auth/login", status, ViaHeader);
+        }
 
-        using var response = await client.SendAsync(Post("/api/v1/auth/login", tenant,
-            new { email = "anyone@tenant.test", password = "AnyPassword123!" }));
-
-        await AssertSoleErrorAsync(response, HttpStatusCode.Forbidden, TenantSuspendedCode);
+        return data;
     }
 
-    [Fact]
-    public async Task ApiKeyLogin_ShouldAnswerTenantPendingDeletionCode_WhenNamedTenantIsPendingDeletion()
+    [Theory]
+    [MemberData(nameof(RefusedSignInRequests))]
+    public async Task SignInRoute_ShouldAnswerSoleTenantStatusCode_WhenResolvedTenantIsRefused(
+        string route, TenantStatus status, string via)
     {
-        var tenant = NewTenant(TenantStatus.PendingDeletion);
+        var tenant = NewTenant(status);
+        object body = route switch
+        {
+            "/api/v1/auth/mfa/verify" => new { mfaToken = await MintChallengeAsync(SeedMfaUser(tenant)), code = CorrectTotp() },
+            "/api/v1/auth/login/apikey" => new { apiKey = "any-api-key" },
+            _ => new { email = "anyone@tenant.test", password = "AnyPassword123!" },
+        };
         using var client = _factory.CreateClient();
 
-        using var response = await client.SendAsync(Post("/api/v1/auth/login/apikey", tenant,
-            new { apiKey = "any-api-key" }));
+        using var request = via == ViaSubdomain ? PostToSubdomain(route, tenant, body) : Post(route, tenant, body);
+        using var response = await client.SendAsync(request);
 
-        await AssertSoleErrorAsync(response, HttpStatusCode.Forbidden, TenantPendingDeletionCode);
-    }
-
-    [Fact]
-    public async Task MfaVerify_ShouldAnswerTenantPendingDeletionCode_WhenNamedTenantIsPendingDeletion()
-    {
-        var tenant = NewTenant(TenantStatus.PendingDeletion);
-        var user = SeedMfaUser(tenant);
-        var challenge = await MintChallengeAsync(user);
-        using var client = _factory.CreateClient();
-
-        using var response = await client.SendAsync(Post("/api/v1/auth/mfa/verify", tenant,
-            new { mfaToken = challenge, code = CorrectTotp() }));
-
-        await AssertSoleErrorAsync(response, HttpStatusCode.Forbidden, TenantPendingDeletionCode);
+        await AssertSoleErrorAsync(response, HttpStatusCode.Forbidden,
+            status == TenantStatus.Suspended ? TenantSuspendedCode : TenantPendingDeletionCode);
     }
 
     [Fact]
@@ -229,6 +236,21 @@ public sealed partial class SignInRefusalCodePipelineTests : IClassFixture<Accou
     {
         var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = JsonContent.Create(body) };
         request.Headers.Add("X-Tenant-Id", tenantId);
+        return request;
+    }
+
+    /// <summary>
+    /// A request that carries no <c>X-Tenant-Id</c>: the tenant is the first label of the request host
+    /// (<c>{tenant}.sign-in.test</c>), which TenantResolutionMiddleware takes as the tenant id when no branding
+    /// maps that subdomain.
+    /// </summary>
+    private static HttpRequestMessage PostToSubdomain<T>(string route, string tenantId, T body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"http://{tenantId}.sign-in.test{route}"))
+        {
+            Content = JsonContent.Create(body),
+        };
+        request.Headers.Host = $"{tenantId}.sign-in.test";
         return request;
     }
 
