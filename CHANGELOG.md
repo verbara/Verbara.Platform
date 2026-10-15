@@ -37,7 +37,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `{prefix}mfa:challenge:{token}` instead of a string under `{prefix}mfa:pending:{token}`, and the Redis server
   must allow scripting (`EVAL`). During a rolling deploy a user whose password step and code step reach
   different versions is asked to sign in again, for at most the challenge's five minutes. Old keys expire on
-  their own.
+  their own. (#393)
 
 - **`/health/ready` no longer carries the voice plane: read `/health/voice` for it.** The readiness probe keeps its
   path, timings and status mapping, but its body no longer holds `asterisk` or the session-fed Pro engine checks
@@ -228,7 +228,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   account no longer exists, gets `400 {"error":"mfa-challenge-expired"}` (it was a prose message or a bare
   `401`), the wrong code that spends a challenge gets `401 {"error":"mfa-challenge-exhausted"}`, and a wrong
   code on a challenge that is still live keeps its bare `401`. With the Redis cache, an empty token
-  now gets the `400` instead of a `500`.
+  now gets the `400` instead of a `500`. (#393)
 
 ## [2.28.0] - 2026-10-11
 
