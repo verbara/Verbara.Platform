@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
@@ -201,5 +203,83 @@ public sealed class TenantStatusMiddlewareTests
         resolved.Should().NotBeNull();
         resolved!.EffectivePlan.Should().Be(TenantPlan.Pro);
         resolved.Features.Should().Contain(PlanFeature.Dialer);
+    }
+
+    private const string SuspendedProse = "This tenant account has been suspended. Contact your administrator.";
+
+    private const string PendingDeletionProse =
+        "This tenant account is pending deletion due to prolonged non-payment. Contact your administrator immediately.";
+
+    private static void SetEndpoint(HttpContext context, bool answersWithCode)
+    {
+        var metadata = answersWithCode
+            ? new EndpointMetadataCollection(TenantRefusalCodeMetadata.Instance)
+            : new EndpointMetadataCollection();
+        context.SetEndpoint(new Endpoint(_ => Task.CompletedTask, metadata, "test-endpoint"));
+    }
+
+    private static string ReadError(DefaultHttpContext context)
+    {
+        context.Response.Body.Position = 0;
+        using var doc = JsonDocument.Parse(context.Response.Body);
+        doc.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal("error");
+        return doc.RootElement.GetProperty("error").GetString()!;
+    }
+
+    [Theory]
+    [InlineData(TenantStatus.Suspended, "tenant-suspended")]
+    [InlineData(TenantStatus.PendingDeletion, "tenant-pending-deletion")]
+    public async Task Invoke_ShouldWriteTenantCode_WhenEndpointAnswersTenantRefusalWithCode(
+        TenantStatus status, string expectedCode)
+    {
+        _tenantStore.GetAsync("acme", Arg.Any<CancellationToken>())
+            .Returns(new Tenant { TenantId = "acme", Name = "ACME", Status = status });
+        var middleware = CreateMiddleware();
+        var context = CreateContext("acme");
+        SetEndpoint(context, answersWithCode: true);
+
+        await middleware.InvokeAsync(context);
+
+        _nextCalled.Should().BeFalse();
+        context.Response.StatusCode.Should().Be(403);
+        ReadError(context).Should().Be(expectedCode);
+    }
+
+    [Theory]
+    [InlineData(TenantStatus.Suspended, false)]
+    [InlineData(TenantStatus.Suspended, true)]
+    [InlineData(TenantStatus.PendingDeletion, false)]
+    [InlineData(TenantStatus.PendingDeletion, true)]
+    public async Task Invoke_ShouldKeepTenantProse_WhenEndpointDoesNotOptIntoTheCode(
+        TenantStatus status, bool hasEndpoint)
+    {
+        _tenantStore.GetAsync("acme", Arg.Any<CancellationToken>())
+            .Returns(new Tenant { TenantId = "acme", Name = "ACME", Status = status });
+        var middleware = CreateMiddleware();
+        var context = CreateContext("acme");
+        if (hasEndpoint)
+            SetEndpoint(context, answersWithCode: false);
+
+        await middleware.InvokeAsync(context);
+
+        _nextCalled.Should().BeFalse();
+        context.Response.StatusCode.Should().Be(403);
+        ReadError(context).Should().Be(status == TenantStatus.Suspended ? SuspendedProse : PendingDeletionProse);
+    }
+
+    [Fact]
+    public async Task Invoke_ShouldKeepNotFoundBody_WhenTenantDeletedOnEndpointThatAnswersWithCode()
+    {
+        _tenantStore.GetAsync("acme", Arg.Any<CancellationToken>())
+            .Returns(new Tenant { TenantId = "acme", Name = "ACME", Status = TenantStatus.Deleted });
+        var middleware = CreateMiddleware();
+        var context = CreateContext("acme");
+        SetEndpoint(context, answersWithCode: true);
+
+        await middleware.InvokeAsync(context);
+
+        _nextCalled.Should().BeFalse();
+        context.Response.StatusCode.Should().Be(404);
+        ReadError(context).Should().Be("Not found");
     }
 }

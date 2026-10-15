@@ -1,10 +1,13 @@
+using System.Text.Json;
 using Verbara.Platform.Api.Endpoints;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Identity.Mfa;
 using Verbara.Platform.Identity.OidcTokenExchange;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 
 namespace Verbara.Platform.Api.Tests.Auth;
@@ -26,6 +29,10 @@ public sealed class InactiveAccountSignInTests
     private const string Email = AuthHandlerFixture.Email;
     private const string Password = AuthHandlerFixture.Password;
     private const string RawApiKey = "inactive-account-raw-key";
+    private const string AccountInactiveCode = "account-inactive";
+    private const string RefreshDeniedProse = "Account is not active.";
+
+    private static readonly IServiceProvider s_renderServices = BuildRenderServices();
 
     public static TheoryData<UserStatus> InactiveStatuses => new()
     {
@@ -50,6 +57,8 @@ public sealed class InactiveAccountSignInTests
         json.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
         RefreshCookieWasSet(context).Should().BeFalse(because: "no refresh token may be handed out");
         await fixture.RefreshTokenStore.DidNotReceive().SaveAsync(Arg.Any<RefreshToken>(), Arg.Any<CancellationToken>());
+        await AssertSoleErrorAsync(result, StatusCodes.Status403Forbidden, AccountInactiveCode,
+            because: "the refusal carries the account code, which names no account status");
     }
 
     [Fact]
@@ -66,17 +75,18 @@ public sealed class InactiveAccountSignInTests
             .Which.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
     }
 
-    [Fact]
-    public async Task Login_ShouldRecordLoginFailureWithStatusReason_WhenAccountIsSuspended()
+    [Theory]
+    [MemberData(nameof(InactiveStatuses))]
+    public async Task Login_ShouldRecordLoginFailureWithStatusReason_WhenAccountIsNotActive(UserStatus status)
     {
         var fixture = NewFixture(mfaEnabled: false);
-        fixture.User.Status = UserStatus.Suspended;
+        fixture.User.Status = status;
 
         await InvokeLoginAsync(fixture, AuthHandlerFixture.BuildHttpContext(), Password);
 
         await fixture.AuthEventStore.Received(1).SaveAsync(
             Arg.Is<AuthEvent>(e => e.EventType == AuthEventTypes.LoginFailure
-                && ReasonOf(e) == "account_suspended"),
+                && ReasonOf(e) == "account_" + status.ToString().ToLowerInvariant()),
             Arg.Any<CancellationToken>());
         fixture.User.FailedLoginAttempts.Should().Be(0,
             because: "the password was correct — the refusal must not count toward lockout");
@@ -142,6 +152,8 @@ public sealed class InactiveAccountSignInTests
         RefreshCookieWasSet(context).Should().BeFalse();
         fixture.User.MfaRecoveryCodes.Should().HaveCount(plaintext.Count,
             because: "the refusal happens before the factor is evaluated, so no recovery code is burned");
+        await AssertSoleErrorAsync(result, StatusCodes.Status403Forbidden, AccountInactiveCode,
+            because: "the second factor carries the same account code as the password path");
     }
 
     // ─── Refresh ─────────────────────────────────────────────────────────────
@@ -178,6 +190,8 @@ public sealed class InactiveAccountSignInTests
             Arg.Is<AuthEvent>(e => e.EventType == AuthEventTypes.SessionRevoked
                 && ReasonOf(e) == "account_" + status.ToString().ToLowerInvariant()),
             Arg.Any<CancellationToken>());
+        await AssertSoleErrorAsync(result, StatusCodes.Status401Unauthorized, RefreshDeniedProse,
+            because: "the refresh refusal is not a sign-in refusal: its body keeps the prose");
     }
 
     // ─── API-key login ───────────────────────────────────────────────────────
@@ -194,6 +208,8 @@ public sealed class InactiveAccountSignInTests
         result.Should().BeOfType<JsonHttpResult<ErrorResponse>>(
             because: "a user-bound key must not mint a JWT for an owner who may not sign in")
             .Which.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        await AssertSoleErrorAsync(result, StatusCodes.Status403Forbidden, AccountInactiveCode,
+            because: "the API-key path carries the same account code as the password path");
     }
 
     [Fact]
@@ -286,6 +302,34 @@ public sealed class InactiveAccountSignInTests
         context.Response.Headers.SetCookie.Any(c => c is not null
             && c.StartsWith(RefreshTokenCookie.Name + "=", StringComparison.Ordinal)
             && !c.StartsWith(RefreshTokenCookie.Name + "=;", StringComparison.Ordinal));
+
+    /// <summary>
+    /// Executes <paramref name="result"/> against a real response, as the host would, and asserts the
+    /// status and that the JSON body is an object whose only member is <c>error</c> with the given value.
+    /// </summary>
+    private static async Task AssertSoleErrorAsync(IResult result, int status, string error, string because)
+    {
+        var context = new DefaultHttpContext { RequestServices = s_renderServices };
+        using var body = new MemoryStream();
+        context.Response.Body = body;
+        await result.ExecuteAsync(context);
+
+        context.Response.StatusCode.Should().Be(status);
+        using var doc = JsonDocument.Parse(body.ToArray());
+        doc.RootElement.ValueKind.Should().Be(JsonValueKind.Object);
+        doc.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal(["error"],
+            because: "the body carries the error member and nothing else");
+        doc.RootElement.GetProperty("error").GetString().Should().Be(error, because);
+    }
+
+    private static ServiceProvider BuildRenderServices()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.ConfigureHttpJsonOptions(o =>
+            o.SerializerOptions.TypeInfoResolverChain.Insert(0, ApiJsonContext.Default));
+        return services.BuildServiceProvider();
+    }
 
     private static string? ReasonOf(AuthEvent e) =>
         e.Details is not null && e.Details.RootElement.TryGetProperty("reason", out var reason)
