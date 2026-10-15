@@ -44,7 +44,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `eventstore-subscriber`, `analytics-aggregator`, `callanalytics-engine` and `agentassist-engine`. They are on the
   new `GET /health/voice` (see **Added**). A dashboard, script or alert that read the AMI state from `/health/ready`
   must read `/health/voice`. Point no probe at `/health/voice`: on a licensed engine it can read Unhealthy after 30 s
-  without calls. (Platform/ADR-0025, addendum of 2026-10-13)
+  without calls. (Platform/ADR-0025, addendum of 2026-10-13) (#392)
 
 ### Added
 
@@ -103,7 +103,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `data.connectionState`; and Unhealthy, naming the worker, when the Stasis inbound worker's heartbeat is older than
   three intervals. The body never shows the AMI host or port. Before, the check watched the `asterisk.ami`,
   `asterisk.ari` and `worker.asterisk-capacity-sync` circuits, which nothing executes, and read `Degraded` with the
-  Sdk default `localhost:5038` on every pod. (Platform/ADR-0025, addendum of 2026-10-13)
+  Sdk default `localhost:5038` on every pod. (Platform/ADR-0025, addendum of 2026-10-13) (#392)
 
 ### Changed
 
@@ -139,7 +139,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The check runs before the ownership check, so during an outage a caller who does not own the call gets 503, not
   `403 not-owner`. Trunks, DID routes and the other routes that send no AMI action answer as before, and the
   silent-listen routes keep their own refusals. The OpenAPI document declares the 503 on both routes.
-  (Platform/ADR-0025, addendum of 2026-10-13)
+  (Platform/ADR-0025, addendum of 2026-10-13) (#392)
 
 ### Fixed
 
@@ -202,14 +202,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   engine can report Unhealthy 30 s after its last call event, so an AMI outage or a quiet half-minute could drain the
   pod) and the Stasis inbound worker's heartbeat moved to `/health/voice`. Postgres, retention, the digital workers'
   heartbeats and the other Pro engine checks still gate readiness, and an unlicensed community boot still answers 200
-  with `dialer-engine` `Degraded`. (Platform/ADR-0025, addendum of 2026-10-13)
+  with `dialer-engine` `Degraded`. (Platform/ADR-0025, addendum of 2026-10-13) (#392)
 - **An unreachable webhook receiver or identity provider no longer drains the pod.** The `services` readiness check
   reports an open `webhook.delivery` or `oidc.token-exchange` circuit as `Degraded` (HTTP 200), however long it has
   been open, and keeps each key's state in `data.circuits`. Before, one tenant's receiver or identity provider,
   unreachable for five minutes, made readiness answer 503 for every tenant; and because the circuit-state gauge reads
   open until the next successful call, an idle tripped circuit kept the pod out. The check no longer watches
   `smtp.send` (only the Mail service executes it) or `worker.asterisk-capacity-sync` (nothing calls it).
-  (Platform/ADR-0025, addendum of 2026-10-13)
+  (Platform/ADR-0025, addendum of 2026-10-13) (#392)
 
 ### Security
 
