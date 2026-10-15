@@ -105,6 +105,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `asterisk.ari` and `worker.asterisk-capacity-sync` circuits, which nothing executes, and read `Degraded` with the
   Sdk default `localhost:5038` on every pod. (Platform/ADR-0025, addendum of 2026-10-13) (#392)
 
+- **`GET /users/me` carries `recoveryCodesNeedRegeneration`.** It is true while the user has MFA enabled and any
+  of their stored recovery codes predates Argon2id, and false after a regenerate, with no codes, or while MFA is
+  off (codes left by an unconfirmed enrollment do not count); it is derived on every read,
+  so no prompt state is stored. The API also exports the meter `Verbara.Platform.Auth.RecoveryCodes`:
+  `mfa_recovery_codes_users{family="argon2id"|"legacy"}`, refreshed from a scan of the users table two minutes
+  after start and then hourly (`Mfa:RecoveryCodeCensus:InitialDelay` and `:Interval`; an interval of `0`
+  disables the scan; only users with MFA enabled are counted), and `mfa_recovery_codes_redeemed_total{family="argon2id"|"bcrypt"|"sha256"}`, counted when
+  a code is consumed. Neither carries a tenant label.
+
 ### Changed
 
 - **Assigning a role to a user the tenant does not have answers `404`.** `POST /admin/users/{id}/roles/{roleId}`
@@ -228,6 +237,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `smtp.send` (only the Mail service executes it) or `worker.asterisk-capacity-sync` (nothing calls it).
   (Platform/ADR-0025, addendum of 2026-10-13) (#392)
 
+- **A corrupt Argon2id password hash is a failed login, not an exception.** A stored hash with a zero time
+  cost, zero lanes or an empty salt made the cryptography library throw, so `/auth/login` and every
+  other password check answered `400 Bad Request` instead of the wrong-password response. A stored hash whose
+  cost parameters are out of bounds (memory above 32 MiB, time cost above 4, memory × time above twice the
+  current parameters, or more than one lane) is now refused without being evaluated, so one stored value can no
+  longer make a single verification cost more than about two normal ones. Every hash the API has written is
+  inside the bound. The same guard covers recovery codes.
+
 ### Security
 
 - **`POST /auth/mfa/verify` has its own rate limit, and a challenge allows three attempts.** The route had no
@@ -246,6 +263,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `401`), the wrong code that spends a challenge gets `401 {"error":"mfa-challenge-exhausted"}`, and a wrong
   code on a challenge that is still live keeps its bare `401`. With the Redis cache, an empty token
   now gets the `400` instead of a `500`. (#393)
+- **New MFA recovery codes are stored as Argon2id.** All four places that issue recovery codes
+  (`POST /auth/mfa/setup`, `POST /auth/mfa/recovery-codes/regenerate`, `POST /profile/security/mfa/enroll/verify`
+  and `POST /profile/security/recovery-codes/regenerate`) now store each code as Argon2id with the password
+  parameters (m = 12 MiB, t = 3, p = 1). Before, the two profile paths stored a single, unstretched round of
+  salted SHA-256 over an 8-character code, which a copy of the `users` table and its key ring could reverse
+  offline, and the two `/auth/mfa/*` paths stored BCrypt cost 10. Codes issued earlier, as
+  BCrypt or salted SHA-256, keep working until they are used, and are never rewritten: only a regenerate moves a
+  user to Argon2id, so users should regenerate their recovery codes. Operators can follow how many users still
+  hold older codes on the new gauge `mfa_recovery_codes_users{family="legacy"}` (see **Added**). Argon2id
+  codes, like the older SHA-256 ones, match regardless of case and surrounding spaces. Because issuing codes now
+  costs about as much as ten password checks, each user can issue recovery codes at most once every 10 seconds
+  across the four endpoints; a second request inside that window gets `429 Too Many Requests` with
+  `Retry-After` and leaves the earlier codes in place (`Mfa:RecoveryCodeMint:MinInterval`; `00:00:00` turns the
+  limit off).
 
 ## [2.28.0] - 2026-10-11
 

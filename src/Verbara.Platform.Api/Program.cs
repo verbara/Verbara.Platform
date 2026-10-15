@@ -430,6 +430,7 @@ builder.Services.AddVerbaraOpenTelemetry(b => b
     .AddMeter(Verbara.Platform.Typification.Ai.TypificationAiMetrics.MeterName)
     // ADR-0026 Phase B — realtime.reconciliation.* (queue_memberships → Asterisk Realtime drift).
     .AddMeter(Verbara.Platform.Api.Services.RealtimeReconciliationService.MeterName)
+    .AddMeter(Verbara.Platform.Api.Services.RecoveryCodeFamilyMetrics.MeterName) // mfa.recovery_codes.{users,redeemed}
     .AddDigitalChannelMeters() // channels.delivery_status.unknown_id, whatsapp.webhook.rejected
     .AddCapacityMeters() // Npgsql pool + operation instruments, auth.write.* (measure-api-multi-replica-baseline D1)
     .WithPrometheusExporter());
@@ -886,9 +887,7 @@ builder.Services.AddSingleton<ITenantLifecycleHandler>(sp => sp.GetRequiredServi
 builder.Services.AddSingleton<Verbara.Platform.Identity.Mfa.IMfaPolicyEvaluator,
     Verbara.Platform.Identity.Mfa.TenantAuthConfigMfaPolicyEvaluator>();
 
-// R5.2 PA.2 — Recovery code generation/hashing for profile-scoped MFA wizard.
-builder.Services.AddSingleton<Verbara.Platform.Identity.Mfa.IRecoveryCodeService,
-    Verbara.Platform.Identity.Mfa.RecoveryCodeService>();
+builder.Services.AddRecoveryCodes(); // generator + legacy SHA-256 verifier, family meter and census refresher
 
 // ─── MFA / Password-Reset Token Caches ─────────────────────────────────────
 // Default: in-memory implementations (single-instance safe). When

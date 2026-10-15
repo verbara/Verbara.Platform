@@ -88,6 +88,7 @@ internal static class MfaEnrollEndpoints
         HttpContext context,
         [FromServices] IUserStore userStore,
         [FromServices] IRecoveryCodeService recoveryCodes,
+        [FromServices] RecoveryCodeMintGate mintGate,
         AuthEventService authEvents,
         CancellationToken ct)
     {
@@ -108,13 +109,15 @@ internal static class MfaEnrollEndpoints
         if (!MfaService.VerifyCode(body.Secret, body.TotpCode))
             return Results.BadRequest(new ErrorResponse("Invalid verification code"));
 
-        // Generate plaintext codes to return ONCE; store SHA-256 + per-user
-        // salt hashes. The salt is the user's stable EntityId (never reused,
-        // never empty) so we don't need a schema migration to add a salt
-        // column today (R5.2 PA.2).
+        // One mint per user per interval across the four mint paths (RecoveryCodeMintGate).
+        if (!mintGate.TryAcquire(user.TenantId, user.UserId, out var retryAfter))
+            return RecoveryCodeMintGate.Refuse(context, retryAfter);
+
+        // Generate plaintext codes to return ONCE and store one Argon2id digest per code
+        // (MfaService.HashRecoveryCodes, the single mint digest every path uses). Each digest
+        // carries its own salt, so no per-user salt is involved.
         var codes = recoveryCodes.Generate();
-        var salt = user.UserId.Value;
-        var hashed = codes.Select(c => recoveryCodes.Hash(c, salt)).ToList();
+        var hashed = MfaService.HashRecoveryCodes(codes).ToList();
 
         // Don't flip MfaEnabled yet — that happens in /complete after the
         // user acknowledges saving the codes. The store re-checks that MFA is

@@ -109,6 +109,28 @@ public sealed class PasswordServiceTests
         act().Should().BeFalse();
     }
 
+    [Theory]
+    [MemberData(nameof(Argon2idTestDigests.ThrowingCases), MemberType = typeof(Argon2idTestDigests))]
+    public void VerifyPassword_ShouldReturnFalse_WhenStoredArgon2idHashIsCorrupt(string kind)
+    {
+        // harden-recovery-code-digest 1.6 — the one pre-existing bug in that change. The
+        // Argon2id branch called Argon2.Verify unguarded, and Isopoh 2.0.0 THROWS
+        // ArgumentException for an encoded t=0, p=0 or an empty salt (RC0 probe). The
+        // exception reaches ErrorHandlingMiddleware from the login path. ADR-0013 says both
+        // credential verifiers are fail-closed; the BCrypt branch is (BcryptVerifyGuard),
+        // this branch was not. Since the fix, Argon2idHasher's bound check refuses all three
+        // before Isopoh runs, so this pins the fail-closed outcome through the bound (property b),
+        // not SafeVerify's catch: no in-bound input is known to make Isopoh 2.0.0 throw.
+        var corrupt = Argon2idTestDigests.Corrupt(kind);
+
+        var act = () => PasswordService.VerifyPassword(Argon2idTestDigests.GoodPlaintext, corrupt);
+
+        act.Should().NotThrow(
+            because: "a corrupt stored Argon2id hash is a failed login, never an exception that surfaces the "
+                   + "cryptography library's message");
+        act().Should().BeFalse();
+    }
+
     [Fact]
     public void ValidatePolicy_ShouldPass_WhenPasswordMeetsAllRequirements()
     {

@@ -199,8 +199,8 @@ internal static class AuthEndpoints
         AuthEventService authEvents,
         [FromServices] IMfaPendingCache mfaCache,
         [FromServices] ITenantAuthConfigStore configStore,
-        // The salted-SHA-256 verifier for recovery codes minted by the profile
-        // enrollment wizard. Legacy codes (BCrypt) need no service; the dispatch
+        // The salted-SHA-256 verifier for legacy recovery codes minted by the profile
+        // enrollment wizard. Argon2id and BCrypt codes need no service; the dispatch
         // lives in MfaService.ValidateRecoveryCode, which classifies per element.
         [FromServices] IRecoveryCodeService recoveryCodes,
         CancellationToken ct)
@@ -267,6 +267,10 @@ internal static class AuthEndpoints
         }
 
         var factor = EvaluateFactor(body, user, recoveryCodes);
+        // Read before consuming: the consume below removes the element, and a store may hand back the same object.
+        RecoveryCodeFamily? matchedFamily = factor.RecoveryCodeIndex is { } matched
+            ? RecoveryCodeFamilies.Classify(user.MfaRecoveryCodes![matched])
+            : null;
         var challengeSpent = attempt.IsFinal;
         var verified = false;
 
@@ -329,6 +333,11 @@ internal static class AuthEndpoints
             return challengeSpent ? MfaChallengeRefusals.ExhaustedResult() : Results.Unauthorized();
         }
 
+        // The matched recovery code was consumed by this request: count the redemption under the family it
+        // was stored in (mfa.recovery_codes.redeemed). Never counted for an attempt or a lost race.
+        if (matchedFamily is { } redeemedFamily)
+            context.RequestServices?.GetService<RecoveryCodeFamilyMetrics>()?.RecordRedeemed(redeemedFamily);
+
         // IssueTokensAsync resets the lockout counter (ResetAttemptsAsync) and emits the success event.
         // That reset lifts no lock in force, so a reservation that itself reached the threshold — and
         // locked the account — is taken back here first.
@@ -358,8 +367,9 @@ internal static class AuthEndpoints
 
         if (!string.IsNullOrEmpty(body.RecoveryCode) && user.MfaRecoveryCodes is { Count: > 0 })
         {
-            // The salt MUST be user.UserId.Value — IRecoveryCodeService.Hash salts
-            // with it, so verification cannot reconstruct it from anything else.
+            // The salt MUST be user.UserId.Value — IRecoveryCodeService.Hash salted the
+            // legacy SHA-256 family with it, so verification cannot reconstruct it from
+            // anything else.
             var (isValid, index) = MfaService.ValidateRecoveryCode(
                 recoveryCodes, body.RecoveryCode, user.MfaRecoveryCodes, user.UserId.Value);
             if (isValid)
@@ -874,6 +884,7 @@ internal static class AuthEndpoints
     internal static async Task<IResult> MfaSetup(
         HttpContext context,
         [FromServices] IUserStore userStore,
+        [FromServices] RecoveryCodeMintGate mintGate,
         CancellationToken ct)
     {
         var (tenantId, userId) = GetAuthClaims(context);
@@ -890,6 +901,11 @@ internal static class AuthEndpoints
         // DELETE /auth/mfa first, which asks for the password — the profile wizard's rule too.
         if (user.MfaEnabled)
             return Results.BadRequest(new ErrorResponse(MfaAlreadyEnrolledMessage));
+
+        // One mint per user per interval across the four mint paths: ten Argon2id derivations behind a bare
+        // access token are otherwise a lever on the whole box's KDF capacity (RecoveryCodeMintGate).
+        if (!mintGate.TryAcquire(user.TenantId, user.UserId, out var retryAfter))
+            return RecoveryCodeMintGate.Refuse(context, retryAfter);
 
         var (secret, qrUri) = MfaService.GenerateSetup(user.Email);
         var recoveryCodes = MfaService.GenerateRecoveryCodes();
@@ -1009,6 +1025,7 @@ internal static class AuthEndpoints
         [FromBody] RegenerateRecoveryCodesRequest request,
         HttpContext context,
         [FromServices] IUserStore userStore,
+        [FromServices] RecoveryCodeMintGate mintGate,
         AuthEventService authEvents,
         CancellationToken ct)
     {
@@ -1025,6 +1042,9 @@ internal static class AuthEndpoints
 
         if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(request.Password, user.PasswordHash))
             return Results.BadRequest(new ErrorResponse("Invalid password"));
+
+        if (!mintGate.TryAcquire(user.TenantId, user.UserId, out var retryAfter))
+            return RecoveryCodeMintGate.Refuse(context, retryAfter);
 
         // Generate fresh plaintext codes to return to the caller, store hashed copies — only while
         // MFA is still on, so codes are never written for an account whose MFA was just disabled.

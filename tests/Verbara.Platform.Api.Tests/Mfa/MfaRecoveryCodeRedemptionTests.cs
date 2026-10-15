@@ -3,11 +3,14 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Verbara.Platform.Api.Endpoints;
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Api.Tests.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Platform.Identity.Mfa;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using OtpNet;
 using Xunit;
 
@@ -35,6 +38,13 @@ namespace Verbara.Platform.Api.Tests.Mfa;
 /// would reconstruct the very same single-family closed loop that hid the bug.
 /// </para>
 /// <para>
+/// Since <c>harden-recovery-code-digest</c> every mint path stores Argon2id, so the endpoint-minted
+/// tests exercise that family, each through its own plaintext generator (16 hex characters on
+/// <c>/auth/mfa/*</c>, 8 Base32 characters on the profile paths). The two legacy families (BCrypt
+/// cost 10 and salted SHA-256) can no longer be minted; the tests that pin them seed digests forged the
+/// way the old mint paths wrote them, and are named for it.
+/// </para>
+/// <para>
 /// The MFA challenge token is minted directly through
 /// <see cref="AuthEndpoints.GenerateMfaChallengeTokenAndStoreAsync"/> — the same
 /// internal seam <c>OidcEndpoints</c> uses — because the seeded fixture user
@@ -49,16 +59,35 @@ namespace Verbara.Platform.Api.Tests.Mfa;
 /// between tests. <see cref="ResetUserAsync"/> restores a known baseline at the top
 /// of every test.
 /// </para>
+/// <para>
+/// The suite mints for that one user many times a second, so it runs on
+/// <see cref="UnthrottledMintApiFactory"/>, which turns the per-user mint gate off
+/// (<c>Mfa:RecoveryCodeMint:MinInterval</c> = 0). The gate has its own suites:
+/// <c>RecoveryCodeMintThrottleTests</c> and <c>RecoveryCodeMintGateTests</c>.
+/// </para>
 /// </remarks>
-public sealed class MfaRecoveryCodeRedemptionTests : IClassFixture<AuthenticatedPlatformApiFactory>
+public sealed class MfaRecoveryCodeRedemptionTests : IClassFixture<MfaRecoveryCodeRedemptionTests.UnthrottledMintApiFactory>
 {
+    /// <summary>The authenticated factory with the per-user recovery-code mint gate turned off.</summary>
+    public sealed class UnthrottledMintApiFactory : AuthenticatedPlatformApiFactory
+    {
+        protected override IHost CreateHost(IHostBuilder builder)
+        {
+            builder.ConfigureAppConfiguration(config => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Mfa:RecoveryCodeMint:MinInterval"] = "00:00:00",
+            }));
+            return base.CreateHost(builder);
+        }
+    }
+
     private const string TestPassword = "CurrentPassword123!";
 
-    private readonly AuthenticatedPlatformApiFactory _factory;
+    private readonly UnthrottledMintApiFactory _factory;
     private readonly HttpClient _authClient;
     private readonly HttpClient _anonClient;
 
-    public MfaRecoveryCodeRedemptionTests(AuthenticatedPlatformApiFactory factory)
+    public MfaRecoveryCodeRedemptionTests(UnthrottledMintApiFactory factory)
     {
         _factory = factory;
         _authClient = factory.CreateAuthenticatedClient();
@@ -75,7 +104,7 @@ public sealed class MfaRecoveryCodeRedemptionTests : IClassFixture<Authenticated
     [Fact]
     public async Task MfaVerify_ShouldReturn200_WhenRedeemingCodeMintedByAuthMfaSetup()
     {
-        // Mint path 1 of 4 — POST /auth/mfa/setup, BCrypt cost-10 digests.
+        // Mint path 1 of 4 — POST /auth/mfa/setup (Argon2id; BCrypt cost-10 before harden-recovery-code-digest).
         await ResetUserAsync();
 
         var codes = await MintViaAuthMfaSetupAsync();
@@ -90,7 +119,7 @@ public sealed class MfaRecoveryCodeRedemptionTests : IClassFixture<Authenticated
     [Fact]
     public async Task MfaVerify_ShouldReturn200_WhenRedeemingCodeMintedByAuthRecoveryCodesRegenerate()
     {
-        // Mint path 2 of 4 — POST /auth/mfa/recovery-codes/regenerate, BCrypt cost-10.
+        // Mint path 2 of 4 — POST /auth/mfa/recovery-codes/regenerate (Argon2id; BCrypt cost-10 before).
         await ResetUserAsync();
 
         var codes = await MintViaAuthRegenerateAsync();
@@ -105,10 +134,11 @@ public sealed class MfaRecoveryCodeRedemptionTests : IClassFixture<Authenticated
     [Fact]
     public async Task MfaVerify_ShouldReturn200_WhenRedeemingCodeMintedByProfileEnrollVerify()
     {
-        // Mint path 3 of 4 — POST /profile/security/mfa/enroll/verify, salted SHA-256.
+        // Mint path 3 of 4 — POST /profile/security/mfa/enroll/verify (Argon2id; salted SHA-256 before).
         // ⚠ THIS IS THE PATH THAT WAS BROKEN IN PRODUCTION: redemption returned
-        // 500 {"detail":"Invalid salt version"} because BCrypt.Verify was run over a
-        // 64-char hex digest. It is the end-to-end counterpart of the unit-level pin
+        // 500 {"detail":"Invalid salt version"} because BCrypt.Verify was run over the
+        // 64-char hex digest this path then wrote. The legacy SHA-256 half of that pin is now
+        // MfaVerify_ShouldReturn200_WhenRedeemingPreChangeSha256Code and the unit-level
         // MfaServiceTests.ValidateRecoveryCode_ShouldReturnTrue_WhenCodeMatchesSha256Digest.
         await ResetUserAsync();
 
@@ -117,17 +147,17 @@ public sealed class MfaRecoveryCodeRedemptionTests : IClassFixture<Authenticated
         var response = await RedeemAsync(codes[0]);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK,
-            because: "wizard-minted codes are salted SHA-256 and must verify through IRecoveryCodeService, not BCrypt");
+            because: "a recovery code returned by POST /profile/security/mfa/enroll/verify must be redeemable");
         await AssertAccessTokenIssuedAsync(response);
     }
 
     [Fact]
     public async Task MfaVerify_ShouldReturn200_WhenRedeemingCodeMintedByProfileRecoveryCodesRegenerate()
     {
-        // Mint path 4 of 4 — POST /profile/security/recovery-codes/regenerate, salted SHA-256.
+        // Mint path 4 of 4 — POST /profile/security/recovery-codes/regenerate (Argon2id; salted SHA-256 before).
         // Also covers the spec scenario "Regenerating through the wizard does not
-        // break redemption": the array starts life as BCrypt (mint path 1) and is
-        // replaced wholesale with the SHA-256 family before redemption.
+        // break redemption": the array starts life minted by path 1 and is replaced
+        // wholesale before redemption.
         await ResetUserAsync();
         await MintViaAuthMfaSetupAsync();
 
@@ -136,43 +166,43 @@ public sealed class MfaRecoveryCodeRedemptionTests : IClassFixture<Authenticated
         var response = await RedeemAsync(codes[0]);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK,
-            because: "codes regenerated through the wizard must redeem even though the array previously held BCrypt digests");
+            because: "codes regenerated through the wizard must redeem after replacing an earlier array");
         await AssertAccessTokenIssuedAsync(response);
     }
 
-    // ─── 4.3 — one-time use, both families ──────────────────────────────────
+    // ─── 4.3 — one-time use, both plaintext generators ──────────────────────
 
     [Fact]
     public async Task MfaVerify_ShouldRejectReplay_WhenSameRecoveryCodeUsedTwice()
     {
-        // BCrypt family.
+        // 16-hex codes from /auth/mfa/setup (BCrypt before harden-recovery-code-digest, Argon2id now).
         await ResetUserAsync();
-        var bcryptCodes = await MintViaAuthMfaSetupAsync();
+        var hexCodes = await MintViaAuthMfaSetupAsync();
 
-        var firstBcrypt = await RedeemAsync(bcryptCodes[0]);
-        var replayBcrypt = await RedeemAsync(bcryptCodes[0]);
+        var firstHex = await RedeemAsync(hexCodes[0]);
+        var replayHex = await RedeemAsync(hexCodes[0]);
 
-        firstBcrypt.StatusCode.Should().Be(HttpStatusCode.OK);
-        replayBcrypt.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+        firstHex.StatusCode.Should().Be(HttpStatusCode.OK);
+        replayHex.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
             because: "redemption is one-time: the matched element is removed from the stored array on success");
 
-        var afterBcrypt = await GetSeededUserAsync();
-        afterBcrypt.MfaRecoveryCodes.Should().HaveCount(bcryptCodes.Length - 1,
+        var afterHex = await GetSeededUserAsync();
+        afterHex.MfaRecoveryCodes.Should().HaveCount(hexCodes.Length - 1,
             because: "exactly one element — the one that matched — is consumed");
 
-        // Salted SHA-256 family.
+        // 8-char codes from the profile wizard (salted SHA-256 before, Argon2id now).
         await ResetUserAsync();
-        var sha256Codes = await MintViaProfileEnrollVerifyAsync();
+        var wizardCodes = await MintViaProfileEnrollVerifyAsync();
 
-        var firstSha256 = await RedeemAsync(sha256Codes[0]);
-        var replaySha256 = await RedeemAsync(sha256Codes[0]);
+        var firstWizard = await RedeemAsync(wizardCodes[0]);
+        var replayWizard = await RedeemAsync(wizardCodes[0]);
 
-        firstSha256.StatusCode.Should().Be(HttpStatusCode.OK);
-        replaySha256.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
-            because: "one-time use must hold identically for the salted-SHA-256 family");
+        firstWizard.StatusCode.Should().Be(HttpStatusCode.OK);
+        replayWizard.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            because: "one-time use must hold identically for codes from the profile generator");
 
-        var afterSha256 = await GetSeededUserAsync();
-        afterSha256.MfaRecoveryCodes.Should().HaveCount(sha256Codes.Length - 1);
+        var afterWizard = await GetSeededUserAsync();
+        afterWizard.MfaRecoveryCodes.Should().HaveCount(wizardCodes.Length - 1);
     }
 
     [Fact]
@@ -224,9 +254,192 @@ public sealed class MfaRecoveryCodeRedemptionTests : IClassFixture<Authenticated
             because: "no hash-shape detail may leak through the failure response (ADR-0013 rationale)");
     }
 
+    // ─── harden-recovery-code-digest 1.1 — every mint path writes Argon2id ──
+
+    [Fact]
+    public async Task MintPath_ShouldStoreOnlyArgon2idDigests_WhenCodesAreMintedByAuthMfaSetup()
+    {
+        await ResetUserAsync();
+
+        var codes = await MintViaAuthMfaSetupAsync();
+
+        await AssertStoredArgon2idAndRedeemableAsync(codes);
+    }
+
+    [Fact]
+    public async Task MintPath_ShouldStoreOnlyArgon2idDigests_WhenCodesAreMintedByAuthRecoveryCodesRegenerate()
+    {
+        await ResetUserAsync();
+
+        var codes = await MintViaAuthRegenerateAsync();
+
+        await AssertStoredArgon2idAndRedeemableAsync(codes);
+    }
+
+    [Fact]
+    public async Task MintPath_ShouldStoreOnlyArgon2idDigests_WhenCodesAreMintedByProfileEnrollVerify()
+    {
+        await ResetUserAsync();
+
+        var codes = await MintViaProfileEnrollVerifyAsync();
+
+        await AssertStoredArgon2idAndRedeemableAsync(codes);
+    }
+
+    [Fact]
+    public async Task MintPath_ShouldStoreOnlyArgon2idDigests_WhenCodesAreMintedByProfileRecoveryCodesRegenerate()
+    {
+        await ResetUserAsync();
+
+        var codes = await MintViaProfileRegenerateAsync();
+
+        await AssertStoredArgon2idAndRedeemableAsync(codes);
+    }
+
+    // ─── harden-recovery-code-digest 1.4 — the endpoint seam with Argon2id ──
+
+    [Fact]
+    public async Task MfaVerify_ShouldReturn401AndConsumeNothing_WhenArgon2idArrayGetsWrongCode()
+    {
+        await ResetUserAsync();
+        var stored = await SeedRecoveryCodesAsync(ForgeArgon2idArray());
+
+        var response = await RedeemAsync("ZZZZ9999");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            because: "a code matching no Argon2id element is a clean 401");
+
+        var user = await GetSeededUserAsync();
+        user.MfaRecoveryCodes.Should().Equal(stored,
+            because: "a failed verification must leave every stored element in place");
+    }
+
+    [Fact]
+    public async Task MfaVerify_ShouldReturn401NotServerError_WhenStoredArgon2idDigestHasZeroTimeCost()
+    {
+        // Isopoh 2.0.0 throws ArgumentException("TimeCost must be 1 or more, got 0") for this
+        // digest. The plaintext is the one the digest was derived from, so an unguarded
+        // Argon2id branch would reach the throw.
+        await ResetUserAsync();
+        await SeedRecoveryCodesAsync([Argon2idTestDigests.Corrupt("t=0")]);
+
+        var response = await RedeemAsync(Argon2idTestDigests.GoodPlaintext);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            because: "corrupt stored material must fail verification, never produce a 400 or 500");
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContainEquivalentOf("TimeCost",
+            because: "the Argon2 library's message must never reach the caller");
+        body.Should().NotContainEquivalentOf("argon",
+            because: "the response must not disclose which cryptography library backs the stored digests");
+    }
+
+    [Fact]
+    public async Task MfaVerify_ShouldRejectReplay_WhenSameArgon2idCodeUsedTwice()
+    {
+        await ResetUserAsync();
+        var stored = await SeedRecoveryCodesAsync(ForgeArgon2idArray());
+
+        var first = await RedeemAsync(s_argon2idPlaintexts[1]);
+        var replay = await RedeemAsync(s_argon2idPlaintexts[1]);
+
+        first.StatusCode.Should().Be(HttpStatusCode.OK,
+            because: "an Argon2id-stored code must redeem once");
+        replay.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            because: "redemption is one-time for the Argon2id family as for the legacy ones");
+
+        var user = await GetSeededUserAsync();
+        user.MfaRecoveryCodes.Should().Equal(new[] { stored[0], stored[2] },
+            because: "exactly the matched element is consumed and the other two remain");
+    }
+
+    // ─── harden-recovery-code-digest 1.5 — legacy keeps working, no regenerate
+
+    [Fact]
+    public async Task MfaVerify_ShouldReturn200_WhenRedeemingPreChangeBcryptCode()
+    {
+        // Forged exactly as POST /auth/mfa/setup wrote it before this change.
+        const string code = "0123456789abcdef";
+        await ResetUserAsync();
+        await SeedRecoveryCodesAsync([BCrypt.Net.BCrypt.HashPassword(code, workFactor: 10)]);
+
+        var response = await RedeemAsync(code);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            because: "a BCrypt code minted before the deploy must keep redeeming with no regenerate");
+        await AssertAccessTokenIssuedAsync(response);
+    }
+
+    [Fact]
+    public async Task MfaVerify_ShouldReturn200_WhenRedeemingPreChangeSha256Code()
+    {
+        // Forged exactly as the profile wizard wrote it before this change: salted with the user id.
+        const string code = "WIZARDCD";
+        await ResetUserAsync();
+        await SeedRecoveryCodesAsync([new RecoveryCodeService().Hash(code, AuthenticatedPlatformApiFactory.TestUserId)]);
+
+        var response = await RedeemAsync(code);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            because: "a salted-SHA-256 code minted before the deploy must keep redeeming with no regenerate");
+        await AssertAccessTokenIssuedAsync(response);
+    }
+
+    // ─── harden-recovery-code-digest 2.5 — the redemption counter ───────────
+
+    [Fact]
+    public async Task MfaVerify_ShouldCountRedemptionByFamily_WhenRecoveryCodeIsConsumed()
+    {
+        // mfa.recovery_codes.redeemed{family} counts consumed codes, never attempts. The listener is scoped
+        // to this factory's IMeterFactory, so redemptions in other test hosts cannot leak in.
+        const string bcryptCode = "0123456789abcdef";
+        var meterFactory = _factory.Services.GetRequiredService<System.Diagnostics.Metrics.IMeterFactory>();
+        var redeemed = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == RecoveryCodeFamilyMetrics.MeterName
+                && ReferenceEquals(instrument.Meter.Scope, meterFactory)
+                && instrument.Name == "mfa.recovery_codes.redeemed")
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
+        {
+            foreach (var tag in tags)
+            {
+                if (tag.Key == "family")
+                {
+                    for (var i = 0; i < value; i++)
+                        redeemed.Enqueue((string)tag.Value!);
+                }
+            }
+        });
+        listener.Start();
+
+        await ResetUserAsync();
+        var stored = await SeedRecoveryCodesAsync([
+            Argon2idTestDigests.Good,
+            BCrypt.Net.BCrypt.HashPassword(bcryptCode, workFactor: 10),
+        ]);
+
+        (await RedeemAsync("ZZZZ9999")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        redeemed.Should().BeEmpty(because: "a rejected code consumes nothing and is not a redemption");
+
+        (await RedeemAsync(bcryptCode)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await RedeemAsync(Argon2idTestDigests.GoodPlaintext)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        redeemed.Should().Equal(["bcrypt", "argon2id"],
+            because: "each consumed code is counted once, under the family it was stored in");
+        (await GetSeededUserAsync()).MfaRecoveryCodes.Should().BeEmpty(
+            because: "both stored elements (of {0}) were consumed", stored.Length);
+    }
+
     // ─── Mint helpers — always through the real endpoint ────────────────────
 
-    /// <summary>Mint path 1 — <c>POST /auth/mfa/setup</c> (BCrypt cost-10).</summary>
+    /// <summary>Mint path 1 — <c>POST /auth/mfa/setup</c> (16 hex characters, Argon2id).</summary>
     private async Task<string[]> MintViaAuthMfaSetupAsync()
     {
         var response = await _authClient.PostAsync("/api/v1/auth/mfa/setup", null);
@@ -236,7 +449,7 @@ public sealed class MfaRecoveryCodeRedemptionTests : IClassFixture<Authenticated
         return await ReadRecoveryCodesAsync(response);
     }
 
-    /// <summary>Mint path 2 — <c>POST /auth/mfa/recovery-codes/regenerate</c> (BCrypt cost-10).</summary>
+    /// <summary>Mint path 2 — <c>POST /auth/mfa/recovery-codes/regenerate</c> (16 hex characters, Argon2id).</summary>
     private async Task<string[]> MintViaAuthRegenerateAsync()
     {
         // This endpoint gates on MfaEnabled + a password challenge; the seeded
@@ -253,7 +466,7 @@ public sealed class MfaRecoveryCodeRedemptionTests : IClassFixture<Authenticated
         return await ReadRecoveryCodesAsync(response);
     }
 
-    /// <summary>Mint path 3 — <c>POST /profile/security/mfa/enroll/verify</c> (salted SHA-256).</summary>
+    /// <summary>Mint path 3 — <c>POST /profile/security/mfa/enroll/verify</c> (8 Base32 characters, Argon2id).</summary>
     private async Task<string[]> MintViaProfileEnrollVerifyAsync()
     {
         // The wizard mints only after a live TOTP validates against the secret
@@ -271,7 +484,7 @@ public sealed class MfaRecoveryCodeRedemptionTests : IClassFixture<Authenticated
         return await ReadRecoveryCodesAsync(response);
     }
 
-    /// <summary>Mint path 4 — <c>POST /profile/security/recovery-codes/regenerate</c> (salted SHA-256).</summary>
+    /// <summary>Mint path 4 — <c>POST /profile/security/recovery-codes/regenerate</c> (8 Base32 characters, Argon2id).</summary>
     private async Task<string[]> MintViaProfileRegenerateAsync()
     {
         // Requires an already-enrolled user plus a fresh TOTP step-up.
@@ -311,6 +524,45 @@ public sealed class MfaRecoveryCodeRedemptionTests : IClassFixture<Authenticated
     }
 
     // ─── Fixture helpers ────────────────────────────────────────────────────
+
+    /// <summary>Three normalised plaintexts for the forged Argon2id arrays (1.4).</summary>
+    private static readonly string[] s_argon2idPlaintexts = ["ABCD2345", "EFGH6789", "JKMN2345"];
+
+    /// <summary>
+    /// Forges an Argon2id array at the production parameters, one element per
+    /// <see cref="s_argon2idPlaintexts"/> entry. Used only where no mint path writes Argon2id
+    /// yet (1.4); the mint-path tests (1.1) never forge.
+    /// </summary>
+    private static string[] ForgeArgon2idArray() =>
+        s_argon2idPlaintexts.Select(PasswordService.HashPassword).ToArray();
+
+    /// <summary>Puts the seeded user into the enrolled state with the given stored digests.</summary>
+    private async Task<string[]> SeedRecoveryCodesAsync(string[] stored)
+    {
+        var user = await GetSeededUserAsync();
+        user.MfaEnabled = true;
+        user.MfaRecoveryCodes = [.. stored];
+        return stored;
+    }
+
+    /// <summary>
+    /// 1.1's two-part check: every element the mint stored is an Argon2id digest at the
+    /// production parameters, and a returned plaintext then redeems at the real endpoint.
+    /// </summary>
+    private async Task AssertStoredArgon2idAndRedeemableAsync(string[] codes)
+    {
+        var user = await GetSeededUserAsync();
+        user.MfaRecoveryCodes.Should().NotBeNullOrEmpty();
+        user.MfaRecoveryCodes.Should().AllSatisfy(d => d.Should().StartWith(Argon2idTestDigests.ProductionPrefix,
+            because: "every mint path must persist Argon2id at the password parameters (design D1, D4)"));
+
+        var response = await RedeemAsync(codes[0]);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            because: "a code the mint returned must redeem at POST /auth/mfa/verify");
+        await AssertAccessTokenIssuedAsync(response);
+    }
+
 
     private static async Task AssertAccessTokenIssuedAsync(HttpResponseMessage response)
     {
