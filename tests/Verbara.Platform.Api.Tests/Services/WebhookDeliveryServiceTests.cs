@@ -198,12 +198,10 @@ public class WebhookDeliveryServiceTests
 
         await service.ProcessPendingRetriesOnceAsync(ct);
         var afterFirstTick = harness.Receiver.Received.Count;
-        var pendingAfterFirstTick = 0;
+        var statusesAfterFirstTick = new List<WebhookDeliveryStatus?>();
         foreach (var id in ids)
-        {
-            if ((await deliveryStore.GetByIdAsync(id, ct))?.Status == WebhookDeliveryStatus.Pending)
-                pendingAfterFirstTick++;
-        }
+            statusesAfterFirstTick.Add((await deliveryStore.GetByIdAsync(id, ct))?.Status);
+        var pendingAfterFirstTick = statusesAfterFirstTick.Count(s => s == WebhookDeliveryStatus.Pending);
 
         await service.ProcessPendingRetriesOnceAsync(ct);
 
@@ -243,7 +241,7 @@ public class WebhookDeliveryServiceTests
         var tickStart = harness.Clock.UtcNow;
         var first = WebhookDeliveryPostgresFixture.PendingDelivery(nextRetryAt: tickStart.AddMinutes(-1));
         deliveryStore.ClaimNextDueAsync(Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(new WebhookDeliveryClaim(first, ClaimId, Reclaimed: false), (WebhookDeliveryClaim?)null);
+            .Returns(new WebhookDeliveryClaim(first, ClaimId, Reclaimed: false), default(WebhookDeliveryClaim?));
         deliveryStore.CompleteAttemptAsync(Arg.Any<WebhookDelivery>(), ClaimId, Arg.Any<CancellationToken>())
             .Returns(true);
 

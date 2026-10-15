@@ -65,7 +65,7 @@ public sealed class WebhookDeliveryServiceResilienceTests
         var deliveryStore = Substitute.For<IWebhookDeliveryStore>();
         deliveryStore.ClaimNextDueAsync(
                 Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns((WebhookDeliveryClaim?)null);
+            .Returns(default(WebhookDeliveryClaim?));
 
         var sut = BuildWorker(deliveryStore: deliveryStore, httpClientFactory: httpFactory);
 
