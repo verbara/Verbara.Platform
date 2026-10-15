@@ -5,10 +5,12 @@ namespace Verbara.Platform.Api.Tests;
 
 public sealed class RbacEndpointTests : IClassFixture<AuthenticatedPlatformApiFactory>
 {
+    private readonly AuthenticatedPlatformApiFactory _factory;
     private readonly HttpClient _client;
 
     public RbacEndpointTests(AuthenticatedPlatformApiFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateAuthenticatedClient();
     }
 
@@ -92,18 +94,55 @@ public sealed class RbacEndpointTests : IClassFixture<AuthenticatedPlatformApiFa
     }
 
     [Fact]
-    public async Task AddUserRole_ShouldReturn204()
+    public async Task AddUserRole_ShouldReturn204_WhenTheUserExistsInTheTenant()
     {
         // First create a role to assign
         var createRequest = new { Name = "ForAssignment" };
         var createResponse = await _client.PostAsJsonAsync("/api/admin/roles", createRequest);
         createResponse.EnsureSuccessStatusCode();
         var created = await createResponse.Content.ReadFromJsonAsync<RoleResponse>();
+        var userId = _factory.SeedActiveUser();
 
         var response = await _client.PostAsync(
-            $"/api/admin/users/user-1/roles/{created!.RoleId}", null);
+            $"/api/admin/users/{userId}/roles/{created!.RoleId}", null);
 
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        var roles = await _client.GetFromJsonAsync<List<AssignmentResponse>>($"/api/admin/users/{userId}/roles");
+        roles.Should().ContainSingle().Which.RoleId.Should().Be(created.RoleId);
+    }
+
+    [Fact]
+    public async Task AddUserRole_ShouldReturn404AndWriteNoRow_WhenTheUserDoesNotExistInTheTenant()
+    {
+        var createResponse = await _client.PostAsJsonAsync("/api/admin/roles", new { Name = "ForAnUnknownUser" });
+        createResponse.EnsureSuccessStatusCode();
+        var created = await createResponse.Content.ReadFromJsonAsync<RoleResponse>();
+        var unknownUserId = $"user-{Guid.NewGuid():N}";
+
+        var response = await _client.PostAsync(
+            $"/api/admin/users/{unknownUserId}/roles/{created!.RoleId}", null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var refusal = await response.Content.ReadFromJsonAsync<RefusalResponse>();
+        refusal.Should().Be(new RefusalResponse("user-not-found", unknownUserId));
+        var roles = await _client.GetFromJsonAsync<List<AssignmentResponse>>($"/api/admin/users/{unknownUserId}/roles");
+        roles.Should().BeEmpty("a refused assignment writes no user_roles row");
+    }
+
+    [Fact]
+    public async Task AddUserRole_ShouldReturn404_WhenTheUserExistsOnlyInAnotherTenant()
+    {
+        var createResponse = await _client.PostAsJsonAsync("/api/admin/roles", new { Name = "ForAForeignUser" });
+        createResponse.EnsureSuccessStatusCode();
+        var created = await createResponse.Content.ReadFromJsonAsync<RoleResponse>();
+        var foreignUserId = _factory.SeedActiveUser(tenantId: "tenant-other-002");
+
+        var response = await _client.PostAsync(
+            $"/api/admin/users/{foreignUserId}/roles/{created!.RoleId}", null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var roles = await _client.GetFromJsonAsync<List<AssignmentResponse>>($"/api/admin/users/{foreignUserId}/roles");
+        roles.Should().BeEmpty();
     }
 
     [Fact]
@@ -115,10 +154,12 @@ public sealed class RbacEndpointTests : IClassFixture<AuthenticatedPlatformApiFa
         createResponse.EnsureSuccessStatusCode();
         var created = await createResponse.Content.ReadFromJsonAsync<RoleResponse>();
 
-        await _client.PostAsync($"/api/admin/users/user-1/roles/{created!.RoleId}", null);
+        var userId = _factory.SeedActiveUser();
+        (await _client.PostAsync($"/api/admin/users/{userId}/roles/{created!.RoleId}", null))
+            .StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         var response = await _client.DeleteAsync(
-            $"/api/admin/users/user-1/roles/{created.RoleId}");
+            $"/api/admin/users/{userId}/roles/{created.RoleId}");
 
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
     }
@@ -146,4 +187,6 @@ public sealed class RbacEndpointTests : IClassFixture<AuthenticatedPlatformApiFa
     }
 
     private sealed record RoleResponse(string RoleId, string Name, string? Description);
+    private sealed record AssignmentResponse(string RoleId);
+    private sealed record RefusalResponse(string Error, string UserId);
 }

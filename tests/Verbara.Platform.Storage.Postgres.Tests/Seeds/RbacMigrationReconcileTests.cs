@@ -7,7 +7,7 @@ using Verbara.Platform.Storage.Postgres.Stores;
 namespace Verbara.Platform.Storage.Postgres.Tests.Seeds;
 
 /// <summary>
-/// The role migration that runs at every start (<see cref="RbacMigrationSeeder.MigrateExistingUsersAsync"/>)
+/// The role migration that runs at every start (<see cref="RbacMigrationSeeder.MigrateExistingUsersAsync(Npgsql.NpgsqlDataSource, System.Threading.CancellationToken)"/>)
 /// keeps the RBAC role it grants for a user's <see cref="UserRole"/> in step with that role: a grant it
 /// made (or a user-creation path made) for a role the user no longer has is removed, so a user demoted
 /// before this release stops holding the old role's permissions at the next start. Against a real
