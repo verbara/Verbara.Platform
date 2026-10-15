@@ -1810,23 +1810,8 @@ app.MapWebChatWebSocket();
 // ─── RBAC seed: permissions, role templates (Postgres only) ──────────────────
 if (!app.Environment.IsEnvironment("Testing"))
 {
-    var npgsqlDs = app.Services.GetService<NpgsqlDataSource>();
-    if (npgsqlDs is not null)
-    {
-        try
-        {
-            await Verbara.Platform.Storage.Postgres.Seeds.RbacSeederOrchestrator
-                .SeedRbacAsync(npgsqlDs, CancellationToken.None);
-            Verbara.Platform.Api.RbacSeedLog.SeedCompleted(app.Logger);
-        }
-        catch (Exception ex)
-        {
-            // ADR-0037 — loud, but never fatal. A silent Console.WriteLine here is what let a
-            // fully broken role model (5 of 11 templates seeded) go unnoticed for weeks. The
-            // boot deliberately continues: a transient database fault must not brick the host.
-            Verbara.Platform.Api.RbacSeedLog.SeedFailed(app.Logger, ex);
-        }
-    }
+    // ADR-0037 — logged at Error on failure, never fatal to the boot (RbacSeedStartup).
+    await Verbara.Platform.Api.RbacSeedStartup.RunAsync(app.Services, app.Logger, CancellationToken.None);
 }
 
 app.Run();

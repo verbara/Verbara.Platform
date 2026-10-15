@@ -284,12 +284,18 @@ internal static class RbacEndpoints
 
     private static async Task<IResult> AddUserRole(
         string id, string roleId, HttpContext context,
-        [FromServices] IUserRoleStore store, [FromServices] PermissionResolver resolver,
+        [FromServices] IUserRoleStore store, [FromServices] IUserStore users, [FromServices] PermissionResolver resolver,
         [FromServices] IAuditService audit, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var userId = EntityId.From(id);
         var assignedBy = context.User.FindFirst("user_id")?.Value;
+
+        // harden-rbac-migration-seeder (design D6): user_roles has no foreign key onto users, so the store
+        // would accept a user id that names nobody in this tenant and leave a row that the permissions read
+        // resolves while login never does. Refuse it before anything is written, cached or audited.
+        if (await users.GetByIdAsync(tenantId, userId, ct) is null)
+            return TypedResults.NotFound(UserRoleAssignmentRefusal.ForUnknownUser(id));
 
         await store.AssignAsync(tenantId, userId, roleId, assignedBy, ct);
         resolver.InvalidateUser(tenantId, userId);

@@ -107,6 +107,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Assigning a role to a user the tenant does not have answers `404`.** `POST /admin/users/{id}/roles/{roleId}`
+  used to answer `204` and store the assignment for any user id. It now looks the user up in the caller's tenant
+  first and, when there is none, answers `404` with `{ "error": "user-not-found", "userId": … }` and stores
+  nothing. A script that assigns roles before it creates the user must create the user first.
+
 - **Refused closes and typifications answer `409` with a stable code instead of `400`.**
   `POST /conversations/{id}/close` and `POST /conversations/{id}/typify` answer `409` with
   `{ "error": … }` set to `typification-required` (a close of an agent-held chat when a published
@@ -142,6 +147,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (Platform/ADR-0025, addendum of 2026-10-13) (#392)
 
 ### Fixed
+
+- **The role migration at startup no longer stops at the first tenant that fails.** Each tenant is migrated in
+  its own transaction: a tenant that fails is rolled back whole, logged at Error (event `3701`, with the tenant
+  id) and retried at the next start, and the tenants after it are still migrated. When any tenant failed, a
+  summary (event `3702`) names them and the startup log still reports the RBAC seed as failed. A template the
+  migration does not clone because the tenant already has a role with that name under another id is now logged
+  (event `3700`, naming the tenant, the template and that role). A user who holds the tenant's setup role
+  (`admin-{tenant}`), its provisioned role (`role_{template}_{tenant}`) or the template's own role is not given a
+  second one when the tenant later adds the template's own role or renames that role. A user attached by name to a
+  role with any other id may receive the template's role as well after that role is renamed: they then hold two
+  equivalent roles (two admin roles for an Admin), gain no permission beyond what their user role already grants,
+  and later starts change nothing.
 
 - **The AI typification suggestion's rate limit now uses the tenant the request resolved.** On
   `POST /api/v1/conversations/{id}/typification-suggestion`, a tenant identified by its subdomain without an

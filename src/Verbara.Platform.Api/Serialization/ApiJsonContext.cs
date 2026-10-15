@@ -414,6 +414,8 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(CurrencyMismatchRefusal))]
 [JsonSerializable(typeof(PlanAboveParentRefusal))]
 [JsonSerializable(typeof(DunningPartnerCustomerRefusal))]
+// harden-rbac-migration-seeder (design D6) — 404 on a role assignment to a user the tenant does not have.
+[JsonSerializable(typeof(UserRoleAssignmentRefusal))]
 [JsonSerializable(typeof(TenantTypeMismatchProblem))]  // ADR-0027 — operational tenant-type gate response
 [JsonSerializable(typeof(ErrorDetailResponse))]
 [JsonSerializable(typeof(MessageResponse))]
