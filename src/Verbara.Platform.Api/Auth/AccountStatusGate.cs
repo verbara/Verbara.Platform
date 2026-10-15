@@ -10,11 +10,20 @@ namespace Verbara.Platform.Api.Auth;
 /// <summary>
 /// How the Api refuses an account that may not authenticate. The rule itself is
 /// <see cref="User.CanAuthenticate"/>; this class only keeps the refusals uniform: one recorded
-/// reason, one response body, one 403 for the sign-in endpoints.
+/// reason, one coded 403 for the sign-in endpoints, one message for every other refusal.
 /// </summary>
 internal static class AccountStatusGate
 {
-    /// <summary>The body of every refusal. Names no status on purpose.</summary>
+    /// <summary>
+    /// The <c>error</c> code of the sign-in endpoints' 403 (<see cref="Forbidden"/>): a stable value a client
+    /// matches instead of text. Names no status on purpose: Suspended and Deactivated read the same.
+    /// </summary>
+    internal const string InactiveAccountCode = "account-inactive";
+
+    /// <summary>
+    /// The message of every refusal outside the sign-in endpoints: the refresh 401, the impersonation
+    /// ProblemDetails <c>detail</c> and the JWT failure reason. Names no status on purpose.
+    /// </summary>
     internal const string DeniedMessage = "Account is not active.";
 
     /// <summary>The impersonation-token claim that records its impersonator's role when it was minted.</summary>
@@ -108,11 +117,12 @@ internal static class AccountStatusGate
 
     /// <summary>
     /// The sign-in endpoints' answer to an account that proved its credentials but may not
-    /// authenticate: 403, distinct from the 401 a wrong password gets.
+    /// authenticate: 403 with <see cref="InactiveAccountCode"/> in <c>error</c>, distinct from the 401 a wrong
+    /// password gets. <c>/auth/login</c>, <c>/auth/mfa/verify</c> and <c>/auth/login/apikey</c> answer it.
     /// </summary>
     internal static IResult Forbidden() =>
         Results.Json(
-            new ErrorResponse(DeniedMessage),
+            new ErrorResponse(InactiveAccountCode),
             ApiJsonContext.Default.ErrorResponse,
             statusCode: StatusCodes.Status403Forbidden);
 }

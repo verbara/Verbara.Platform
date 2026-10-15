@@ -31,16 +31,18 @@ internal static class AuthEndpoints
     {
         var group = app.MapGroup("/auth");
 
-        // Anonymous auth endpoints
-        group.MapPost("/login", Login).AllowAnonymous();
+        // Anonymous auth endpoints. The three sign-in routes answer a tenant-status refusal with its code
+        // (TenantStatusRefusals); every other route keeps the prose.
+        group.MapPost("/login", Login).AllowAnonymous().AnswersTenantRefusalWithCode();
         group.MapPost("/refresh", Refresh).AllowAnonymous();
-        group.MapPost("/login/apikey", ApiKeyLogin).AllowAnonymous();
+        group.MapPost("/login/apikey", ApiKeyLogin).AllowAnonymous().AnswersTenantRefusalWithCode();
         group.MapPost("/forgot-password", ForgotPassword).AllowAnonymous();
         group.MapPost("/reset-password", ResetPassword).AllowAnonymous();
 
         // MFA verification during login (anonymous — uses challenge token). Its own limit per tenant and
         // client, plus a per-client backstop across tenants (MfaVerifyRateLimitPolicy).
-        group.MapPost("/mfa/verify", MfaVerify).AllowAnonymous().RequireMfaVerifyRateLimit();
+        group.MapPost("/mfa/verify", MfaVerify).AllowAnonymous().RequireMfaVerifyRateLimit()
+            .AnswersTenantRefusalWithCode();
 
         // Authenticated endpoints
         group.MapPost("/logout", Logout).RequireAuthorization();

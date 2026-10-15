@@ -46,6 +46,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   must read `/health/voice`. Point no probe at `/health/voice`: on a licensed engine it can read Unhealthy after 30 s
   without calls. (Platform/ADR-0025, addendum of 2026-10-13) (#392)
 
+- **Sign-in refusals carry a code.** The account-status and tenant-status 403 refusals of `/auth/login`,
+  `/auth/mfa/verify` and `/auth/login/apikey` carry a code in `error`: `account-inactive` instead of
+  `Account is not active.`, and `tenant-suspended` / `tenant-pending-deletion` instead of the tenant prose (only on
+  those three routes; every other route keeps the prose). The status is unchanged; a client that matched the text
+  must match the code.
+
 ### Added
 
 - **`/metrics` shows how full each Postgres pool is and what the auth write queue does.** The API now
@@ -113,6 +119,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   after start and then hourly (`Mfa:RecoveryCodeCensus:InitialDelay` and `:Interval`; an interval of `0`
   disables the scan; only users with MFA enabled are counted), and `mfa_recovery_codes_redeemed_total{family="argon2id"|"bcrypt"|"sha256"}`, counted when
   a code is consumed. Neither carries a tenant label. (#407)
+
+- **Sign-in refusal codes.** `/auth/login`, `/auth/mfa/verify` and `/auth/login/apikey` answer `403` with
+  `account-inactive` (an account that is not Active, the same for every such status), `tenant-suspended` or
+  `tenant-pending-deletion` in `error`.
 
 ### Changed
 

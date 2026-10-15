@@ -36,13 +36,15 @@ internal sealed class TenantStatusMiddleware
         switch (tenant.Status)
         {
             case TenantStatus.Suspended:
-                await WriteError(context, 403,
-                    "This tenant account has been suspended. Contact your administrator.");
+                await WriteError(context, 403, AnswersWithCode(context)
+                    ? TenantStatusRefusals.Suspended
+                    : "This tenant account has been suspended. Contact your administrator.");
                 return;
 
             case TenantStatus.PendingDeletion:
-                await WriteError(context, 403,
-                    "This tenant account is pending deletion due to prolonged non-payment. Contact your administrator immediately.");
+                await WriteError(context, 403, AnswersWithCode(context)
+                    ? TenantStatusRefusals.PendingDeletion
+                    : "This tenant account is pending deletion due to prolonged non-payment. Contact your administrator immediately.");
                 return;
 
             case TenantStatus.Deleted:
@@ -64,6 +66,14 @@ internal sealed class TenantStatusMiddleware
                 return;
         }
     }
+
+    /// <summary>
+    /// True when the matched endpoint opted into the coded refusal
+    /// (<see cref="TenantStatusRefusalEndpointExtensions.AnswersTenantRefusalWithCode"/>); the routing middleware
+    /// runs before this one, so the endpoint is already selected.
+    /// </summary>
+    private static bool AnswersWithCode(HttpContext context) =>
+        context.GetEndpoint()?.Metadata.GetMetadata<TenantRefusalCodeMetadata>() is not null;
 
     private static async Task PopulateCaches(HttpContext context, Tenant tenant)
     {
