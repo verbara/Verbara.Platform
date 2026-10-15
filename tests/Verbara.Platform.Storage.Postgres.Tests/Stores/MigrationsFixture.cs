@@ -56,12 +56,51 @@ public sealed class MigrationsFixture : IAsyncLifetime
         if (_container is not null) await _container.DisposeAsync();
     }
 
+    private const string MigrationResourcePrefix = "Verbara.Platform.Storage.Postgres.Migrations.";
+
+    /// <summary>
+    /// Runs one embedded migration (by file name, e.g. <c>023_WebhookDeliveryClaim.sql</c>) again, on top of the
+    /// full set already applied — the check that a migration is idempotent.
+    /// </summary>
+    public async Task ReapplyMigrationAsync(string fileName)
+    {
+        var assembly = typeof(ServiceCollectionExtensions).Assembly;
+        await using var stream = assembly.GetManifestResourceStream(MigrationResourcePrefix + fileName)
+            ?? throw new InvalidOperationException($"No embedded migration named {fileName}.");
+        using var reader = new StreamReader(stream);
+        var sql = await reader.ReadToEndAsync();
+
+        await using var conn = await DataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// The column's type as Postgres prints it (<c>format_type</c>, e.g. <c>character varying(32)</c>) and whether
+    /// it is nullable, or <c>null</c> when the column does not exist.
+    /// </summary>
+    public async Task<(string Type, bool Nullable)?> ColumnDefinitionAsync(string table, string column)
+    {
+        await using var conn = await DataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT format_type(a.atttypid, a.atttypmod), NOT a.attnotnull " +
+            "FROM pg_attribute a " +
+            "WHERE a.attrelid = to_regclass(@Table) AND a.attname = @Column AND a.attnum > 0 AND NOT a.attisdropped";
+        cmd.Parameters.Add(new NpgsqlParameter("Table", table));
+        cmd.Parameters.Add(new NpgsqlParameter("Column", column));
+        await using var reader = await cmd.ExecuteReaderAsync();
+        if (!await reader.ReadAsync()) return null;
+        return (reader.GetString(0), reader.GetBoolean(1));
+    }
+
     // Mirrors DatabaseMigrationService: discover embedded Migrations/*.sql by the
     // assembly resource prefix, ordered ordinally by name, and apply each in order.
     private async Task ApplyMigrationsAsync()
     {
         var assembly = typeof(ServiceCollectionExtensions).Assembly;
-        const string prefix = "Verbara.Platform.Storage.Postgres.Migrations.";
+        const string prefix = MigrationResourcePrefix;
 
         var resources = assembly.GetManifestResourceNames()
             .Where(n => n.StartsWith(prefix, StringComparison.Ordinal) && n.EndsWith(".sql", StringComparison.Ordinal))
