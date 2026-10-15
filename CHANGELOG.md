@@ -56,7 +56,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/auth/mfa/verify` and `/auth/login/apikey` carry a code in `error`: `account-inactive` instead of
   `Account is not active.`, and `tenant-suspended` / `tenant-pending-deletion` instead of the tenant prose (only on
   those three routes; every other route keeps the prose). The status is unchanged; a client that matched the text
-  must match the code.
+  must match the code. (#409)
 
 ### Added
 
@@ -128,7 +128,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Sign-in refusal codes.** `/auth/login`, `/auth/mfa/verify` and `/auth/login/apikey` answer `403` with
   `account-inactive` (an account that is not Active, the same for every such status), `tenant-suspended` or
-  `tenant-pending-deletion` in `error`.
+  `tenant-pending-deletion` in `error`. (#409)
 
 ### Changed
 
