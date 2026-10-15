@@ -28,6 +28,7 @@ namespace Verbara.Platform.Api.Tests.Mfa;
 public sealed class RecoveryCodeMintThrottleTests : IClassFixture<AuthenticatedPlatformApiFactory>
 {
     private const string Password = "CurrentPassword123!";
+    private const string StepUpSecret = "JBSWY3DPEHPK3PXP";
 
     private readonly AuthenticatedPlatformApiFactory _factory;
 
@@ -73,6 +74,41 @@ public sealed class RecoveryCodeMintThrottleTests : IClassFixture<AuthenticatedP
 
         verify.StatusCode.Should().Be(HttpStatusCode.TooManyRequests,
             because: "the allowance is per user across all four mint paths, not per endpoint");
+        RetryAfterSecondsOf(verify).Should().BeGreaterThanOrEqualTo(1);
+    }
+
+    [Fact]
+    public async Task RegenerateRecoveryCodes_ShouldReturn429WithRetryAfterAndKeepCodes_WhenSameUserMintedWithinInterval()
+    {
+        await using var host = WithMintInterval("00:01:00");
+        var client = host.CreateAuthenticatedClient();
+        var user = await MintThenEnableAsync(host, client);
+        var storedBefore = user.MfaRecoveryCodes!.ToArray();
+
+        var regenerate = await client.PostAsJsonAsync(
+            "/api/v1/auth/mfa/recovery-codes/regenerate", new { password = Password });
+
+        regenerate.StatusCode.Should().Be(HttpStatusCode.TooManyRequests,
+            because: "the allowance is per user across all four mint paths, not per endpoint");
+        RetryAfterSecondsOf(regenerate).Should().BeGreaterThanOrEqualTo(1);
+        user.MfaRecoveryCodes.Should().Equal(storedBefore, because: "a refused mint writes nothing");
+    }
+
+    [Fact]
+    public async Task ProfileRegenerateRecoveryCodes_ShouldReturn429WithRetryAfterAndKeepCodes_WhenSameUserMintedWithinInterval()
+    {
+        await using var host = WithMintInterval("00:01:00");
+        var client = host.CreateAuthenticatedClient();
+        var user = await MintThenEnableAsync(host, client);
+        var storedBefore = user.MfaRecoveryCodes!.ToArray();
+
+        var regenerate = await client.PostAsJsonAsync(
+            "/api/v1/profile/security/recovery-codes/regenerate", new { totpCode = ComputeTotp(StepUpSecret) });
+
+        regenerate.StatusCode.Should().Be(HttpStatusCode.TooManyRequests,
+            because: "the allowance is per user across all four mint paths, not per endpoint");
+        RetryAfterSecondsOf(regenerate).Should().BeGreaterThanOrEqualTo(1);
+        user.MfaRecoveryCodes.Should().Equal(storedBefore, because: "a refused mint writes nothing");
     }
 
     [Fact]
@@ -93,6 +129,34 @@ public sealed class RecoveryCodeMintThrottleTests : IClassFixture<AuthenticatedP
 
         right.StatusCode.Should().Be(HttpStatusCode.OK,
             because: "the allowance is spent by a mint, not by a refused credential check");
+    }
+
+    /// <summary>
+    /// Spends the user's allowance with one mint through <c>/auth/mfa/setup</c>, then leaves the account with
+    /// MFA on, a known authenticator secret and a known password, so either regenerate route passes its own
+    /// credential checks and reaches the allowance.
+    /// </summary>
+    private static async Task<User> MintThenEnableAsync(AuthenticatedHost host, HttpClient client)
+    {
+        var user = await ResetUserAsync(host);
+        (await client.PostAsync("/api/v1/auth/mfa/setup", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        user.MfaRecoveryCodes.Should().NotBeNullOrEmpty(because: "the first mint stored codes");
+        user.MfaEnabled = true;
+        user.MfaSecret = StepUpSecret;
+        user.MfaConfirmedAt = DateTimeOffset.UtcNow;
+        user.PasswordHash = PasswordService.HashPassword(Password);
+        return user;
+    }
+
+    /// <summary>The <c>Retry-After</c> header as whole seconds; fails if it is absent or not an integer.</summary>
+    private static int RetryAfterSecondsOf(HttpResponseMessage response)
+    {
+        response.Headers.TryGetValues("Retry-After", out var values).Should().BeTrue(
+            because: "a throttled mint says how long to wait");
+        var raw = values!.Single();
+        int.TryParse(raw, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture,
+            out var seconds).Should().BeTrue(because: $"Retry-After is whole seconds, got '{raw}'");
+        return seconds;
     }
 
     private AuthenticatedHost WithMintInterval(string interval) =>
