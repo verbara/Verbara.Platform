@@ -110,7 +110,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Assigning a role to a user the tenant does not have answers `404`.** `POST /admin/users/{id}/roles/{roleId}`
   used to answer `204` and store the assignment for any user id. It now looks the user up in the caller's tenant
   first and, when there is none, answers `404` with `{ "error": "user-not-found", "userId": … }` and stores
-  nothing. A script that assigns roles before it creates the user must create the user first.
+  nothing. A script that assigns roles before it creates the user must create the user first. (#403)
 
 - **Refused closes and typifications answer `409` with a stable code instead of `400`.**
   `POST /conversations/{id}/close` and `POST /conversations/{id}/typify` answer `409` with
@@ -158,7 +158,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   second one when the tenant later adds the template's own role or renames that role. A user attached by name to a
   role with any other id may receive the template's role as well after that role is renamed: they then hold two
   equivalent roles (two admin roles for an Admin), gain no permission beyond what their user role already grants,
-  and later starts change nothing.
+  and later starts change nothing. (#403)
 
 - **The AI typification suggestion's rate limit now uses the tenant the request resolved.** On
   `POST /api/v1/conversations/{id}/typification-suggestion`, a tenant identified by its subdomain without an
