@@ -259,9 +259,9 @@ public sealed class PostgresUserStoreMfaEncryptionTests
     public async Task Get_ShouldPreserveBothHashFormats_WhenCodesMixBcryptAndSha256Hex()
     {
         const string userId = "u-formats";
-        // MfaService.HashRecoveryCodes emits BCrypt cost-10 digests;
-        // RecoveryCodeService.Hash emits salted SHA-256 hex. Both coexist in
-        // the column today and neither may be inspected or normalised.
+        // The two legacy families: BCrypt cost-10 digests (what the /auth/mfa/* paths
+        // wrote) and salted SHA-256 hex (RecoveryCodeService.Hash). New codes are
+        // Argon2id; all three coexist in the column and none may be inspected or normalised.
         const string bcryptDigest = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
         const string sha256HexDigest = "9F86D081884C7D659A2FEAA0C55AD015A3BF4F1B2B0B822CD15D6C15B0F00A08";
         string[] supplied = [bcryptDigest, sha256HexDigest];

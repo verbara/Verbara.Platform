@@ -1,7 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
 using Verbara.Platform.Identity;
-using Isopoh.Cryptography.Argon2;
 
 namespace Verbara.Platform.Api.Services;
 
@@ -12,8 +9,8 @@ namespace Verbara.Platform.Api.Services;
 /// <para>
 /// AHH Phase 4 — replaces BCrypt (workFactor 12, ~162 ms verify on AMD 9900X
 /// per Phase 0 baseline) with Argon2id at the OWASP-2025 floor parameters
-/// (m=19 MiB, t=2, p=1, ~33 ms verify) as the canonical hash for new
-/// passwords. Legacy BCrypt hashes (<c>$2a$/$2b$</c>) remain verifiable so
+/// (m=19 MiB, t=2, p=1, ~33 ms verify; retuned to m=12 MiB, t=3 in v1.14.2,
+/// see <see cref="Argon2idHasher"/>) as the canonical hash for new passwords. Legacy BCrypt hashes (<c>$2a$/$2b$</c>) remain verifiable so
 /// already-deployed credentials keep working; the on-login rehash path in
 /// <see cref="Verbara.Platform.Api.Endpoints.AuthEndpoints"/> migrates each
 /// user transparently the next time they log in successfully.
@@ -39,69 +36,18 @@ internal sealed class PasswordService
     public const int LegacyBcryptWorkFactor = 12;
 
     /// <summary>
-    /// v1.14.2 retuned: Argon2id m=12 MiB (was 19 MiB).
-    /// OWASP-2025 specifies a parameter CURVE — m=46 MiB / t=1 OR
-    /// m=19 MiB / t=2 OR m=12 MiB / t=3 all target roughly the same total
-    /// work factor. v1.14.0 shipped with m=19 MiB which empirically
-    /// saturates memory bandwidth + GC under sustained load (post-AHH
-    /// single-replica regressed to ~50 req/s vs pre-AHH 75 req/s).
-    /// Lowering m + raising t keeps the OWASP floor while shrinking the
-    /// working-set per concurrent verify so GC pressure is less steep at
-    /// 100+ req/s. See docs/operations/auth-horizontal-scaling.md.
+    /// Hash a password with Argon2id. The parameters (m = 12 MiB, t = 3, p = 1) live in
+    /// <see cref="Argon2idHasher"/>, shared with MFA recovery codes so one place tunes both.
     /// </summary>
-    private const int Argon2MemoryCostKib = 12 * 1024;
-
-    /// <summary>v1.14.2 retuned: Argon2id t=3 (was 2). See above.</summary>
-    private const int Argon2TimeCost = 3;
-
-    /// <summary>OWASP-2025 floor: Argon2id p=1.</summary>
-    private const int Argon2Lanes = 1;
-
-    /// <summary>Argon2id output length in bytes.</summary>
-    private const int Argon2HashLength = 32;
-
-    /// <summary>Salt length in bytes (RFC 9106 recommendation).</summary>
-    private const int Argon2SaltLength = 16;
-
-    /// <summary>
-    /// Encoded-Argon2id prefix. Isopoh emits <c>$argon2id$v=19$m=…,t=…,p=…$salt$hash</c>;
-    /// only the prefix is needed to discriminate from BCrypt.
-    /// </summary>
-    private const string Argon2idPrefix = "$argon2id$";
-
-    /// <summary>
-    /// Hash a password with Argon2id at the OWASP-2025 floor parameters.
-    /// </summary>
-    public static string HashPassword(string password)
-    {
-        ArgumentNullException.ThrowIfNull(password);
-
-        var salt = new byte[Argon2SaltLength];
-        RandomNumberGenerator.Fill(salt);
-
-        var config = new Argon2Config
-        {
-            Type = Argon2Type.HybridAddressing,
-            Version = Argon2Version.Nineteen,
-            TimeCost = Argon2TimeCost,
-            MemoryCost = Argon2MemoryCostKib,
-            Lanes = Argon2Lanes,
-            Threads = Argon2Lanes,
-            Password = Encoding.UTF8.GetBytes(password),
-            Salt = salt,
-            HashLength = Argon2HashLength,
-        };
-
-        using var argon2 = new Argon2(config);
-        using var hash = argon2.Hash();
-        return config.EncodeString(hash.Buffer);
-    }
+    public static string HashPassword(string password) => Argon2idHasher.Hash(password);
 
     /// <summary>
     /// Verify a password against an existing hash. Detects the algorithm by
     /// prefix and dispatches:
     /// <list type="bullet">
-    ///   <item><description><c>$argon2id$…</c> → Argon2id verify.</description></item>
+    ///   <item><description><c>$argon2id$…</c> → Argon2id verify through <see cref="Argon2idHasher.SafeVerify"/>,
+    ///   which bounds the stored parameters before evaluating and treats a library exception as a
+    ///   failed verify.</description></item>
     ///   <item><description><c>$2a$/$2b$…</c> → BCrypt verify (legacy).</description></item>
     /// </list>
     /// </summary>
@@ -110,8 +56,11 @@ internal sealed class PasswordService
         ArgumentNullException.ThrowIfNull(password);
         ArgumentNullException.ThrowIfNull(hash);
 
-        if (hash.StartsWith(Argon2idPrefix, StringComparison.Ordinal))
-            return Argon2.Verify(hash, password);
+        // A corrupt stored Argon2id hash is a failed login, never an exception: Isopoh throws
+        // ArgumentException for an encoded t=0, p=0 or empty salt, and that message would otherwise
+        // reach ErrorHandlingMiddleware from the login path (ADR-0013).
+        if (hash.StartsWith(Argon2idHasher.Prefix, StringComparison.Ordinal))
+            return Argon2idHasher.SafeVerify(hash, password);
 
         // Default: legacy BCrypt. BCrypt.Net-Next accepts both $2a$ and $2b$
         // variants; any failure to parse the STORED hash is treated as a verify

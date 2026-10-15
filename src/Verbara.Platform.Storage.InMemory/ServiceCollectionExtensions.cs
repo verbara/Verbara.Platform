@@ -56,6 +56,9 @@ public static class ServiceCollectionExtensions
         services.AddKeyedSingleton<IUserStore, InMemoryUserStore>(AuthHotpathCacheKeys.UserStoreInner);
         services.AddSingleton<IUserStore>(sp =>
             sp.GetRequiredKeyedService<IUserStore>(AuthHotpathCacheKeys.UserStoreInner));
+        // harden-recovery-code-digest — the legacy recovery-code census, over the same store instance.
+        services.TryAddSingleton<Verbara.Platform.Identity.Mfa.IRecoveryCodeCensus>(sp => new InMemoryRecoveryCodeCensus(
+            (InMemoryUserStore)sp.GetRequiredKeyedService<IUserStore>(AuthHotpathCacheKeys.UserStoreInner)));
         services.AddSingleton<IApiKeyStore, InMemoryApiKeyStore>();
         services.AddSingleton<IServiceAccountStore, InMemoryServiceAccountStore>();
         services.AddSingleton<IRefreshTokenStore, InMemoryRefreshTokenStore>();

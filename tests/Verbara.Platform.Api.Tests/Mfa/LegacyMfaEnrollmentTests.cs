@@ -113,7 +113,7 @@ public sealed class LegacyMfaEnrollmentTests : IClassFixture<AccountStatusApiFac
     {
         var (store, context) = HandlerWithEnrolledUser();
 
-        var result = await AuthEndpoints.MfaSetup(context, store, CancellationToken.None);
+        var result = await AuthEndpoints.MfaSetup(context, store, new RecoveryCodeMintGate(RecoveryCodeMintOptions.Default, TimeProvider.System), CancellationToken.None);
 
         result.Should().BeOfType<BadRequest<ErrorResponse>>()
             .Which.Value!.Error.Should().Be(AuthEndpoints.MfaAlreadyEnrolledMessage);

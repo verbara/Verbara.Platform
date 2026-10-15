@@ -524,6 +524,7 @@ public sealed class AuthEndpointsTests
             request,
             BuildHttpContext(),
             userStore,
+            new RecoveryCodeMintGate(RecoveryCodeMintOptions.Default, TimeProvider.System),
             new AuthEventService(authEventStore),
             CancellationToken.None);
 
@@ -555,6 +556,7 @@ public sealed class AuthEndpointsTests
             request,
             BuildHttpContext(),
             userStore,
+            new RecoveryCodeMintGate(RecoveryCodeMintOptions.Default, TimeProvider.System),
             new AuthEventService(authEventStore),
             CancellationToken.None);
 
