@@ -128,7 +128,7 @@ public sealed class UserStoreRefusalTests
         ReadsReturn(mfaEnabled: true);
 
         var result = await AuthEndpoints.RegenerateRecoveryCodes(
-            new RegenerateRecoveryCodesRequest(Password), Context(), _store, AuthEvents(), CancellationToken.None);
+            new RegenerateRecoveryCodesRequest(Password), Context(), _store, new RecoveryCodeMintGate(RecoveryCodeMintOptions.Default, TimeProvider.System), AuthEvents(), CancellationToken.None);
 
         result.Should().BeOfType<BadRequest<ErrorResponse>>()
             .Which.Value!.Error.Should().Be("MFA is not enabled for this user.");
@@ -143,7 +143,7 @@ public sealed class UserStoreRefusalTests
 
         var result = await ProfileRecoveryCodesEndpoints.Regenerate(
             new ProfileRegenerateRecoveryCodesRequest(TotpNow()), Context(), _store, new RecoveryCodeService(),
-            AuthEvents(), audit, CancellationToken.None);
+            new RecoveryCodeMintGate(RecoveryCodeMintOptions.Default, TimeProvider.System), AuthEvents(), audit, CancellationToken.None);
 
         result.Should().BeOfType<BadRequest<ErrorResponse>>()
             .Which.Value!.Error.Should().Be("MFA is not enabled for this user.");
@@ -157,7 +157,7 @@ public sealed class UserStoreRefusalTests
 
         var result = await MfaEnrollEndpoints.Verify(
             new MfaEnrollVerifyRequest(Secret, TotpNow()), Context(), _store, new RecoveryCodeService(),
-            AuthEvents(), CancellationToken.None);
+            new RecoveryCodeMintGate(RecoveryCodeMintOptions.Default, TimeProvider.System), AuthEvents(), CancellationToken.None);
 
         result.Should().BeOfType<BadRequest<ErrorResponse>>()
             .Which.Value!.Error.Should().Be("MFA already enrolled.");

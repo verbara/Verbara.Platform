@@ -109,6 +109,10 @@ public static class ServiceCollectionExtensions
         services.AddKeyedSingleton<IUserStore, PostgresUserStore>(AuthHotpathCacheKeys.UserStoreInner);
         services.AddSingleton<IUserStore>(sp =>
             sp.GetRequiredKeyedService<IUserStore>(AuthHotpathCacheKeys.UserStoreInner));
+        // harden-recovery-code-digest — the legacy recovery-code census (unwrapping scan, resolved at first use).
+        services.TryAddSingleton<Verbara.Platform.Identity.Mfa.IRecoveryCodeCensus>(sp => new PostgresRecoveryCodeCensus(
+            sp.GetRequiredService<NpgsqlDataSource>(),
+            sp.GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>()));
         services.AddSingleton<IApiKeyStore, PostgresApiKeyStore>();
         services.AddSingleton<IRefreshTokenStore, PostgresRefreshTokenStore>();
         services.AddSingleton<IAuthEventStore, PostgresAuthEventStore>();

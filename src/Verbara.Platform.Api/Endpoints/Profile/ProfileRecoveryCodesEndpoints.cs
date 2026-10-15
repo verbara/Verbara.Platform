@@ -24,9 +24,9 @@ namespace Verbara.Platform.Api.Endpoints.Profile;
 /// The pattern mirrors <c>POST /auth/change-password</c> step-up (v1.9.2).
 /// </para>
 /// <para>
-/// Generated codes use the new SHA-256 + per-user salt scheme via
-/// <see cref="IRecoveryCodeService"/> (8-char Base32) and are returned ONCE.
-/// Storage retains hashes only.
+/// Plaintext codes come from <see cref="IRecoveryCodeService.Generate"/> (8-char Base32) and are
+/// returned ONCE. Storage keeps one Argon2id digest per code, written by
+/// <see cref="MfaService.HashRecoveryCodes"/> like every other mint path.
 /// </para>
 /// </remarks>
 internal static class ProfileRecoveryCodesEndpoints
@@ -41,13 +41,14 @@ internal static class ProfileRecoveryCodesEndpoints
 
     /// <summary>
     /// Regenerates the user's recovery codes after a fresh TOTP step-up.
-    /// Returns the plaintext codes ONCE; stores SHA-256 + per-user salt hashes.
+    /// Returns the plaintext codes ONCE; stores their Argon2id digests.
     /// </summary>
     internal static async Task<IResult> Regenerate(
         [FromBody] ProfileRegenerateRecoveryCodesRequest body,
         HttpContext context,
         [FromServices] IUserStore userStore,
         [FromServices] IRecoveryCodeService recoveryCodes,
+        [FromServices] RecoveryCodeMintGate mintGate,
         AuthEventService authEvents,
         [FromServices] IAuditService audit,
         CancellationToken ct)
@@ -87,11 +88,14 @@ internal static class ProfileRecoveryCodesEndpoints
             return Results.Unauthorized();
         }
 
+        // One mint per user per interval across the four mint paths (RecoveryCodeMintGate).
+        if (!mintGate.TryAcquire(user.TenantId, user.UserId, out var retryAfter))
+            return RecoveryCodeMintGate.Refuse(context, retryAfter);
+
         var codes = recoveryCodes.Generate();
-        var salt = user.UserId.Value;
         // Only while MFA is still on: codes are never written for an account whose MFA was just disabled.
         if (!await userStore.SetRecoveryCodesAsync(
-                user.TenantId, user.UserId, codes.Select(c => recoveryCodes.Hash(c, salt)).ToList(), DateTimeOffset.UtcNow, ct))
+                user.TenantId, user.UserId, MfaService.HashRecoveryCodes(codes).ToList(), DateTimeOffset.UtcNow, ct))
             return Results.BadRequest(new ErrorResponse("MFA is not enabled for this user."));
 
         await authEvents.LogAsync(tenantId, userId, AuthEventTypes.RecoveryCodesRegenerated,

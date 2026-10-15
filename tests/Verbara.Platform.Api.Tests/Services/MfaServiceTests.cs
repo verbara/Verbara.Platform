@@ -91,15 +91,16 @@ public sealed class MfaServiceTests
 
     // ─── Per-element digest dispatch (fix-recovery-code-redemption) ─────────
     //
-    // Two digest families coexist in users.mfa_recovery_codes:
-    //   • BCrypt cost-10        — minted by POST /auth/mfa/setup and
-    //                             POST /auth/mfa/recovery-codes/regenerate
-    //                             via MfaService.HashRecoveryCodes.
-    //   • salted SHA-256 (hex)  — minted by POST /profile/security/mfa/enroll/verify
-    //                             and POST /profile/security/recovery-codes/regenerate
-    //                             via IRecoveryCodeService.Hash(code, userId).
-    // Every test below verifies against a digest produced by the real minting
-    // code, never by re-hashing by hand inside the assertion.
+    // Three digest families coexist in users.mfa_recovery_codes:
+    //   • Argon2id              — minted by all four paths via MfaService.HashRecoveryCodes
+    //                             since harden-recovery-code-digest.
+    //   • BCrypt cost-10        — legacy: what POST /auth/mfa/setup and
+    //                             POST /auth/mfa/recovery-codes/regenerate wrote before,
+    //                             forged here with BCrypt.HashPassword(code, 10).
+    //   • salted SHA-256 (hex)  — legacy: what the profile wizard wrote before, via
+    //                             IRecoveryCodeService.Hash(code, userId).
+    // Every test below verifies against a digest produced by the code that minted (or
+    // used to mint) that family, never by re-hashing by hand inside the assertion.
 
     [Fact]
     public void ValidateRecoveryCode_ShouldReturnTrue_WhenCodeMatchesSha256Digest()
@@ -126,10 +127,11 @@ public sealed class MfaServiceTests
     [Fact]
     public void ValidateRecoveryCode_ShouldReturnTrue_WhenCodeMatchesBcryptDigest()
     {
-        // The legacy family — unchanged behaviour, pinned so the new SHA-256
-        // branch cannot be introduced at the cost of the existing one.
-        var plaintext = MfaService.GenerateRecoveryCodes();
-        var stored = MfaService.HashRecoveryCodes(plaintext);
+        // A legacy family — unchanged behaviour, pinned so neither the SHA-256 nor the
+        // Argon2id branch can be introduced at the cost of this one. The digests are what
+        // the /auth/mfa/* paths wrote before harden-recovery-code-digest (BCrypt cost 10).
+        var plaintext = MfaService.GenerateRecoveryCodes().Take(2).ToList();
+        var stored = plaintext.Select(c => BCrypt.Net.BCrypt.HashPassword(c, workFactor: 10)).ToList();
 
         var (isValid, index) = MfaService.ValidateRecoveryCode(
             s_recoveryCodes, plaintext[0], stored, TestSalt);
@@ -235,10 +237,12 @@ public sealed class MfaServiceTests
     [Fact]
     public void ValidateRecoveryCode_ShouldReturnFalse_WhenCodeMatchesNothing()
     {
-        // Per family: a wrong code must be rejected cleanly in both, with no
+        // Per family: a wrong code must be rejected cleanly in each, with no
         // element consumed (index -1 means the caller removes nothing).
-        var bcryptPlaintext = MfaService.GenerateRecoveryCodes();
-        var bcryptStored = MfaService.HashRecoveryCodes(bcryptPlaintext);
+        var bcryptPlaintext = MfaService.GenerateRecoveryCodes().Take(2).ToList();
+        var bcryptStored = bcryptPlaintext.Select(c => BCrypt.Net.BCrypt.HashPassword(c, workFactor: 10)).ToList();
+
+        var argon2idStored = MfaService.HashRecoveryCodes(MfaService.GenerateRecoveryCodes().Take(2).ToList());
 
         var sha256Plaintext = s_recoveryCodes.Generate();
         var sha256Stored = sha256Plaintext.Select(c => s_recoveryCodes.Hash(c, TestSalt)).ToList();
@@ -248,8 +252,13 @@ public sealed class MfaServiceTests
         var sha256Result = MfaService.ValidateRecoveryCode(
             s_recoveryCodes, "definitely-not-minted", sha256Stored, TestSalt);
 
+        var argon2idResult = MfaService.ValidateRecoveryCode(
+            s_recoveryCodes, "definitely-not-minted", argon2idStored, TestSalt);
+
         bcryptResult.Should().Be((false, -1),
             because: "a non-matching code against BCrypt digests is a clean rejection, never a 500");
+        argon2idResult.Should().Be((false, -1),
+            because: "a non-matching code against Argon2id digests is a clean rejection, never a 500");
         sha256Result.Should().Be((false, -1),
             because: "a non-matching code against salted-SHA-256 digests is a clean rejection, never a 500");
     }
@@ -269,5 +278,116 @@ public sealed class MfaServiceTests
         isValid.Should().BeFalse(
             because: "a code minted for one user must not redeem under another user's salt");
         index.Should().Be(-1);
+    }
+
+    // ─── Third family: Argon2id (harden-recovery-code-digest, Phase A) ──────
+    //
+    // Every new mint writes Argon2id at the password parameters (design D1, D4). The
+    // fixtures are forged by Argon2idTestDigests (Isopoh at the production parameters,
+    // over the NORMALISED plaintext, which is what the mint will hash).
+
+    [Fact]
+    public void ValidateRecoveryCode_ShouldReturnTrue_WhenCodeMatchesArgon2idDigest()
+    {
+        var stored = new[] { Argon2idTestDigests.Good };
+
+        var (isValid, index) = MfaService.ValidateRecoveryCode(
+            s_recoveryCodes, Argon2idTestDigests.GoodPlaintext, stored, TestSalt);
+
+        isValid.Should().BeTrue(
+            because: "an element starting with $argon2id$ must be verified with Argon2id, not fall to the "
+                   + "salted-SHA-256 branch");
+        index.Should().Be(0);
+    }
+
+    [Fact]
+    public void ValidateRecoveryCode_ShouldMatchArgon2id_WhenCodeIsTypedLowercaseWithWhitespace()
+    {
+        // D4: the Argon2id branch normalises the submitted code exactly as the mint does
+        // (Trim + ToUpperInvariant), matching what the SHA-256 family has always done.
+        var stored = new[] { Argon2idTestDigests.Good };
+        var typed = "  " + Argon2idTestDigests.GoodPlaintext.ToLowerInvariant() + " \t";
+
+        var (isValid, index) = MfaService.ValidateRecoveryCode(s_recoveryCodes, typed, stored, TestSalt);
+
+        isValid.Should().BeTrue(
+            because: "a code typed in lower case with surrounding whitespace is the same code once normalised");
+        index.Should().Be(0);
+    }
+
+    [Fact]
+    public void ValidateRecoveryCode_ShouldMatchPerElement_WhenArrayMixesThreeFamilies()
+    {
+        // One element per family; each plaintext must return its own index, so the caller
+        // removes exactly that element and the other two stay redeemable.
+        const string bcryptPlaintext = "0123456789abcdef"; // /auth/mfa/* format, verified raw
+        const string sha256Plaintext = "WIZARDCD";          // profile format
+
+        var stored = new List<string>
+        {
+            Argon2idTestDigests.Good,
+            BCrypt.Net.BCrypt.HashPassword(bcryptPlaintext, workFactor: 10),
+            s_recoveryCodes.Hash(sha256Plaintext, TestSalt),
+        };
+
+        var argon2idMatch = MfaService.ValidateRecoveryCode(
+            s_recoveryCodes, Argon2idTestDigests.GoodPlaintext, stored, TestSalt);
+        var bcryptMatch = MfaService.ValidateRecoveryCode(s_recoveryCodes, bcryptPlaintext, stored, TestSalt);
+        var sha256Match = MfaService.ValidateRecoveryCode(s_recoveryCodes, sha256Plaintext, stored, TestSalt);
+
+        argon2idMatch.Should().Be((true, 0),
+            because: "element 0 is an Argon2id digest and must be verified with Argon2id");
+        bcryptMatch.Should().Be((true, 1),
+            because: "element 1 is a BCrypt digest, verified with BCrypt even beside an Argon2id element");
+        sha256Match.Should().Be((true, 2),
+            because: "element 2 is a salted-SHA-256 digest, verified through IRecoveryCodeService");
+    }
+
+    [Theory]
+    [MemberData(nameof(Argon2idTestDigests.CorruptCases), MemberType = typeof(Argon2idTestDigests))]
+    public void ValidateRecoveryCode_ShouldReturnFalse_WhenArgon2idDigestIsCorrupt(string kind)
+    {
+        // Spec MODIFIED "Stored material never raises": the Argon2id branch must (a) treat any
+        // library exception as no match and (b) refuse, WITHOUT evaluating, a stored digest
+        // whose encoded cost falls outside a fixed bound. The submitted code is the one the
+        // digest was derived from, so only the corruption can make it a miss.
+        var stored = new[] { Argon2idTestDigests.Corrupt(kind) };
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var act = () => MfaService.ValidateRecoveryCode(
+            s_recoveryCodes, Argon2idTestDigests.GoodPlaintext, stored, TestSalt);
+
+        act.Should().NotThrow(
+            because: "no content of the stored column may raise out of the verifier");
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        act().Should().Be((false, -1),
+            because: "a corrupt Argon2id digest is a failed verification, never a match");
+
+        if (kind == "m=262144")
+        {
+            allocated.Should().BeLessThan(64L * 1024 * 1024,
+                because: "a stored memory cost above the bound must be refused before evaluation; Isopoh "
+                       + "honours m=262144 and allocated 2,132 MiB for one verify in the RC0 probe");
+        }
+    }
+
+    [Fact]
+    public void ValidateRecoveryCode_ShouldReturnFalse_WhenSubmittedCodeIsLongerThan64Characters()
+    {
+        // Design D2: a submitted code longer than 64 characters after trimming is a miss with no
+        // evaluation, so one attempt cannot make the verifier hash an arbitrarily large input ten
+        // times. The stored element is the real SHA-256 digest of that same long code, so only the
+        // length bound can make it a miss.
+        var tooLong = new string('A', 65);
+        var stored = new[] { s_recoveryCodes.Hash(tooLong, TestSalt) };
+
+        MfaService.ValidateRecoveryCode(s_recoveryCodes, tooLong, stored, TestSalt).Should().Be((false, -1),
+            because: "a code over the length bound is refused before any digest is evaluated");
+
+        var atLimit = new string('A', 64);
+        var storedAtLimit = new[] { s_recoveryCodes.Hash(atLimit, TestSalt) };
+        MfaService.ValidateRecoveryCode(s_recoveryCodes, "  " + atLimit + " ", storedAtLimit, TestSalt)
+            .Should().Be((true, 0), because: "the bound is measured after trimming and admits 64 characters");
     }
 }

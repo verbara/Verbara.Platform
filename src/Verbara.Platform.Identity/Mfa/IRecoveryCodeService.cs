@@ -14,7 +14,13 @@ namespace Verbara.Platform.Identity.Mfa;
 /// Generated codes are 8-character uppercase strings drawn from the unambiguous
 /// Base32 alphabet (RFC 4648 minus the visually confusable <c>0/1/O/I</c> glyphs)
 /// and produced via <see cref="System.Security.Cryptography.RandomNumberGenerator"/>.
-/// Stored hashes use SHA-256 over the per-user salt + plaintext code.
+/// </para>
+/// <para>
+/// <see cref="Hash"/> and <see cref="Verify"/> are the <b>legacy</b> salted SHA-256 family: one
+/// unstretched SHA-256 over the per-user salt and the code. No mint path writes it any more; every
+/// path stores Argon2id digests, and the Api's recovery-code verifier keeps this family verifiable
+/// for codes minted before that change (see <see cref="RecoveryCodeFamilies"/>). New callers must not
+/// use <see cref="Hash"/> to store a code.
 /// </para>
 /// </remarks>
 public interface IRecoveryCodeService
@@ -22,18 +28,19 @@ public interface IRecoveryCodeService
     /// <summary>
     /// Generates 10 unique 8-character recovery codes.
     /// </summary>
-    /// <returns>Plaintext codes — display once, then hash with <see cref="Hash"/>.</returns>
+    /// <returns>Plaintext codes — display once; the caller stores their Argon2id digests.</returns>
     IReadOnlyList<string> Generate();
 
     /// <summary>
-    /// Computes the storage hash for <paramref name="code"/> using the supplied
-    /// per-user <paramref name="salt"/>.
+    /// Computes the legacy salted SHA-256 digest of <paramref name="code"/> with the
+    /// per-user <paramref name="salt"/>. Kept to verify codes minted before the move to
+    /// Argon2id and to forge test fixtures; no mint path writes it.
     /// </summary>
     string Hash(string code, string salt);
 
     /// <summary>
-    /// Verifies that <paramref name="code"/> matches <paramref name="storedHash"/>
-    /// when hashed with <paramref name="salt"/>.
+    /// Verifies that <paramref name="code"/> matches a legacy salted SHA-256
+    /// <paramref name="storedHash"/> when hashed with <paramref name="salt"/>, in constant time.
     /// </summary>
     bool Verify(string code, string salt, string storedHash);
 }

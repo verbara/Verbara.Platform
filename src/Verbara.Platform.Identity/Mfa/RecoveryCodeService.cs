@@ -5,8 +5,10 @@ using System.Text;
 namespace Verbara.Platform.Identity.Mfa;
 
 /// <summary>
-/// Default <see cref="IRecoveryCodeService"/> implementation backed by
-/// <see cref="RandomNumberGenerator"/> + SHA-256.
+/// Default <see cref="IRecoveryCodeService"/> implementation: <see cref="RandomNumberGenerator"/>
+/// for code generation, and the legacy salted SHA-256 family for <see cref="Hash"/> and
+/// <see cref="Verify"/>. No mint path writes that family any more (every path stores Argon2id);
+/// it stays verifiable for codes minted before.
 /// </summary>
 /// <remarks>
 /// <para>

@@ -21,6 +21,14 @@ internal sealed class InMemoryUserStore : IUserStore
     private readonly ConcurrentDictionary<(TenantId, EntityId), User> _items = new();
     private readonly Lock _writeGate = new();
 
+    /// <summary>
+    /// The recovery-code array of every stored user whose MFA is on, across tenants, for
+    /// <see cref="InMemoryRecoveryCodeCensus"/> (a pending enrollment's codes are not counted, as in the Postgres
+    /// census). Writers replace a stored user rather than change it, so each array read here is a whole one.
+    /// </summary>
+    internal IEnumerable<IReadOnlyList<string>?> RecoveryCodeArrays() =>
+        _items.Values.Where(u => u.MfaEnabled).Select(u => u.MfaRecoveryCodes);
+
     public Task<User?> GetByIdAsync(TenantId tenantId, EntityId userId, CancellationToken ct)
     {
         _items.TryGetValue((tenantId, userId), out var item);

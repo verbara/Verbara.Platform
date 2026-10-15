@@ -63,7 +63,7 @@ from pathlib import Path
 # Map of repo-relative path -> max lines. Lower a number when the file shrinks;
 # raising one is a reviewed, visible decision to grow an orchestrator file.
 LOC_BUDGETS = {
-    "src/Verbara.Platform.Api/Program.cs": 1838,  # ratcheted 2026-10-13 (merge of origin/main #390: −2 near the rate limiter); 1840 earlier 2026-10-13 (readiness-without-asterisk D6: −73, health wiring moved to PlatformHealthExtensions); was 1932 frozen 2026-07-20
+    "src/Verbara.Platform.Api/Program.cs": 1822,  # ratcheted 2026-10-15 (harden-recovery-code-digest: −1, recovery-code wiring moved to RecoveryCodesExtensions; #403 had already removed 15); 1838 earlier 2026-10-13 (merge of origin/main #390: −2 near the rate limiter); 1840 earlier 2026-10-13 (readiness-without-asterisk D6: −73, health wiring moved to PlatformHealthExtensions); was 1932 frozen 2026-07-20
 }
 
 # Matches `catch {}`, `catch { }`, `catch (Exception) {}`, and the multi-line
