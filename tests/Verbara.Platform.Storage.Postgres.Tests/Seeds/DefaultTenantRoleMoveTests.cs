@@ -173,6 +173,25 @@ public sealed class DefaultTenantRoleMoveTests
             ["agent", "owners"], "an administrator's grant is that administrator's choice, not the former role's");
     }
 
+    [Fact]
+    public async Task MoveAsync_ShouldTakeNothing_WhenTheRoleGrantedAtCreationWasClonedFromATemplateOfTheNewRoleToo()
+    {
+        await using var dataSource = await SeededAsync();
+        var tenant = new TenantId("renamed");
+        var user = await NewUserAsync(dataSource, tenant, UserRole.Admin);
+        await new PostgresTenantRoleStore(dataSource).CloneFromTemplateAsync(
+            tenant, "owners", "admin", "Admin", null, CancellationToken.None);
+        await DefaultTenantRole.GrantAsync(
+            new PostgresTenantRoleStore(dataSource), new PostgresRoleTemplateStore(dataSource), new PostgresUserRoleStore(dataSource),
+            tenant, user, UserRole.Admin, CancellationToken.None);
+        await RenameAsync(dataSource, tenant, "owners", "Owners");
+
+        var move = await MoveAsync(dataSource, tenant, user, UserRole.Admin, UserRole.Admin);
+
+        move.Removed.Should().BeEmpty("a role cloned from a template of the role the user moves to comes with that role too");
+        (await RoleIdsOfAsync(dataSource, tenant, user)).Should().Contain("owners");
+    }
+
     // ─── PostgresUserRoleStore.MoveAsync, the one statement ──────────────────
 
     [Fact]

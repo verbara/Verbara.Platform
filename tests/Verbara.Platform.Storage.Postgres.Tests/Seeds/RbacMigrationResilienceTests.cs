@@ -181,8 +181,9 @@ public sealed class RbacMigrationResilienceTests
     // The migration attaches a user to a same-named role under any id, but recognises a held role
     // afterwards only by the template's shapes. Renaming such a role frees the name, the template is
     // cloned, and the next run attaches it too: two admin-equivalent roles, no permission beyond what
-    // users.role declares, and stable from then on. The follow-up change
-    // rbac-role-provenance-survives-renames owns the fix; these tests pin today's behaviour.
+    // users.role declares, and stable from then on. A role cloned from a template is recognised by its
+    // source template instead (next section), so this stays only for a role with no source template;
+    // these tests pin it.
 
     [Fact]
     public async Task MigrateExistingUsersAsync_ShouldAttachTheTemplateRoleAlongsideAndThenHoldSteady_WhenARoleWithAnArbitraryIdTheMigrationGrantedIsRenamed()
@@ -368,6 +369,61 @@ public sealed class RbacMigrationResilienceTests
 
         (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(
             [roleId], "both the id shape and the source template name the role, and they agree");
+    }
+
+    // Each row is recognised as a default role of UserRole Admin by one mark only: the template id, one of
+    // the id shapes the tenant's copies come in, the template's name, or the source template.
+    [Theory]
+    [InlineData("admin", "Owners", null)]
+    [InlineData("role_admin_t9", "Owners", null)]
+    [InlineData("admin-t9", "Owners", null)]
+    [InlineData("platform-admin-t9", "Owners", null)]
+    [InlineData("owners", "Admin", null)]
+    [InlineData("owners", "Owners", "admin")]
+    public async Task MigrateExistingUsersAsync_ShouldLeaveOnlyTheAgentRoleInOneRun_WhenTheFormerRoleIsRecognisedByOneMarkAlone(
+        string roleId, string name, string? sourceTemplateId)
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "t9", roleId, name, sourceTemplateId);
+        await GivenUserAsync(dataSource, "t9", "user-t9", AgentRole);
+        await GivenAssignmentAsync(dataSource, "t9", "user-t9", roleId, "default-role");
+
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+
+        (await RoleIdsOfAsync(dataSource, "t9", "user-t9")).Should().Equal(
+            ["agent"], $"'{roleId}' came with the user's former role, and that one mark is enough to take it back in the run " +
+            "that attaches the agent role");
+    }
+
+    [Fact]
+    public async Task MigrateExistingUsersAsync_ShouldKeepOneAdminAssignment_WhenTheHeldRoleIsNamedLikeTheTemplateAndTheTemplateIdExists()
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "acme", "owners", "Admin");
+        await GivenRoleAsync(dataSource, "acme", "admin", "Administrator");
+        await GivenUserAsync(dataSource, "acme", "user-acme", AdminRole);
+        await GivenAssignmentAsync(dataSource, "acme", "user-acme", "owners", "default-role");
+
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(
+            ["owners"], "the held role is named like the template, which settles the user although the exact template " +
+            "id would be resolved first");
+    }
+
+    [Fact]
+    public async Task MigrateExistingUsersAsync_ShouldAttachTheAdminRoleAndKeepTheAdministratorsGrant_WhenTheRenamedRoleWasClonedFromTheAdminTemplate()
+    {
+        await using var dataSource = await SeededAsync();
+        await GivenRoleAsync(dataSource, "acme", "owners", "Owners", sourceTemplateId: "admin");
+        await GivenUserAsync(dataSource, "acme", "user-acme", AdminRole);
+        await GivenAssignmentAsync(dataSource, "acme", "user-acme", "owners", "some-administrator");
+
+        await RbacMigrationSeeder.MigrateExistingUsersAsync(dataSource, CancellationToken.None);
+
+        (await RoleIdsOfAsync(dataSource, "acme", "user-acme")).Should().Equal(
+            ["admin", "owners"], "a role an administrator granted is that administrator's custom role even when it was " +
+            "cloned from the admin template, so it does not stand in for the default role and is not taken back");
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

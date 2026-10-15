@@ -27,7 +27,7 @@ internal static partial class RbacMigrationLog
 
     [LoggerMessage(EventId = 3703, Level = LogLevel.Warning,
         Message = "RBAC migration: tenant {TenantId} user {UserId} was attached to role {RoleId} while holding " +
-                  "{HeldRoleIds}, granted by the migration or at user creation from a role with no source template; " +
-                  "such a role is recognised by its name only.")]
+                  "{HeldRoleIds}, granted by the migration or at user creation on a role that no template's id, name or " +
+                  "source template matches any more; such a role was recognised by its former name only.")]
     public static partial void NameDependentAttach(ILogger logger, string tenantId, string userId, string roleId, string heldRoleIds);
 }
