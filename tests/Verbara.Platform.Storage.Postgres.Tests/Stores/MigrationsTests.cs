@@ -101,4 +101,25 @@ public class MigrationsTests : IClassFixture<MigrationsFixture>
         (await _fixture.IndexExistsAsync("ux_messages_tenant_external")).Should().BeTrue();
         (await _fixture.IndexExistsAsync("idx_messages_external")).Should().BeFalse();
     }
+
+    // ── webhook-delivery-runs-once (migration 023, design D1) ─────────────────
+
+    [Fact]
+    public async Task Migrations_ShouldAddWebhookDeliveryClaimColumns_WhenApplied()
+    {
+        (await _fixture.ColumnDefinitionAsync("webhook_deliveries", "claim_id"))
+            .Should().Be(("character varying(32)", true), "the claim id is a nullable Guid \"N\" (32 hex chars)");
+        (await _fixture.ColumnDefinitionAsync("webhook_deliveries", "claim_expires_at"))
+            .Should().Be(("timestamp with time zone", true), "the lease expiry is nullable: an unclaimed row has none");
+        (await _fixture.IndexExistsAsync("ix_webhook_deliveries_pending"))
+            .Should().BeTrue("the claim of the next due delivery runs on the existing partial index (design D3)");
+
+        // Additive and idempotent: a second run is a no-op that leaves both columns as they were.
+        await _fixture.ReapplyMigrationAsync("023_WebhookDeliveryClaim.sql");
+
+        (await _fixture.ColumnDefinitionAsync("webhook_deliveries", "claim_id"))
+            .Should().Be(("character varying(32)", true));
+        (await _fixture.ColumnDefinitionAsync("webhook_deliveries", "claim_expires_at"))
+            .Should().Be(("timestamp with time zone", true));
+    }
 }
