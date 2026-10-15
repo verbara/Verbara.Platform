@@ -135,17 +135,27 @@ public sealed class DefaultTenantRoleMoveTests
         (await PermissionsOfAsync(dataSource, tenant, user)).Should().Contain(s_administratorPermissions);
     }
 
-    [Fact]
-    public async Task MoveAsync_ShouldLeaveADemotedAdministratorOnlyTheAgentRole_WhenTheRoleGrantedAtCreationWasClonedFromTheAdminTemplateAndRenamed()
+    // Both assigners whose grant follows from the user's role: user creation (DefaultTenantRole.GrantAsync,
+    // "default-role") and the boot-time migration ("migration").
+    [Theory]
+    [InlineData("default-role")]
+    [InlineData("migration")]
+    public async Task MoveAsync_ShouldLeaveADemotedAdministratorOnlyTheAgentRole_WhenTheRoleGrantedWithTheUserRoleWasClonedFromTheAdminTemplateAndRenamed(
+        string assignedBy)
     {
         await using var dataSource = await SeededAsync();
         var tenant = new TenantId("renamed");
         var user = await NewUserAsync(dataSource, tenant, UserRole.Admin);
         await new PostgresTenantRoleStore(dataSource).CloneFromTemplateAsync(
             tenant, "owners", "admin", "Admin", null, CancellationToken.None);
-        (await DefaultTenantRole.GrantAsync(
-            new PostgresTenantRoleStore(dataSource), new PostgresRoleTemplateStore(dataSource), new PostgresUserRoleStore(dataSource),
-            tenant, user, UserRole.Admin, CancellationToken.None)).Should().Be("owners");
+        if (assignedBy == "default-role")
+            (await DefaultTenantRole.GrantAsync(
+                new PostgresTenantRoleStore(dataSource), new PostgresRoleTemplateStore(dataSource), new PostgresUserRoleStore(dataSource),
+                tenant, user, UserRole.Admin, CancellationToken.None)).Should().Be("owners");
+        else
+            await new PostgresUserRoleStore(dataSource).AssignAsync(tenant, user, "owners", assignedBy, CancellationToken.None);
+        (await new PostgresUserRoleStore(dataSource).GetRolesForUserAsync(tenant, user, CancellationToken.None))
+            .Should().ContainSingle().Which.AssignedBy.Should().Be(assignedBy);
         await RenameAsync(dataSource, tenant, "owners", "Owners");
 
         var move = await MoveAsync(dataSource, tenant, user, UserRole.Admin, UserRole.Agent);
