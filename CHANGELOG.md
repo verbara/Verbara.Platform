@@ -50,7 +50,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   claim an outbound webhook delivery takes before each POST (see **Fixed**). It is additive, with no backfill and no
   new index. Rolling back leaves nothing stuck: an older API ignores the columns, and a delivery left claimed is still
   `Pending` and due for its retry poll. Until every replica runs this release, an older replica does not honour the
-  claims, so a delivery can still be POSTed twice during the rolling deploy. (Platform/ADR-0043)
+  claims, so a delivery can still be POSTed twice during the rolling deploy. (Platform/ADR-0043) (#406)
 
 ### Added
 
@@ -253,7 +253,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   now carries the same body bytes: the immediate send POSTs the stored payload, as retries already did, so its JSON
   takes the stored key order and spacing (the JSON is equivalent, and the signature covers the bytes sent). While a
   subscription's circuit is open, a due delivery is deferred to the circuit's next probe without counting an attempt,
-  instead of being picked up and skipped on every poll. (Platform/ADR-0043)
+  instead of being picked up and skipped on every poll. (Platform/ADR-0043) (#406)
 - **A corrupt Argon2id password hash is a failed login, not an exception.** A stored hash with a zero time
   cost, zero lanes or an empty salt made the cryptography library throw, so `/auth/login` and every
   other password check answered `400 Bad Request` instead of the wrong-password response. A stored hash whose
