@@ -52,25 +52,6 @@ internal sealed class PostgresWebhookDeliveryStore : IWebhookDeliveryStore
         return row?.ToModel();
     }
 
-    public async Task<IReadOnlyList<WebhookDelivery>> ListPendingRetriesAsync(
-        DateTimeOffset now, int batchSize, CancellationToken ct)
-    {
-        var rows = await _dataSource.QueryListAsync(
-            "SELECT delivery_id, tenant_id, subscription_id, event_type, payload, status, " +
-            "attempts, max_attempts, next_retry_at, last_response_code, last_error, " +
-            "created_at, delivered_at " +
-            "FROM webhook_deliveries " +
-            "WHERE status = 'Pending' AND next_retry_at IS NOT NULL AND next_retry_at <= @Now " +
-            "ORDER BY next_retry_at LIMIT @BatchSize",
-            p =>
-            {
-                p.Add(new NpgsqlParameter("Now", now.UtcDateTime));
-                p.Add(new NpgsqlParameter("BatchSize", batchSize));
-            },
-            DeliveryRow.Map, ct);
-        return rows.Select(r => r.ToModel()).ToList();
-    }
-
     public async Task<PagedResult<WebhookDelivery>> ListBySubscriptionAsync(
         string subscriptionId, int page, int pageSize, CancellationToken ct)
     {

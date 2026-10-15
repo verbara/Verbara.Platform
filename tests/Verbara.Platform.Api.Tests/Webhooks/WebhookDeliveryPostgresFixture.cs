@@ -2,6 +2,7 @@ using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using NpgsqlTypes;
 using Verbara.Platform.Core.Webhooks;
 using Verbara.Platform.Storage.Postgres;
 
@@ -106,14 +107,18 @@ public sealed class WebhookDeliveryPostgresFixture : IAsyncLifetime
         await SubscriptionStore.SaveAsync(Subscription, ct);
     }
 
-    /// <summary>A <c>Pending</c> delivery for the seeded subscription, due at <paramref name="nextRetryAt"/>.</summary>
-    public static WebhookDelivery PendingDelivery(DateTimeOffset nextRetryAt, int attempts = 0)
+    /// <summary>
+    /// A <c>Pending</c> delivery, due at <paramref name="nextRetryAt"/>, for the seeded subscription or for
+    /// <paramref name="subscriptionId"/>.
+    /// </summary>
+    public static WebhookDelivery PendingDelivery(
+        DateTimeOffset nextRetryAt, int attempts = 0, string subscriptionId = SubscriptionId)
     {
         var deliveryId = Guid.NewGuid().ToString("N");
         return new WebhookDelivery(
             DeliveryId: deliveryId,
             TenantId: TenantId,
-            SubscriptionId: SubscriptionId,
+            SubscriptionId: subscriptionId,
             EventType: EventType,
             Payload: $$"""{"id":"{{deliveryId}}","type":"{{EventType}}"}""",
             Status: WebhookDeliveryStatus.Pending,
@@ -124,6 +129,24 @@ public sealed class WebhookDeliveryPostgresFixture : IAsyncLifetime
             LastError: null,
             CreatedAt: nextRetryAt,
             DeliveredAt: null);
+    }
+
+    /// <summary>
+    /// The two claim columns of one delivery, read raw: they are not part of <see cref="WebhookDelivery"/> nor of
+    /// the delivery API (design D1). Both are <see langword="null"/> when the delivery holds no claim.
+    /// </summary>
+    public async Task<(string? ClaimId, DateTimeOffset? ExpiresAt)> ClaimColumnsAsync(
+        string deliveryId, CancellationToken ct = default)
+    {
+        await using var conn = await DataSource.OpenConnectionAsync(ct);
+        await using var cmd = new NpgsqlCommand(
+            "SELECT claim_id, claim_expires_at FROM webhook_deliveries WHERE delivery_id = @Id", conn);
+        cmd.Parameters.Add(new NpgsqlParameter("Id", NpgsqlDbType.Varchar) { Value = deliveryId });
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        (await reader.ReadAsync(ct)).Should().BeTrue($"delivery {deliveryId} exists");
+        return (
+            reader.IsDBNull(0) ? null : reader.GetString(0),
+            reader.IsDBNull(1) ? null : new DateTimeOffset(reader.GetDateTime(1), TimeSpan.Zero));
     }
 
     // Mirrors DatabaseMigrationService and MigrationsFixture: every embedded Migrations/*.sql resource of the

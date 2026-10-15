@@ -11,7 +11,8 @@ namespace Verbara.Platform.Api.Tests.Webhooks;
 
 /// <summary>
 /// Builds real <see cref="WebhookDeliveryService"/> instances over the <see cref="WebhookDeliveryPostgresFixture"/>
-/// stores, one shared <see cref="GatedReceiverHandler"/> and one <see cref="MutableClock"/>. The services are never
+/// stores (or any pair of stores, such as the InMemory ones), one shared <see cref="GatedReceiverHandler"/> and one
+/// <see cref="MutableClock"/>. The services are never
 /// started: tests drive the single-cycle seams (<c>DeliverForTestAsync</c> is the immediate path for one dequeued
 /// item, <c>ProcessPendingRetriesOnceAsync</c> is one poll tick), per spec <c>test-determinism</c>. The transport
 /// policy defaults to <see cref="ResiliencePolicy.NoOp"/> (the constructor's default), so each attempt sends exactly
@@ -19,15 +20,27 @@ namespace Verbara.Platform.Api.Tests.Webhooks;
 /// </summary>
 internal sealed class WebhookDeliveryHarness : IDisposable
 {
-    private readonly WebhookDeliveryPostgresFixture _fixture;
+    private readonly IWebhookDeliveryStore _deliveryStore;
+    private readonly IWebhookSubscriptionStore _subscriptionStore;
     private readonly ILoggerFactory _loggerFactory;
     private readonly List<IDisposable> _owned = [];
 
-    public WebhookDeliveryHarness(WebhookDeliveryPostgresFixture fixture, bool holdFirstRequest = true)
+    public WebhookDeliveryHarness(
+        WebhookDeliveryPostgresFixture fixture, bool holdFirstRequest = true, Func<int, HttpResponseMessage>? answer = null)
+        : this(fixture.DeliveryStore, fixture.SubscriptionStore, holdFirstRequest, answer)
     {
-        _fixture = fixture;
+    }
+
+    public WebhookDeliveryHarness(
+        IWebhookDeliveryStore deliveryStore,
+        IWebhookSubscriptionStore subscriptionStore,
+        bool holdFirstRequest = true,
+        Func<int, HttpResponseMessage>? answer = null)
+    {
+        _deliveryStore = deliveryStore;
+        _subscriptionStore = subscriptionStore;
         Clock = new MutableClock(WebhookDeliveryPostgresFixture.Epoch);
-        Receiver = new GatedReceiverHandler(holdFirstRequest);
+        Receiver = new GatedReceiverHandler(holdFirstRequest, answer);
         _loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(Logs));
         (EventBus, Dispatcher) = NewDispatcher();
     }
@@ -74,15 +87,15 @@ internal sealed class WebhookDeliveryHarness : IDisposable
         var bus = new PlatformEventBus();
         _owned.Add(bus);
         var dispatcher = new WebhookDispatcher(
-            bus, _fixture.SubscriptionStore, _fixture.DeliveryStore, Clock, NullLogger<WebhookDispatcher>.Instance);
+            bus, _subscriptionStore, _deliveryStore, Clock, NullLogger<WebhookDispatcher>.Instance);
         _owned.Add(dispatcher);
         return (bus, dispatcher);
     }
 
     private WebhookDeliveryService NewService(WebhookDispatcher dispatcher, ResiliencePolicy? policy) => new(
         dispatcher,
-        _fixture.DeliveryStore,
-        _fixture.SubscriptionStore,
+        _deliveryStore,
+        _subscriptionStore,
         new ReceiverHttpClientFactory(Receiver),
         new CircuitBreakerPolicy(Options.Create(new CircuitBreakerOptions())),
         Clock,

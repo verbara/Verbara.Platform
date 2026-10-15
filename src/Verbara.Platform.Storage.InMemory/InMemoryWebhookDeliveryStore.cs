@@ -25,23 +25,6 @@ internal sealed class InMemoryWebhookDeliveryStore : IWebhookDeliveryStore
             return Task.FromResult(_deliveries.TryGetValue(deliveryId, out var entry) ? entry.Delivery : null);
     }
 
-    public Task<IReadOnlyList<WebhookDelivery>> ListPendingRetriesAsync(
-        DateTimeOffset now, int batchSize, CancellationToken ct)
-    {
-        lock (_lock)
-        {
-            IReadOnlyList<WebhookDelivery> result = _deliveries.Values
-                .Select(e => e.Delivery)
-                .Where(d => d.Status == WebhookDeliveryStatus.Pending
-                    && d.NextRetryAt.HasValue
-                    && d.NextRetryAt.Value <= now)
-                .OrderBy(d => d.NextRetryAt)
-                .Take(batchSize)
-                .ToList();
-            return Task.FromResult(result);
-        }
-    }
-
     public Task<PagedResult<WebhookDelivery>> ListBySubscriptionAsync(
         string subscriptionId, int page, int pageSize, CancellationToken ct)
     {

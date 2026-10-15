@@ -36,34 +36,6 @@ public class InMemoryWebhookDeliveryStoreTests
     }
 
     [Fact]
-    public async Task ListPendingRetriesAsync_ShouldReturnOnlyDueDeliveries()
-    {
-        var now = DateTimeOffset.UtcNow;
-
-        await _store.SaveAsync(CreateDelivery(id: "due", nextRetryAt: now.AddMinutes(-1)), CancellationToken.None);
-        await _store.SaveAsync(CreateDelivery(id: "future", nextRetryAt: now.AddMinutes(10)), CancellationToken.None);
-        await _store.SaveAsync(CreateDelivery(id: "delivered",
-            status: WebhookDeliveryStatus.Delivered, nextRetryAt: now.AddMinutes(-1)), CancellationToken.None);
-        await _store.SaveAsync(CreateDelivery(id: "no-retry",
-            status: WebhookDeliveryStatus.Pending, nextRetryAt: null), CancellationToken.None);
-
-        var result = await _store.ListPendingRetriesAsync(now, 100, CancellationToken.None);
-        result.Should().HaveCount(1);
-        result[0].DeliveryId.Should().Be("due");
-    }
-
-    [Fact]
-    public async Task ListPendingRetriesAsync_ShouldRespectBatchSize()
-    {
-        var now = DateTimeOffset.UtcNow;
-        for (int i = 0; i < 10; i++)
-            await _store.SaveAsync(CreateDelivery(nextRetryAt: now.AddMinutes(-1)), CancellationToken.None);
-
-        var result = await _store.ListPendingRetriesAsync(now, 3, CancellationToken.None);
-        result.Should().HaveCount(3);
-    }
-
-    [Fact]
     public async Task ListDeadLetterAsync_ShouldReturnPaginatedDeadLetters()
     {
         for (int i = 0; i < 5; i++)

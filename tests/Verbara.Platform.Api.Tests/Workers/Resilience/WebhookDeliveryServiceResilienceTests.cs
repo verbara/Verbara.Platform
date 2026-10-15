@@ -43,7 +43,7 @@ public sealed class WebhookDeliveryServiceResilienceTests
     [Fact]
     public async Task ExecuteAsync_ShouldPropagateToExecuteTask_WhenFatalException()
     {
-        // ListPendingRetriesAsync is invoked from the poll loop after a 30s Task.Delay;
+        // ClaimNextDueAsync is invoked from the poll loop after a 30s Task.Delay;
         // throwing from it would be caught by the inner try-catch. The only way to
         // force the outer fatal path from a unit test is to cancel the stoppingToken
         // and verify the ExecuteTask completes cleanly — see the next test for that.
@@ -63,9 +63,9 @@ public sealed class WebhookDeliveryServiceResilienceTests
             .Returns(_ => throw new InvalidOperationException("simulated http factory crash"));
 
         var deliveryStore = Substitute.For<IWebhookDeliveryStore>();
-        deliveryStore.ListPendingRetriesAsync(
-                Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns(Array.Empty<WebhookDelivery>());
+        deliveryStore.ClaimNextDueAsync(
+                Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns((WebhookDeliveryClaim?)null);
 
         var sut = BuildWorker(deliveryStore: deliveryStore, httpClientFactory: httpFactory);
 
@@ -83,7 +83,7 @@ public sealed class WebhookDeliveryServiceResilienceTests
     [Fact]
     public async Task ProcessPendingRetriesOnceAsync_ShouldSwallowAndLog_WhenNonCancellationThrows()
     {
-        // Recoverable-inner contract of the DB poll loop: when ListPendingRetriesAsync raises a
+        // Recoverable-inner contract of the DB poll loop: when ClaimNextDueAsync raises a
         // non-cancellation exception, the inner catch in ProcessPendingRetriesOnceAsync logs +
         // swallows it so the worker keeps spinning (no rethrow, no fault on ExecuteTask).
         //
@@ -93,13 +93,13 @@ public sealed class WebhookDeliveryServiceResilienceTests
         //
         // The dual-loop OUTER fatal rethrow (PollPendingRetriesAsync / ProcessChannelAsync catch →
         // LogWorkerCrash + throw) is structurally unreachable from unit scope: the only inner work
-        // a unit can inject (ListPendingRetriesAsync / DeliverAsync) is itself wrapped by the inner
+        // a unit can inject (ClaimNextDueAsync / DeliverAsync) is itself wrapped by the inner
         // catch, and the channel reader never throws outside cancellation in production. This is
         // recorded in the OpenSpec change for C3.
         var deliveryStore = Substitute.For<IWebhookDeliveryStore>();
-        deliveryStore.ListPendingRetriesAsync(
-                Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .ThrowsAsync(new InvalidOperationException("poll list failure"));
+        deliveryStore.ClaimNextDueAsync(
+                Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("poll claim failure"));
 
         var sut = BuildWorker(deliveryStore: deliveryStore);
 
