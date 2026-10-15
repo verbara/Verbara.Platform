@@ -112,7 +112,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `mfa_recovery_codes_users{family="argon2id"|"legacy"}`, refreshed from a scan of the users table two minutes
   after start and then hourly (`Mfa:RecoveryCodeCensus:InitialDelay` and `:Interval`; an interval of `0`
   disables the scan; only users with MFA enabled are counted), and `mfa_recovery_codes_redeemed_total{family="argon2id"|"bcrypt"|"sha256"}`, counted when
-  a code is consumed. Neither carries a tenant label.
+  a code is consumed. Neither carries a tenant label. (#407)
 
 ### Changed
 
@@ -243,7 +243,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cost parameters are out of bounds (memory above 32 MiB, time cost above 4, memory × time above twice the
   current parameters, or more than one lane) is now refused without being evaluated, so one stored value can no
   longer make a single verification cost more than about two normal ones. Every hash the API has written is
-  inside the bound. The same guard covers recovery codes.
+  inside the bound. The same guard covers recovery codes. (#407)
 
 ### Security
 
@@ -276,7 +276,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   costs about as much as ten password checks, each user can issue recovery codes at most once every 10 seconds
   across the four endpoints; a second request inside that window gets `429 Too Many Requests` with
   `Retry-After` and leaves the earlier codes in place (`Mfa:RecoveryCodeMint:MinInterval`; `00:00:00` turns the
-  limit off).
+  limit off). (#407)
 
 ## [2.28.0] - 2026-10-11
 
