@@ -295,7 +295,9 @@ internal static partial class AdminEndpoints
     //    lineage would be refused only for as long as no row with this id exists.
     //  • Hub connections and SSE streams were authenticated once and would stay open: cut on every
     //    node. User-bound API keys stop on their own — they authenticate only while the owner exists.
-    //  • Access tokens already issued stay valid until they expire (at most 15 minutes).
+    //  • Access tokens already issued stay valid until they expire (at most 15 minutes), but resolve no
+    //    permission: the user's role assignments go with it (ON DELETE CASCADE) and its cached permissions
+    //    are dropped. A token whose role claim is Admin or SystemAdmin still passes on that claim.
     //  • licensed-agent-metering (Q1) — a user who owns an agent is refused with 409 before anything is
     //    revoked or deleted: the admin deletes the agent first, so the agent's history stays attributable.
     private static async Task<IResult> DeleteUser(
@@ -307,6 +309,7 @@ internal static partial class AdminEndpoints
         [FromServices] SessionService sessions,
         [FromServices] IAuditService audit,
         [FromServices] ISupervisorListenProfileStore listenProfiles,
+        [FromServices] PermissionResolver permissions,
         PlatformEventBus eventBus,
         CancellationToken ct)
     {
@@ -318,7 +321,7 @@ internal static partial class AdminEndpoints
         // it under its lock when an agent was created for the user after the check above.
         var actorId = CallerIdentity.ResolveUserIdOrSystem(context.User);
         var deletion = await LicensedUserWrites.DeleteAsync(
-            store, userWriter, tenantId, EntityId.From(id), actorId, deleteOwnedAgent: false, ct);
+            store, userWriter, permissions, tenantId, EntityId.From(id), actorId, deleteOwnedAgent: false, ct);
         if (deletion.OwnsAgent)
             return UserOwnsAgent(id, agentId: null);
         var deleted = deletion.UserDeleted;

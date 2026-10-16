@@ -254,14 +254,19 @@ internal static class RbacEndpoints
         return TypedResults.Ok(roles);
     }
 
-    private static async Task<Ok<IReadOnlyList<UserRoleAssignment>>> ReplaceUserRoles(
+    private static async Task<Results<Ok<IReadOnlyList<UserRoleAssignment>>, NotFound<UserRoleAssignmentRefusal>>> ReplaceUserRoles(
         string id, HttpContext context, [FromBody] ReplaceUserRolesRequest body,
-        [FromServices] IUserRoleStore store, [FromServices] PermissionResolver resolver,
+        [FromServices] IUserRoleStore store, [FromServices] IUserStore users, [FromServices] PermissionResolver resolver,
         [FromServices] IAuditService audit, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var userId = EntityId.From(id);
         var assignedBy = context.User.FindFirst("user_id")?.Value;
+
+        // add-user-roles-user-foreign-key (design D5): the same lookup as AddUserRole, before anything is
+        // written, cached or audited. Without it the key onto users refuses the rows as a 500.
+        if (await users.GetByIdAsync(tenantId, userId, ct) is null)
+            return TypedResults.NotFound(UserRoleAssignmentRefusal.ForUnknownUser(id));
 
         var before = await store.GetRolesForUserAsync(tenantId, userId, ct);
         await store.ReplaceAllAsync(tenantId, userId, body.RoleIds, assignedBy, ct);
@@ -291,9 +296,9 @@ internal static class RbacEndpoints
         var userId = EntityId.From(id);
         var assignedBy = context.User.FindFirst("user_id")?.Value;
 
-        // harden-rbac-migration-seeder (design D6): user_roles has no foreign key onto users, so the store
-        // would accept a user id that names nobody in this tenant and leave a row that the permissions read
-        // resolves while login never does. Refuse it before anything is written, cached or audited.
+        // harden-rbac-migration-seeder (design D6): refuse a user id that names nobody in this tenant before
+        // anything is written, cached or audited. Since migration 024 the key of user_roles onto users refuses
+        // the row too (add-user-roles-user-foreign-key), but as a 500; this lookup keeps the typed 404.
         if (await users.GetByIdAsync(tenantId, userId, ct) is null)
             return TypedResults.NotFound(UserRoleAssignmentRefusal.ForUnknownUser(id));
 

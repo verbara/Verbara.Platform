@@ -165,12 +165,41 @@ public sealed class RbacEndpointTests : IClassFixture<AuthenticatedPlatformApiFa
     }
 
     [Fact]
-    public async Task ReplaceUserRoles_ShouldReturn200()
+    public async Task ReplaceUserRoles_ShouldReturn200_WhenTheUserExistsInTheTenant()
     {
+        var userId = _factory.SeedActiveUser();
         var request = new { RoleIds = new[] { "agent" } };
-        var response = await _client.PutAsJsonAsync("/api/admin/users/user-1/roles", request);
+        var response = await _client.PutAsJsonAsync($"/api/admin/users/{userId}/roles", request);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task ReplaceUserRoles_ShouldReturn404AndWriteNoRow_WhenTheUserDoesNotExistInTheTenant()
+    {
+        var unknownUserId = $"user-{Guid.NewGuid():N}";
+        var request = new { RoleIds = new[] { "agent" } };
+
+        var response = await _client.PutAsJsonAsync($"/api/admin/users/{unknownUserId}/roles", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var refusal = await response.Content.ReadFromJsonAsync<RefusalResponse>();
+        refusal.Should().Be(new RefusalResponse("user-not-found", unknownUserId));
+        var roles = await _client.GetFromJsonAsync<List<AssignmentResponse>>($"/api/admin/users/{unknownUserId}/roles");
+        roles.Should().BeEmpty("a refused replacement writes no user_roles row");
+    }
+
+    [Fact]
+    public async Task ReplaceUserRoles_ShouldReturn404_WhenTheUserExistsOnlyInAnotherTenant()
+    {
+        var foreignUserId = _factory.SeedActiveUser(tenantId: "tenant-other-002");
+        var request = new { RoleIds = new[] { "agent" } };
+
+        var response = await _client.PutAsJsonAsync($"/api/admin/users/{foreignUserId}/roles", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var roles = await _client.GetFromJsonAsync<List<AssignmentResponse>>($"/api/admin/users/{foreignUserId}/roles");
+        roles.Should().BeEmpty();
     }
 
     // --- Auth Tests ---

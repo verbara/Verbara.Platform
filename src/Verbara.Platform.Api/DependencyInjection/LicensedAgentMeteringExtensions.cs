@@ -50,6 +50,7 @@ public static class LicensedAgentMeteringExtensions
         services.TryAddSingleton(sp => new InMemoryLicensedAgentChangeWriter(
             sp.GetKeyedService<IAgentStore>(RealtimeSyncingStoresExtensions.AgentStoreInner) ?? sp.GetRequiredService<IAgentStore>(),
             sp.GetKeyedService<IUserStore>(AuthHotpathCacheKeys.UserStoreInner) ?? sp.GetRequiredService<IUserStore>(),
+            sp.GetRequiredService<IUserRoleStore>(),
             sp.GetRequiredService<IConversationStore>(),
             sp.GetRequiredService<InMemoryLicenseAgentLedger>()));
         services.TryAddSingleton<ILicensedAgentChangeWriter>(sp => sp.GetRequiredService<InMemoryLicensedAgentChangeWriter>());

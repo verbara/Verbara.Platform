@@ -21,13 +21,21 @@ internal static class LicensedUserWrites
         return users is CachedUserStore cached ? cached.WriteThroughAsync(tenantId, userId, Write, ct) : Write();
     }
 
-    public static Task<LicensedUserDeletion> DeleteAsync(
-        IUserStore users, ILicensedUserChangeWriter writer, TenantId tenantId, EntityId userId, string? actorUserId,
-        bool deleteOwnedAgent, CancellationToken ct)
+    // add-user-roles-user-foreign-key (design D6): deleting the user removes its user_roles rows (ON DELETE
+    // CASCADE), so the permissions resolved for it are dropped too — on this replica, and through Redis on the
+    // others — also when the delete was refused, as the user cache is. Without this, this replica kept serving
+    // the deleted user's cached permissions until the entry expired.
+    public static async Task<LicensedUserDeletion> DeleteAsync(
+        IUserStore users, ILicensedUserChangeWriter writer, PermissionResolver? permissions, TenantId tenantId,
+        EntityId userId, string? actorUserId, bool deleteOwnedAgent, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(writer);
         Task<LicensedUserDeletion> Write() =>
             writer.CommitUserDeletedAsync(tenantId, userId, actorUserId, deleteOwnedAgent, ct);
-        return users is CachedUserStore cached ? cached.WriteThroughAsync(tenantId, userId, Write, ct) : Write();
+        var deletion = users is CachedUserStore cached
+            ? await cached.WriteThroughAsync(tenantId, userId, Write, ct).ConfigureAwait(false)
+            : await Write().ConfigureAwait(false);
+        permissions?.InvalidateUser(tenantId, userId);
+        return deletion;
     }
 }
