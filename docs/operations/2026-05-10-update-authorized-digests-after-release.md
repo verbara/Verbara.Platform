@@ -12,11 +12,17 @@
 
 After **every** Verbara.Platform tagged release.
 
-> **Stop condition — do not run this while that tag's smoke is red.** If the release's
-> Release workflow run shows its `Post-release functional smoke` job as failed, do **not**
-> register the `api` + `realtime` digests: registering binds every newly issued license's
-> `AuthorizedImageDigests` claim to a functionally unverified image set (Pro/ADR-0011
-> Layer C). Re-run or fix the smoke first; register only once that job is green.
+> **Stop condition — do not run this while that tag's Release run is not green.** If the
+> release's Release workflow run shows any `Build, push, and sign` job as failed, or its
+> `Post-release functional smoke` job as failed **or skipped**, do **not** register the
+> `api` + `realtime` digests: registering binds every newly issued license's
+> `AuthorizedImageDigests` claim to an unverified image set (Pro/ADR-0011 Layer C). A
+> skipped smoke is not a pass: when one image fails the provenance gate before its push,
+> the smoke is skipped while the passing `api` and `realtime` legs still print their
+> digest blocks. Re-run or fix the release first; register only once every release job
+> and the smoke are green.
+> (A retroactive tag also skips the smoke, by design: that run builds and publishes
+> nothing, so this runbook does not apply to it.)
 
 > **TWO entries per release — `api` AND `realtime`.**
 > `data/authorized-digests.json` stores **one `current[]` entry per image per

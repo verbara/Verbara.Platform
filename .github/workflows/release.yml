@@ -106,6 +106,7 @@ jobs:
         if: steps.retro.outputs.skip != 'true'
         id: tag
         run: |
+          set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           if [ -z "$TAG" ]; then
             echo "GITHUB_REF_NAME is empty; cannot derive release tag" >&2
@@ -123,7 +124,7 @@ jobs:
           #   build_date = the tag's creatordate in UTC (a lightweight tag yields the
           #                commit date) — the same rule `released_at` uses below
           # The tag ref is expected locally (fetch-depth: 0); if it is not, fall back to
-          # GITHUB_SHA (the tagged commit on a tag push) rather than red the release.
+          # GITHUB_SHA (the tagged commit on a tag push), which is still a real commit SHA.
           VCS_REF="$(git rev-parse --verify --quiet "refs/tags/${TAG}^{commit}" || true)"
           BUILD_DATE="$(TZ=UTC git for-each-ref \
             --format='%(creatordate:format-local:%Y-%m-%dT%H:%M:%SZ)' "refs/tags/${TAG}" || true)"
@@ -135,7 +136,13 @@ jobs:
             BUILD_DATE="$(TZ=UTC git log -1 --format='%cd' \
               --date=format-local:%Y-%m-%dT%H:%M:%SZ "$VCS_REF" || true)"
           fi
-          BUILD_DATE="${BUILD_DATE:-unknown}"
+          # Validate before any build (fail-release-on-missing-image-provenance): a full
+          # 40-hex SHA, the version equal to the tag, an RFC 3339 date. There is no
+          # `unknown` fallback any more: the provenance gate compares the image labels
+          # against these values, so they must never be placeholders themselves.
+          python3 scripts/check-image-provenance.py inputs \
+            --revision "$VCS_REF" --version "$TAG" --created "$BUILD_DATE" \
+            --ref-name "$GITHUB_REF_NAME"
           {
             echo "vcs_ref=${VCS_REF}"
             echo "version=${TAG}"
@@ -154,6 +161,50 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Provenance gate (fail-release-on-missing-image-provenance). The image is first built
+      # with load: true and no push, under a gate-only local tag that matches no registry
+      # name; the gate step reads its labels from the runner's daemon and refuses the leg
+      # unless revision, version and created EQUAL the resolved values. Only then does
+      # `Build and push final image` run: a second invocation served from this builder's
+      # cache, which keeps `id: build` so its digest still feeds sign, verify and print.
+      # The gate proves the build-args land in the labels; it does not byte-verify the
+      # pushed digest, which is why the post-push print step still reads the registry.
+      - name: Build final image for the provenance gate (load only, no push)
+        if: steps.retro.outputs.skip != 'true'
+        id: gatebuild
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: verbara-provenance-gate/${{ matrix.name }}:${{ steps.tag.outputs.release_tag }}
+          secrets: |
+            nuget_auth_token=${{ secrets.PACKAGES_PAT }}
+          build-args: |
+            VCS_REF=${{ steps.tag.outputs.vcs_ref }}
+            VERSION=${{ steps.tag.outputs.version }}
+            BUILD_DATE=${{ steps.tag.outputs.build_date }}
+          provenance: false
+
+      - name: Gate on image provenance labels (before push)
+        # Fails closed. class=unstamped (a label absent, empty, `unknown` or different): the
+        # cause is at the tag and a re-run replays it, so fix on main and cut a new tag.
+        # class=unverifiable (labels unreadable): re-run the failed leg.
+        if: steps.retro.outputs.skip != 'true'
+        env:
+          GATE_IMAGE: verbara-provenance-gate/${{ matrix.name }}:${{ steps.tag.outputs.release_tag }}
+          EXPECTED_REVISION: ${{ steps.tag.outputs.vcs_ref }}
+          EXPECTED_VERSION: ${{ steps.tag.outputs.version }}
+          EXPECTED_CREATED: ${{ steps.tag.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          python3 scripts/check-image-provenance.py gate \
+            --image "$GATE_IMAGE" \
+            --revision "$EXPECTED_REVISION" \
+            --version "$EXPECTED_VERSION" \
+            --created "$EXPECTED_CREATED"
 
       - name: Build and push final image
         if: steps.retro.outputs.skip != 'true'
@@ -260,15 +311,18 @@ jobs:
       - name: Print image provenance labels
         # Prints the org.opencontainers.image.* labels the registry holds for the digest
         # this leg just pushed, so the release log shows what every image carries.
-        # PRINT-ONLY by design (stamp-ci-image-provenance): it must never red a release
-        # whose image is already pushed and signed. The gate that fails the release on a
-        # missing or `unknown` revision is the separate, later change
-        # fail-release-on-missing-image-provenance, written against this step's log.
+        # PRINT-ONLY by design: it must never red a release whose image is already pushed
+        # and signed. The gate that refuses an unverified image is `Gate on image provenance
+        # labels (before push)`; this step is the registry-side evidence of what was actually
+        # published, and warns when it differs from the resolved revision, version or created.
         if: steps.retro.outputs.skip != 'true'
         continue-on-error: true
         env:
           IMAGE_KIND: ${{ matrix.name }}
           IMAGE_REF: ${{ env.REGISTRY }}/${{ steps.tag.outputs.image_name }}@${{ steps.build.outputs.digest }}
+          EXPECTED_REVISION: ${{ steps.tag.outputs.vcs_ref }}
+          EXPECTED_VERSION: ${{ steps.tag.outputs.version }}
+          EXPECTED_CREATED: ${{ steps.tag.outputs.build_date }}
         # bash without -e (GitHub's default shell adds it): a failed jq or inspect must still print a line.
         shell: bash {0}
         run: |
@@ -294,8 +348,14 @@ jobs:
           echo "[${IMAGE_KIND}] revision = ${revision}"
           echo "[${IMAGE_KIND}] version  = ${version}"
           echo "[${IMAGE_KIND}] created  = ${created}"
-          if [ -z "$revision" ] || [ "$revision" = "(absent)" ] || [ "$revision" = "(unreadable)" ] || [ "$revision" = "unknown" ]; then
-            echo "::warning::[${IMAGE_KIND}] org.opencontainers.image.revision is ${revision} on ${IMAGE_REF}"
+          if [ "$revision" != "$EXPECTED_REVISION" ]; then
+            echo "::warning::[${IMAGE_KIND}] org.opencontainers.image.revision is ${revision}, expected ${EXPECTED_REVISION}, on ${IMAGE_REF}"
+          fi
+          if [ "$version" != "$EXPECTED_VERSION" ]; then
+            echo "::warning::[${IMAGE_KIND}] org.opencontainers.image.version is ${version}, expected ${EXPECTED_VERSION}, on ${IMAGE_REF}"
+          fi
+          if [ "$created" != "$EXPECTED_CREATED" ]; then
+            echo "::warning::[${IMAGE_KIND}] org.opencontainers.image.created is ${created}, expected ${EXPECTED_CREATED}, on ${IMAGE_REF}"
           fi
           {
             echo "#### Provenance — \`${IMAGE_KIND}\`"

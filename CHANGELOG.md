@@ -9,6 +9,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed — CI
+
+- **A release image whose provenance labels cannot be verified is no longer pushed.** Each `release.yml` leg now
+  builds its image without pushing it, and a new `Gate on image provenance labels (before push)` step reads the
+  image's `org.opencontainers.image.revision`, `.version` and `.created` labels and fails the leg unless they equal
+  the commit, tag and build date the run resolved. The error names the image, the label, the value found, the value
+  expected and a class: `unstamped` (a label is absent, empty, `unknown` or different) or `unverifiable` (the labels
+  could not be read). The `Resolve release tag` step now also fails before any build when the revision is not a
+  full commit SHA, the version is not the tag or the build date is not an RFC 3339 timestamp; it no longer falls
+  back to `unknown`. The post-push `Print image provenance labels` step stays informational and now warns when
+  the revision, version or created date differs from the resolved values. The logic lives in
+  `scripts/check-image-provenance.py`, unit-tested in the `coverage-scripts` job. Images already published are
+  unchanged.
+
+  **Operator note:** with one leg red, the other images are still pushed and signed, but no GitHub Release is
+  created and the smoke is skipped. For `unstamped`, fix the cause on `main` and cut a new tag (a re-run replays the
+  same tag); for `unverifiable`, re-run the failed leg. The authorized-digests runbook's stop condition now covers a
+  red release job and a skipped smoke, not only a red smoke.
+
 ## [2.29.0] - 2026-10-15
 
 Minor release, the **post-WhatsApp hardening** train. Sign-in and MFA: `POST /auth/mfa/verify` gets its own
