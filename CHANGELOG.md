@@ -116,7 +116,7 @@ version. Read **Upgrading** first: migrations `022` and `023` run at start-up.
   voice callback rescue logs the trunk id and does not originate. `VoiceDialResponse`, `VoiceTransferResponse` and
   every silent-listen refusal body gain `trunkId` (integer or null, always written). The OpenAPI document declares
   the 409 of both voice routes, marks `correlationId` and `error` optional, and `trunkId` required and nullable, there
-  and on every silent-listen refusal. (#386)
+  and on every silent-listen refusal. (#386, #388)
 - **Released images say which commit and release they were built from.** The release workflow passes the
   commit the tag points to, the tag, and the tag's date to all four images (`api`, `realtime`, `renderer`,
   `mail`), and the `realtime`, `renderer` and `mail` Dockerfiles gain the `org.opencontainers.image.*` labels the
