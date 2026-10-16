@@ -9,6 +9,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.29.0] - 2026-10-15
+
+Minor release, the **post-WhatsApp hardening** train. Sign-in and MFA: `POST /auth/mfa/verify` gets its own
+rate limit and survives two typos per challenge, recovery codes are minted with Argon2id, sign-in refusals carry
+a code that tells an inactive account from an inactive tenant, and tenant status is enforced on every sign-in
+path and on Realtime connections. RBAC: the role migration isolates each tenant, role assignment refuses unknown
+users, and a default-role grant survives a template rename. Operations: an Asterisk outage no longer takes the
+API out of readiness, each outbound webhook delivery is POSTed once across replicas, the LLM rate limit keys on
+the resolved tenant, and the four images carry OCI provenance labels. Also new: supervisor silent listen, and
+outbound calls that reach the tenant's trunk. It pairs with console **v3.24.0-web**, which requires this
+version. Read **Upgrading** first: migrations `022` and `023` run at start-up.
+
 ### Upgrading
 
 - **Migration `022` adds the `supervisor_listen_profiles` table.** It is additive; nothing else reads it. (#378)
@@ -106,7 +118,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `api` Dockerfile already had, so `docker inspect` shows `revision`, `version` and `created` on every image
   instead of `unknown` or nothing. A new release step prints those labels for each pushed image in the run log and
   summary; it only reports, and never fails the release. A local build without the build arguments labels the image
-  `unknown`.
+  `unknown`. (#394)
 
 - **`GET /health/voice` reports the voice plane.** It is anonymous and has the `/health/ready` JSON shape and status
   mapping (Healthy and Degraded give 200, Unhealthy gives 503). It holds `asterisk` and the four session-fed Pro
@@ -144,14 +156,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   conversation cannot close or wrap up from its state: `Queued`, `Offered`, `Snoozed`, `Escalated`, already
   ended, a live voice call on `/close`, or a concurrent close, transfer or wrap-up that got there first).
   Before, `/close` answered a generic `400` and `/typify` a `400` with a sentence. `/typify` still answers
-  `400 no typification schema bound` when no schema is bound, and its validation errors are unchanged.
+  `400 no typification schema bound` when no schema is bound, and its validation errors are unchanged. (#375)
 - **An agent is free for a new chat while in wrap-up.** A chat's capacity unit is released when it enters
   wrap-up, through `/close` or `/typify`, so the agent can be offered the next chat while typifying the
-  last one, as voice already behaves. This applies to every tenant, licensed or not.
+  last one, as voice already behaves. This applies to every tenant, licensed or not. (#375)
 - **Closes and wrap-ups now publish a conversation state-changed event, on every tenant.** Every
   successful `POST /conversations/{id}/close` emits a state change to `Closed`, including closes from
   wrap-up, waiting-for-customer and resolved, which emitted nothing before; an agent-held `/typify` emits the
-  change to `WrapUp`. Realtime consoles now see the close or the wrap-up as it happens.
+  change to `WrapUp`. Realtime consoles now see the close or the wrap-up as it happens. (#375)
 - **The compose Prometheus scrapes each API replica as its own target.** The `platform-api` job in
   `docker/observability/prometheus.yml` finds the replicas through Docker's DNS (`dns_sd_configs`, A records,
   port `5000`) instead of the single static target `platform-api:5000`. Under `--scale platform-api=N` there
@@ -229,12 +241,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   schema (every deployment without Advanced Typification) left the agent no way to end the chat. The
   close now wraps the chat up and closes it, and publishes both state changes. A supervisor closing
   another agent's chat this way is audited with `typification=skipped-no-schema`. Live voice calls still
-  end through the call itself.
+  end through the call itself. (#375)
 - **Digital capacity is released at wrap-up, on every tenant.** Wrapping up a chat through
   `/typify` did not release the agent's unit, so the agent's load kept counting the chat until a restart.
   Wrap-up now releases it once, even when two closes race. A close or typify by an agent whose chat was
   transferred away after the request was authorized answers `409 conversation-not-closable` and leaves the
-  new owner's chat and capacity alone.
+  new owner's chat and capacity alone. (#375)
 - **The Postgres pool and slow-query alerts read series the API exports.** `PgConnectionPoolHigh` and
   `SlowQueriesHigh`, in `docs/operations/alerts.yml` and `infra/k8s/manifests/prometheusrules-r55.yaml`,
   read `db_client_connections_usage` and `db_client_commands_duration`, which Npgsql 10 does not emit and the
@@ -327,6 +339,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it answers an inactive account (`401`, no tokens, no MFA challenge), before the authorization code is exchanged,
   so a refused sign-in creates, links or updates no user. The access check Realtime makes for every
   hub connection now also refuses a user whose tenant is Suspended, PendingDeletion or Deleted (#414).
+
+### Dependencies
+
+- **Advisory drift: the .NET 10 servicing set moves to `10.0.13`.** Advisories published on 2026-10-13 cover
+  `System.Security.Cryptography.Pkcs` and `System.Security.Cryptography.Xml` (GHSA-846f-f764-76mx,
+  GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj, GHSA-r955-8q5j-3h83) and `Microsoft.AspNetCore.SignalR.Common`
+  (GHSA-334f-vvp4-7g6p, CVE-2026-70159, a denial of service), all up to `10.0.12`, and NuGet audit made every
+  restore fail. Both crypto packages and `SignalR.Common` are pinned at `10.0.13`; because the patched SignalR
+  packages require it, every central `Microsoft.Extensions.*` and `Microsoft.AspNetCore.*` entry on `10.0.12`
+  moves to `10.0.13` as one set. No code change. (#395, #397)
+- **Third-party bumps:** `Microsoft.AspNetCore.DataProtection` and `.Extensions` `10.0.7` → `10.0.12` (#399),
+  `AWSSDK.S3` `4.0.103.4` → `4.0.104.2` (#341, #398), `Microsoft.AspNetCore.SignalR.Client` `10.0.5` →
+  `10.0.12` before the servicing move above (#342), `Scalar.AspNetCore` `2.17.11` → `2.17.14` (#359), and the
+  test-only `coverlet.collector` `10.0.1` → `10.1.0` (#340).
+- **Pins unchanged:** Verbara.Sdk `2.8.0` and Verbara.Sdk.Pro `2.18.0-pro`.
 
 ## [2.28.0] - 2026-10-11
 
