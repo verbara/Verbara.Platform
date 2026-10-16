@@ -16,6 +16,7 @@ public sealed class InMemoryLicensedAgentChangeWriterTests : IDisposable
     private static readonly TenantId T1 = new("t1");
     private readonly InMemoryAgentStore _agents = new();
     private readonly InMemoryUserStore _users = new();
+    private readonly InMemoryUserRoleStore _userRoles = new();
     private readonly InMemoryConversationStore _conversations = new();
     private readonly FixedLicenseIdSource _licenses = new("lic-1");
     private readonly InMemoryLicenseAgentLedger _ledger;
@@ -24,7 +25,7 @@ public sealed class InMemoryLicensedAgentChangeWriterTests : IDisposable
     public InMemoryLicensedAgentChangeWriterTests()
     {
         _ledger = new InMemoryLicenseAgentLedger(_licenses, new FixedClock());
-        _writer = new InMemoryLicensedAgentChangeWriter(_agents, _users, _conversations, _ledger);
+        _writer = new InMemoryLicensedAgentChangeWriter(_agents, _users, _userRoles, _conversations, _ledger);
     }
 
     public void Dispose() => _writer.Dispose();
@@ -128,6 +129,27 @@ public sealed class InMemoryLicensedAgentChangeWriterTests : IDisposable
         deletion.Should().Be(LicensedUserDeletion.RefusedOwnsAgent);
         _ledger.Events("t1").Should().HaveCount(before);
         (await _users.GetByIdAsync(T1, EntityId.From("u1"), CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task CommitUserDeletedAsync_ShouldRemoveTheUsersRoleAssignmentsOnly_WhenTheUserIsDeleted()
+    {
+        await UserAsync("u1");
+        await UserAsync("u2");
+        await _userRoles.AssignAsync(T1, EntityId.From("u1"), "agent", "admin", CancellationToken.None);
+        await _userRoles.AssignAsync(T1, EntityId.From("u1"), "supervisor", "admin", CancellationToken.None);
+        await _userRoles.AssignAsync(T1, EntityId.From("u2"), "agent", "admin", CancellationToken.None);
+        await _userRoles.AssignAsync(new TenantId("t2"), EntityId.From("u1"), "agent", "admin", CancellationToken.None);
+
+        var deletion = await _writer.CommitUserDeletedAsync(T1, EntityId.From("u1"), "admin", deleteOwnedAgent: false, CancellationToken.None);
+
+        deletion.UserDeleted.Should().BeTrue();
+        (await _userRoles.GetRolesForUserAsync(T1, EntityId.From("u1"), CancellationToken.None)).Should().BeEmpty(
+            "the user's role assignments go with it, as the Postgres foreign key's ON DELETE CASCADE removes them");
+        (await _userRoles.GetRolesForUserAsync(T1, EntityId.From("u2"), CancellationToken.None))
+            .Select(a => a.RoleId).Should().Equal("agent");
+        (await _userRoles.GetRolesForUserAsync(new TenantId("t2"), EntityId.From("u1"), CancellationToken.None))
+            .Select(a => a.RoleId).Should().Equal(["agent"], "the same id in another tenant is another user");
     }
 
     private async Task UserAsync(string userId, UserStatus status = UserStatus.Active) =>

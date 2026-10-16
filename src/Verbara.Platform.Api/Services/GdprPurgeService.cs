@@ -23,6 +23,7 @@ internal sealed class GdprPurgeService : IGdprPurgeService
     private readonly ILicensedUserChangeWriter _userWriter;
     private readonly ILogger<GdprPurgeService> _logger;
     private readonly ISupervisorListenProfileStore? _listenProfiles;
+    private readonly PermissionResolver? _permissions;
 
     public GdprPurgeService(
         IContactStore contactStore,
@@ -38,7 +39,8 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         IAuditService audit,
         ILicensedUserChangeWriter userWriter,
         ILogger<GdprPurgeService> logger,
-        ISupervisorListenProfileStore? listenProfiles = null)
+        ISupervisorListenProfileStore? listenProfiles = null,
+        PermissionResolver? permissions = null)
     {
         _contactStore = contactStore;
         _conversationStore = conversationStore;
@@ -54,6 +56,7 @@ internal sealed class GdprPurgeService : IGdprPurgeService
         _userWriter = userWriter;
         _logger = logger;
         _listenProfiles = listenProfiles;
+        _permissions = permissions;
     }
 
 
@@ -165,7 +168,7 @@ internal sealed class GdprPurgeService : IGdprPurgeService
 
         // 3. Delete the user record itself (with its agent, when it owns one)
         var deletion = await LicensedUserWrites.DeleteAsync(
-            _userStore, _userWriter, tid, uid, performedBy, deleteOwnedAgent: true, ct);
+            _userStore, _userWriter, _permissions, tid, uid, performedBy, deleteOwnedAgent: true, ct);
         if (agent is not null && deletion.DeletedAgentId == agent.AgentId.Value)
         {
             entitiesDeleted["agent"] = 1;

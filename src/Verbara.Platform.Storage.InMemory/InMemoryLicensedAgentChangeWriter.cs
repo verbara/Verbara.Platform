@@ -20,19 +20,23 @@ public sealed class InMemoryLicensedAgentChangeWriter : ILicensedAgentChangeWrit
 {
     private readonly IAgentStore _agents;
     private readonly IUserStore _users;
+    private readonly IUserRoleStore _userRoles;
     private readonly IConversationStore _conversations;
     private readonly InMemoryLicenseAgentLedger _ledger;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public InMemoryLicensedAgentChangeWriter(
-        IAgentStore agents, IUserStore users, IConversationStore conversations, InMemoryLicenseAgentLedger ledger)
+        IAgentStore agents, IUserStore users, IUserRoleStore userRoles, IConversationStore conversations,
+        InMemoryLicenseAgentLedger ledger)
     {
         ArgumentNullException.ThrowIfNull(agents);
         ArgumentNullException.ThrowIfNull(users);
+        ArgumentNullException.ThrowIfNull(userRoles);
         ArgumentNullException.ThrowIfNull(conversations);
         ArgumentNullException.ThrowIfNull(ledger);
         _agents = agents;
         _users = users;
+        _userRoles = userRoles;
         _conversations = conversations;
         _ledger = ledger;
     }
@@ -147,6 +151,9 @@ public sealed class InMemoryLicensedAgentChangeWriter : ILicensedAgentChangeWrit
             }
 
             await _users.DeleteAsync(tenantId, userId, ct).ConfigureAwait(false);
+            // add-user-roles-user-foreign-key (design D7): the user's role assignments go with it, as the
+            // ON DELETE CASCADE of user_roles onto users removes them in Postgres.
+            await _userRoles.ReplaceAllAsync(tenantId, userId, [], assignedBy: null, ct).ConfigureAwait(false);
             if (agent is not null)
             {
                 staged.Append(LicenseAgentEventKinds.UserDeleted, agent.AgentId.Value, userId.Value, actorUserId, null,

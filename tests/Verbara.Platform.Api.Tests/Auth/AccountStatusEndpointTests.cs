@@ -7,6 +7,7 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 
 namespace Verbara.Platform.Api.Tests.Auth;
 
@@ -164,6 +165,20 @@ public sealed class AccountStatusEndpointTests : IClassFixture<AccountStatusApiF
             because: "a deleted user's live connections must not outlive the account");
     }
 
+    [Fact]
+    public async Task DeleteUser_ShouldDropTheUsersCachedPermissions_WhenTheUserIsDeleted()
+    {
+        var target = NewTargetUser();
+        await WarmPermissionsThenRemoveRolesAsync(target);
+
+        using var client = AdminClient();
+        (await client.DeleteAsync($"/api/v1/admin/users/{target.UserId.Value}"))
+            .StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        (await ResolvePermissionsAsync(target)).Should().BeEmpty(
+            because: "the deleted user's roles go with it, and this replica must not serve them from its cache");
+    }
+
     // ─── GDPR erasure: POST /admin/gdpr/purge-user ───────────────────────────
 
     [Fact]
@@ -186,6 +201,24 @@ public sealed class AccountStatusEndpointTests : IClassFixture<AccountStatusApiF
             && e.Metadata.TenantId == Customer
             && e.Metadata.UserId == target.UserId.Value,
             because: "a purged user's live connections must not outlive the account, exactly as on DELETE");
+    }
+
+    [Fact]
+    public async Task PurgeUserData_ShouldDropTheUsersCachedPermissions_WhenTheUserIsPurged()
+    {
+        var target = NewTargetUser();
+        await WarmPermissionsThenRemoveRolesAsync(target);
+
+        using var client = AdminClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/admin/gdpr/purge-user")
+        {
+            Content = JsonContent.Create(new { userId = target.UserId.Value, reason = "erasure request" }),
+        };
+        request.Headers.Add("X-Confirm-Purge", "true");
+        (await client.SendAsync(request)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        (await ResolvePermissionsAsync(target)).Should().BeEmpty(
+            because: "a purged user's role assignments go with it, exactly as on DELETE");
     }
 
     // ─── Impersonation start (mints a 30-minute token for the caller) ────────
@@ -337,6 +370,21 @@ public sealed class AccountStatusEndpointTests : IClassFixture<AccountStatusApiF
             password,
         });
     }
+
+    // The user's permissions are resolved (and cached) while it holds roles; then its roles are gone from the
+    // store, as the user_roles foreign key's ON DELETE CASCADE removes them with the user. Only a dropped cache
+    // entry makes the next resolve see that.
+    private async Task WarmPermissionsThenRemoveRolesAsync(User user)
+    {
+        (await ResolvePermissionsAsync(user)).Should().NotBeEmpty(because: "the user holds roles before the delete");
+        _factory.Services.GetRequiredService<IUserRoleStore>()
+            .GetEffectivePermissionsAsync(user.TenantId, user.UserId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(StringComparer.Ordinal)));
+    }
+
+    private Task<IReadOnlySet<string>> ResolvePermissionsAsync(User user) =>
+        _factory.Services.GetRequiredService<PermissionResolver>()
+            .ResolveAsync(user.TenantId, user.UserId, CancellationToken.None);
 
     private HttpClient AdminClient()
     {

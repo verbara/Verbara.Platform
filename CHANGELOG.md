@@ -64,6 +64,11 @@ version. Read **Upgrading** first: migrations `022` and `023` run at start-up.
   `Pending` and due for its retry poll. Until every replica runs this release, an older replica does not honour the
   claims, so a delivery can still be POSTed twice during the rolling deploy. (Platform/ADR-0043) (#406)
 
+- **Migration `024` removes role assignments of users that do not exist, then adds a foreign key from `user_roles`
+  onto `users`.** Rows of `user_roles` whose user is not in `users` (assignments made for an unknown id, and the rows
+  every deleted user left behind) are deleted at upgrade, with no manual step. From then on, deleting a user removes
+  their role assignments. The migration locks `users` and `user_roles` against writes while it runs (reads go on).
+
 - **Sign-in refusals carry a code.** The account-status and tenant-status 403 refusals of `/auth/login`,
   `/auth/mfa/verify` and `/auth/login/apikey` carry a code in `error`: `account-inactive` instead of
   `Account is not active.`, and `tenant-suspended` / `tenant-pending-deletion` instead of the tenant prose (only on
@@ -149,6 +154,10 @@ version. Read **Upgrading** first: migrations `022` and `023` run at start-up.
   first and, when there is none, answers `404` with `{ "error": "user-not-found", "userId": … }` and stores
   nothing. A script that assigns roles before it creates the user must create the user first. (#403)
 
+- **Replacing a user's roles for a user the tenant does not have answers `404`.** `PUT /admin/users/{id}/roles`
+  used to answer `200` and store the roles for any user id. It now answers `404` with
+  `{ "error": "user-not-found", "userId": … }` and stores nothing, as `POST /admin/users/{id}/roles/{roleId}` does.
+
 - **Refused closes and typifications answer `409` with a stable code instead of `400`.**
   `POST /conversations/{id}/close` and `POST /conversations/{id}/typify` answer `409` with
   `{ "error": … }` set to `typification-required` (a close of an agent-held chat when a published
@@ -209,6 +218,14 @@ version. Read **Upgrading** first: migrations `022` and `023` run at start-up.
   who holds a role that the migration or user creation granted and that no template's id, name or source template
   matches any more, it logs a warning (event `3703`, naming the tenant, the user, the attached role and the held
   roles). (#411)
+
+- **Deleting a user removes their role assignments.** `DELETE /admin/users/{id}` and the GDPR user purge left the
+  user's rows in `user_roles`. Authorization resolves a token's user's permissions from those rows (cached for up to
+  five minutes per replica), so an access token the deleted user still held kept its role permissions until it expired (at most 15 minutes),
+  and a custom role held only by deleted users could not be deleted. The database now removes the rows with the
+  user, in the same transaction; every replica drops the permissions it cached for the user (the replica that ran
+  the delete kept them before); and a role assignment for a user that does not exist is refused (see
+  **Upgrading**). A token whose role claim is `Admin` or `SystemAdmin` still passes on that claim until it expires.
 
 - **The AI typification suggestion's rate limit now uses the tenant the request resolved.** On
   `POST /api/v1/conversations/{id}/typification-suggestion`, a tenant identified by its subdomain without an

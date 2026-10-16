@@ -15,7 +15,8 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Seeds;
 /// <para>
 /// <b>Fidelity over minimalism where constraints are concerned.</b> The point of running against a
 /// real Postgres is that the real <em>constraints</em> fire, so every table here reproduces its
-/// baseline primary keys, foreign keys <b>and unique indexes</b> verbatim. In particular
+/// baseline primary keys, foreign keys <b>and unique indexes</b> verbatim, including the key of
+/// <c>user_roles</c> onto <c>users</c> that migration <c>024</c> adds. In particular
 /// <c>idx_tenant_roles_name</c> — the second unique index on <c>tenant_roles</c>, over
 /// <c>(tenant_id, lower(name))</c> — is load-bearing: while it was missing from this fixture, a
 /// <c>tenant_roles</c> insert that conflicted on the role <em>name</em> rather than on the role
@@ -140,16 +141,6 @@ public sealed class PostgresRbacFixture : IAsyncLifetime
             FOREIGN KEY (tenant_id, role_id) REFERENCES tenant_roles(tenant_id, role_id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS user_roles (
-            tenant_id TEXT NOT NULL,
-            user_id TEXT NOT NULL,
-            role_id TEXT NOT NULL,
-            assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            assigned_by TEXT,
-            PRIMARY KEY (tenant_id, user_id, role_id),
-            FOREIGN KEY (tenant_id, role_id) REFERENCES tenant_roles(tenant_id, role_id) ON DELETE CASCADE
-        );
-
         -- Narrow projection of baseline `users`: RbacMigrationSeeder.MigrateExistingUsersAsync
         -- drives its whole loop off "SELECT DISTINCT tenant_id FROM users" plus
         -- "SELECT user_id, role FROM users WHERE tenant_id = @TenantId". `role` is the UserRole
@@ -160,6 +151,21 @@ public sealed class PostgresRbacFixture : IAsyncLifetime
             role INTEGER NOT NULL,
             PRIMARY KEY (tenant_id, user_id)
         );
+
+        -- user_roles_tenant_id_user_id_fkey is added by 024_UserRolesUserForeignKey.sql, so `users`
+        -- is created first. A role assignment for a user the tenant does not have fails with 23503.
+        CREATE TABLE IF NOT EXISTS user_roles (
+            tenant_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            role_id TEXT NOT NULL,
+            assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            assigned_by TEXT,
+            PRIMARY KEY (tenant_id, user_id, role_id),
+            FOREIGN KEY (tenant_id, role_id) REFERENCES tenant_roles(tenant_id, role_id) ON DELETE CASCADE,
+            CONSTRAINT user_roles_tenant_id_user_id_fkey
+                FOREIGN KEY (tenant_id, user_id) REFERENCES users(tenant_id, user_id) ON DELETE CASCADE
+        );
+
         """;
 }
 
