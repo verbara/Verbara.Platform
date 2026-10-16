@@ -196,7 +196,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   role. A role an administrator assigned is never removed this way. When the migration attaches a role to a user
   who holds a role that the migration or user creation granted and that no template's id, name or source template
   matches any more, it logs a warning (event `3703`, naming the tenant, the user, the attached role and the held
-  roles).
+  roles). (#411)
 
 - **The AI typification suggestion's rate limit now uses the tenant the request resolved.** On
   `POST /api/v1/conversations/{id}/typification-suggestion`, a tenant identified by its subdomain without an
