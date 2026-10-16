@@ -429,7 +429,7 @@ public sealed class MfaVerifyChallengeAttemptsTests
             var policy = Substitute.For<IMfaPolicyEvaluator>();
             var result = await OidcEndpoints.CompleteOidcLoginAsync(
                 BuildHttpContext(), _jwtService, _refreshService, _authEvents, policy, _mfaCache,
-                await ReadUserAsync(),
+                new InMemoryTenantStore(), await ReadUserAsync(),
                 new OidcFlowState
                 {
                     TenantId = TenantId,
@@ -543,6 +543,7 @@ public sealed class MfaVerifyChallengeAttemptsTests
                 FailChallengeConsume ? new ConsumeFailingCache(_mfaCache) : _mfaCache,
                 _configStore,
                 _recoveryCodes,
+                new InMemoryTenantStore(),
                 CancellationToken.None);
 
             var (status, error) = await RenderAsync(result);

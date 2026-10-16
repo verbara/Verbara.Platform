@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
+using Verbara.Platform.Storage.InMemory;
 
 namespace Verbara.Platform.Api.Tests.Endpoints;
 
@@ -144,7 +145,7 @@ public sealed class OidcRefreshCookieTests
 
             var result = await OidcEndpoints.CompleteOidcLoginAsync(
                 context, _jwtService, _refreshService, _authEvents,
-                _mfaEvaluator, _mfaCache, _user, flowState, publicBaseUrl: "https://app.example.com",
+                _mfaEvaluator, _mfaCache, new InMemoryTenantStore(), _user, flowState, publicBaseUrl: "https://app.example.com",
                 ip: null, ua: null, ct: CancellationToken.None);
 
             return (result, context);

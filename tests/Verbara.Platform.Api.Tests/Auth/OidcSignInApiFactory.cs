@@ -73,7 +73,23 @@ internal sealed class OidcSignInApiFactory(
     /// state cookie issued before the login endpoint checked it would. Returns where the callback sends
     /// the browser.
     /// </summary>
-    public Task<string> CompleteWithFlowStateAsync(string returnUrl)
+    public Task<string> CompleteWithFlowStateAsync(string returnUrl) =>
+        CallBackAsync(CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }),
+            FlowStateCookie(returnUrl));
+
+    /// <summary>
+    /// Completes a sign-in from a valid flow state carrying <paramref name="returnUrl"/>, the way the identity
+    /// provider's redirect does, and returns the callback's response whatever it is.
+    /// </summary>
+    public async Task<HttpResponseMessage> CallBackResponseAsync(string returnUrl)
+    {
+        using var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var callback = new HttpRequestMessage(HttpMethod.Get, "/api/auth/oidc/callback?code=authorization-code&state=state");
+        callback.Headers.Add("Cookie", FlowStateCookie(returnUrl));
+        return await client.SendAsync(callback);
+    }
+
+    private string FlowStateCookie(string returnUrl)
     {
         var state = new OidcFlowState
         {
@@ -84,9 +100,7 @@ internal sealed class OidcSignInApiFactory(
             ExpiresAtUnix = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds(),
         };
         var protector = Services.GetRequiredService<IDataProtectionProvider>().CreateProtector("OidcFlowState");
-        var cookie = $"{StateCookie}={protector.Protect(JsonSerializer.Serialize(state, OidcJsonContext.Default.OidcFlowState))}";
-
-        return CallBackAsync(CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }), cookie);
+        return $"{StateCookie}={protector.Protect(JsonSerializer.Serialize(state, OidcJsonContext.Default.OidcFlowState))}";
     }
 
     private static async Task<string> CallBackAsync(HttpClient client, string stateCookie)

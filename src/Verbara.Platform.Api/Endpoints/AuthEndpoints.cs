@@ -88,6 +88,7 @@ internal static class AuthEndpoints
         // queue. The migration is bounded by the user's login activity, not
         // calendar time.
         [FromServices] AuthWriteQueue? authWriteQueue,
+        [FromServices] ITenantStore tenantStore,
         CancellationToken ct)
     {
         // Resolve tenant: body > middleware context (header/subdomain)
@@ -97,6 +98,11 @@ internal static class AuthEndpoints
 
         if (string.IsNullOrWhiteSpace(rawTenantId))
             return Results.BadRequest(new ErrorResponse("Tenant identification required. Provide tenantId in body or X-Tenant-Id header."));
+
+        // The tenant's status is checked wherever the tenant was named, before the credentials: a tenant
+        // named in the body answers exactly as one named by header or subdomain does in the middleware.
+        if (await TenantServingGate.RefuseAsync(tenantStore, rawTenantId, ct) is { } tenantRefusal)
+            return tenantRefusal;
 
         var tenantId = new TenantId(rawTenantId);
         var ip = GetIpAddress(context);
@@ -205,6 +211,7 @@ internal static class AuthEndpoints
         // enrollment wizard. Argon2id and BCrypt codes need no service; the dispatch
         // lives in MfaService.ValidateRecoveryCode, which classifies per element.
         [FromServices] IRecoveryCodeService recoveryCodes,
+        [FromServices] ITenantStore tenantStore,
         CancellationToken ct)
     {
         // A challenge allows MfaChallenge.MaxAttempts factors (IMfaPendingCache states the lifecycle).
@@ -220,6 +227,13 @@ internal static class AuthEndpoints
             return MfaChallengeRefusals.ExpiredResult();
 
         var pending = attempt.Entry;
+
+        // The challenge's tenant may have stopped serving since it was minted. Refused before the user is
+        // read or the factor evaluated, and without spending the challenge (the attempt reserved above still
+        // counts toward its limit).
+        if (await TenantServingGate.RefuseAsync(tenantStore, pending.TenantId, ct) is { } tenantRefusal)
+            return tenantRefusal;
+
         var tenantId = new TenantId(pending.TenantId);
         var user = await userStore.GetByIdAsync(tenantId, EntityId.From(pending.UserId), ct);
         // A bare 401 would say "wrong factor, the challenge is still live"; this challenge is spent and
@@ -408,6 +422,7 @@ internal static class AuthEndpoints
         [FromServices] ITenantAuthConfigStore configStore,
         [FromServices] IMfaPolicyEvaluator mfaPolicyEvaluator,
         AuthEventService authEvents,
+        [FromServices] ITenantStore tenantStore,
         CancellationToken ct)
     {
         var rawToken = context.Request.Cookies[RefreshTokenCookie.Name];
@@ -422,6 +437,20 @@ internal static class AuthEndpoints
             return Results.Unauthorized();
 
         var (newRawToken, newStoredToken) = result.Value;
+
+        // A tenant that stopped serving ends the user's whole refresh lineage, as an account that left
+        // Active does below. RotateAsync has already minted a replacement, so that one goes too.
+        if (await TenantServingGate.RefusedStatusAsync(tenantStore, newStoredToken.TenantId, ct) is { } tenantStatus)
+        {
+            await refreshTokenStore.RevokeAllForUserAsync(
+                newStoredToken.TenantId, newStoredToken.UserId, DateTimeOffset.UtcNow, ct);
+            DeleteRefreshCookie(context);
+            await authEvents.LogAsync(newStoredToken.TenantId, newStoredToken.UserId,
+                AuthEventTypes.SessionRevoked, ip, ua,
+                new Dictionary<string, string> { ["reason"] = TenantServingGate.DenialReason(tenantStatus) }, ct);
+            return Results.Unauthorized();
+        }
+
         var user = await userStore.GetByIdAsync(
             new TenantId(newStoredToken.TenantId),
             EntityId.From(newStoredToken.UserId),
@@ -572,6 +601,7 @@ internal static class AuthEndpoints
         [FromServices] IMfaPolicyEvaluator mfaPolicyEvaluator,
         JwtTokenService jwtService,
         AuthEventService authEvents,
+        [FromServices] ITenantStore tenantStore,
         CancellationToken ct)
     {
         var hashedKey = HashKey(body.ApiKey);
@@ -585,6 +615,10 @@ internal static class AuthEndpoints
 
         if (apiKey.UserId is not { } linkedUserId)
             return Results.Unauthorized();
+
+        // The key's tenant must still be serving before the key mints anything.
+        if (await TenantServingGate.RefuseAsync(tenantStore, apiKey.TenantId.Value, ct) is { } tenantRefusal)
+            return tenantRefusal;
 
         var user = await userStore.GetByIdAsync(apiKey.TenantId, linkedUserId, ct);
         if (user is null)

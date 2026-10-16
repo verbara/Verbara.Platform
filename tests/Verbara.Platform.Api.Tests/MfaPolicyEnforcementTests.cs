@@ -173,6 +173,7 @@ public sealed class MfaPolicyEnforcementTests
             fixture.ConfigStore,
             fixture.MfaPolicyEvaluator,
             fixture.AuthEvents,
+            fixture.TenantStore,
             CancellationToken.None);
 
         var json = result.Should().BeOfType<JsonHttpResult<MfaEnrollmentRequiredResponse>>().Subject;

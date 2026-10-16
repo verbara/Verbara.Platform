@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
+using Verbara.Platform.Storage.InMemory;
 
 namespace Verbara.Platform.Api.Tests.Endpoints;
 
@@ -202,6 +203,7 @@ public sealed class OidcMfaEnforcementTests
                 _authEvents,
                 _mfaEvaluator,
                 MfaCache,
+                new InMemoryTenantStore(),
                 _user,
                 flowState,
                 publicBaseUrl: "https://app.example.com",

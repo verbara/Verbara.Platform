@@ -278,6 +278,7 @@ public sealed class MfaVerifyBookkeepingTests
                 _mfaCache,
                 _configStore,
                 RecoveryCodes,
+                new InMemoryTenantStore(),
                 CancellationToken.None);
         }
 
