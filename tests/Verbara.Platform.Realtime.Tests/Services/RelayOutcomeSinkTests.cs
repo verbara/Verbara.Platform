@@ -181,17 +181,26 @@ public sealed class RelayOutcomeSinkTests
             PodInstanceId = "pod-race",
         });
 
-        var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        // The race window opens on the writer's first record, not at test start:
+        // on a loaded runner Task.Run can be scheduled after a timer started
+        // here has already fired, and the writer then records nothing.
+        using var stop = new CancellationTokenSource();
+        var firstRecord = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var writer = Task.Run(async () =>
         {
             var t0 = DateTimeOffset.UtcNow;
             var i = 0;
-            while (!stop.IsCancellationRequested)
+            do
             {
                 sink.Record(MakeEntry(t0.AddTicks(i++)));
+                firstRecord.TrySetResult();
                 if (i % 100 == 0) await Task.Yield();
             }
+            while (!stop.IsCancellationRequested);
         });
+
+        await firstRecord.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        stop.CancelAfter(TimeSpan.FromMilliseconds(200));
 
         var reader = Task.Run(async () =>
         {
