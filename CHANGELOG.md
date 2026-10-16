@@ -21,7 +21,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (before the connect, or after the call came back to their queue) never counts. The customer is the first
   other leg that is not `Local/`. On an outbound click-to-dial the agent's own leg
   is no longer read as the customer's. A call ended by a reload, with no hangup cause, still stamps `false`.
-  Closes the code half of #384; the lab re-run of `PLT-DIAL-02` cell g is still pending.
+  Closes the code half of #384; the lab re-run of `PLT-DIAL-02` cell g is still pending. (#426)
 
 ### Changed — Dependencies
 
