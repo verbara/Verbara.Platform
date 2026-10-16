@@ -144,6 +144,7 @@ public sealed class InactiveAccountSignInTests
             fixture.MfaPendingCache,
             fixture.ConfigStore,
             recoveryCodes,
+            fixture.TenantStore,
             CancellationToken.None);
 
         result.Should().BeOfType<JsonHttpResult<ErrorResponse>>(
@@ -177,6 +178,7 @@ public sealed class InactiveAccountSignInTests
             fixture.ConfigStore,
             fixture.MfaPolicyEvaluator,
             fixture.AuthEvents,
+            fixture.TenantStore,
             CancellationToken.None);
 
         result.Should().BeOfType<JsonHttpResult<ErrorResponse>>(
@@ -274,6 +276,7 @@ public sealed class InactiveAccountSignInTests
             fixture.MfaPolicyEvaluator,
             fixture.MfaPendingCache,
             authWriteQueue: null,
+            fixture.TenantStore,
             CancellationToken.None);
 
     private static Task<IResult> InvokeCompleteOidcLoginAsync(AuthHandlerFixture fixture, HttpContext context) =>
@@ -284,6 +287,7 @@ public sealed class InactiveAccountSignInTests
             fixture.AuthEvents,
             fixture.MfaPolicyEvaluator,
             fixture.MfaPendingCache,
+            fixture.TenantStore,
             fixture.User,
             new OidcFlowState
             {

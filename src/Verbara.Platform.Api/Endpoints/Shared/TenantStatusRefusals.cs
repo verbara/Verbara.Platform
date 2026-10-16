@@ -1,8 +1,8 @@
 namespace Verbara.Platform.Api.Endpoints.Shared;
 
 /// <summary>
-/// The stable refusal codes <see cref="Middleware.TenantStatusMiddleware"/> writes for a tenant that is not
-/// serving, in Platform's <see cref="ErrorResponse"/> convention: <c>error</c> carries only a kebab-case machine
+/// The stable refusal codes <see cref="Middleware.TenantStatusMiddleware"/> and the sign-in handlers
+/// (<see cref="Auth.TenantServingGate"/>) write for a tenant that is not serving, in Platform's <see cref="ErrorResponse"/> convention: <c>error</c> carries only a kebab-case machine
 /// code. Both answer <c>403</c>.
 /// </summary>
 /// <remarks>

@@ -97,6 +97,7 @@ public sealed class EffectivePermissionsTests
             fixture.ConfigStore,
             fixture.MfaPolicyEvaluator,
             fixture.AuthEvents,
+            fixture.TenantStore,
             CancellationToken.None);
 
         var ok = result.Should().BeOfType<Ok<TokenResponse>>().Subject;

@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using NSubstitute;
 using OtpNet;
+using Verbara.Platform.Storage.InMemory;
 
 namespace Verbara.Platform.Api.Tests.Endpoints;
 
@@ -156,7 +157,7 @@ public sealed class AuthEndpointsTests
 
         var result = await AuthEndpoints.Refresh(
             ctx, userStore, jwtService: null!, refreshService, refreshTokenStore,
-            configStore, mfaPolicyEvaluator, authEvents, CancellationToken.None);
+            configStore, mfaPolicyEvaluator, authEvents, new InMemoryTenantStore(), CancellationToken.None);
 
         var statusResult = result.Should().BeOfType<JsonHttpResult<MfaEnrollmentRequiredResponse>>().Subject;
         statusResult.StatusCode.Should().Be(401);

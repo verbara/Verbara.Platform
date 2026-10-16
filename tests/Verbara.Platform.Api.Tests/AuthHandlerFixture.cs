@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
+using Verbara.Platform.Storage.InMemory;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -58,6 +59,8 @@ internal sealed class AuthHandlerFixture
     public readonly Verbara.Platform.Identity.Mfa.IMfaPolicyEvaluator MfaPolicyEvaluator =
         Substitute.For<Verbara.Platform.Identity.Mfa.IMfaPolicyEvaluator>();
     public readonly Verbara.Platform.Identity.Mfa.InMemoryMfaPendingCache MfaPendingCache = new();
+    /// <summary>Knows no tenant, so no handler refuses for tenant status unless a test seeds one.</summary>
+    public readonly Verbara.Sdk.Pro.MultiTenant.ITenantStore TenantStore = new InMemoryTenantStore();
     public readonly Verbara.Platform.Identity.Mfa.InMemoryPasswordResetCache PasswordResetCache = new();
     public readonly AuthEventService AuthEvents;
     public readonly JwtTokenService JwtService;
@@ -205,6 +208,7 @@ internal sealed class AuthHandlerFixture
             MfaPolicyEvaluator,
             MfaPendingCache,
             authWriteQueue: null, // AHH Phase 4 — null queue → rehash skipped (test path)
+            TenantStore,
             CancellationToken.None);
 
     public Task<IResult> InvokeApiKeyLoginAsync(ApiKeyLoginRequest body) =>
@@ -217,6 +221,7 @@ internal sealed class AuthHandlerFixture
             MfaPolicyEvaluator,
             JwtService,
             AuthEvents,
+            TenantStore,
             CancellationToken.None);
 
     private static string HashKey(string rawKey)

@@ -11,6 +11,7 @@ using Verbara.Platform.Identity.OidcTokenExchange;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Verbara.Sdk.Pro.MultiTenant;
 
 namespace Verbara.Platform.Api.Endpoints;
 
@@ -104,6 +105,7 @@ internal static class OidcEndpoints
         [FromServices] IMfaPolicyEvaluator mfaEvaluator,
         [FromServices] IMfaPendingCache mfaCache,
         [FromServices] IConfiguration configuration,
+        [FromServices] ITenantStore tenantStore,
         JwtTokenService jwtService,
         RefreshTokenService refreshService,
         AuthEventService authEvents,
@@ -119,6 +121,15 @@ internal static class OidcEndpoints
         var tenantId = flowState!.TenantId;
         var ip = context.Connection.RemoteIpAddress?.ToString();
         var ua = context.Request.Headers.UserAgent.FirstOrDefault();
+
+        // A tenant that is not serving is refused before the code is exchanged, so the refused sign-in
+        // creates, links or stamps no user. CompleteOidcLoginAsync checks again for its other callers.
+        if (await TenantServingGate.RefusedStatusAsync(tenantStore, tenantId, ct) is { } tenantStatus)
+        {
+            await authEvents.LogAsync(tenantId, null, AuthEventTypes.OidcLoginFailure, ip, ua,
+                new Dictionary<string, string> { ["reason"] = TenantServingGate.DenialReason(tenantStatus) }, ct);
+            return Results.Unauthorized();
+        }
 
         if (!string.IsNullOrEmpty(error))
         {
@@ -187,9 +198,9 @@ internal static class OidcEndpoints
             return Results.Unauthorized();
         }
 
-        // The account-status check lives in CompleteOidcLoginAsync, the step that issues tokens or
+        // The account- and tenant-status checks live in CompleteOidcLoginAsync, the step that issues tokens or
         // an MFA challenge, so no caller of that step can skip it.
-        return await CompleteOidcLoginAsync(context, jwtService, refreshService, authEvents, mfaEvaluator, mfaCache, user, flowState, publicBaseUrl, ip, ua, ct);
+        return await CompleteOidcLoginAsync(context, jwtService, refreshService, authEvents, mfaEvaluator, mfaCache, tenantStore, user, flowState, publicBaseUrl, ip, ua, ct);
     }
 
     /// <summary>
@@ -239,7 +250,7 @@ internal static class OidcEndpoints
     internal static async Task<IResult> CompleteOidcLoginAsync(
         HttpContext context, JwtTokenService jwtService, RefreshTokenService refreshService,
         AuthEventService authEvents, IMfaPolicyEvaluator mfaEvaluator, IMfaPendingCache mfaCache,
-        User user, OidcFlowState flowState, string publicBaseUrl, string? ip, string? ua, CancellationToken ct)
+        ITenantStore tenantStore, User user, OidcFlowState flowState, string publicBaseUrl, string? ip, string? ua, CancellationToken ct)
     {
         var tenantId = flowState.TenantId;
 
@@ -253,6 +264,14 @@ internal static class OidcEndpoints
         {
             await authEvents.LogAsync(tenantId, user.UserId.Value, AuthEventTypes.OidcLoginFailure, ip, ua,
                 new Dictionary<string, string> { ["reason"] = AccountStatusGate.DenialReason(user) }, ct);
+            return Results.Unauthorized();
+        }
+
+        // Nor does it say anything about the tenant: one that is not serving gets the same answer.
+        if (await TenantServingGate.RefusedStatusAsync(tenantStore, tenantId, ct) is { } tenantStatus)
+        {
+            await authEvents.LogAsync(tenantId, user.UserId.Value, AuthEventTypes.OidcLoginFailure, ip, ua,
+                new Dictionary<string, string> { ["reason"] = TenantServingGate.DenialReason(tenantStatus) }, ct);
             return Results.Unauthorized();
         }
 
