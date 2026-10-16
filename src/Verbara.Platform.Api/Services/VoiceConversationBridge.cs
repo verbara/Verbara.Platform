@@ -1,4 +1,5 @@
 using System.Globalization;
+using Verbara.Platform.Api.Services.SupervisorListen;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
@@ -412,7 +413,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
             // the eval markers and the state advance commit atomically (no half-stamped row on crash).
             bool? abnormalHangup = null;
             if (wasActive)
-                abnormalHangup = await StampCallbackEvalFactsAsync(tenantId, session, conversation).ConfigureAwait(false);
+                abnormalHangup = await StampCallbackEvalFactsAsync(tenantId, session, conversation, agentId).ConfigureAwait(false);
 
             await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
             _eventBus.Publish(new ConversationStateChangedEvent(tenantId.Value, conversation.ConversationId.Value, oldState.ToString(), conversation.State.ToString()));
@@ -478,10 +479,14 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     /// Returns the abnormal-hangup verdict so the caller can publish the csat-completion
     /// <see cref="VoiceAgentHangupEvent"/> with the same verdict it stamped.
     /// </summary>
-    private async Task<bool> StampCallbackEvalFactsAsync(TenantId tenantId, CallSession session, Conversation conversation)
+    private async Task<bool> StampCallbackEvalFactsAsync(TenantId tenantId, CallSession session, Conversation conversation, EntityId? agentId)
     {
-        var agent = session.Participants.FirstOrDefault(p => p.Role == ParticipantRole.Agent);
-        var caller = session.Participants.FirstOrDefault(p => p.Role == ParticipantRole.Caller);
+        // The agent's leg by channel, never by ParticipantRole.Agent: the SDK never assigns that role (#384).
+        // The customer is the first leg that is neither the agent's nor a Local/ helper (Internal) — not "the
+        // first leg", which on a click-to-dial or a rescued callback is the agent's own.
+        var participants = session.Participants;
+        var agent = AgentLegResolver.FindAgentLeg(tenantId.Value, agentId, participants, session.ConnectedAt);
+        var caller = participants.FirstOrDefault(p => !ReferenceEquals(p, agent) && p.Role != ParticipantRole.Internal);
         var abnormal = IsAbnormalAgentHangup(agent?.HangupCause, agent?.LeftAt, caller?.LeftAt);
 
         conversation.SetMetadata("pendingCallbackEval", "true");

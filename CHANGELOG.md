@@ -9,6 +9,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A voice call whose agent leg dies is now flagged abnormal, so the callback rescue and the voice-CSAT
+  verdict see it.** The callback-eval stamp looked for the agent leg with `ParticipantRole.Agent`, a role the
+  SDK never assigns: its sessions only tag legs `Caller` (first), `Destination` (later) and `Internal`
+  (`Local/`). So every answered call was stamped `agentLegAbnormal=false`, `CallbackRescueWorker` never
+  called a dropped customer back, and `VoiceAgentHangupEvent.Abnormal` was always `false`. The stamp now finds
+  the agent leg by its channel, `PJSIP/{tenant}-agent-{agentId}-` (the prefix silent listen already uses). On a
+  queue call it takes the leg that was up when the call first connected, so a ring the agent did not answer
+  (before the connect, or after the call came back to their queue) never counts. The customer is the first
+  other leg that is not `Local/`. On an outbound click-to-dial the agent's own leg
+  is no longer read as the customer's. A call ended by a reload, with no hangup cause, still stamps `false`.
+  Closes the code half of #384; the lab re-run of `PLT-DIAL-02` cell g is still pending.
+
 ### Changed — Dependencies
 
 - `Microsoft.AspNetCore.DataProtection` and `Microsoft.AspNetCore.DataProtection.Extensions` move from 10.0.12 to

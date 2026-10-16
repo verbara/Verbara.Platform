@@ -922,7 +922,8 @@ public sealed class VoiceConversationBridgeTests : IDisposable
     // Adds a participant carrying a HangupCause + LeftAt (SDK-internal AddParticipant, via reflection —
     // mirrors AddCaller) so the abnormal-hangup verdict can be exercised end-to-end through the bridge.
     private static void AddParticipantWithHangup(
-        CallSession session, string channel, ParticipantRole role, HangupCause? cause, DateTimeOffset? leftAt)
+        CallSession session, string channel, ParticipantRole role, HangupCause? cause, DateTimeOffset? leftAt,
+        DateTimeOffset? joinedAt = null)
     {
         var participant = new SessionParticipant
         {
@@ -932,6 +933,8 @@ public sealed class VoiceConversationBridgeTests : IDisposable
             Role = role,
             HangupCause = cause,
             LeftAt = leftAt,
+            // Deterministic: JoinedAt otherwise defaults to the wall clock, after every fake-clock instant.
+            JoinedAt = joinedAt ?? DateTimeOffset.UnixEpoch,
         };
         var add = typeof(CallSession).GetMethod("AddParticipant", BindingFlags.Instance | BindingFlags.NonPublic)
                   ?? throw new InvalidOperationException("CallSession.AddParticipant not found.");
@@ -944,8 +947,11 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         var session = MakeSession("link-hg-clean", Tenant, AgentInterface);
         session.QueueName = "acme-Support";
         _sessions.GetById("s-link-hg-clean").Returns(session);
-        // Agent leg ends cleanly (NormalClearing) → IsAbnormalAgentHangup returns false.
-        AddParticipantWithHangup(session, "PJSIP/acme-agent-1", ParticipantRole.Agent,
+        // Agent leg ends cleanly (NormalClearing) → IsAbnormalAgentHangup returns false. Roles are the ones the
+        // SDK's InferRole assigns: the customer leg comes first (Caller), the queue member second (Destination).
+        AddParticipantWithHangup(session, "PJSIP/acme-trunk-00000001", ParticipantRole.Caller,
+            HangupCause.NormalClearing, _clock.UtcNow);
+        AddParticipantWithHangup(session, $"{AgentInterface}-00000002", ParticipantRole.Destination,
             HangupCause.NormalClearing, _clock.UtcNow);
         var conversation = VoiceConversation("link-hg-clean", ConversationState.Active);
         _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-hg-clean", Arg.Any<CancellationToken>())
@@ -972,10 +978,10 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         _sessions.GetById("s-link-hg-abn").Returns(session);
         // Agent leg dies with a non-normal cause and leaves before the caller → abnormal verdict is true.
         var agentLeft = _clock.UtcNow;
-        AddParticipantWithHangup(session, "PJSIP/acme-agent-1", ParticipantRole.Agent,
-            HangupCause.NetworkOutOfOrder, agentLeft);
-        AddParticipantWithHangup(session, "PJSIP/acme-trunk/+15551230000", ParticipantRole.Caller,
+        AddParticipantWithHangup(session, "PJSIP/acme-trunk-00000001", ParticipantRole.Caller,
             HangupCause.NormalClearing, agentLeft.AddSeconds(2));
+        AddParticipantWithHangup(session, $"{AgentInterface}-00000002", ParticipantRole.Destination,
+            HangupCause.NetworkOutOfOrder, agentLeft);
         var conversation = VoiceConversation("link-hg-abn", ConversationState.Active);
         _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-hg-abn", Arg.Any<CancellationToken>())
             .Returns(conversation);
@@ -988,6 +994,177 @@ public sealed class VoiceConversationBridgeTests : IDisposable
 
         events.OfType<VoiceAgentHangupEvent>().Should().ContainSingle(ev =>
             ev.ConversationId == conversation.ConversationId.Value && ev.Abnormal);
+    }
+
+    // ─── #384: the stamp finds the agent leg by channel, never by ParticipantRole.Agent ───────────────
+    // The SDK's InferRole only assigns Internal (Local/), Caller (first leg) and Destination (every later
+    // leg). These fixtures use exactly those roles and real channel names, as cell g of PLT-DIAL-02 saw them.
+
+    private async Task<(Conversation Conversation, List<PlatformEvent> Events)> EndAnsweredCallAsync(
+        string linkedId, CallSession session, ConversationOwner? owner = null)
+    {
+        _sessions.GetById($"s-{linkedId}").Returns(session);
+        var conversation = VoiceConversation(linkedId, ConversationState.Active);
+        if (owner is not null)
+            conversation.Owner = owner;
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), linkedId, Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
+            .Returns(AgentInState(AgentState.Busy));
+        var events = CaptureEvents();
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallEndedEvent($"s-{linkedId}", "primary", _clock.UtcNow, null, TimeSpan.FromSeconds(42), TimeSpan.FromSeconds(39)));
+        return (conversation, events);
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldStampAgentLegAbnormalTrue_WhenQueueMemberLegDropsWithNetworkOutOfOrder()
+    {
+        var session = MakeSession("link-384-q", Tenant, AgentInterface);
+        session.ConnectedAt = _clock.UtcNow.AddSeconds(-30);
+        session.QueueName = "acme-Support";
+        var dropped = _clock.UtcNow;
+        AddParticipantWithHangup(session, "PJSIP/t-1-000000b4", ParticipantRole.Caller,
+            HangupCause.NetworkOutOfOrder, dropped);
+        AddParticipantWithHangup(session, $"{AgentInterface}-000000b5", ParticipantRole.Destination,
+            HangupCause.NetworkOutOfOrder, dropped);
+
+        var (conversation, events) = await EndAnsweredCallAsync("link-384-q", session);
+
+        conversation.Metadata.Should().ContainKey("agentLegAbnormal").WhoseValue.Should().Be("true");
+        events.OfType<VoiceAgentHangupEvent>().Should().ContainSingle(ev => ev.Abnormal);
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldStampAgentLegAbnormalTrue_WhenOutboundAgentLegIsTheFirstChannel()
+    {
+        // Click-to-dial / rescued callback: the agent's leg is created first (Caller), the customer second
+        // (Destination), and there is no member interface — the agent comes from the conversation owner.
+        var session = MakeSession("link-384-out", Tenant);
+        var dropped = _clock.UtcNow;
+        AddParticipantWithHangup(session, $"{AgentInterface}-000000c1", ParticipantRole.Caller,
+            HangupCause.NetworkOutOfOrder, dropped);
+        AddParticipantWithHangup(session, "PJSIP/t-1-000000c2", ParticipantRole.Destination,
+            HangupCause.NetworkOutOfOrder, dropped.AddMilliseconds(1));
+
+        var (conversation, _) = await EndAnsweredCallAsync("link-384-out", session,
+            new ConversationOwner(ConversationOwnerKind.Agent, EntityId.From(AgentGuid)));
+
+        conversation.Metadata.Should().ContainKey("agentLegAbnormal").WhoseValue.Should().Be("true");
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldStampAgentLegAbnormalFalse_WhenOutboundCustomerHungUpFirst()
+    {
+        // Same outbound shape, but the customer (Destination) leaves first: a customer-initiated end. A lookup
+        // that took the first leg as "the caller" would compare the agent with itself and call this abnormal.
+        var session = MakeSession("link-384-out-cust", Tenant);
+        var customerLeft = _clock.UtcNow;
+        AddParticipantWithHangup(session, $"{AgentInterface}-000000d1", ParticipantRole.Caller,
+            HangupCause.NetworkOutOfOrder, customerLeft.AddSeconds(1));
+        AddParticipantWithHangup(session, "PJSIP/t-1-000000d2", ParticipantRole.Destination,
+            HangupCause.NormalClearing, customerLeft);
+
+        var (conversation, _) = await EndAnsweredCallAsync("link-384-out-cust", session,
+            new ConversationOwner(ConversationOwnerKind.Agent, EntityId.From(AgentGuid)));
+
+        conversation.Metadata.Should().ContainKey("agentLegAbnormal").WhoseValue.Should().Be("false");
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldStampAgentLegAbnormalFalse_WhenAnotherAgentsLegDropped()
+    {
+        // Only a leg of THIS call's agent counts: a leg whose channel names another agent is never the agent leg.
+        var session = MakeSession("link-384-other", Tenant, AgentInterface);
+        session.ConnectedAt = _clock.UtcNow.AddSeconds(-30);
+        var dropped = _clock.UtcNow;
+        AddParticipantWithHangup(session, "PJSIP/t-1-000000e1", ParticipantRole.Caller,
+            HangupCause.NormalClearing, dropped.AddSeconds(1));
+        AddParticipantWithHangup(session, $"PJSIP/{Tenant}-agent-22222222222222222222222222222222-000000e2",
+            ParticipantRole.Destination, HangupCause.NetworkOutOfOrder, dropped);
+
+        var (conversation, _) = await EndAnsweredCallAsync("link-384-other", session);
+
+        conversation.Metadata.Should().ContainKey("agentLegAbnormal").WhoseValue.Should().Be("false");
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldStampAgentLegAbnormalFalse_WhenReloadEndedTheCall()
+    {
+        // ADR-0062: a reload-produced ending carries no cause on any leg. sdk-pin-cascade requires false here.
+        var session = MakeSession("link-384-reload", Tenant, AgentInterface);
+        session.ConnectedAt = _clock.UtcNow.AddSeconds(-30);
+        var gone = _clock.UtcNow;
+        AddParticipantWithHangup(session, "PJSIP/t-1-000000f1", ParticipantRole.Caller, cause: null, gone);
+        AddParticipantWithHangup(session, $"{AgentInterface}-000000f2", ParticipantRole.Destination, cause: null, gone);
+
+        var (conversation, _) = await EndAnsweredCallAsync("link-384-reload", session);
+
+        conversation.Metadata.Should().ContainKey("agentLegAbnormal").WhoseValue.Should().Be("false");
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldStampAgentLegAbnormalTrue_WhenALocalLegLeftBeforeTheAgent()
+    {
+        // A Local/ helper channel (Internal) is never the customer, even when it is the first leg of the call (an
+        // originate through a Local/ channel): its earlier departure must not read as "the caller hung up first".
+        var session = MakeSession("link-384-local", Tenant, AgentInterface);
+        session.ConnectedAt = _clock.UtcNow.AddSeconds(-30);
+        var dropped = _clock.UtcNow;
+        AddParticipantWithHangup(session, "Local/100@from-queue-00000001;1", ParticipantRole.Internal,
+            HangupCause.NormalClearing, dropped.AddSeconds(-1));
+        AddParticipantWithHangup(session, "PJSIP/t-1-00000101", ParticipantRole.Destination,
+            HangupCause.NetworkOutOfOrder, dropped);
+        AddParticipantWithHangup(session, $"{AgentInterface}-00000102", ParticipantRole.Destination,
+            HangupCause.NetworkOutOfOrder, dropped);
+
+        var (conversation, _) = await EndAnsweredCallAsync("link-384-local", session);
+
+        conversation.Metadata.Should().ContainKey("agentLegAbnormal").WhoseValue.Should().Be("true");
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldStampAgentLegAbnormalFalse_WhenTheAgentWasRungAgainAndDidNotAnswer()
+    {
+        // The queue rang the agent once without an answer, then again, and the agent took the call. Later they
+        // blind-transferred it back to a queue they are a member of, were rung again and did not answer (another
+        // member did). Neither unanswered ring is the leg that took the call: the first left before the connect,
+        // the last joined after it, so their non-normal causes must not flag the call abnormal.
+        var session = MakeSession("link-384-rering", Tenant, AgentInterface);
+        session.QueueName = "acme-Support";
+        var connected = _clock.UtcNow.AddMinutes(-5);
+        session.ConnectedAt = connected;
+        AddParticipantWithHangup(session, "PJSIP/t-1-00000201", ParticipantRole.Caller,
+            HangupCause.NormalClearing, connected.AddSeconds(200), joinedAt: connected.AddSeconds(-60));
+        AddParticipantWithHangup(session, $"{AgentInterface}-00000200", ParticipantRole.Destination,
+            HangupCause.NoAnswer, connected.AddSeconds(-25), joinedAt: connected.AddSeconds(-40));
+        AddParticipantWithHangup(session, $"{AgentInterface}-00000202", ParticipantRole.Destination,
+            HangupCause.NormalClearing, connected.AddSeconds(60), joinedAt: connected.AddSeconds(-5));
+        AddParticipantWithHangup(session, $"{AgentInterface}-00000203", ParticipantRole.Destination,
+            HangupCause.NoAnswer, connected.AddSeconds(75), joinedAt: connected.AddSeconds(70));
+
+        var (conversation, _) = await EndAnsweredCallAsync("link-384-rering", session);
+
+        conversation.Metadata.Should().ContainKey("agentLegAbnormal").WhoseValue.Should().Be("false");
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldStampAgentLegAbnormalFalse_WhenTheCustomerLegLeftFirstWithTheSameCause()
+    {
+        // Both legs report the same cause (as cell g saw), so only the order the SDK processed the two Hangups
+        // tells an agent drop from a customer drop: the customer's leg leaving first is a customer-initiated end.
+        var session = MakeSession("link-384-custfirst", Tenant, AgentInterface);
+        session.ConnectedAt = _clock.UtcNow.AddSeconds(-30);
+        var dropped = _clock.UtcNow;
+        AddParticipantWithHangup(session, "PJSIP/t-1-00000301", ParticipantRole.Caller,
+            HangupCause.NetworkOutOfOrder, dropped);
+        AddParticipantWithHangup(session, $"{AgentInterface}-00000302", ParticipantRole.Destination,
+            HangupCause.NetworkOutOfOrder, dropped.AddMilliseconds(1));
+
+        var (conversation, _) = await EndAnsweredCallAsync("link-384-custfirst", session);
+
+        conversation.Metadata.Should().ContainKey("agentLegAbnormal").WhoseValue.Should().Be("false");
     }
 
     [Fact]
