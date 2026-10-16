@@ -14,7 +14,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Microsoft.AspNetCore.DataProtection` and `Microsoft.AspNetCore.DataProtection.Extensions` move from 10.0.12 to
   10.0.13, the servicing band every other ASP.NET Core and `Microsoft.Extensions` pin already uses. No advisory
   requires it; the vulnerable transitive pieces (`System.Security.Cryptography.Xml` and `.Pkcs`) were already pinned
-  to 10.0.13.
+  to 10.0.13. (#423)
 
 ### Changed — CI
 
