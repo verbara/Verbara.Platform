@@ -209,7 +209,7 @@ jobs:
         # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): no document is
         # produced on a bot PR (export skipped above), so skip the upload too.
         if: github.event_name == 'merge_group' || github.event.pull_request.user.login != 'dependabot[bot]'
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: openapi-document-${{ github.sha }}
           path: artifacts/openapi/openapi-document.json
@@ -449,7 +449,7 @@ jobs:
 
       - name: Upload coverage report
         if: ${{ always() }}
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: coverage-${{ github.sha }}
           path: coverage/report
