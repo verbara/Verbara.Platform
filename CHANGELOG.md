@@ -326,7 +326,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and clears the cookie, so the user signs in again once the tenant is reactivated. The OIDC callback answers such a tenant as
   it answers an inactive account (`401`, no tokens, no MFA challenge), before the authorization code is exchanged,
   so a refused sign-in creates, links or updates no user. The access check Realtime makes for every
-  hub connection now also refuses a user whose tenant is Suspended, PendingDeletion or Deleted.
+  hub connection now also refuses a user whose tenant is Suspended, PendingDeletion or Deleted (#414).
 
 ## [2.28.0] - 2026-10-11
 
