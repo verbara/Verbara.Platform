@@ -17,7 +17,7 @@ public sealed class AgentLegResolverTests
 
     private static ConversationOwner AgentOwner(EntityId id) => new(ConversationOwnerKind.Agent, id);
 
-    private static SessionParticipant Leg(string uniqueId, string channel, ParticipantRole role = ParticipantRole.Agent,
+    private static SessionParticipant Leg(string uniqueId, string channel, ParticipantRole role = ParticipantRole.Destination,
         DateTimeOffset? leftAt = null) => new()
     {
         UniqueId = uniqueId,
@@ -92,5 +92,88 @@ public sealed class AgentLegResolverTests
         IReadOnlyList<SessionParticipant> legs = [Leg("1.1", $"PJSIP/acme-agent-{Owner.Value}ff-00000001")];
 
         AgentLegResolver.Resolve(Tenant, AgentOwner(Owner), legs).Should().BeNull();
+    }
+
+    private static readonly DateTimeOffset Connected = new(2026, 10, 16, 12, 0, 0, TimeSpan.Zero);
+
+    private static SessionParticipant LegAt(string uniqueId, string channel, DateTimeOffset joinedAt,
+        DateTimeOffset? leftAt, ParticipantRole role = ParticipantRole.Destination) => new()
+    {
+        UniqueId = uniqueId,
+        Channel = channel,
+        Technology = "PJSIP",
+        Role = role,
+        JoinedAt = joinedAt,
+        LeftAt = leftAt,
+    };
+
+    [Fact]
+    public void FindAgentLeg_ShouldReturnTheLegUpAtConnect_WhenItHasAlreadyLeft()
+    {
+        // At CallEnded every leg has a LeftAt: the callback-eval stamp must still find the agent's (#384).
+        IReadOnlyList<SessionParticipant> legs =
+        [
+            LegAt("1.1", "PJSIP/t-1-000000b4", Connected.AddSeconds(-20), Connected.AddSeconds(90), ParticipantRole.Caller),
+            LegAt("1.2", $"PJSIP/acme-agent-{Owner.Value}-000000b5", Connected.AddSeconds(-5), Connected.AddSeconds(90)),
+        ];
+
+        AgentLegResolver.FindAgentLeg(Tenant, Owner, legs, Connected)!.UniqueId.Should().Be("1.2");
+    }
+
+    [Fact]
+    public void FindAgentLeg_ShouldIgnoreRingsBeforeAndAfterTheConnect()
+    {
+        // An earlier ring that timed out and a later ring after the call came back to the queue are not the leg
+        // that took the call.
+        IReadOnlyList<SessionParticipant> legs =
+        [
+            LegAt("1.1", $"PJSIP/acme-agent-{Owner.Value}-00000001", Connected.AddSeconds(-40), Connected.AddSeconds(-25)),
+            LegAt("1.2", $"PJSIP/acme-agent-{Owner.Value}-00000002", Connected.AddSeconds(-5), Connected.AddSeconds(60)),
+            LegAt("1.3", $"PJSIP/acme-agent-{Owner.Value}-00000003", Connected.AddSeconds(70), Connected.AddSeconds(75)),
+        ];
+
+        AgentLegResolver.FindAgentLeg(Tenant, Owner, legs, Connected)!.UniqueId.Should().Be("1.2");
+    }
+
+    [Fact]
+    public void FindAgentLeg_ShouldReturnNull_WhenNoAgentLegWasUpAtConnect()
+    {
+        // One leg left before the connect (a click-to-dial A-leg gone at a transfer into a queue), one joined after.
+        IReadOnlyList<SessionParticipant> legs =
+        [
+            LegAt("1.1", $"PJSIP/acme-agent-{Owner.Value}-00000001", Connected.AddSeconds(-90), Connected.AddSeconds(-10)),
+            LegAt("1.2", $"PJSIP/acme-agent-{Owner.Value}-00000002", Connected.AddSeconds(70), Connected.AddSeconds(75)),
+        ];
+
+        AgentLegResolver.FindAgentLeg(Tenant, Owner, legs, Connected).Should().BeNull();
+    }
+
+    [Fact]
+    public void FindAgentLeg_ShouldReturnTheFirstLeg_WhenTheCallHadNoQueueConnect()
+    {
+        // A click-to-dial never sets ConnectedAt; its agent leg is the A-leg the originate created first.
+        IReadOnlyList<SessionParticipant> legs =
+        [
+            LegAt("1.1", $"PJSIP/acme-agent-{Owner.Value}-0000000a", Connected, Connected.AddSeconds(30), ParticipantRole.Caller),
+            LegAt("1.2", "PJSIP/pstn-default-0000000b", Connected.AddSeconds(1), Connected.AddSeconds(30)),
+            LegAt("1.3", $"PJSIP/acme-agent-{Owner.Value}-0000000c", Connected.AddSeconds(5), Connected.AddSeconds(30)),
+        ];
+
+        AgentLegResolver.FindAgentLeg(Tenant, Owner, legs, connectedAt: null)!.UniqueId.Should().Be("1.1");
+    }
+
+    [Fact]
+    public void FindAgentLeg_ShouldReturnNull_WhenNoAgentIdOrOnlyOtherAgentsLegs()
+    {
+        IReadOnlyList<SessionParticipant> legs =
+        [
+            LegAt("1.1", $"PJSIP/acme-agent-{OtherAgent.Value}-00000001", Connected, null),
+            LegAt("1.2", $"PJSIP/globex-agent-{Owner.Value}-00000002", Connected, null),
+            LegAt("1.3", $"PJSIP/acme-agent-{Owner.Value}ff-00000003", Connected, null),
+        ];
+
+        AgentLegResolver.FindAgentLeg(Tenant, null, legs, Connected).Should().BeNull();
+        AgentLegResolver.FindAgentLeg(Tenant, Owner, legs, Connected).Should().BeNull();
+        AgentLegResolver.FindAgentLeg(Tenant, Owner, legs, connectedAt: null).Should().BeNull();
     }
 }
