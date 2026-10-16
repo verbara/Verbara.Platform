@@ -122,6 +122,15 @@ internal static class OidcEndpoints
         var ip = context.Connection.RemoteIpAddress?.ToString();
         var ua = context.Request.Headers.UserAgent.FirstOrDefault();
 
+        // A tenant that is not serving is refused before the code is exchanged, so the refused sign-in
+        // creates, links or stamps no user. CompleteOidcLoginAsync checks again for its other callers.
+        if (await TenantServingGate.RefusedStatusAsync(tenantStore, tenantId, ct) is { } tenantStatus)
+        {
+            await authEvents.LogAsync(tenantId, null, AuthEventTypes.OidcLoginFailure, ip, ua,
+                new Dictionary<string, string> { ["reason"] = TenantServingGate.DenialReason(tenantStatus) }, ct);
+            return Results.Unauthorized();
+        }
+
         if (!string.IsNullOrEmpty(error))
         {
             await authEvents.LogAsync(tenantId, null, AuthEventTypes.OidcLoginFailure, ip, ua, null, ct);

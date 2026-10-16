@@ -64,6 +64,36 @@ public sealed class TenantStatusSignInPathTests : IClassFixture<AccountStatusApi
         AssertNoRefreshCookie(response);
     }
 
+    [Theory]
+    [MemberData(nameof(RefusedStatuses))]
+    public async Task Login_ShouldAnswerTenantStatusCodeWithoutCountingAFailedAttempt_WhenBodyTenantIsNotServingAndPasswordIsWrong(
+        TenantStatus status)
+    {
+        var tenant = NewTenant(status);
+        var user = NewUser(tenant);
+        using var client = _factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new { tenantId = tenant, email = user.Email, password = "Wrong-" + Password });
+
+        await AssertSoleErrorAsync(response, HttpStatusCode.Forbidden, CodeFor(status));
+        _factory.GetUser(user.UserId.Value, tenant)!.FailedLoginAttempts.Should().Be(0,
+            because: "the tenant status is checked before the credentials, so a wrong password is never counted");
+    }
+
+    [Theory]
+    [MemberData(nameof(RefusedStatuses))]
+    public async Task Login_ShouldAnswerTenantStatusCode_WhenBodyTenantIsNotServingAndEmailIsUnknown(TenantStatus status)
+    {
+        var tenant = NewTenant(status);
+        using var client = _factory.CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new { tenantId = tenant, email = $"{NewId("nobody")}@tenant-status.test", password = Password });
+
+        await AssertSoleErrorAsync(response, HttpStatusCode.Forbidden, CodeFor(status));
+    }
+
     [Fact]
     public async Task Login_ShouldAnswer404_WhenBodyTenantIsDeleted()
     {

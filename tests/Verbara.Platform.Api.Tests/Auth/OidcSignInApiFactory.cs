@@ -49,6 +49,12 @@ internal sealed class OidcSignInApiFactory(
         MfaConfirmedAt = mfaEnabled ? DateTimeOffset.UtcNow : null,
     };
 
+    /// <summary>The stubbed provider side: the code exchange and the ID-token validation.</summary>
+    public IOidcTokenExchangeService TokenExchange { get; } = Substitute.For<IOidcTokenExchangeService>();
+
+    /// <summary>The stubbed creation or update of the signed-in user.</summary>
+    public IOidcUserProvisioningService Provisioning { get; } = Substitute.For<IOidcUserProvisioningService>();
+
     /// <summary>
     /// Starts a sign-in with <paramref name="returnUrl"/> as the console does, then completes it the way
     /// the identity provider's redirect does, carrying the state cookie the login set. Returns where the
@@ -146,7 +152,7 @@ internal sealed class OidcSignInApiFactory(
                 }));
             Replace(services, authConfigStore);
 
-            var tokenExchange = Substitute.For<IOidcTokenExchangeService>();
+            var tokenExchange = TokenExchange;
             tokenExchange.ExchangeCodeAsync(
                     Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
                     Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -156,7 +162,7 @@ internal sealed class OidcSignInApiFactory(
                 .Returns(Task.FromResult(new OidcClaimsResult("provider-subject", User.Email, User.DisplayName, true)));
             Replace(services, tokenExchange);
 
-            var provisioning = Substitute.For<IOidcUserProvisioningService>();
+            var provisioning = Provisioning;
             provisioning.ProvisionOrUpdateAsync(
                     Arg.Any<string>(), Arg.Any<OidcClaimsResult>(), Arg.Any<TenantAuthConfig>(), Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult<User?>(User));

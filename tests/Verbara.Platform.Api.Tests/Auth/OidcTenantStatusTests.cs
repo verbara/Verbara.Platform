@@ -2,6 +2,7 @@ using System.Net;
 using Verbara.Platform.Api.Endpoints;
 using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 
 namespace Verbara.Platform.Api.Tests.Auth;
 
@@ -30,6 +31,24 @@ public sealed class OidcTenantStatusTests
         var cookies = response.Headers.TryGetValues("Set-Cookie", out var values) ? values : [];
         cookies.Should().NotContain(c => c.StartsWith(RefreshTokenCookie.Name + "=", StringComparison.Ordinal)
             && !c.StartsWith(RefreshTokenCookie.Name + "=;", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(TenantStatus.Suspended)]
+    [InlineData(TenantStatus.PendingDeletion)]
+    [InlineData(TenantStatus.Deleted)]
+    public async Task OidcCallback_ShouldNeitherExchangeTheCodeNorProvisionTheUser_WhenFlowTenantIsNotServing(TenantStatus status)
+    {
+        using var factory = new OidcSignInApiFactory();
+        UpsertTenant(factory, status);
+
+        using var response = await factory.CallBackResponseAsync("/login");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, await response.Content.ReadAsStringAsync());
+        await factory.TokenExchange.DidNotReceiveWithAnyArgs().ExchangeCodeAsync(
+            default!, default!, default!, default!, default!, default!, default);
+        await factory.Provisioning.DidNotReceiveWithAnyArgs().ProvisionOrUpdateAsync(
+            default!, default!, default!, default);
     }
 
     [Theory]

@@ -324,7 +324,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Deleted one `404`, with no tokens. `POST /auth/refresh` answers a bare `401` for a refresh token whose tenant is
   not serving, revokes every refresh token of that user and clears the cookie, as it does for an account that is no
   longer Active; the user signs in again once the tenant is reactivated. The OIDC callback answers such a tenant as
-  it answers an inactive account (`401`, no tokens, no MFA challenge). The access check Realtime makes for every
+  it answers an inactive account (`401`, no tokens, no MFA challenge), before the authorization code is exchanged,
+  so a refused sign-in creates, links or updates no user. The access check Realtime makes for every
   hub connection now also refuses a user whose tenant is Suspended, PendingDeletion or Deleted.
 
 ## [2.28.0] - 2026-10-11
