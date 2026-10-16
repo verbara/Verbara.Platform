@@ -67,7 +67,7 @@ version. Read **Upgrading** first: migrations `022` and `023` run at start-up.
 - **Migration `024` removes role assignments of users that do not exist, then adds a foreign key from `user_roles`
   onto `users`.** Rows of `user_roles` whose user is not in `users` (assignments made for an unknown id, and the rows
   every deleted user left behind) are deleted at upgrade, with no manual step. From then on, deleting a user removes
-  their role assignments. The migration locks `users` and `user_roles` against writes while it runs (reads go on).
+  their role assignments. The migration locks `users` and `user_roles` against writes while it runs (reads go on). (#413)
 
 - **Sign-in refusals carry a code.** The account-status and tenant-status 403 refusals of `/auth/login`,
   `/auth/mfa/verify` and `/auth/login/apikey` carry a code in `error`: `account-inactive` instead of
@@ -156,7 +156,7 @@ version. Read **Upgrading** first: migrations `022` and `023` run at start-up.
 
 - **Replacing a user's roles for a user the tenant does not have answers `404`.** `PUT /admin/users/{id}/roles`
   used to answer `200` and store the roles for any user id. It now answers `404` with
-  `{ "error": "user-not-found", "userId": … }` and stores nothing, as `POST /admin/users/{id}/roles/{roleId}` does.
+  `{ "error": "user-not-found", "userId": … }` and stores nothing, as `POST /admin/users/{id}/roles/{roleId}` does. (#413)
 
 - **Refused closes and typifications answer `409` with a stable code instead of `400`.**
   `POST /conversations/{id}/close` and `POST /conversations/{id}/typify` answer `409` with
@@ -225,7 +225,7 @@ version. Read **Upgrading** first: migrations `022` and `023` run at start-up.
   and a custom role held only by deleted users could not be deleted. The database now removes the rows with the
   user, in the same transaction; every replica drops the permissions it cached for the user (the replica that ran
   the delete kept them before); and a role assignment for a user that does not exist is refused (see
-  **Upgrading**). A token whose role claim is `Admin` or `SystemAdmin` still passes on that claim until it expires.
+  **Upgrading**). A token whose role claim is `Admin` or `SystemAdmin` still passes on that claim until it expires. (#413)
 
 - **The AI typification suggestion's rate limit now uses the tenant the request resolved.** On
   `POST /api/v1/conversations/{id}/typification-suggestion`, a tenant identified by its subdomain without an
