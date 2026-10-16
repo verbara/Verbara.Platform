@@ -45,6 +45,7 @@ public sealed class TenantStatusSignInPathTests : IClassFixture<AccountStatusApi
     {
         TenantStatus.Active,
         TenantStatus.Warning,
+        TenantStatus.Degraded,
     };
 
     // ─── POST /auth/login, tenant in the body ────────────────────────────────
@@ -232,6 +233,7 @@ public sealed class TenantStatusSignInPathTests : IClassFixture<AccountStatusApi
     [InlineData(TenantStatus.Deleted, false)]
     [InlineData(TenantStatus.Active, true)]
     [InlineData(TenantStatus.Warning, true)]
+    [InlineData(TenantStatus.Degraded, true)]
     public async Task GetUserAccess_ShouldReportAllowedOnlyForServingTenant_WhenUserIsActive(
         TenantStatus status, bool expectedAllowed)
     {

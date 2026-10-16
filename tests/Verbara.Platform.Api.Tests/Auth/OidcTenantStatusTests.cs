@@ -54,6 +54,7 @@ public sealed class OidcTenantStatusTests
     [Theory]
     [InlineData(TenantStatus.Active)]
     [InlineData(TenantStatus.Warning)]
+    [InlineData(TenantStatus.Degraded)]
     public async Task OidcCallback_ShouldSendTheAccessToken_WhenFlowTenantIsServing(TenantStatus status)
     {
         using var factory = new OidcSignInApiFactory();

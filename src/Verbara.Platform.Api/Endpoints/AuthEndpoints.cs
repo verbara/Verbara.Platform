@@ -99,8 +99,7 @@ internal static class AuthEndpoints
         if (string.IsNullOrWhiteSpace(rawTenantId))
             return Results.BadRequest(new ErrorResponse("Tenant identification required. Provide tenantId in body or X-Tenant-Id header."));
 
-        // The tenant's status is checked wherever the tenant was named, before the credentials: a tenant
-        // named in the body answers exactly as one named by header or subdomain does in the middleware.
+        // The tenant's status is checked before the credentials, wherever the request names the tenant.
         if (await TenantServingGate.RefuseAsync(tenantStore, rawTenantId, ct) is { } tenantRefusal)
             return tenantRefusal;
 
