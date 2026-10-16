@@ -26,7 +26,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   **Operator note:** with one leg red, the other images are still pushed and signed, but no GitHub Release is
   created and the smoke is skipped. For `unstamped`, fix the cause on `main` and cut a new tag (a re-run replays the
   same tag); for `unverifiable`, re-run the failed leg. The authorized-digests runbook's stop condition now covers a
-  red release job and a skipped smoke, not only a red smoke.
+  red release job and a skipped smoke, not only a red smoke. (#419)
 
 ## [2.29.0] - 2026-10-15
 
