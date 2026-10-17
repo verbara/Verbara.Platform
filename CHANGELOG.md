@@ -23,19 +23,29 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is no longer read as the customer's. A call ended by a reload, with no hangup cause, still stamps `false`.
   Closes the code half of #384; the lab re-run of `PLT-DIAL-02` cell g is still pending. (#426)
 
-- **Campaign metrics are published for every tenant's active campaigns, under that tenant, with one
-  `campaign.metrics_updated` webhook delivery per change whatever the replica count; the predictive dialer dials
-  again (Pro 2.19.0-pro).** After the `campaign-metrics:webhooks` lease moves between replicas (a
-  `LeadershipTransition` log line records it), metrics webhooks pause for up to ≈ 70 s and the current state of
-  each active campaign is then sent once more under a new `X-Webhook-Id`. Receivers need no new rule for it: the
-  payload is the campaign's current state, not a delta, so apply each delivery as an upsert keyed by
-  `data.campaignId`; and when two deliveries of one campaign arrive out of order (a retried delivery can arrive
-  after a newer one, with one replica or several), keep the one with the later `timestamp`, the publishing
-  replica's clock. Delivery stays at-least-once with `X-Webhook-Id` as the idempotency key. (Platform/ADR-0043)
-  (#N)
+- **Campaign metrics are published for every tenant's Active and Paused campaigns, under that tenant, with one
+  `campaign.metrics_updated` webhook delivery per change whatever the replica count.** After the
+  `campaign-metrics:webhooks` lease moves between replicas (a `LeadershipTransition` log line records it), metrics
+  webhooks pause for up to ≈ 70 s and the current state of each campaign is then sent once more under a new
+  `X-Webhook-Id`. Receivers need no new rule for it: the payload is the campaign's current state, not a delta, so
+  apply each delivery as an upsert keyed by `data.campaignId`; and when two deliveries of one campaign arrive out
+  of order (a retried delivery can arrive after a newer one, with one replica or several), keep the one with the
+  later payload top-level `timestamp` (the publishing replica's clock), not the later `X-Webhook-Timestamp`
+  header, which is each attempt's send time. Delivery stays at-least-once with `X-Webhook-Id` as the idempotency
+  key. (Platform/ADR-0043) (#N)
+
+- **The outbound dialer dials on Postgres for the first time (Pro 2.19.0-pro).** It finds every tenant's Active
+  campaigns, in every dialing mode, and a Paused campaign does not dial. Each contact is claimed when it is
+  fetched, so no two fetches, on one replica or several, hand out the same contact. Limits:
+  - **Each contact is dialed once and is not retried.** Nothing records call results yet, so a dialed contact
+    stays claimed (`status = 1`), `call_attempts` stays empty and campaign metrics do not move. Recording results
+    is a separate change.
+  - **Every API replica runs its own dialer with its own channel cap.** With N replicas, up to N × the cap
+    channels can be up at once. This holds until the dialer runs in one process. (#N)
 
 ### Changed — Dependencies
 
+- **Verbara.Sdk.Pro `2.18.0-pro` → `2.19.0-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged. (#N)
 - `Microsoft.AspNetCore.DataProtection` and `Microsoft.AspNetCore.DataProtection.Extensions` move from 10.0.12 to
   10.0.13, the servicing band every other ASP.NET Core and `Microsoft.Extensions` pin already uses. No advisory
   requires it; the vulnerable transitive pieces (`System.Security.Cryptography.Xml` and `.Pkcs`) were already pinned
