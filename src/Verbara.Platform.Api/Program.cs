@@ -1585,7 +1585,6 @@ if (app.Environment.IsProduction())
 }
 
 app.UseWebSockets();
-app.UseStaticFiles();
 app.UseMiddleware<VersionRedirectMiddleware>();
 app.UseRouting();
 app.UseMiddleware<ErrorHandlingMiddleware>();
