@@ -199,7 +199,8 @@ public sealed class CampaignMetricsPollerTests : IDisposable
 
         _active = [Acme11()];
         await CreateSut().PollMetricsAsync(CancellationToken.None);
-        await dispatcher.WaitForDispatchAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await dispatcher.WaitForDispatchAsync(timeout.Token);
 
         var delivery = saved.Should().ContainSingle().Subject;
         delivery.SubscriptionId.Should().Be("sub-acme");

@@ -213,13 +213,15 @@ public sealed class CampaignMetricsReplicaTests : IDisposable
         public async Task PollAsync()
         {
             await _poller.PollMetricsAsync(CancellationToken.None);
-            await _dispatcher.WaitForDispatchAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _dispatcher.WaitForDispatchAsync(timeout.Token);
         }
 
         public async Task PublishAsync(PlatformEvent evt)
         {
             _bus.Publish(evt);
-            await _dispatcher.WaitForDispatchAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _dispatcher.WaitForDispatchAsync(timeout.Token);
         }
 
         public void Dispose()
