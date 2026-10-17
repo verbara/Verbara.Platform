@@ -47,7 +47,7 @@ public static class WebhookEventTypes
         [ConversationStateChanged] = "Fired when a conversation changes state",
         [AgentStateChanged] = "Fired when an agent's presence state changes",
         [CampaignStatusChanged] = "Fired when an outbound campaign changes status",
-        [CampaignMetricsUpdated] = "Fired with a campaign's current metrics when first seen, when they change, and again after the lease changes hands: upsert by campaignId, keeping the later payload timestamp (not the X-Webhook-Timestamp header)",
+        [CampaignMetricsUpdated] = "Fired with a campaign's current metrics when first seen, when they change, and again after the lease changes hands or is re-acquired: upsert by campaignId, keeping the later payload timestamp (not the X-Webhook-Timestamp header)",
         [CampaignDispositionSubmitted] = "Fired when an agent submits a disposition for a campaign call",
         [AgentAssistSuggestion] = "Fired when an agent assist suggestion is generated",
         [AgentAssistSentiment] = "Fired when a sentiment reading is produced for a call",
