@@ -1,4 +1,4 @@
-"""Unit tests for check-endpoint-invariants.py (gates #6, #7, #9, #10, #11).
+"""Unit tests for check-endpoint-invariants.py (gates #6, #7, #9, #10, #11, #12).
 
 Runs the script as a subprocess against a synthetic src/ tree in a tmp dir and
 asserts exit codes + failure grammar. Stdlib unittest only — NO pip deps, so this
@@ -42,6 +42,33 @@ _RUNTIMECONFIG_WITH_SWITCH = (
 _PG_STORE = "src/Verbara.Platform.Storage.Postgres/Stores/PostgresBotConfigStore.cs"
 _SPECIFY_KIND_LINE = "var at = DateTime.SpecifyKind(raw, DateTimeKind.Utc);"
 
+
+# --- Gate #12 fixtures: Asterisk outbound registration stays loadable ----------
+_MODULES_CONF = "docker/asterisk-config/modules.conf"
+_SORCERY_CONF = "docker/asterisk-config/sorcery.conf"
+_MODULES_OK = (
+    "[modules]\n"
+    "autoload = yes\n"
+    "noload = chan_sip.so\n"
+)
+_MODULES_NOLOAD = (
+    "[modules]\n"
+    "autoload = yes\n"
+    "noload = res_pjsip_outbound_registration.so\n"
+)
+_SORCERY_OK = (
+    "[res_pjsip]\n"
+    "endpoint = realtime,ps_endpoints\n"
+    "\n"
+    "[res_pjsip_outbound_registration]\n"
+    "registration = realtime,ps_registrations\n"
+)
+# The shape that shipped before #385: the mapping on LINE 3, under [res_pjsip].
+_SORCERY_UNDER_RES_PJSIP = (
+    "[res_pjsip]\n"
+    "endpoint = realtime,ps_endpoints\n"
+    "registration = realtime,ps_registrations\n"
+)
 
 def _store_body(statement):
     """A .cs file whose `statement` sits on LINE 3 (for path:line assertions)."""
@@ -446,6 +473,103 @@ class EndpointInvariantsTest(unittest.TestCase):
             self.assertEqual(result.returncode, 1, result.stdout)
             self.assertIn(f"{_PG_STORE}:3", result.stdout)
 
+
+    # --- Gate #12: Asterisk outbound registration stays loadable --------------
+
+    def _asterisk_tree(self, root, modules=_MODULES_OK, sorcery=_SORCERY_OK):
+        """A passing src/ tree plus an Asterisk config dir; None omits a file."""
+        _tree(root)
+        if modules is not None:
+            _write(root, _MODULES_CONF, modules)
+        if sorcery is not None:
+            _write(root, _SORCERY_CONF, sorcery)
+
+    def test_passes_when_outbound_registration_loads_with_own_section(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._asterisk_tree(root)
+            result = _run(root)
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertIn("Gate #12", result.stdout)
+
+    def test_passes_when_tree_has_no_asterisk_config(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root)
+            result = _run(root)
+            self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_fails_when_modules_conf_noloads_outbound_registration(self):
+        for line in ("noload = res_pjsip_outbound_registration.so",
+                     "noload => res_pjsip_outbound_registration",
+                     "noload=res_pjsip_outbound_registration.so ; why"):
+            with tempfile.TemporaryDirectory() as root:
+                self._asterisk_tree(root, modules=f"[modules]\n{line}\n")
+                result = _run(root)
+                self.assertEqual(result.returncode, 1, f"{line}: {result.stdout}")
+                self.assertIn(f"{_MODULES_CONF}:2", result.stdout)
+
+    def test_ignores_noload_of_outbound_registration_in_comment(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._asterisk_tree(
+                root, modules="[modules]\n; noload = res_pjsip_outbound_registration.so\n")
+            result = _run(root)
+            self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_fails_when_registration_mapped_under_res_pjsip(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._asterisk_tree(root, sorcery=_SORCERY_UNDER_RES_PJSIP)
+            result = _run(root)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn(f"{_SORCERY_CONF}:3", result.stdout)
+            self.assertIn("[res_pjsip]", result.stdout)
+
+    def test_fails_when_registration_mapped_in_both_sections(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._asterisk_tree(
+                root, sorcery=_SORCERY_UNDER_RES_PJSIP + "\n[res_pjsip_outbound_registration]\n"
+                "registration = realtime,ps_registrations\n")
+            result = _run(root)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn(f"{_SORCERY_CONF}:3", result.stdout)
+
+    def test_fails_when_registration_mapping_missing(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._asterisk_tree(
+                root, sorcery="[res_pjsip]\nendpoint = realtime,ps_endpoints\n")
+            result = _run(root)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("no `registration = realtime,ps_registrations`", result.stdout)
+
+    def test_fails_when_registration_mapping_is_commented_out(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._asterisk_tree(
+                root, sorcery="[res_pjsip_outbound_registration]\n"
+                "; registration = realtime,ps_registrations\n")
+            result = _run(root)
+            self.assertEqual(result.returncode, 1, result.stdout)
+
+    def test_fails_when_registration_maps_another_backend(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._asterisk_tree(
+                root, sorcery="[res_pjsip_outbound_registration]\n"
+                "registration = config,pjsip.conf\n")
+            result = _run(root)
+            self.assertEqual(result.returncode, 1, result.stdout)
+
+    def test_fails_when_asterisk_config_file_missing(self):
+        for missing in ("modules", "sorcery"):
+            with tempfile.TemporaryDirectory() as root:
+                self._asterisk_tree(root, **{missing: None})
+                result = _run(root)
+                self.assertEqual(result.returncode, 1, f"{missing}: {result.stdout}")
+                self.assertIn(f"{missing}.conf: MISSING", result.stdout)
+
+    def test_repo_asterisk_config_passes_gate(self):
+        # The shipped config itself — the line #385 found and the section move.
+        repo = Path(_HERE).parent.parent
+        result = subprocess.run(
+            [sys.executable, _SCRIPT], cwd=repo, capture_output=True, text=True)
+        self.assertIn("Gate #12 (Asterisk outbound registration loadable): OK.",
+                      result.stdout, result.stdout)
 
 if __name__ == "__main__":
     unittest.main()

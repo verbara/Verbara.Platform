@@ -1,3 +1,4 @@
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Api.Voice;
 using Verbara.Platform.Audit;
@@ -10,6 +11,15 @@ namespace Verbara.Platform.Api.Endpoints;
 
 internal static class TrunkEndpoints
 {
+    /// <summary>400: a request set <c>registrationUri</c> to an empty or blank value.</summary>
+    internal const string RegistrationUriEmptyCode = "registration-uri-empty";
+
+    /// <summary>400: a trunk with a registration URI would have no client URI (Asterisk rejects the registration).</summary>
+    internal const string ClientUriRequiredCode = "client-uri-required";
+
+    /// <summary>400: <c>registrationUri</c> or <c>clientUri</c> is not a <c>sip:</c> / <c>sips:</c> URI (field in details).</summary>
+    internal const string InvalidSipUriCode = "invalid-sip-uri";
+
     public static void MapTrunkEndpoints(this IEndpointRouteBuilder app)
     {
         var trunks = app.MapGroup("/admin/trunks").RequireAuthorization("AdminOnly").RequireOperationalTenant();
@@ -57,6 +67,11 @@ internal static class TrunkEndpoints
         var tenantId = GetTenantId(context);
         if (!string.IsNullOrEmpty(body.MatchHost) && !IsValidMatchHost(body.MatchHost))
             return Results.BadRequest();
+
+        var registrationError = ValidateRegistration(
+            body.RegistrationUri, body.ClientUri, body.RegistrationUri, body.ClientUri);
+        if (registrationError is not null)
+            return Results.BadRequest(registrationError);
 
         var invalidCodecs = KnownCodecs.InvalidTokens(body.Codecs);
         if (invalidCodecs.Count > 0)
@@ -106,6 +121,20 @@ internal static class TrunkEndpoints
         var trunk = await trunkStore.GetAsync(id, tenantId, ct);
         if (trunk is null)
             return Results.NotFound();
+
+        // Validated against the stored values before anything is applied: a request that sets only one
+        // of the two URIs is checked together with the other one as stored. A URI the request sends back
+        // unchanged counts as not requested: the console's edit form echoes both stored URIs on every save,
+        // so a trunk stored before this rule must stay editable for its other fields.
+        var requestedRegistrationUri = string.Equals(body.RegistrationUri, trunk.RegistrationUri, StringComparison.Ordinal)
+            ? null : body.RegistrationUri;
+        var requestedClientUri = string.Equals(body.ClientUri, trunk.ClientUri, StringComparison.Ordinal)
+            ? null : body.ClientUri;
+        var registrationError = ValidateRegistration(
+            requestedRegistrationUri, requestedClientUri,
+            body.RegistrationUri ?? trunk.RegistrationUri, body.ClientUri ?? trunk.ClientUri);
+        if (registrationError is not null)
+            return Results.BadRequest(registrationError);
 
         var before = MapToDto(trunk);
 
@@ -256,6 +285,56 @@ internal static class TrunkEndpoints
             return false;
         var max = ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 ? 128 : 32;
         return prefix >= 0 && prefix <= max;
+    }
+
+    /// <summary>
+    /// #385 — a registration trunk must carry a registration Asterisk can send: a non-blank <c>sip:</c> /
+    /// <c>sips:</c> registration URI and a <c>sip:</c> / <c>sips:</c> client URI (the Realtime sync writes a
+    /// missing client URI as an empty <c>client_uri</c>, which Asterisk refuses). Only the fields the request
+    /// carries (<paramref name="requestedRegistrationUri"/>, <paramref name="requestedClientUri"/>) are checked,
+    /// so a trunk stored before this rule stays editable for its other fields; the client-URI requirement is
+    /// checked on the resulting values (<paramref name="registrationUri"/>, <paramref name="clientUri"/>).
+    /// </summary>
+    private static ErrorDetailResponse? ValidateRegistration(
+        string? requestedRegistrationUri, string? requestedClientUri, string? registrationUri, string? clientUri)
+    {
+        if (requestedRegistrationUri is null && requestedClientUri is null)
+            return null;
+
+        if (requestedRegistrationUri is not null)
+        {
+            if (string.IsNullOrWhiteSpace(requestedRegistrationUri))
+                return new ErrorDetailResponse(RegistrationUriEmptyCode, ["registrationUri"]);
+            if (!IsSipUri(requestedRegistrationUri))
+                return new ErrorDetailResponse(InvalidSipUriCode, ["registrationUri"]);
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestedClientUri) && !IsSipUri(requestedClientUri))
+            return new ErrorDetailResponse(InvalidSipUriCode, ["clientUri"]);
+
+        if (!string.IsNullOrWhiteSpace(registrationUri) && string.IsNullOrWhiteSpace(clientUri))
+            return new ErrorDetailResponse(ClientUriRequiredCode, ["clientUri"]);
+
+        return null;
+    }
+
+    /// <summary>
+    /// True for <c>sip:</c> or <c>sips:</c> (any case) followed by at least one character and no whitespace or
+    /// control character — the shape Asterisk accepts for <c>server_uri</c> / <c>client_uri</c>.
+    /// </summary>
+    private static bool IsSipUri(string value)
+    {
+        var rest = value.StartsWith("sips:", StringComparison.OrdinalIgnoreCase) ? value.AsSpan(5)
+            : value.StartsWith("sip:", StringComparison.OrdinalIgnoreCase) ? value.AsSpan(4)
+            : [];
+        if (rest.IsEmpty)
+            return false;
+        foreach (var c in rest)
+        {
+            if (char.IsWhiteSpace(c) || char.IsControl(c))
+                return false;
+        }
+        return true;
     }
 
     private static TrunkType ParseTrunkType(string type) =>
