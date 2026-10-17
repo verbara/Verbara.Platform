@@ -83,6 +83,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed — CI
 
+- **A test that hangs now fails within 5 minutes and names itself.** Every `dotnet test` step in `ci.yml` (the unit
+  lane, the coverage lane and both live-database lanes) runs with `--blame-hang-timeout 5m`. A test that runs 5 minutes
+  without finishing aborts the run, the console names it, and a `hang-report-*` artifact with the test sequence (the
+  hung test is marked `Completed="False"`) is uploaded on failure. Before, a hang ran into the job's 30-minute timeout
+  with no indication of which test it was (#428: `Channels.Sms.Tests` on a PR run). `CsatSmsCorrelatorFixture` also
+  bounds its container start at 3 minutes. (#431)
+
 - **A release image whose provenance labels cannot be verified is no longer pushed.** Each `release.yml` leg now
   builds its image without pushing it, and a new `Gate on image provenance labels (before push)` step reads the
   image's `org.opencontainers.image.revision`, `.version` and `.created` labels and fails the leg unless they equal
