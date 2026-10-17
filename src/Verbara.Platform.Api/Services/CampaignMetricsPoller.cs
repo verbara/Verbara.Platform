@@ -3,6 +3,7 @@ namespace Verbara.Platform.Api.Services;
 using Verbara.Sdk.Pro.Dialer.Campaign;
 using Verbara.Sdk.Pro.Dialer.Models;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Resilience;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -18,17 +19,24 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
     private readonly PlatformEventBus _eventBus;
     private readonly ResiliencePolicy _policy;
     private readonly ILogger<CampaignMetricsPoller> _logger;
+    private readonly IClusterLeader _webhooksLeader;
     private readonly Dictionary<long, CampaignMetricsSnapshot> _previousSnapshots = new();
+
+    // Whether the last poll that reached the publish loop ran as the campaign-metrics webhook lease
+    // holder. A faulted or circuit-open tick never reaches the loop, so it leaves this untouched.
+    private bool _publishedAsLeader;
 
     public CampaignMetricsPoller(
         CampaignStoreBase campaignStore,
         PlatformEventBus eventBus,
         ILogger<CampaignMetricsPoller> logger,
+        [FromKeyedServices(CampaignMetricsLeaderResources.Webhooks)] IClusterLeader webhooksLeader,
         [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _campaignStore = campaignStore;
         _eventBus = eventBus;
         _logger = logger;
+        _webhooksLeader = webhooksLeader;
         _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
@@ -78,11 +86,28 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
 
     internal async Task PollMetricsAsync(CancellationToken ct)
     {
-        // Use empty string for tenant — multi-tenant polling gets all tenants
-        var metrics = await _campaignStore.GetActiveCampaignMetricsAsync("", ct);
+        var metrics = await _campaignStore.GetAllActiveCampaignMetricsAsync(ct);
 
-        foreach (var snapshot in metrics)
+        // Read the lease after the store call, immediately before publishing: the round-trip can span
+        // a demotion and a re-acquire, and only this tick's view decides whether its events reach the
+        // dispatcher (design D5 point 4). On gaining the lease, publish every active campaign as if seen
+        // for the first time: as a follower this replica recorded changes whose webhooks were dropped.
+        var isLeader = _webhooksLeader.IsLeader;
+        if (isLeader && !_publishedAsLeader)
+            _previousSnapshots.Clear();
+        _publishedAsLeader = isLeader;
+
+        foreach (var item in metrics)
         {
+            var snapshot = item.Metrics;
+
+            // An event without a tenant reaches no tenant's subscribers; never publish one.
+            if (string.IsNullOrWhiteSpace(item.TenantId))
+            {
+                LogMissingTenant(snapshot.CampaignId, snapshot.CampaignName);
+                continue;
+            }
+
             if (_previousSnapshots.TryGetValue(snapshot.CampaignId, out var previous))
             {
                 // Only publish if metrics changed
@@ -92,7 +117,7 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
                     previous.AbandonRate != snapshot.AbandonRate)
                 {
                     _eventBus.Publish(new CampaignMetricsUpdatedEvent(
-                        "", // TenantId — will need per-tenant polling in future
+                        item.TenantId,
                         snapshot.CampaignId,
                         snapshot.ContactsDialed,
                         snapshot.ContactsRemaining,
@@ -105,7 +130,7 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
             {
                 // First time seeing this campaign — publish initial metrics
                 _eventBus.Publish(new CampaignMetricsUpdatedEvent(
-                    "", snapshot.CampaignId,
+                    item.TenantId, snapshot.CampaignId,
                     snapshot.ContactsDialed, snapshot.ContactsRemaining,
                     snapshot.ConnectRate, snapshot.AbandonRate, 0));
             }
@@ -114,10 +139,14 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
         }
 
         // Remove campaigns no longer active
-        var activeIds = metrics.Select(m => m.CampaignId).ToHashSet();
+        var activeIds = metrics.Select(m => m.Metrics.CampaignId).ToHashSet();
         foreach (var id in _previousSnapshots.Keys.Where(k => !activeIds.Contains(k)).ToList())
             _previousSnapshots.Remove(id);
     }
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Skipping metrics for campaign {CampaignId} ({CampaignName}): the store returned no tenant id")]
+    private partial void LogMissingTenant(long campaignId, string campaignName);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Error polling campaign metrics")]
     private partial void LogPollError(Exception ex);

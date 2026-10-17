@@ -1103,52 +1103,11 @@ if (!string.IsNullOrEmpty(clusterConn))
     var clusterDataSource = ResolveDataSource(clusterConn, "cluster")!;
     builder.Services.UsePostgresClusterTransport(clusterDataSource);
 
-    // ─── Phase 2.2 voice inbound — per-resource leader election ──────────────────
-    // StasisInboundConsumer opens an ARI WebSocket, and Asterisk delivers a Stasis
-    // app to exactly ONE socket — so only the elected leader pod connects + consumes
-    // (a physical call can't be re-emitted, so this gates the *connection*, stronger
-    // than the relay's per-event short-circuit). Mirrors the Realtime microservice
-    // wiring (ADR-0022 Phase A.5): a keyed "Cluster" NpgsqlDataSource (the SAME shared
-    // instance as the transport — no extra pool, ADR-0015) backs AddPostgresDistributedLock,
-    // and the builder AddVerbaraCluster overload registers the keyed IClusterLeader.
-    // This coexists with the ClusterOptions AddVerbaraCluster above (independent
-    // overloads). Gated additionally on Asterisk:Ari being configured so that ONLY an
-    // ARI-capable pod can ever win the voice-inbound lease — making "a pod that can't
-    // connect Asterisk never holds the lease while a capable pod stays follower" a
-    // structural invariant rather than relying on Helm env homogeneity.
-    // Phase 3B.0 adds a SECOND voice lease: voice:ami:owner gates the single pod that
-    // EMITS AMI-driven side-effects (VoiceConversationBridge — tracked voice Conversation,
-    // capacity, agent Busy/ACW, tenant stamping). Every pod's CallSessionManager observes the
-    // same broadcast AMI stream (warm standby), but only the leader acts, so side-effects
-    // happen exactly once cluster-wide with no cold-start gap on failover. It is gated on
-    // Asterisk:Ami (Hostname) — NOT Ari — because AMI capability ≠ ARI capability; a pod must
-    // be AMI-capable to own the AMI side-effect plane. Both leases share the one lock backend +
-    // keyed "Cluster" datasource (one pool, ADR-0015): a single AddVerbaraCluster with two
-    // RegisterLeader calls (the Pro builder materializes each lease independently).
+    // Per-resource leases (voice, W3/W4/W5, campaign-metrics webhooks): ClusterLeadershipExtensions.
     var voiceInboundEnabled = !string.IsNullOrWhiteSpace(builder.Configuration["Asterisk:Ari:BaseUrl"]);
     var voiceAmiEnabled = !string.IsNullOrWhiteSpace(builder.Configuration["Asterisk:Ami:Hostname"]);
-
-    // W3 — the cluster/lock/leader registration is lifted to the clusterConn level (out of the
-    // voice-only sub-block below) because the agent-liveness lease must run on EVERY clustered
-    // deployment, not just voice-capable ones. The one shared lock backend + keyed "Cluster"
-    // datasource (one pool, ADR-0015) materializes each lease independently: the liveness lease
-    // ALWAYS, the two voice leases only when their respective Asterisk capability is configured.
-    builder.Services.AddKeyedSingleton<NpgsqlDataSource>("Cluster", (_, _) => clusterDataSource);
-    builder.Services.AddPostgresDistributedLock(connectionStringName: "Cluster");
-    builder.Services.AddVerbaraCluster(opts =>
-    {
-        opts.UsePostgresLockBackend(connectionStringName: "Cluster");
-        opts.RegisterLeader(Verbara.Platform.Api.Services.AgentLivenessLeaderResources.Sweep);   // W3 — always
-        opts.RegisterLeader(Verbara.Platform.Api.Services.PendingPauseLeaderResources.Sweep);    // W4 — always
-        opts.RegisterLeader(Verbara.Platform.Api.Services.WorkFailoverLeaderResources.Sweep);    // W5 — always
-        if (voiceInboundEnabled)
-            opts.RegisterLeader(Verbara.Platform.Api.Services.VoiceLeaderResources.Inbound);
-        if (voiceAmiEnabled)
-        {
-            opts.RegisterLeader(Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner);
-            opts.RegisterLeader(Verbara.Platform.Api.Services.CallbackRescueLeaderResources.Sweep);    // W5b — voice-AMI only
-        }
-    });
+    builder.Services.AddClusteredLeaders(clusterDataSource, voiceInboundEnabled: voiceInboundEnabled,
+        voiceAmiEnabled: voiceAmiEnabled, dialerEnabled: !string.IsNullOrEmpty(dialerConnectionString));
     if (voiceInboundEnabled || voiceAmiEnabled)
     {
         if (voiceInboundEnabled)
@@ -1230,25 +1189,7 @@ if (!string.IsNullOrEmpty(clusterConn))
 }
 else
 {
-    // W3 — single-node (no cluster conn): always-leader stub for the agent-liveness
-    // sweep resource so the reaper still runs on a single replica. Clustered
-    // deployments take the Postgres-lease-backed leader registered above instead.
-    builder.Services.AddKeyedSingleton<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
-        Verbara.Platform.Api.Services.AgentLivenessLeaderResources.Sweep,
-        (_, _) => new Verbara.Platform.Api.Services.AlwaysLeader(
-            Verbara.Platform.Api.Services.AgentLivenessLeaderResources.Sweep));
-    // W4 — single-node always-leader stub for the deferred-pause drain sweep resource
-    // so the drain worker still runs on a single replica (same rationale as W3 above).
-    builder.Services.AddKeyedSingleton<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
-        Verbara.Platform.Api.Services.PendingPauseLeaderResources.Sweep,
-        (_, _) => new Verbara.Platform.Api.Services.AlwaysLeader(
-            Verbara.Platform.Api.Services.PendingPauseLeaderResources.Sweep));
-    // W5 — single-node always-leader stub for the work-failover sweep resource so the
-    // failover worker still runs on a single replica (same rationale as W3/W4 above).
-    builder.Services.AddKeyedSingleton<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
-        Verbara.Platform.Api.Services.WorkFailoverLeaderResources.Sweep,
-        (_, _) => new Verbara.Platform.Api.Services.AlwaysLeader(
-            Verbara.Platform.Api.Services.WorkFailoverLeaderResources.Sweep));
+    builder.Services.AddSingleNodeLeaders();
 }
 
 // W3 — leader-gated agent-liveness reaper. Runs on every pod (both cluster + single-node

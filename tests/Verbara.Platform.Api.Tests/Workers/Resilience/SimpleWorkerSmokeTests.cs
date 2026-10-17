@@ -68,7 +68,8 @@ public sealed class SimpleWorkerSmokeTests
         var sut = new CampaignMetricsPoller(
             Substitute.For<CampaignStoreBase>(),
             new PlatformEventBus(),
-            NullLogger<CampaignMetricsPoller>.Instance);
+            NullLogger<CampaignMetricsPoller>.Instance,
+            Verbara.Platform.Api.Tests.Webhooks.MetricsWebhooksLeader.Holding());
 
         await StartCancelStopAsync(sut);
     }

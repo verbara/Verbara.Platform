@@ -43,8 +43,37 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is no longer read as the customer's. A call ended by a reload, with no hangup cause, still stamps `false`.
   Closes #384; the lab re-run of `PLT-DIAL-02` cell g measured 10/10 (verbara-lab #33). (#426)
 
+- **Campaign metrics are published for every tenant's Active and Paused campaigns, under that tenant, with one
+  `campaign.metrics_updated` webhook delivery per change whatever the replica count.** After this
+  `campaign-metrics:webhooks` lease changes hands or is re-acquired (a `LeadershipTransition` log line records
+  it), metrics webhooks pause for up to ≈ 70 s with the default `Cluster:Leadership` timings (lease 30 s, renewal
+  10 s, poll 30 s) when the holder dies, and longer when it is stopped gracefully, since the lease is not released
+  while the host drains (83 s measured in the lab), and the current state of each campaign is then sent once more
+  under a new `X-Webhook-Id`.
+  Receivers need no new rule for it: the payload is the campaign's current state, not a delta, so apply each
+  delivery as an upsert keyed by `data.campaignId`; and when two deliveries of one campaign arrive out of order
+  (a retried delivery can arrive after a newer one, with one replica or several), keep the one with the later
+  payload top-level `timestamp` (the publishing replica's clock), not the later `X-Webhook-Timestamp` header,
+  which is each attempt's send time. Delivery stays at-least-once with `X-Webhook-Id` as the idempotency key.
+  (Platform/ADR-0043) (#N)
+
+- **The outbound dialer now finds every tenant's campaigns (Pro 2.19.0-pro), but it still places no call.**
+  Before, it read campaigns for tenant `""` only and saw none. Now it finds every tenant's Active campaigns in
+  every dialing mode, does not dial a Paused one, and claims each contact as it is fetched (one record per
+  contact), so no two fetches, on one replica or several, hand out the same contact; a contact dropped without a
+  call (compliance rejection, failed originate, stop) goes back to pending. **It still does not place calls with
+  this Platform:** the engine originates on the Asterisk node `"default"` while Platform registers its node as
+  `"primary"`, so every originate fails before AMI (`Node default not found in pool`) and the dialer's circuit
+  breaker opens; behind that, the default dial string is `PJSIP/{phone}` with no trunk. Measured in the lab on this
+  build: both tenants' campaigns were picked up on the first tick, 0 originates. Making the dialer place calls
+  end to end (node, trunk, and recording call results, which also releases each call's channel slot and lets a
+  contact be retried) is a separate change. Until results are recorded, `call_attempts` gets no rows, so
+  `contactsDialed`, `connectRate` and `abandonRate` stay at 0 while `contactsRemaining` moves as contacts are
+  claimed and given back. Every API replica runs its own dialer engine. (#N)
+
 ### Changed — Dependencies
 
+- **Verbara.Sdk.Pro `2.18.0-pro` → `2.19.0-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged. (#N)
 - `Microsoft.AspNetCore.DataProtection` and `Microsoft.AspNetCore.DataProtection.Extensions` move from 10.0.12 to
   10.0.13, the servicing band every other ASP.NET Core and `Microsoft.Extensions` pin already uses. No advisory
   requires it; the vulnerable transitive pieces (`System.Security.Cryptography.Xml` and `.Pkcs`) were already pinned
