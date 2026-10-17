@@ -47,7 +47,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `campaign.metrics_updated` webhook delivery per change whatever the replica count.** After this
   `campaign-metrics:webhooks` lease changes hands or is re-acquired (a `LeadershipTransition` log line records
   it), metrics webhooks pause for up to ≈ 70 s with the default `Cluster:Leadership` timings (lease 30 s, renewal
-  10 s, poll 30 s) and the current state of each campaign is then sent once more under a new `X-Webhook-Id`.
+  10 s, poll 30 s) when the holder dies, and longer when it is stopped gracefully, since the lease is not released
+  while the host drains (83 s measured in the lab), and the current state of each campaign is then sent once more
+  under a new `X-Webhook-Id`.
   Receivers need no new rule for it: the payload is the campaign's current state, not a delta, so apply each
   delivery as an upsert keyed by `data.campaignId`; and when two deliveries of one campaign arrive out of order
   (a retried delivery can arrive after a newer one, with one replica or several), keep the one with the later
