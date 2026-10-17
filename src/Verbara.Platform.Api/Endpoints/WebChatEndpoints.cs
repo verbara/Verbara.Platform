@@ -188,13 +188,13 @@ internal static partial class WebChatEndpoints
 
                 if (frame.Kind == WebChatFrameKind.Ignored)
                 {
-                    LogNonTextFrameIgnored(logger, session.TenantId.Value, sessionId);
+                    LogNonTextFrameIgnored(logger, session.TenantId.Value, session.SessionId);
                     continue;
                 }
 
                 if (frame.Kind == WebChatFrameKind.Oversized)
                 {
-                    LogMessageTooLarge(logger, session.TenantId.Value, sessionId, maxLength);
+                    LogMessageTooLarge(logger, session.TenantId.Value, session.SessionId, maxLength);
                     continue;
                 }
 
@@ -205,7 +205,7 @@ internal static partial class WebChatEndpoints
                 }
                 catch (JsonException ex)
                 {
-                    LogMalformedFrame(logger, session.TenantId.Value, sessionId, ex);
+                    LogMalformedFrame(logger, session.TenantId.Value, session.SessionId, ex);
                     continue;
                 }
 
@@ -213,7 +213,7 @@ internal static partial class WebChatEndpoints
                 {
                     if (clientMsg.Text.Length > maxLength)
                     {
-                        LogMessageTooLong(logger, session.TenantId.Value, sessionId, clientMsg.Text.Length, maxLength);
+                        LogMessageTooLong(logger, session.TenantId.Value, session.SessionId, clientMsg.Text.Length, maxLength);
                         continue;
                     }
 
