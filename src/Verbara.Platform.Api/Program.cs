@@ -1130,16 +1130,9 @@ if (!string.IsNullOrEmpty(clusterConn))
                     sp.GetRequiredKeyedService<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
                         Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner),
                     sp.GetRequiredService<ILogger<Verbara.Platform.Api.Services.VoiceCallControlService>>()));
-            // Trunk connectivity test (P2): leader-gated AMI `pjsip show ...` diagnostic run server-side
-            // (replaces the operator SSHing into Asterisk, manual §3.3). TrunkStoreBase resolves lazily —
-            // its registration is below, but this factory only touches it at first request.
-            builder.Services.AddSingleton<Verbara.Platform.Api.Services.ITrunkConnectivityTester>(sp =>
-                new Verbara.Platform.Api.Services.TrunkConnectivityTester(
-                    sp.GetRequiredService<TrunkStoreBase>(),
-                    sp.GetRequiredService<Verbara.Sdk.Live.Server.VerbaraServerPool>(),
-                    sp.GetRequiredKeyedService<Verbara.Sdk.Pro.Cluster.Leadership.IClusterLeader>(
-                        Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner),
-                    sp.GetRequiredService<ILogger<Verbara.Platform.Api.Services.TrunkConnectivityTester>>()));
+            // Trunk connectivity test (P2, leader-gated AMI `pjsip show ...`) + the #385 registration reload worker
+            // (ModuleLoad reload of res_pjsip_outbound_registration after a registration write). Both lazy on AMI.
+            builder.Services.AddTrunkAmiServices();
             // Outbound click-to-dial (3B.2d): reuse the Pro Dialer originate executor (circuit-breaker +
             // trunk-health). It is NOT registered by AddProDialer (consumed via GetService there), and its
             // trunk-health / post-call / time-provider deps are optional, so register it via a factory that

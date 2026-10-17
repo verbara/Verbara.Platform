@@ -51,6 +51,17 @@ Five gates, all freeze-current / ratchet posture (fail only on regression):
      PostgresBotConfigStore.cs:119. Convert with `.ToUniversalTime()` (or the
      `ToUtcInstant()` helper in Verbara.Platform.Core) instead. Floor is zero.
 
+  #12 Asterisk outbound registration stays loadable — when the repo ships an
+     Asterisk config (docker/asterisk-config/), `res_pjsip_outbound_registration`
+     may not be `noload`ed in modules.conf, and sorcery.conf must map
+     `registration = realtime,ps_registrations` under its OWN
+     `[res_pjsip_outbound_registration]` section and nowhere else. Measured in the
+     lab (issue #385): a `noload` line silently disabled every registration trunk,
+     and with the mapping under `[res_pjsip]` the module declines to load at boot —
+     both leave a trunk with a registration URI that never sends a REGISTER, with no
+     operator-visible error. A tree without docker/asterisk-config/ is out of scope;
+     a tree that has it must carry both files.
+
 Exit 0 = all gates pass; 1 = at least one violation (with ::error:: annotations
 so GitHub renders them inline). Run from the repo root:
     python3 scripts/check-endpoint-invariants.py
@@ -63,7 +74,7 @@ from pathlib import Path
 # Map of repo-relative path -> max lines. Lower a number when the file shrinks;
 # raising one is a reviewed, visible decision to grow an orchestrator file.
 LOC_BUDGETS = {
-    "src/Verbara.Platform.Api/Program.cs": 1763,  # ratcheted 2026-10-16 (dialer-sees-every-tenants-campaigns D5: −59, cluster leases and single-node stubs moved to ClusterLeadershipExtensions); 1822 earlier 2026-10-15 (harden-recovery-code-digest: −1, recovery-code wiring moved to RecoveryCodesExtensions; #403 had already removed 15); 1838 earlier 2026-10-13 (merge of origin/main #390: −2 near the rate limiter); 1840 earlier 2026-10-13 (readiness-without-asterisk D6: −73, health wiring moved to PlatformHealthExtensions); was 1932 frozen 2026-07-20
+    "src/Verbara.Platform.Api/Program.cs": 1756,  # ratcheted 2026-10-16 (merge of origin/main #429 into dialer-sees-every-tenants-campaigns: −7, registration-trunks-register moved trunk AMI wiring to RealtimeSyncingStoresExtensions.AddTrunkAmiServices); 1763 earlier 2026-10-16 (dialer-sees-every-tenants-campaigns D5: −59, cluster leases and single-node stubs moved to ClusterLeadershipExtensions); 1822 earlier 2026-10-15 (harden-recovery-code-digest: −1, recovery-code wiring moved to RecoveryCodesExtensions; #403 had already removed 15); 1838 earlier 2026-10-13 (merge of origin/main #390: −2 near the rate limiter); 1840 earlier 2026-10-13 (readiness-without-asterisk D6: −73, health wiring moved to PlatformHealthExtensions); was 1932 frozen 2026-07-20
 }
 
 # Matches `catch {}`, `catch { }`, `catch (Exception) {}`, and the multi-line
@@ -130,6 +141,27 @@ _SPECIFY_KIND_SCOPE_MARKERS = ("Storage.Postgres", "Stores")
 # reads from Npgsql cannot produce a reader-sourced value to mislabel, so a
 # SpecifyKind there is a different question and stays out of scope deliberately.
 _NPGSQL_READER_MARKERS = ("NpgsqlDataReader", "GetDateTimeOrNull", "GetDateTime(")
+
+
+# --- Gate #12 config: Asterisk outbound registration stays loadable -----------
+_ASTERISK_CONFIG_DIR = "docker/asterisk-config"
+_OUTBOUND_REG_SECTION = "res_pjsip_outbound_registration"
+# `noload = res_pjsip_outbound_registration.so` (also `=>`, with or without `.so`).
+_NOLOAD_OUTBOUND_REG = re.compile(
+    r"^noload\s*=>?\s*res_pjsip_outbound_registration(\.so)?\s*$", re.IGNORECASE)
+_SECTION_HEADER = re.compile(r"^\[([^\]]+)\]")
+# The sorcery object-type key `registration` (also `=>`); captures the value.
+_REGISTRATION_MAPPING = re.compile(r"^registration\s*=>?\s*(.*?)\s*$", re.IGNORECASE)
+_REGISTRATION_VALUE = "realtime,ps_registrations"
+
+
+def _conf_lines(text):
+    """(line number, stripped content) of every Asterisk .conf line with its `;`
+    comment removed; blank results are dropped."""
+    for number, raw in enumerate(text.splitlines(), start=1):
+        content = raw.split(";", 1)[0].strip()
+        if content:
+            yield number, content
 
 
 def _comment_spans(text):
@@ -242,6 +274,53 @@ def find_specify_kind_utc(root):
     return violations
 
 
+def find_outbound_registration_regressions(root):
+    """Violation strings for every config line that stops Asterisk from loading
+    res_pjsip_outbound_registration or from reading ps_registrations (gate #12)."""
+    config_dir = root / _ASTERISK_CONFIG_DIR
+    if not config_dir.is_dir():
+        return []
+    violations = []
+
+    modules = config_dir / "modules.conf"
+    if not modules.is_file():
+        violations.append(f"{_ASTERISK_CONFIG_DIR}/modules.conf: MISSING")
+    else:
+        for number, content in _conf_lines(modules.read_text(encoding="utf-8")):
+            if _NOLOAD_OUTBOUND_REG.match(content):
+                violations.append(
+                    f"{_ASTERISK_CONFIG_DIR}/modules.conf:{number}: noload of "
+                    f"{_OUTBOUND_REG_SECTION} — registration trunks never send a REGISTER")
+
+    sorcery = config_dir / "sorcery.conf"
+    if not sorcery.is_file():
+        violations.append(f"{_ASTERISK_CONFIG_DIR}/sorcery.conf: MISSING")
+        return violations
+    section = None
+    mapped = False
+    for number, content in _conf_lines(sorcery.read_text(encoding="utf-8")):
+        header = _SECTION_HEADER.match(content)
+        if header:
+            section = header.group(1).strip()
+            continue
+        mapping = _REGISTRATION_MAPPING.match(content)
+        if not mapping:
+            continue
+        if section != _OUTBOUND_REG_SECTION:
+            violations.append(
+                f"{_ASTERISK_CONFIG_DIR}/sorcery.conf:{number}: `registration` mapped under "
+                f"[{section}] — it must live under [{_OUTBOUND_REG_SECTION}], or the module "
+                f"declines to load")
+        elif mapping.group(1).replace(" ", "") == _REGISTRATION_VALUE:
+            mapped = True
+    if not mapped:
+        violations.append(
+            f"{_ASTERISK_CONFIG_DIR}/sorcery.conf: no `registration = {_REGISTRATION_VALUE}` "
+            f"under [{_OUTBOUND_REG_SECTION}] — Asterisk would not read trunk registrations "
+            f"from Postgres")
+    return violations
+
+
 def main(root=None):
     root = root or Path.cwd()
     failed = False
@@ -295,6 +374,14 @@ def main(root=None):
             print(f"  {violation}")
     else:
         print("Gate #11 (no SpecifyKind relabel in Postgres stores): OK.")
+
+    outbound_reg = find_outbound_registration_regressions(root)
+    if outbound_reg:
+        failed = True
+        for violation in outbound_reg:
+            print(f"::error::Asterisk outbound registration (gate #12): {violation}")
+    else:
+        print("Gate #12 (Asterisk outbound registration loadable): OK.")
 
     return 1 if failed else 0
 

@@ -11,6 +11,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A registration trunk now registers with its carrier, and keeps Asterisk in step when it changes.** Three
+  defects stopped every trunk with a registration URI from ever sending a REGISTER. The Asterisk image did not load
+  `res_pjsip_outbound_registration` at all (`modules.conf` carried a `noload` for it). With that line gone the
+  module still declined to load, because `sorcery.conf` mapped `registration` under `[res_pjsip]`; it now has its
+  own `[res_pjsip_outbound_registration]` section. And Asterisk reads `ps_registrations` only when that module
+  loads, so a trunk created or edited after boot stayed unregistered until a restart. Platform now asks Asterisk to
+  reload the module (AMI `ModuleLoad`, `res_pjsip_outbound_registration.so`) after a trunk is created, updated or
+  deleted with a registration URI, retries until Asterisk accepts it, and every reconcile interval the AMI-owner pod
+  reloads again when `ps_registrations` changed since the last accepted reload. An operator who saves a
+  registration trunk sees it register within about 2-12 s: 1 s to batch writes, then Asterisk spreads the first
+  REGISTER over up to 10 s. If the pod that served the save has no AMI connection at that moment, it can take up to
+  one reconcile interval (60 s). Deleting the trunk unregisters it. Clearing the registration URI of an existing
+  trunk is not supported yet: delete and recreate the trunk. The trunk API also refuses a registration that cannot work, with a 400:
+  `registration-uri-empty` for a blank `registrationUri`, `client-uri-required` when a trunk with a registration
+  URI would have no `clientUri`, and `invalid-sip-uri` (field in `details`) when either is not a `sip:`/`sips:`
+  URI. Only a URI that changes is checked, so a trunk saved before these rules stays editable when a client sends
+  its stored URIs back unchanged. The console's trunk wizard still lets an operator leave the client URI blank in
+  register mode; that save now returns `client-uri-required` instead of creating a trunk that never registers. A
+  new invariant gate fails CI if the `noload` line or the `[res_pjsip]` mapping comes back. Closes #385. (#429)
+
 - **A voice call whose agent leg dies is now flagged abnormal, so the callback rescue and the voice-CSAT
   verdict see it.** The callback-eval stamp looked for the agent leg with `ParticipantRole.Agent`, a role the
   SDK never assigns: its sessions only tag legs `Caller` (first), `Destination` (later) and `Internal`
@@ -21,7 +41,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (before the connect, or after the call came back to their queue) never counts. The customer is the first
   other leg that is not `Local/`. On an outbound click-to-dial the agent's own leg
   is no longer read as the customer's. A call ended by a reload, with no hangup cause, still stamps `false`.
-  Closes the code half of #384; the lab re-run of `PLT-DIAL-02` cell g is still pending. (#426)
+  Closes #384; the lab re-run of `PLT-DIAL-02` cell g measured 10/10 (verbara-lab #33). (#426)
 
 - **Campaign metrics are published for every tenant's Active and Paused campaigns, under that tenant, with one
   `campaign.metrics_updated` webhook delivery per change whatever the replica count.** After the
