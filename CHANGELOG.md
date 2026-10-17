@@ -29,7 +29,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   URI. Only a URI that changes is checked, so a trunk saved before these rules stays editable when a client sends
   its stored URIs back unchanged. The console's trunk wizard still lets an operator leave the client URI blank in
   register mode; that save now returns `client-uri-required` instead of creating a trunk that never registers. A
-  new invariant gate fails CI if the `noload` line or the `[res_pjsip]` mapping comes back. Closes #385.
+  new invariant gate fails CI if the `noload` line or the `[res_pjsip]` mapping comes back. Closes #385. (#429)
 
 - **A voice call whose agent leg dies is now flagged abnormal, so the callback rescue and the voice-CSAT
   verdict see it.** The callback-eval stamp looked for the agent leg with `ParticipantRole.Agent`, a role the
