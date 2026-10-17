@@ -55,7 +55,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (a retried delivery can arrive after a newer one, with one replica or several), keep the one with the later
   payload top-level `timestamp` (the publishing replica's clock), not the later `X-Webhook-Timestamp` header,
   which is each attempt's send time. Delivery stays at-least-once with `X-Webhook-Id` as the idempotency key.
-  (Platform/ADR-0043) (#N)
+  (Platform/ADR-0043) (#435)
 
 - **The outbound dialer now finds every tenant's campaigns (Pro 2.19.0-pro), but it still places no call.**
   Before, it read campaigns for tenant `""` only and saw none. Now it finds every tenant's Active campaigns in
@@ -69,11 +69,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   end to end (node, trunk, and recording call results, which also releases each call's channel slot and lets a
   contact be retried) is a separate change. Until results are recorded, `call_attempts` gets no rows, so
   `contactsDialed`, `connectRate` and `abandonRate` stay at 0 while `contactsRemaining` moves as contacts are
-  claimed and given back. Every API replica runs its own dialer engine. (#N)
+  claimed and given back. Every API replica runs its own dialer engine. (#435)
 
 ### Changed — Dependencies
 
-- **Verbara.Sdk.Pro `2.18.0-pro` → `2.19.0-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged. (#N)
+- **Verbara.Sdk.Pro `2.18.0-pro` → `2.19.0-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged. (#435)
 - `Microsoft.AspNetCore.DataProtection` and `Microsoft.AspNetCore.DataProtection.Extensions` move from 10.0.12 to
   10.0.13, the servicing band every other ASP.NET Core and `Microsoft.Extensions` pin already uses. No advisory
   requires it; the vulnerable transitive pieces (`System.Security.Cryptography.Xml` and `.Pkcs`) were already pinned
