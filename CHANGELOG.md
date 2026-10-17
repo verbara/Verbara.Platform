@@ -57,7 +57,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   without finishing aborts the run, the console names it, and a `hang-report-*` artifact with the test sequence (the
   hung test is marked `Completed="False"`) is uploaded on failure. Before, a hang ran into the job's 30-minute timeout
   with no indication of which test it was (#428: `Channels.Sms.Tests` on a PR run). `CsatSmsCorrelatorFixture` also
-  bounds its container start at 3 minutes.
+  bounds its container start at 3 minutes. (#431)
 
 - **A release image whose provenance labels cannot be verified is no longer pushed.** Each `release.yml` leg now
   builds its image without pushing it, and a new `Gate on image provenance labels (before push)` step reads the
