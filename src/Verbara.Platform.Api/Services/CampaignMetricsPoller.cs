@@ -3,6 +3,7 @@ namespace Verbara.Platform.Api.Services;
 using Verbara.Sdk.Pro.Dialer.Campaign;
 using Verbara.Sdk.Pro.Dialer.Models;
 using Verbara.Platform.Core;
+using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Resilience;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -18,17 +19,24 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
     private readonly PlatformEventBus _eventBus;
     private readonly ResiliencePolicy _policy;
     private readonly ILogger<CampaignMetricsPoller> _logger;
+    private readonly IClusterLeader _webhooksLeader;
     private readonly Dictionary<long, CampaignMetricsSnapshot> _previousSnapshots = new();
+
+    // Whether the last poll that reached the publish loop ran as the campaign-metrics webhook lease
+    // holder. A faulted or circuit-open tick never reaches the loop, so it leaves this untouched.
+    private bool _publishedAsLeader;
 
     public CampaignMetricsPoller(
         CampaignStoreBase campaignStore,
         PlatformEventBus eventBus,
         ILogger<CampaignMetricsPoller> logger,
+        [FromKeyedServices(CampaignMetricsLeaderResources.Webhooks)] IClusterLeader webhooksLeader,
         [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
         _campaignStore = campaignStore;
         _eventBus = eventBus;
         _logger = logger;
+        _webhooksLeader = webhooksLeader;
         _policy = policy ?? ResiliencePolicy.NoOp;
     }
 
@@ -79,6 +87,15 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
     internal async Task PollMetricsAsync(CancellationToken ct)
     {
         var metrics = await _campaignStore.GetAllActiveCampaignMetricsAsync(ct);
+
+        // Read the lease after the store call, immediately before publishing: the round-trip can span
+        // a demotion and a re-acquire, and only this tick's view decides whether its events reach the
+        // dispatcher (design D5 point 4). On gaining the lease, publish every active campaign as if seen
+        // for the first time: as a follower this replica recorded changes whose webhooks were dropped.
+        var isLeader = _webhooksLeader.IsLeader;
+        if (isLeader && !_publishedAsLeader)
+            _previousSnapshots.Clear();
+        _publishedAsLeader = isLeader;
 
         foreach (var item in metrics)
         {

@@ -20,7 +20,7 @@ public class WebhookDispatcherTests : IDisposable
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         _dispatcher = new WebhookDispatcher(
             _eventBus, _subStore, _deliveryStore, _clock,
-            NullLogger<WebhookDispatcher>.Instance);
+            NullLogger<WebhookDispatcher>.Instance, Webhooks.MetricsWebhooksLeader.Holding());
     }
 
     [Fact]

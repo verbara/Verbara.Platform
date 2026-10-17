@@ -87,7 +87,8 @@ internal sealed class WebhookDeliveryHarness : IDisposable
         var bus = new PlatformEventBus();
         _owned.Add(bus);
         var dispatcher = new WebhookDispatcher(
-            bus, _subscriptionStore, _deliveryStore, Clock, NullLogger<WebhookDispatcher>.Instance);
+            bus, _subscriptionStore, _deliveryStore, Clock, NullLogger<WebhookDispatcher>.Instance,
+            MetricsWebhooksLeader.Holding());
         _owned.Add(dispatcher);
         return (bus, dispatcher);
     }

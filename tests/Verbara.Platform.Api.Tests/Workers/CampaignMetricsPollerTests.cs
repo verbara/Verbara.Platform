@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Api.Tests.Webhooks;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Webhooks;
 using Verbara.Sdk.Pro.Dialer.Campaign;
@@ -52,7 +53,7 @@ public sealed class CampaignMetricsPollerTests : IDisposable
     private static TenantCampaignMetricsSnapshot Globex12() => Item("globex", 12, "Globex winback");
 
     private CampaignMetricsPoller CreateSut() =>
-        new(_store, _bus, NullLogger<CampaignMetricsPoller>.Instance);
+        new(_store, _bus, NullLogger<CampaignMetricsPoller>.Instance, MetricsWebhooksLeader.Holding());
 
     [Fact]
     public async Task PollMetricsAsync_ShouldPublishEveryTenantsCampaignMetrics_WhenTwoTenantsHaveActiveCampaigns()
@@ -193,7 +194,8 @@ public sealed class CampaignMetricsPollerTests : IDisposable
         deliveryStore.SaveAsync(Arg.Do<WebhookDelivery>(saved.Add), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
         using var dispatcher = new WebhookDispatcher(
-            _bus, subStore, deliveryStore, clock, NullLogger<WebhookDispatcher>.Instance);
+            _bus, subStore, deliveryStore, clock, NullLogger<WebhookDispatcher>.Instance,
+            MetricsWebhooksLeader.Holding());
 
         _active = [Acme11()];
         await CreateSut().PollMetricsAsync(CancellationToken.None);

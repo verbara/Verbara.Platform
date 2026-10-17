@@ -332,7 +332,8 @@ public class WebhookDeliveryServiceTests
             subStore,
             deliveryStore,
             clock,
-            NullLogger<WebhookDispatcher>.Instance);
+            NullLogger<WebhookDispatcher>.Instance,
+            MetricsWebhooksLeader.Holding());
 
         // Real ResiliencePolicy — retry once with negligible backoff so tests stay fast.
         var policy = new ResiliencePolicyBuilder()

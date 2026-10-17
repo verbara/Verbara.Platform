@@ -196,12 +196,16 @@ public sealed record CampaignStatusChangedEvent(
     string OldStatus, string NewStatus)
     : PlatformEvent(TenantId, "campaign.status_changed", DateTimeOffset.UtcNow);
 
-/// <summary>Raised when campaign dialing metrics are updated.</summary>
+/// <summary>
+/// Raised when campaign dialing metrics are updated. Every replica's metrics poller publishes it
+/// (<see cref="IPublishedOnEveryReplica"/>); only the campaign-metrics webhook lease holder dispatches
+/// its webhooks.
+/// </summary>
 public sealed record CampaignMetricsUpdatedEvent(
     string TenantId, long CampaignId,
     int ContactsDialed, int ContactsRemaining,
     double ConnectRate, double AbandonRate, int ActiveCalls)
-    : PlatformEvent(TenantId, "campaign.metrics_updated", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "campaign.metrics_updated", DateTimeOffset.UtcNow), IPublishedOnEveryReplica;
 
 /// <summary>Raised when an agent submits a disposition for a campaign call.</summary>
 public sealed record CampaignDispositionSubmittedEvent(
