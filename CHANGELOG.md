@@ -44,24 +44,34 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Closes #384; the lab re-run of `PLT-DIAL-02` cell g measured 10/10 (verbara-lab #33). (#426)
 
 - **Campaign metrics are published for every tenant's Active and Paused campaigns, under that tenant, with one
-  `campaign.metrics_updated` webhook delivery per change whatever the replica count.** After the
-  `campaign-metrics:webhooks` lease moves between replicas (a `LeadershipTransition` log line records it), metrics
-  webhooks pause for up to ≈ 70 s and the current state of each campaign is then sent once more under a new
-  `X-Webhook-Id`. Receivers need no new rule for it: the payload is the campaign's current state, not a delta, so
-  apply each delivery as an upsert keyed by `data.campaignId`; and when two deliveries of one campaign arrive out
-  of order (a retried delivery can arrive after a newer one, with one replica or several), keep the one with the
-  later payload top-level `timestamp` (the publishing replica's clock), not the later `X-Webhook-Timestamp`
-  header, which is each attempt's send time. Delivery stays at-least-once with `X-Webhook-Id` as the idempotency
-  key. (Platform/ADR-0043) (#N)
+  `campaign.metrics_updated` webhook delivery per change whatever the replica count.** After this
+  `campaign-metrics:webhooks` lease changes hands or is re-acquired (a `LeadershipTransition` log line records
+  it), metrics webhooks pause for up to ≈ 70 s with the default `Cluster:Leadership` timings (lease 30 s, renewal
+  10 s, poll 30 s) and the current state of each campaign is then sent once more under a new `X-Webhook-Id`.
+  Receivers need no new rule for it: the payload is the campaign's current state, not a delta, so apply each
+  delivery as an upsert keyed by `data.campaignId`; and when two deliveries of one campaign arrive out of order
+  (a retried delivery can arrive after a newer one, with one replica or several), keep the one with the later
+  payload top-level `timestamp` (the publishing replica's clock), not the later `X-Webhook-Timestamp` header,
+  which is each attempt's send time. Delivery stays at-least-once with `X-Webhook-Id` as the idempotency key.
+  (Platform/ADR-0043) (#N)
 
 - **The outbound dialer dials on Postgres for the first time (Pro 2.19.0-pro).** It finds every tenant's Active
   campaigns, in every dialing mode, and a Paused campaign does not dial. Each contact is claimed when it is
-  fetched, so no two fetches, on one replica or several, hand out the same contact. Limits:
+  fetched, one record per contact, so while a contact is claimed no other fetch, on one replica or several, hands
+  it out. A contact dropped without a call (compliance rejection, failed originate, stop) goes back to pending and
+  can be fetched again. Limits:
+  - **Each API process places at most a campaign's `MaxConcurrentCalls` calls (and `MaxGlobalChannels` overall),
+    then stops dialing it until the process restarts.** A channel slot is taken before each originate, and after
+    a successful one only the call-result handler releases it, which is not wired yet. A campaign that leaves the
+    Active/Paused set also frees its slots; a pause releases nothing. Wiring call results also releases the slot
+    when a call ends.
   - **Each contact is dialed once and is not retried.** Nothing records call results yet, so a dialed contact
-    stays claimed (`status = 1`), `call_attempts` stays empty and campaign metrics do not move. Recording results
-    is a separate change.
-  - **Every API replica runs its own dialer with its own channel cap.** With N replicas, up to N × the cap
-    channels can be up at once. This holds until the dialer runs in one process. (#N)
+    stays claimed (`status = 1`) and `call_attempts` gets no rows: `contactsDialed`, `connectRate` and
+    `abandonRate` stay at 0. `contactsRemaining` still falls as contacts are claimed and rises when one is given
+    back. Recording results is a separate change.
+  - **Every API replica runs its own dialer with its own budgets.** With N replicas, up to N × those budgets can be
+    placed: N × `MaxConcurrentCalls` calls per campaign and N × `MaxGlobalChannels` in all. This holds until the
+    dialer runs in one process. (#N)
 
 ### Changed — Dependencies
 
