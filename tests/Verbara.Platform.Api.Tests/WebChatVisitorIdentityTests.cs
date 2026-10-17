@@ -21,6 +21,8 @@ namespace Verbara.Platform.Api.Tests;
 public sealed class WebChatVisitorIdentityTests : IDisposable
 {
     private const string VisitorTenantId = "tenant-webchat-identity";
+    private const string InactiveChannelTenantId = "tenant-webchat-inactive";
+    private const string MissingChannelTenantId = "tenant-webchat-missing";
     private static readonly TenantId VisitorTenant = new(VisitorTenantId);
     private readonly Factory _factory = new();
 
@@ -32,6 +34,10 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         {
             var host = base.CreateHost(builder);
             SeedTestCustomerTenant(host.Services, VisitorTenantId);
+            SeedWebChatChannel(host.Services, VisitorTenantId);
+            SeedTestCustomerTenant(host.Services, InactiveChannelTenantId);
+            SeedWebChatChannel(host.Services, InactiveChannelTenantId, isActive: false);
+            SeedTestCustomerTenant(host.Services, MissingChannelTenantId);
             return host;
         }
     }
@@ -535,6 +541,34 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
             .GetByIdAsync(VisitorTenant, EntityId.From(conversationId.GetString()!), CancellationToken.None);
         conversation.Should().NotBeNull();
         conversation!.ContactId.Should().Be(contact.ContactId);
+    }
+
+    [Fact]
+    public async Task CreateSession_ShouldReturnNotFound_WhenWebChatChannelInactive() =>
+        await AssertSessionRefusedLikeAnUnknownTenantAsync(InactiveChannelTenantId);
+
+    [Fact]
+    public async Task CreateSession_ShouldReturnNotFound_WhenWebChatChannelMissing() =>
+        await AssertSessionRefusedLikeAnUnknownTenantAsync(MissingChannelTenantId);
+
+    /// <summary>
+    /// A tenant without an active WebChat channel gets exactly the unknown-tenant answer — same status, same
+    /// body — and no contact or conversation is created for it.
+    /// </summary>
+    private async Task AssertSessionRefusedLikeAnUnknownTenantAsync(string tenantId)
+    {
+        using var client = _factory.CreateClient();
+        using var unknown = await client.PostAsJsonAsync("/api/v1/webchat/sessions", new { tenantId = "no-such-tenant" });
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var unknownBody = await unknown.Content.ReadAsStringAsync();
+
+        using var response = await client.PostAsJsonAsync("/api/v1/webchat/sessions", new { tenantId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadAsStringAsync()).Should().Be(unknownBody,
+            "a tenant without an active WebChat channel answers exactly like an unknown tenant");
+        var (contacts, conversations, _) = await WebhookProbes.CountRowsAsync(_factory.Services, new TenantId(tenantId));
+        (contacts, conversations).Should().Be((0, 0), "no visitor contact or conversation is created");
     }
 
     /// <summary>

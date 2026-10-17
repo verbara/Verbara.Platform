@@ -116,6 +116,27 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
         AwaitTenantUpsert(tenantStore, tenant);
     }
 
+    /// <summary>
+    /// Saves the WebChat channel configuration of <paramref name="tenantId"/> in the wired
+    /// <c>ITenantChannelConfigStore</c>. A WebChat session is created only for a tenant whose WebChat
+    /// channel is configured and active, so every fixture that creates sessions seeds one.
+    /// </summary>
+    internal static void SeedWebChatChannel(IServiceProvider services, string tenantId, bool isActive = true)
+    {
+        using var scope = services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Verbara.Platform.Channels.Core.ITenantChannelConfigStore>()
+            .SaveAsync(
+                new Verbara.Platform.Channels.Core.TenantChannelConfig
+                {
+                    TenantId = new TenantId(tenantId),
+                    Channel = ChannelType.WebChat,
+                    IsActive = isActive,
+                    Credentials = new Dictionary<string, string>(),
+                },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+    }
+
     private static void AwaitTenantUpsert(Verbara.Sdk.Pro.MultiTenant.ITenantStore tenantStore, Verbara.Sdk.Pro.MultiTenant.Tenant tenant)
     {
         // The store API exposes either Task or ValueTask depending on the impl;

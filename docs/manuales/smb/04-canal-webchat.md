@@ -63,7 +63,9 @@ El canal WebChat permite que un visitante anónimo del sitio web del cliente ini
 
 ## 1. Configurar el canal WebChat (default queue)
 
-El paso funcional es **decirle al canal a qué queue mandar los chats**. La sesión de WebChat es anónima y funciona aunque el canal no esté "activo"; lo que importa para el enrutado es la `defaultQueueId` (Tier 1). Si no la configurás, Verbara cae al **Tier 2: la primera queue activa del tenant** (la que creó el wizard). Configurarla explícitamente es lo recomendado.
+Antes de embeber el widget, el canal WebChat del tenant tiene que estar **configurado y activo** (`isActive: true`): sin eso `POST /api/v1/webchat/sessions` responde `404` (el mismo `Tenant not found` que un tenant inexistente) y el widget no abre la conversación. Un tenant creado por API (sin pasar por el wizard) tiene que hacer el `PUT` de abajo con `"isActive": true`.
+
+Además, conviene **decirle al canal a qué queue mandar los chats**: lo que importa para el enrutado es la `defaultQueueId` (Tier 1). Si no la configurás, Verbara cae al **Tier 2: la primera queue activa del tenant** (la que creó el wizard). Configurarla explícitamente es lo recomendado.
 
 Necesitás el id de la queue destino. Si seguiste el manual 03, ya tenés una queue (ej. `Atención General`). Listala:
 
