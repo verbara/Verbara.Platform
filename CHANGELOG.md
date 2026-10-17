@@ -61,10 +61,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it out. A contact dropped without a call (compliance rejection, failed originate, stop) goes back to pending and
   can be fetched again. Limits:
   - **Each API process places at most a campaign's `MaxConcurrentCalls` calls (and `MaxGlobalChannels` overall),
-    then stops dialing it until the process restarts.** A channel slot is taken before each originate, and after
-    a successful one only the call-result handler releases it, which is not wired yet. A campaign that leaves the
-    Active/Paused set also frees its slots; a pause releases nothing. Wiring call results also releases the slot
-    when a call ends.
+    then stops dialing it until the process restarts; once `MaxGlobalChannels` is used up, every campaign on that
+    process stops.** A channel slot is taken before each originate, and after a successful one only the
+    call-result handler releases it, which is not wired yet. A campaign that leaves the Active/Paused set also
+    frees its slots; a pause releases nothing. Wiring call results also releases the slot when a call ends. While a
+    campaign cannot dial, its activation keeps up to ~75 contacts claimed (50 buffered + one batch of 25) that no
+    replica dials until a pause, removal or process stop.
   - **Each contact is dialed once and is not retried.** Nothing records call results yet, so a dialed contact
     stays claimed (`status = 1`) and `call_attempts` gets no rows: `contactsDialed`, `connectRate` and
     `abandonRate` stay at 0. `contactsRemaining` still falls as contacts are claimed and rises when one is given
