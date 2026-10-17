@@ -232,6 +232,16 @@ jobs:
           dotnet test Verbara.Platform.slnx --no-build -c Release
           --filter "FullyQualifiedName!~Storage.Postgres.Tests&FullyQualifiedName!~Identity.Redis.Tests"
           --logger "console;verbosity=normal"
+          --blame-hang-timeout 5m --blame-hang-dump-type none --results-directory TestResults
+      - name: Upload hang report
+        # #428: --blame-hang-timeout aborts a test that runs 5 min without finishing and writes the sequence of
+        # tests that ran (Sequence_*.xml; the hung test is the entry with Completed="False"). Uploaded only on failure.
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: hang-report-unit-${{ github.sha }}
+          path: TestResults/**/Sequence_*.xml
+          if-no-files-found: ignore
 
   # live-postgres-ci-lane: runs the two container-backed test projects build-and-test
   # excludes above (Storage.Postgres.Tests, Identity.Redis.Tests) against real
@@ -350,6 +360,7 @@ jobs:
         run: >-
           dotnet test tests/Verbara.Platform.Storage.Postgres.Tests/Verbara.Platform.Storage.Postgres.Tests.csproj
           --no-build -c Release --logger "console;verbosity=normal"
+          --blame-hang-timeout 5m --blame-hang-dump-type none --results-directory TestResults
 
       - name: Live-DB tests — Identity.Redis.Tests
         # dependabot CI-load skip (Sdk/ADR-0039, STEP-level): as above — and, as
@@ -358,6 +369,17 @@ jobs:
         run: >-
           dotnet test tests/Verbara.Platform.Identity.Redis.Tests/Verbara.Platform.Identity.Redis.Tests.csproj
           --no-build -c Release --logger "console;verbosity=normal"
+          --blame-hang-timeout 5m --blame-hang-dump-type none --results-directory TestResults
+
+      - name: Upload hang report
+        # #428: --blame-hang-timeout aborts a test that runs 5 min without finishing and writes the sequence of
+        # tests that ran (Sequence_*.xml; the hung test is the entry with Completed="False"). Uploaded only on failure.
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: hang-report-live-db-${{ github.sha }}
+          path: TestResults/**/Sequence_*.xml
+          if-no-files-found: ignore
 
   coverage:
     name: Coverage Ratchet
@@ -422,6 +444,17 @@ jobs:
           --filter "FullyQualifiedName!~Storage.Postgres.Tests&FullyQualifiedName!~Identity.Redis.Tests"
           --collect:"XPlat Code Coverage" --settings coverlet.runsettings
           --results-directory ${{ github.workspace }}/coverage
+          --blame-hang-timeout 5m --blame-hang-dump-type none
+
+      - name: Upload hang report
+        # #428: --blame-hang-timeout aborts a test that runs 5 min without finishing and writes the sequence of
+        # tests that ran (Sequence_*.xml; the hung test is the entry with Completed="False"). Uploaded only on failure.
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: hang-report-coverage-${{ github.sha }}
+          path: coverage/**/Sequence_*.xml
+          if-no-files-found: ignore
 
       - name: Merge coverage report
         run: |

@@ -12,6 +12,8 @@ namespace Verbara.Platform.Channels.Sms.Tests;
 /// </summary>
 public sealed class CsatSmsCorrelatorFixture : IAsyncLifetime
 {
+    private static readonly TimeSpan StartTimeout = TimeSpan.FromMinutes(3);
+
     private IContainer? _container;
 
     public string ConnectionString =>
@@ -39,7 +41,10 @@ public sealed class CsatSmsCorrelatorFixture : IAsyncLifetime
                     .UntilCommandIsCompleted("pg_isready", "-U", "postgres", "-h", "127.0.0.1"))
             .Build();
 
-        await _container.StartAsync();
+        // #428: a container that never becomes ready must fail the class, not hang the job until its 30-min
+        // timeout. A cold image pull plus the readiness probe take well under this bound.
+        using var startTimeout = new CancellationTokenSource(StartTimeout);
+        await _container.StartAsync(startTimeout.Token);
 
         // pg_isready returns ready before Postgres reliably accepts real connections (the
         // post-handshake "Connection reset by peer" race the repo's other Testcontainers fixtures
