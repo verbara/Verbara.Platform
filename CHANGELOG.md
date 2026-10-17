@@ -35,7 +35,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   never the text (event ids 7540-7542 at warning level, 7543 at debug level for a binary message). The REST route
   `POST /api/v1/webchat/sessions/{sessionId}/messages` now applies the same limit and answers `400` with
   `Text exceeds 4000 characters` instead of storing the message; `MaxMessageLength` was declared but used nowhere
-  until now.
+  until now (#442)
 
 - **A registration trunk now registers with its carrier, and keeps Asterisk in step when it changes.** Three
   defects stopped every trunk with a registration URI from ever sending a REGISTER. The Asterisk image did not load
