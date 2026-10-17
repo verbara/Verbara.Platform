@@ -78,11 +78,19 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
 
     internal async Task PollMetricsAsync(CancellationToken ct)
     {
-        // Use empty string for tenant — multi-tenant polling gets all tenants
-        var metrics = await _campaignStore.GetActiveCampaignMetricsAsync("", ct);
+        var metrics = await _campaignStore.GetAllActiveCampaignMetricsAsync(ct);
 
-        foreach (var snapshot in metrics)
+        foreach (var item in metrics)
         {
+            var snapshot = item.Metrics;
+
+            // An event without a tenant reaches no tenant's subscribers; never publish one.
+            if (string.IsNullOrWhiteSpace(item.TenantId))
+            {
+                LogMissingTenant(snapshot.CampaignId, snapshot.CampaignName);
+                continue;
+            }
+
             if (_previousSnapshots.TryGetValue(snapshot.CampaignId, out var previous))
             {
                 // Only publish if metrics changed
@@ -92,7 +100,7 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
                     previous.AbandonRate != snapshot.AbandonRate)
                 {
                     _eventBus.Publish(new CampaignMetricsUpdatedEvent(
-                        "", // TenantId — will need per-tenant polling in future
+                        item.TenantId,
                         snapshot.CampaignId,
                         snapshot.ContactsDialed,
                         snapshot.ContactsRemaining,
@@ -105,7 +113,7 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
             {
                 // First time seeing this campaign — publish initial metrics
                 _eventBus.Publish(new CampaignMetricsUpdatedEvent(
-                    "", snapshot.CampaignId,
+                    item.TenantId, snapshot.CampaignId,
                     snapshot.ContactsDialed, snapshot.ContactsRemaining,
                     snapshot.ConnectRate, snapshot.AbandonRate, 0));
             }
@@ -114,10 +122,14 @@ public sealed partial class CampaignMetricsPoller : BackgroundService
         }
 
         // Remove campaigns no longer active
-        var activeIds = metrics.Select(m => m.CampaignId).ToHashSet();
+        var activeIds = metrics.Select(m => m.Metrics.CampaignId).ToHashSet();
         foreach (var id in _previousSnapshots.Keys.Where(k => !activeIds.Contains(k)).ToList())
             _previousSnapshots.Remove(id);
     }
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Skipping metrics for campaign {CampaignId} ({CampaignName}): the store returned no tenant id")]
+    private partial void LogMissingTenant(long campaignId, string campaignName);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Error polling campaign metrics")]
     private partial void LogPollError(Exception ex);
