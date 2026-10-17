@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
@@ -9,6 +10,9 @@ using Verbara.Sdk.Pro.Dialer.Routing;
 using Verbara.Sdk.Pro.Dialer.Storage.Postgres;
 using Verbara.Sdk.Pro.Realtime;
 using Verbara.Sdk.Pro.Realtime.Decorators;
+using Verbara.Sdk.Pro.Realtime.Storage.Postgres;
+using Verbara.Sdk.Live.Server;
+using Verbara.Sdk.Pro.Cluster.Leadership;
 
 namespace Verbara.Platform.Api.DependencyInjection;
 
@@ -105,23 +109,67 @@ public static class RealtimeSyncingStoresExtensions
     /// decorator when a dialer connection string is present, otherwise the no-op in-memory store.
     /// Relocated verbatim out of the Api composition root (ADR-0012 Ola-3 gate #9 LOC budget).
     /// </summary>
+    /// <remarks>
+    /// #385: on the dialer branch the realtime-syncing store is wrapped (outside) by
+    /// <see cref="RegistrationReloadingTrunkStore"/>, which raises the in-memory
+    /// <see cref="TrunkRegistrationReloadSignal"/> after a write that touches a registration, once the
+    /// Realtime sync has written <c>ps_registrations</c>. The signal is registered on both branches; it is
+    /// read only by <see cref="TrunkRegistrationReloadWorker"/> (voice-AMI pods, <see cref="AddTrunkAmiServices"/>).
+    /// </remarks>
     public static IServiceCollection AddRealtimeSyncingTrunkStore(
         this IServiceCollection services, string? dialerConnectionString)
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.TryAddSingleton<TrunkRegistrationReloadSignal>();
+
         // Trunk decorator — wraps PostgresTrunkStore with Realtime sync (only when Dialer is configured)
         if (!string.IsNullOrEmpty(dialerConnectionString))
         {
             services.AddSingleton<TrunkStoreBase>(sp =>
-                new RealtimeSyncingTrunkStore(
-                    new PostgresTrunkStore(sp.GetRequiredService<DialerDbContext>()),
-                    sp.GetRequiredService<IRealtimeSyncService>()));
+                new RegistrationReloadingTrunkStore(
+                    new RealtimeSyncingTrunkStore(
+                        new PostgresTrunkStore(sp.GetRequiredService<DialerDbContext>()),
+                        sp.GetRequiredService<IRealtimeSyncService>()),
+                    sp.GetRequiredService<TrunkRegistrationReloadSignal>()));
         }
         else
         {
             services.AddSingleton<TrunkStoreBase>(_ => new InMemoryTrunkStore());
         }
+
+        return services;
+    }
+
+    /// <summary>
+    /// The trunk services that need the live AMI connection, for a voice-AMI pod (call inside the
+    /// <c>voiceAmiEnabled</c> block, where the keyed <see cref="VoiceLeaderResources.AmiOwner"/> leader is
+    /// registered): the leader-gated connectivity tester (P2, relocated verbatim from the Api composition root
+    /// — ADR-0012 gate #9 LOC budget) and the #385 <see cref="TrunkRegistrationReloadWorker"/>, which reloads
+    /// <c>res_pjsip_outbound_registration</c> after a registration write and on drift. Both resolve the AMI
+    /// server and <see cref="TrunkStoreBase"/> lazily, never at host start.
+    /// </summary>
+    public static IServiceCollection AddTrunkAmiServices(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddSingleton<ITrunkConnectivityTester>(sp =>
+            new TrunkConnectivityTester(
+                sp.GetRequiredService<TrunkStoreBase>(),
+                sp.GetRequiredService<VerbaraServerPool>(),
+                sp.GetRequiredKeyedService<IClusterLeader>(VoiceLeaderResources.AmiOwner),
+                sp.GetRequiredService<ILogger<TrunkConnectivityTester>>()));
+
+        services.TryAddSingleton<TrunkRegistrationReloadSignal>();
+        services.AddHostedService(sp =>
+            new TrunkRegistrationReloadWorker(
+                sp.GetRequiredService<TrunkRegistrationReloadSignal>(),
+                sp.GetRequiredService<VerbaraServerPool>(),
+                sp.GetRequiredKeyedService<IClusterLeader>(VoiceLeaderResources.AmiOwner),
+                new RealtimeTrunkRegistrationFingerprintSource(sp.GetService<RealtimeDbContext>()),
+                sp.GetRequiredService<IOptions<RealtimeOptions>>(),
+                sp.GetRequiredService<ILogger<TrunkRegistrationReloadWorker>>(),
+                sp.GetService<TimeProvider>()));
 
         return services;
     }
