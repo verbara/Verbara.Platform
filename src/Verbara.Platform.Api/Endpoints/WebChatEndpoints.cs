@@ -1,5 +1,4 @@
 using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
@@ -13,6 +12,7 @@ using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace Verbara.Platform.Api.Endpoints;
 
@@ -127,7 +127,9 @@ internal static partial class WebChatEndpoints
         [FromServices] IInboundMessagePipeline pipeline,
         [FromServices] WebChatInboundRouter inboundRouter,
         [FromServices] IClock clock,
-        [FromServices] PlatformEventBus eventBus)
+        [FromServices] PlatformEventBus eventBus,
+        [FromServices] IOptions<WebChatOptions> options,
+        [FromServices] ILoggerFactory loggerFactory)
     {
         if (!context.WebSockets.IsWebSocketRequest)
         {
@@ -163,47 +165,74 @@ internal static partial class WebChatEndpoints
             await ws.SendAsync(connectedMsg, WebSocketMessageType.Text, true, ct);
             transport.Register(sessionId, ws);
 
-            // Read loop
-            var buffer = new byte[4096];
+            // Read loop. Each message is read whole (it can span several reads) into a buffer bounded by
+            // MaxMessageLength; a message the server cannot use is skipped and the socket stays open, so one bad
+            // message never cuts the visitor off from agent replies (spec webchat-visitor-identity).
+            var maxLength = options.Value.MaxMessageLength;
+            var logger = loggerFactory.CreateLogger(LoggerCategory);
+            var reader = new WebChatMessageReader(WebChatMessageReader.MaxMessageBytesFor(maxLength));
             while (ws.State == WebSocketState.Open)
             {
-                WebSocketReceiveResult result;
+                WebChatInboundFrame frame;
                 try
                 {
-                    result = await ws.ReceiveAsync(buffer, ct);
+                    frame = await reader.ReadAsync(ws, ct);
                 }
                 catch (WebSocketException)
                 {
                     break;
                 }
 
-                if (result.MessageType == WebSocketMessageType.Close)
+                if (frame.Kind == WebChatFrameKind.Close)
                     break;
 
-                if (result.MessageType == WebSocketMessageType.Text)
+                if (frame.Kind == WebChatFrameKind.Ignored)
                 {
-                    var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    var clientMsg = JsonSerializer.Deserialize(json, WebChatJsonContext.Default.WebChatClientMessage);
+                    LogNonTextFrameIgnored(logger, session.TenantId.Value, sessionId);
+                    continue;
+                }
 
-                    if (clientMsg?.Type == "message" && !string.IsNullOrEmpty(clientMsg.Text))
-                    {
-                        await sessionManager.TouchAsync(sessionId, clock);
-                        var inbound = WebChatMessageAdapter.ToInboundMessage(
-                            session,
-                            new MessageEnvelope([new TextBlock(clientMsg.Text)]),
-                            Guid.NewGuid().ToString("N"),
-                            clock.UtcNow);
+                if (frame.Kind == WebChatFrameKind.Oversized)
+                {
+                    LogMessageTooLarge(logger, session.TenantId.Value, sessionId, maxLength);
+                    continue;
+                }
 
-                        var pipelineResult = await pipeline.ProcessAsync(inbound, session.TenantId, ChannelType.WebChat, ct);
-                        await inboundRouter.RouteFirstInboundAsync(
-                            sessionId, session.TenantId, pipelineResult, inbound.Content, ct);
-                    }
-                    else if (clientMsg?.Type == "typing")
+                WebChatClientMessage? clientMsg;
+                try
+                {
+                    clientMsg = JsonSerializer.Deserialize(frame.Payload.Span, WebChatJsonContext.Default.WebChatClientMessage);
+                }
+                catch (JsonException ex)
+                {
+                    LogMalformedFrame(logger, session.TenantId.Value, sessionId, ex);
+                    continue;
+                }
+
+                if (clientMsg?.Type == "message" && !string.IsNullOrEmpty(clientMsg.Text))
+                {
+                    if (clientMsg.Text.Length > maxLength)
                     {
-                        eventBus.Publish(new ConversationMessageEvent(
-                            session.TenantId.Value, session.ConversationId.Value,
-                            "", "TypingIndicator", "WebChat"));
+                        LogMessageTooLong(logger, session.TenantId.Value, sessionId, clientMsg.Text.Length, maxLength);
+                        continue;
                     }
+
+                    await sessionManager.TouchAsync(sessionId, clock);
+                    var inbound = WebChatMessageAdapter.ToInboundMessage(
+                        session,
+                        new MessageEnvelope([new TextBlock(clientMsg.Text)]),
+                        Guid.NewGuid().ToString("N"),
+                        clock.UtcNow);
+
+                    var pipelineResult = await pipeline.ProcessAsync(inbound, session.TenantId, ChannelType.WebChat, ct);
+                    await inboundRouter.RouteFirstInboundAsync(
+                        sessionId, session.TenantId, pipelineResult, inbound.Content, ct);
+                }
+                else if (clientMsg?.Type == "typing")
+                {
+                    eventBus.Publish(new ConversationMessageEvent(
+                        session.TenantId.Value, session.ConversationId.Value,
+                        "", "TypingIndicator", "WebChat"));
                 }
             }
         }
@@ -221,6 +250,7 @@ internal static partial class WebChatEndpoints
         [FromServices] IInboundMessagePipeline pipeline,
         [FromServices] WebChatInboundRouter inboundRouter,
         [FromServices] IClock clock,
+        [FromServices] IOptions<WebChatOptions> options,
         CancellationToken ct)
     {
         var session = await sessionManager.GetSessionAsync(sessionId);
@@ -229,6 +259,10 @@ internal static partial class WebChatEndpoints
 
         if (string.IsNullOrWhiteSpace(request.Text))
             return TypedResults.BadRequest(new ErrorResponse("Text is required"));
+
+        var maxLength = options.Value.MaxMessageLength;
+        if (request.Text.Length > maxLength)
+            return TypedResults.BadRequest(new ErrorResponse($"Text exceeds {maxLength} characters"));
 
         await sessionManager.TouchAsync(sessionId, clock);
 
@@ -244,4 +278,22 @@ internal static partial class WebChatEndpoints
 
         return TypedResults.Ok(new MessageResponse("Message sent"));
     }
+
+    private const string LoggerCategory = "Verbara.Platform.Api.Endpoints.WebChat";
+
+    [LoggerMessage(EventId = 7540, Level = LogLevel.Warning,
+        Message = "WebChat socket message skipped: not valid JSON (tenant={TenantId}, session={SessionId})")]
+    private static partial void LogMalformedFrame(ILogger logger, string tenantId, string sessionId, Exception ex);
+
+    [LoggerMessage(EventId = 7541, Level = LogLevel.Warning,
+        Message = "WebChat socket message skipped: {Length} characters, over the {MaxLength}-character limit (tenant={TenantId}, session={SessionId})")]
+    private static partial void LogMessageTooLong(ILogger logger, string tenantId, string sessionId, int length, int maxLength);
+
+    [LoggerMessage(EventId = 7542, Level = LogLevel.Warning,
+        Message = "WebChat socket message skipped: larger than any message of {MaxLength} characters can be (tenant={TenantId}, session={SessionId})")]
+    private static partial void LogMessageTooLarge(ILogger logger, string tenantId, string sessionId, int maxLength);
+
+    [LoggerMessage(EventId = 7543, Level = LogLevel.Debug,
+        Message = "WebChat socket message skipped: not a text message (tenant={TenantId}, session={SessionId})")]
+    private static partial void LogNonTextFrameIgnored(ILogger logger, string tenantId, string sessionId);
 }

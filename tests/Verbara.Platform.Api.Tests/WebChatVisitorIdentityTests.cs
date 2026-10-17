@@ -283,6 +283,207 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
             "a message over the WebSocket reuses the session's contact and conversation, exactly like the REST route");
     }
 
+    [Fact]
+    public async Task VisitorSocketMessage_ShouldBeStoredIntact_WhenMultiByteTextSpansSeveralReads()
+    {
+        // 4000 characters (the widget's composer cap) of 3- and 2-byte UTF-8, written raw the way a browser's
+        // JSON.stringify writes them: 10 000 bytes of text, sent in 1000-byte fragments (cutting characters in half)
+        // so the server sees it in several reads. It must assemble the whole message, not parse its first read.
+        var text = string.Concat(Enumerable.Repeat("€ñ", 2000));
+        text.Length.Should().Be(4000);
+        await using var visitor = await VisitorSocket.OpenAsync(this);
+
+        await visitor.SendFragmentedAsync(Encoding.UTF8.GetBytes($$"""{"type":"message","text":"{{text}}"}"""));
+
+        var stored = await visitor.WaitForInboundTextsAsync(1);
+        stored.Should().Equal([text], "a message within the length limit is stored exactly as the visitor typed it");
+        visitor.Socket.State.Should().Be(WebSocketState.Open);
+    }
+
+    [Fact]
+    public async Task VisitorSocketMessage_ShouldBeStoredIntact_WhenEveryCharacterIsEscaped()
+    {
+        // The worst case on the wire: a client whose encoder writes every non-ASCII character as a 6-byte \uXXXX
+        // escape (System.Text.Json's default encoder does). 4000 characters are then 24 000 bytes of text, and the
+        // server's byte bound must still fit them.
+        var text = string.Concat(Enumerable.Repeat("€ñ", 2000));
+        await using var visitor = await VisitorSocket.OpenAsync(this);
+        var frame = JsonSerializer.SerializeToUtf8Bytes(
+            new WebChatClientMessage("message", text), WebChatJsonContext.Default.WebChatClientMessage);
+        frame.Length.Should().BeGreaterThan(24_000, "every character is escaped");
+
+        await visitor.SendFragmentedAsync(frame);
+
+        var stored = await visitor.WaitForInboundTextsAsync(1);
+        stored.Should().Equal([text]);
+        visitor.Socket.State.Should().Be(WebSocketState.Open);
+    }
+
+    [Fact]
+    public async Task VisitorSocket_ShouldSkipMalformedFrame_WhenValidFrameFollowsOnSameSocket()
+    {
+        await using var visitor = await VisitorSocket.OpenAsync(this);
+
+        await visitor.SendRawAsync("""{"type":"message","text":"unterminated""");
+        await visitor.SendMessageAsync("after the bad frame");
+
+        var stored = await visitor.WaitForInboundTextsAsync(1);
+        stored.Should().Equal(["after the bad frame"], "a malformed frame is skipped and the socket keeps reading");
+        visitor.Socket.State.Should().Be(WebSocketState.Open);
+    }
+
+    [Fact]
+    public async Task VisitorSocket_ShouldSkipFrame_WhenTextIsNotValidUtf8()
+    {
+        await using var visitor = await VisitorSocket.OpenAsync(this);
+
+        byte[] invalid = [.. "{\"type\":\"message\",\"text\":\""u8, 0xC3, 0x28, .. "\"}"u8];
+        await visitor.Socket.SendAsync(invalid, WebSocketMessageType.Text, true, visitor.Timeout);
+        await visitor.SendMessageAsync("valid");
+
+        var stored = await visitor.WaitForInboundTextsAsync(1);
+        stored.Should().Equal(["valid"], "a frame that is not valid UTF-8 is malformed: skipped, and the socket keeps reading");
+        visitor.Socket.State.Should().Be(WebSocketState.Open);
+    }
+
+    [Fact]
+    public async Task VisitorSocket_ShouldDropOverLengthMessage_WhenTextExceedsMaxMessageLength()
+    {
+        await using var visitor = await VisitorSocket.OpenAsync(this);
+
+        await visitor.SendMessageAsync(new string('a', new WebChatOptions().MaxMessageLength + 1));
+        await visitor.SendMessageAsync("short one");
+
+        var stored = await visitor.WaitForInboundTextsAsync(1);
+        stored.Should().Equal(["short one"],
+            "a message over MaxMessageLength characters is dropped, and the socket stays open for the next one");
+        visitor.Socket.State.Should().Be(WebSocketState.Open);
+    }
+
+    [Fact]
+    public async Task VisitorSocket_ShouldDropMessage_WhenFrameExceedsByteBound()
+    {
+        // Far beyond any message the length limit allows: the server stops buffering it, discards the rest of
+        // it as it arrives, and goes on reading the next message.
+        await using var visitor = await VisitorSocket.OpenAsync(this);
+
+        await visitor.SendRawAsync($$"""{"type":"message","text":"{{new string('x', 64 * 1024)}}"}""");
+        await visitor.SendMessageAsync("next");
+
+        var stored = await visitor.WaitForInboundTextsAsync(1);
+        stored.Should().Equal(["next"]);
+        visitor.Socket.State.Should().Be(WebSocketState.Open);
+    }
+
+    [Fact]
+    public async Task VisitorSocket_ShouldIgnoreBinaryFrame_WhenTextFrameFollows()
+    {
+        await using var visitor = await VisitorSocket.OpenAsync(this);
+
+        await visitor.Socket.SendAsync(Encoding.UTF8.GetBytes("""{"type":"message","text":"binary"}"""),
+            WebSocketMessageType.Binary, true, visitor.Timeout);
+        await visitor.SendMessageAsync("text");
+
+        var stored = await visitor.WaitForInboundTextsAsync(1);
+        stored.Should().Equal(["text"], "the protocol is text frames; a binary frame is ignored, not read as a message");
+        visitor.Socket.State.Should().Be(WebSocketState.Open);
+    }
+
+    [Fact]
+    public async Task RestMessage_ShouldReturnBadRequest_WhenTextExceedsMaxMessageLength()
+    {
+        using var client = _factory.CreateClient();
+        var sessionId = await CreateSessionAsync(client);
+        var session = await GetSessionAsync(sessionId);
+        var max = new WebChatOptions().MaxMessageLength;
+
+        using (var tooLong = await client.PostAsJsonAsync(
+            $"/api/v1/webchat/sessions/{sessionId}/messages", new { text = new string('a', max + 1) }))
+            tooLong.StatusCode.Should().Be(HttpStatusCode.BadRequest, "the REST route enforces the same limit as the socket");
+        using (var atLimit = await client.PostAsJsonAsync(
+            $"/api/v1/webchat/sessions/{sessionId}/messages", new { text = new string('a', max) }))
+            atLimit.StatusCode.Should().Be(HttpStatusCode.OK, "a message of exactly MaxMessageLength characters is accepted");
+
+        var messages = await _factory.Services.GetRequiredService<IMessageStore>()
+            .GetConversationMessagesAsync(VisitorTenant, session.ConversationId, 100, 0, CancellationToken.None);
+        messages.Count(m => m.Direction == MessageDirection.Inbound).Should().Be(1);
+    }
+
+    /// <summary>A visitor's session with its socket attached and the <c>connected</c> frame consumed.</summary>
+    private sealed class VisitorSocket : IAsyncDisposable
+    {
+        private readonly WebChatVisitorIdentityTests _owner;
+        private readonly CancellationTokenSource _timeout = new(TimeSpan.FromSeconds(20));
+        private readonly HttpClient _client;
+        private WebChatSession _session = null!;
+
+        private VisitorSocket(WebChatVisitorIdentityTests owner)
+        {
+            _owner = owner;
+            _client = owner._factory.CreateClient();
+        }
+
+        public WebSocket Socket { get; private set; } = null!;
+
+        public CancellationToken Timeout => _timeout.Token;
+
+        public static async Task<VisitorSocket> OpenAsync(WebChatVisitorIdentityTests owner)
+        {
+            var visitor = new VisitorSocket(owner);
+            var sessionId = await CreateSessionAsync(visitor._client);
+            visitor._session = await owner.GetSessionAsync(sessionId);
+            visitor.Socket = await owner._factory.Server.CreateWebSocketClient()
+                .ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), visitor.Timeout);
+            (await ReceiveTextAsync(visitor.Socket, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+            return visitor;
+        }
+
+        public Task SendMessageAsync(string text) => SendRawAsync(JsonSerializer.Serialize(
+            new WebChatClientMessage("message", text), WebChatJsonContext.Default.WebChatClientMessage));
+
+        /// <summary>Sends one text message as several 1000-byte WebSocket frames.</summary>
+        public async Task SendFragmentedAsync(byte[] message)
+        {
+            for (var offset = 0; offset < message.Length; offset += 1000)
+            {
+                var count = Math.Min(1000, message.Length - offset);
+                await Socket.SendAsync(message.AsMemory(offset, count), WebSocketMessageType.Text,
+                    endOfMessage: offset + count == message.Length, Timeout);
+            }
+        }
+
+        public Task SendRawAsync(string frame) =>
+            Socket.SendAsync(Encoding.UTF8.GetBytes(frame), WebSocketMessageType.Text, true, Timeout);
+
+        /// <summary>
+        /// Waits until the session's conversation holds <paramref name="expected"/> inbound messages, then gives the
+        /// socket's read loop time to store any extra one, and returns the texts of all of them.
+        /// </summary>
+        public async Task<IReadOnlyList<string>> WaitForInboundTextsAsync(int expected)
+        {
+            var store = _owner._factory.Services.GetRequiredService<IMessageStore>();
+            IReadOnlyList<string> texts = [];
+            async Task<IReadOnlyList<string>> ReadAsync() =>
+                [.. (await store.GetConversationMessagesAsync(VisitorTenant, _session.ConversationId, 100, 0, CancellationToken.None))
+                    .Where(m => m.Direction == MessageDirection.Inbound)
+                    .SelectMany(m => m.Content.Blocks.OfType<TextBlock>())
+                    .Select(b => b.Text)];
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+            while ((texts = await ReadAsync()).Count < expected && DateTimeOffset.UtcNow < deadline)
+                await Task.Delay(20); // fence-allow: LOOP-DRIVER — poll pacing until the server-side socket loop stores the message
+            await Task.Delay(100); // fence-allow: SETTLE — window in which an extra (wrongly stored) message would show
+            return await ReadAsync();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Socket?.Dispose();
+            _client.Dispose();
+            _timeout.Dispose();
+            await Task.CompletedTask;
+        }
+    }
+
     private Task<Message> SendAgentReplyAsync(WebChatSession session, EntityId agentId, string text) =>
         _factory.Services.GetRequiredService<IConversationService>().SendMessageAsync(
             session.ConversationId,
