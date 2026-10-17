@@ -55,25 +55,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   which is each attempt's send time. Delivery stays at-least-once with `X-Webhook-Id` as the idempotency key.
   (Platform/ADR-0043) (#N)
 
-- **The outbound dialer dials on Postgres for the first time (Pro 2.19.0-pro).** It finds every tenant's Active
-  campaigns, in every dialing mode, and a Paused campaign does not dial. Each contact is claimed when it is
-  fetched, one record per contact, so while a contact is claimed no other fetch, on one replica or several, hands
-  it out. A contact dropped without a call (compliance rejection, failed originate, stop) goes back to pending and
-  can be fetched again. Limits:
-  - **Each API process places at most a campaign's `MaxConcurrentCalls` calls (and `MaxGlobalChannels` overall),
-    then stops dialing it until the process restarts; once `MaxGlobalChannels` is used up, every campaign on that
-    process stops.** A channel slot is taken before each originate, and after a successful one only the
-    call-result handler releases it, which is not wired yet. A campaign that leaves the Active/Paused set also
-    frees its slots; a pause releases nothing. Wiring call results also releases the slot when a call ends. While a
-    campaign cannot dial, its activation keeps up to ~75 contacts claimed (50 buffered + one batch of 25) that no
-    replica dials until a pause, removal or process stop.
-  - **Each contact is dialed once and is not retried.** Nothing records call results yet, so a dialed contact
-    stays claimed (`status = 1`) and `call_attempts` gets no rows: `contactsDialed`, `connectRate` and
-    `abandonRate` stay at 0. `contactsRemaining` still falls as contacts are claimed and rises when one is given
-    back. Recording results is a separate change.
-  - **Every API replica runs its own dialer with its own budgets.** With N replicas, up to N × those budgets can be
-    placed: N × `MaxConcurrentCalls` calls per campaign and N × `MaxGlobalChannels` in all. This holds until the
-    dialer runs in one process. (#N)
+- **The outbound dialer now finds every tenant's campaigns (Pro 2.19.0-pro), but it still places no call.**
+  Before, it read campaigns for tenant `""` only and saw none. Now it finds every tenant's Active campaigns in
+  every dialing mode, does not dial a Paused one, and claims each contact as it is fetched (one record per
+  contact), so no two fetches, on one replica or several, hand out the same contact; a contact dropped without a
+  call (compliance rejection, failed originate, stop) goes back to pending. **It still does not place calls with
+  this Platform:** the engine originates on the Asterisk node `"default"` while Platform registers its node as
+  `"primary"`, so every originate fails before AMI (`Node default not found in pool`) and the dialer's circuit
+  breaker opens; behind that, the default dial string is `PJSIP/{phone}` with no trunk. Measured in the lab on this
+  build: both tenants' campaigns were picked up on the first tick, 0 originates. Making the dialer place calls
+  end to end (node, trunk, and recording call results, which also releases each call's channel slot and lets a
+  contact be retried) is a separate change. Until results are recorded, `call_attempts` gets no rows, so
+  `contactsDialed`, `connectRate` and `abandonRate` stay at 0 while `contactsRemaining` moves as contacts are
+  claimed and given back. Every API replica runs its own dialer engine. (#N)
 
 ### Changed — Dependencies
 
