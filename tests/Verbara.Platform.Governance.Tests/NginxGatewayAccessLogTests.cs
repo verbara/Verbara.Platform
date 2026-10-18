@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Verbara.Platform.Governance.Tests;
@@ -86,6 +87,7 @@ public sealed partial class NginxGatewayAccessLogTests
     [Theory]
     [InlineData("/api/")]
     [InlineData("/hubs/")]
+    [InlineData("/ws/")]
     public void GatewayConf_ShouldPassTheQueryOnToTheApiAndTheHub(string path)
     {
         var location = GatewayLocation(path);
@@ -95,6 +97,30 @@ public sealed partial class NginxGatewayAccessLogTests
         location.Children.Should().ContainSingle(d => d.Name == "proxy_pass").Which.Args.Should().ContainSingle()
             .Which.Should().NotContain("$",
                 "a proxy_pass built from variables passes only what they name, not the request's query");
+    }
+
+    [Theory]
+    [InlineData("/hubs/", "realtime")]
+    [InlineData("/ws/", "api")]
+    public void GatewayConf_ShouldUpgradeTheWebSocketToItsBackend(string path, string upstream)
+    {
+        // /hubs/ is the SignalR hub; /ws/ is the WebChat widget's socket (/ws/webchat/{sessionId}), which
+        // otherwise falls to `location /` and gets the console's index.html instead of an upgrade.
+        var location = GatewayLocation(path);
+
+        location.Children.Should().ContainSingle(d => d.Name == "proxy_pass").Which.Args.Should()
+            .Equal($"http://{upstream}");
+        location.Children.Should().Contain(d => d.Name == "proxy_http_version" && d.Args.Count == 1 && d.Args[0] == "1.1",
+            "a WebSocket handshake is an HTTP/1.1 upgrade, and nginx proxies HTTP/1.0 by default");
+        location.Children.Should().Contain(
+            d => d.Name == "proxy_set_header" && d.Args.Count == 2 && d.Args[0] == "Upgrade" && d.Args[1] == "$http_upgrade",
+            "Upgrade is a hop-by-hop header: nginx passes it on only when the location sets it again");
+        location.Children.Should().Contain(
+            d => d.Name == "proxy_set_header" && d.Args.Count == 2 && d.Args[0] == "Connection" && d.Args[1] == "upgrade",
+            "Connection is a hop-by-hop header: nginx passes it on only when the location sets it again");
+        Seconds(location.Children!.Single(d => d.Name == "proxy_read_timeout").Args.Single()).Should().BeGreaterThan(120,
+            "the API pings an idle socket every 2 minutes (UseWebSockets' default keep-alive), so a shorter " +
+            "read timeout closes a quiet conversation");
     }
 
     [Fact]
@@ -362,6 +388,15 @@ public sealed partial class NginxGatewayAccessLogTests
         locations.Should().ContainSingle($"the gateway must route '{path}' in exactly one location");
         return locations[0];
     }
+
+    /// <summary>An nginx time value (<c>90</c>, <c>90s</c>, <c>5m</c>, <c>1h</c>) in seconds.</summary>
+    private static int Seconds(string time) => time[^1] switch
+    {
+        's' => int.Parse(time[..^1], CultureInfo.InvariantCulture),
+        'm' => 60 * int.Parse(time[..^1], CultureInfo.InvariantCulture),
+        'h' => 3600 * int.Parse(time[..^1], CultureInfo.InvariantCulture),
+        _ => int.Parse(time, CultureInfo.InvariantCulture),
+    };
 
     private static string ReadRepoFile(string relativePath)
     {

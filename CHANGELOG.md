@@ -11,6 +11,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The bundled gateway now carries the WebChat widget's WebSocket to the API.** `docker/nginx-gateway.conf` had
+  no location for `/ws/`, so the widget's socket (`/ws/webchat/{sessionId}`, the `wsUrl` that
+  `POST /api/v1/webchat/sessions` returns) fell to `location /`, which proxies to the web image without the upgrade
+  headers and answers the console's `index.html`. No visitor behind the full, production, reference-SMB or demo
+  compose stack could ever chat. The gateway now proxies `/ws/` to the API like `/hubs/`: HTTP/1.1, the `Upgrade`
+  and `Connection` headers, a one-hour read timeout, and the client address in `X-Forwarded-For`. The gateway
+  governance tests now fail if `/ws/` stops upgrading to the API. The SMB WebChat manual
+  (`docs/manuales/smb/04-canal-webchat.md`) now says that a self-managed reverse proxy must forward `/ws/` the same
+  way, that the WebChat channel needs the API at one replica on Kubernetes (the chart defaults to two, with an HPA),
+  that `data-position` takes only `bottom-right` or `bottom-left`, and that the session is created when the
+  visitor submits the pre-chat form, not on the first message. Closes #441.
+
 - **A registration trunk now registers with its carrier, and keeps Asterisk in step when it changes.** Three
   defects stopped every trunk with a registration URI from ever sending a REGISTER. The Asterisk image did not load
   `res_pjsip_outbound_registration` at all (`modules.conf` carried a `noload` for it). With that line gone the

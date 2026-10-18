@@ -19,7 +19,8 @@ El canal WebChat permite que un visitante anónimo del sitio web del cliente ini
    SDK (script tag) → dibuja la burbuja flotante y, al abrir,
    carga lazy un iframe aislado en /webchat/embed/
          │
-         │  (2) el iframe POST /api/v1/webchat/sessions  { "tenantId": "<customer>" }
+         │  (2) el visitante completa el formulario inicial (nombre + email) y,
+         │      al enviarlo, el iframe POST /api/v1/webchat/sessions  { "tenantId": "<customer>" }
          │      → { "sessionId", "wsUrl": "/ws/webchat/{sessionId}",
          │          "visitorAddress": "webchat-…", "contactId", "conversationId" }   (anónimo, sin auth)
          │
@@ -41,6 +42,22 @@ El canal WebChat permite que un visitante anónimo del sitio web del cliente ini
 > 💡 Cada sesión es **un contacto y una conversación**: al crearla, Verbara crea el contacto anónimo con la dirección `webchat-…` (`visitorAddress`) y su conversación, y todos los mensajes del visitante caen en esa conversación mientras siga abierta; si se cerró, el siguiente mensaje abre una conversación nueva del mismo contacto y entra a la cola. La respuesta del agente se entrega por la dirección del visitante al WebSocket de la sesión (también si el visitante recargó la página o tiene dos pestañas abiertas), y sólo queda como enviada si un WebSocket la recibió.
 >
 > ⚠️ **Las respuestas del agente sólo se entregan de forma fiable con una única réplica del API.** Las sesiones y los WebSockets viven en el proceso del API, y la respuesta se entrega dentro de la propia petición del agente: sólo llega al visitante si esa petición cae en la réplica que tiene su WebSocket. En otra réplica queda guardada como fallida (`SESSION_NOT_CONNECTED`), igual que si el visitante se hubiera ido. Las sticky sessions no lo resuelven, porque fijan las peticiones del agente por la afinidad del agente, no la del visitante.
+>
+> **En Kubernetes**, el chart despliega el API con **2 réplicas** por default (`api.replicas: 2`) y un HPA que escala entre 2 y 8 (`api.hpa`). Para usar WebChat, dejá el API en **una sola réplica** hasta que Verbara entregue las respuestas entre réplicas: `--set api.replicas=1 --set api.hpa.enabled=false` (con el HPA activo, su `minReplicas: 2` vuelve a subir el deployment a 2). El compose SMB (`docker-compose.reference-smb.yml`) ya corre un único `platform-api`.
+
+> ⚠️ **El WebSocket del paso (3) entra por `/ws/`.** El `nginx-gateway` del compose ya lo reenvía al API con los headers de upgrade. Si ponés **tu propio proxy inverso** delante de Verbara (TLS, un balanceador, Cloudflare), tiene que reenviar `/ws/` al API como WebSocket: HTTP/1.1, los headers `Upgrade` y `Connection: upgrade`, y un timeout de lectura largo (el gateway usa 1 h; menos de 2 minutos corta una conversación quieta). Sin eso, el navegador recibe la página de la consola en vez de un WebSocket y el visitante no puede chatear. Con nginx:
+>
+> ```nginx
+> location /ws/ {
+>   proxy_pass http://<api>:5000;
+>   proxy_http_version 1.1;
+>   proxy_set_header Upgrade $http_upgrade;
+>   proxy_set_header Connection "upgrade";
+>   proxy_set_header Host $host;
+>   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+>   proxy_read_timeout 3600s;
+> }
+> ```
 
 > 💡 El SDK (`verbara-webchat.js`) sólo pinta la burbuja y carga el iframe. Las llamadas al API las hace el **iframe** (`/webchat/embed/`), aislado del sitio del cliente. El operador no necesita saber esto para embeber, pero explica por qué sólo hay un `<script>` y ningún `<div>` que montar.
 
@@ -103,7 +120,7 @@ Atributos **que el SDK realmente lee** (`dataset`):
 |---|---|---|
 | `data-tenant-id` | id del tenant **Customer** que recibe las conversaciones | **Obligatorio.** Es el mismo `$CUSTOMER_TENANT_ID`. No es secreto (la sesión es anónima). |
 | `data-locale` | `auto` / `es-419` / `pt-BR` / `en-US` | `auto` detecta del navegador del visitante. |
-| `data-position` | `bottom-right` / `bottom-left` / `top-right` / `top-left` | Posición de la burbuja flotante. |
+| `data-position` | `bottom-right` / `bottom-left` | Posición de la burbuja flotante. Default: `bottom-right`. No hay posiciones arriba (`top-…`). |
 | `data-greeting` | texto | Mensaje de bienvenida del panel. |
 | `data-theme` | JSON, ej. `'{"primaryColor":"#1d4ed8"}'` | Theming. Es **un solo atributo con JSON**, no atributos sueltos por color. |
 | `data-api-base` | URL base del API | **Opcional.** Default: mismo origen que sirve el JS. Setealo sólo si el API está en otro host que el Web (ej. `https://api.tu-dominio.com`). |
@@ -160,10 +177,11 @@ Vas a ver una burbuja flotante en la esquina; click → se abre el panel. Tambi�
 
 ### 4.1 Iniciar conversación de prueba
 
-1. En el panel del widget, escribí un mensaje: `"Hola, esto es una prueba"`.
-2. **Enviar.**
+1. En el panel del widget, completá el formulario inicial (nombre y email) y envialo.
+2. Escribí un mensaje: `"Hola, esto es una prueba"`.
+3. **Enviar.**
 
-(El primer mensaje crea la sesión, enruta a la queue y dispara la oferta al agente.)
+(Al enviar el formulario se crea la sesión, con su contacto y su conversación. El primer mensaje enruta la conversación a la queue y dispara la oferta al agente.)
 
 ### 4.2 Validar desde el lado del agente
 
