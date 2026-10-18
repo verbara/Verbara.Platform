@@ -17,7 +17,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   configured but not active, the call answers `404` with the same body as an unknown tenant (`Tenant not found`) and
   creates nothing. Enable the WebChat channel in **Admin -> Channels** before embedding the widget; a tenant set up
   through the API instead of the setup wizard must `PUT /api/v1/admin/channels/webchat` with `"isActive": true`
-  (the setup wizard already does). The per-client and per-tenant session limits apply as before.
+  (the setup wizard already does). The per-client and per-tenant session limits apply as before. (#447)
 
 ### Fixed
 
@@ -31,7 +31,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`docs/manuales/smb/04-canal-webchat.md`) now says that a self-managed reverse proxy must forward `/ws/` the same
   way, that the WebChat channel needs the API at one replica on Kubernetes (the chart defaults to two, with an HPA),
   that `data-position` takes only `bottom-right` or `bottom-left`, and that the session is created when the
-  visitor submits the pre-chat form, not on the first message. Closes #441.
+  visitor submits the pre-chat form, not on the first message. Closes #441. (#444)
 
 - **A long WebChat message over the visitor socket is now stored whole, and one bad message no longer drops the
   visitor's connection.** The WebChat socket read each message with a single 4 KiB read and parsed only that, so a
@@ -45,7 +45,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   never the text (event ids 7540-7542 at warning level, 7543 at debug level for a binary message). The REST route
   `POST /api/v1/webchat/sessions/{sessionId}/messages` now applies the same limit and answers `400` with
   `Text exceeds 4000 characters` instead of storing the message; `MaxMessageLength` was declared but used nowhere
-  until now (#442)
+  until now (#442, #446)
 
 - **A registration trunk now registers with its carrier, and keeps Asterisk in step when it changes.** Three
   defects stopped every trunk with a registration URI from ever sending a REGISTER. The Asterisk image did not load
@@ -113,7 +113,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   supported widget is the one the console image serves at `/webchat/v1/verbara-webchat.js`, which the console's
   WebChat page gives as the snippet. With the two files gone the API host serves no static files, so
   `UseStaticFiles()` is removed from the pipeline as well. A site still using the old tag must switch to the snippet
-  the console shows.
+  the console shows. (#445)
 
 ### Changed — Dependencies
 
