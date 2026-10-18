@@ -462,14 +462,13 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         public async Task<IReadOnlyList<string>> WaitForInboundTextsAsync(int expected)
         {
             var store = _owner._factory.Services.GetRequiredService<IMessageStore>();
-            IReadOnlyList<string> texts = [];
             async Task<IReadOnlyList<string>> ReadAsync() =>
                 [.. (await store.GetConversationMessagesAsync(VisitorTenant, _session.ConversationId, 100, 0, CancellationToken.None))
                     .Where(m => m.Direction == MessageDirection.Inbound)
                     .SelectMany(m => m.Content.Blocks.OfType<TextBlock>())
                     .Select(b => b.Text)];
             var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
-            while ((texts = await ReadAsync()).Count < expected && DateTimeOffset.UtcNow < deadline)
+            while ((await ReadAsync()).Count < expected && DateTimeOffset.UtcNow < deadline)
                 await Task.Delay(20); // fence-allow: LOOP-DRIVER — poll pacing until the server-side socket loop stores the message
             await Task.Delay(100); // fence-allow: SETTLE — window in which an extra (wrongly stored) message would show
             return await ReadAsync();
