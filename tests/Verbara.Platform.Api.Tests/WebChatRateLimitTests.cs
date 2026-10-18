@@ -34,6 +34,13 @@ public sealed class WebChatRateLimitTests : IClassFixture<WebChatRateLimitTests.
             builder.ConfigureServices(services => services.AddSingleton<IStartupFilter, ProxyPeerStartupFilter>());
         }
 
+        protected override Microsoft.Extensions.Hosting.IHost CreateHost(Microsoft.Extensions.Hosting.IHostBuilder builder)
+        {
+            var host = base.CreateHost(builder);
+            SeedWebChatChannel(host.Services, TestTenantId);
+            return host;
+        }
+
         private sealed class ProxyPeerStartupFilter : IStartupFilter
         {
             public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>

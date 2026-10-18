@@ -40,6 +40,8 @@ public sealed class WebChatRateLimitTenantTests : IDisposable
         {
             var host = base.CreateHost(builder);
             SeedTestCustomerTenant(host.Services, OtherTenantId);
+            SeedWebChatChannel(host.Services, TestTenantId);
+            SeedWebChatChannel(host.Services, OtherTenantId);
             return host;
         }
 

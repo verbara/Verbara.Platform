@@ -9,6 +9,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **A WebChat session now requires the tenant's WebChat channel to be configured and active.**
+  `POST /api/v1/webchat/sessions` checks the tenant's WebChat channel before it creates the visitor's contact and
+  conversation, the same check every inbound channel webhook makes. When the channel is not configured, or is
+  configured but not active, the call answers `404` with the same body as an unknown tenant (`Tenant not found`) and
+  creates nothing. Enable the WebChat channel in **Admin -> Channels** before embedding the widget; a tenant set up
+  through the API instead of the setup wizard must `PUT /api/v1/admin/channels/webchat` with `"isActive": true`
+  (the setup wizard already does). The per-client and per-tenant session limits apply as before.
+
 ### Fixed
 
 - **The bundled gateway now carries the WebChat widget's WebSocket to the API.** `docker/nginx-gateway.conf` had

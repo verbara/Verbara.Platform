@@ -81,6 +81,7 @@ internal static partial class WebChatEndpoints
     private static async Task<Results<Ok<CreateSessionResponse>, NotFound<ErrorResponse>>> CreateSession(
         CreateSessionRequest request,
         [FromServices] ITenantStore tenantStore,
+        [FromServices] ITenantChannelConfigStore channelConfigStore,
         [FromServices] IConversationLifecycleService lifecycleService,
         [FromServices] IContactStore contactStore,
         [FromServices] WebChatSessionManager sessionManager,
@@ -91,7 +92,13 @@ internal static partial class WebChatEndpoints
 
         var tenant = await tenantStore.GetAsync(request.TenantId, ct);
         if (tenant is null)
-            return TypedResults.NotFound(new ErrorResponse("Tenant not found"));
+            return TenantNotFound();
+
+        // A session needs the tenant's WebChat channel configured and active (Admin -> Channels), the same
+        // condition every inbound webhook checks. Without it the answer is the unknown-tenant one.
+        var channelConfig = await channelConfigStore.GetAsync(tid, ChannelType.WebChat, ct);
+        if (channelConfig is null || !channelConfig.IsActive)
+            return TenantNotFound();
 
         // Create anonymous contact for this WebChat visitor
         var visitorAddress = new ChannelAddress(ChannelType.WebChat, $"webchat-{Guid.NewGuid():N}");
@@ -118,6 +125,8 @@ internal static partial class WebChatEndpoints
             contact.ContactId.Value,
             conversation.ConversationId.Value));
     }
+
+    private static NotFound<ErrorResponse> TenantNotFound() => TypedResults.NotFound(new ErrorResponse("Tenant not found"));
 
     internal static async Task HandleWebSocket(
         HttpContext context,
