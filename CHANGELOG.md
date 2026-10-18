@@ -23,6 +23,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that `data-position` takes only `bottom-right` or `bottom-left`, and that the session is created when the
   visitor submits the pre-chat form, not on the first message. Closes #441.
 
+- **A long WebChat message over the visitor socket is now stored whole, and one bad message no longer drops the
+  visitor's connection.** The WebChat socket read each message with a single 4 KiB read and parsed only that, so a
+  message larger than 4 KiB on the wire (one near the widget's 4000-character limit with accented letters or other
+  multi-byte characters) was cut, failed to parse, and the server ended the socket: the message was lost and agent
+  replies no longer reached the visitor on that socket. The server now reads each message to its end, so a message
+  of up to 4000 characters (`WebChatOptions.MaxMessageLength`, the widget's own limit) is stored exactly as typed. A
+  message the server cannot use is skipped and the socket stays open: one that is not valid JSON, a binary message,
+  one whose text is longer than 4000 characters, or one larger on the wire than any 4000-character message can be
+  (the server discards it as it arrives instead of buffering it). Each skip is logged with the tenant and session,
+  never the text (event ids 7540-7542 at warning level, 7543 at debug level for a binary message). The REST route
+  `POST /api/v1/webchat/sessions/{sessionId}/messages` now applies the same limit and answers `400` with
+  `Text exceeds 4000 characters` instead of storing the message; `MaxMessageLength` was declared but used nowhere
+  until now (#442)
+
 - **A registration trunk now registers with its carrier, and keeps Asterisk in step when it changes.** Three
   defects stopped every trunk with a registration URI from ever sending a REGISTER. The Asterisk image did not load
   `res_pjsip_outbound_registration` at all (`modules.conf` carried a `noload` for it). With that line gone the
