@@ -83,6 +83,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `contactsDialed`, `connectRate` and `abandonRate` stay at 0 while `contactsRemaining` moves as contacts are
   claimed and given back. Every API replica runs its own dialer engine. (#435)
 
+### Removed
+
+- **The API host no longer serves the older WebChat widget (`/webchat/widget.js`, `/webchat/widget.css`).** The
+  supported widget is the one the console image serves at `/webchat/v1/verbara-webchat.js`, which the console's
+  WebChat page gives as the snippet. With the two files gone the API host serves no static files, so
+  `UseStaticFiles()` is removed from the pipeline as well. A site still using the old tag must switch to the snippet
+  the console shows.
+
 ### Changed — Dependencies
 
 - **Verbara.Sdk.Pro `2.18.0-pro` → `2.19.0-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged. (#435)
