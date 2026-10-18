@@ -9,6 +9,32 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.30.0] - 2026-10-18
+
+Minor release, the **WebChat end to end** train. The widget now works on a customer's site: the bundled gateway
+carries its socket to the API, a long message is stored whole, a bad message no longer drops the visitor, and a
+session requires the tenant's WebChat channel to be active. Also: registration trunks register with their carrier,
+a dropped agent leg is flagged abnormal, deleting a user removes their role assignments (migration `024`), campaign
+metrics cover every tenant with one webhook delivery per change, and a release image whose provenance labels cannot
+be verified is not pushed. The outbound dialer now finds every tenant's campaigns but **still places no call** (see
+**Fixed**). It pairs with console **v3.25.0-web**; the widget works end to end only with both. Read **Upgrading**
+first: migration `024` runs at start-up, a WebChat session needs the channel active, and the API host no longer
+serves the older widget.
+
+### Upgrading
+
+- **Migration `024` removes role assignments of users that do not exist, then adds a foreign key from `user_roles`
+  onto `users`.** Rows of `user_roles` whose user is not in `users` (assignments made for an unknown id, and the rows
+  every deleted user left behind) are deleted at upgrade, with no manual step. From then on, deleting a user removes
+  their role assignments. The migration locks `users` and `user_roles` against writes while it runs (reads go on). (#413)
+
+- **WebChat needs the tenant's WebChat channel active.** A tenant whose channel is missing or inactive gets `404`
+  on `POST /api/v1/webchat/sessions` (see **Changed**). A tenant set up through the API must enable the channel
+  before embedding the widget. (#447)
+
+- **The older WebChat widget is gone from the API host.** A site that loads `/webchat/widget.js` from the API must
+  switch to the snippet the console's WebChat page shows (see **Removed**). (#445)
+
 ### Changed
 
 - **A WebChat session now requires the tenant's WebChat channel to be configured and active.**
@@ -18,6 +44,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   creates nothing. Enable the WebChat channel in **Admin -> Channels** before embedding the widget; a tenant set up
   through the API instead of the setup wizard must `PUT /api/v1/admin/channels/webchat` with `"isActive": true`
   (the setup wizard already does). The per-client and per-tenant session limits apply as before. (#447)
+
+- **Replacing a user's roles for a user the tenant does not have answers `404`.** `PUT /admin/users/{id}/roles`
+  used to answer `200` and store the roles for any user id. It now answers `404` with
+  `{ "error": "user-not-found", "userId": … }` and stores nothing, as `POST /admin/users/{id}/roles/{roleId}` does. (#413)
 
 ### Fixed
 
@@ -107,6 +137,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `contactsDialed`, `connectRate` and `abandonRate` stay at 0 while `contactsRemaining` moves as contacts are
   claimed and given back. Every API replica runs its own dialer engine. (#435)
 
+- **Deleting a user removes their role assignments.** `DELETE /admin/users/{id}` and the GDPR user purge left the
+  user's rows in `user_roles`. Authorization resolves a token's user's permissions from those rows (cached for up to
+  five minutes per replica), so an access token the deleted user still held kept its role permissions until it expired (at most 15 minutes),
+  and a custom role held only by deleted users could not be deleted. The database now removes the rows with the
+  user, in the same transaction; every replica drops the permissions it cached for the user (the replica that ran
+  the delete kept them before); and a role assignment for a user that does not exist is refused (see
+  **Upgrading**). A token whose role claim is `Admin` or `SystemAdmin` still passes on that claim until it expires. (#413)
+
 ### Removed
 
 - **The API host no longer serves the older WebChat widget (`/webchat/widget.js`, `/webchat/widget.css`).** The
@@ -122,6 +160,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   10.0.13, the servicing band every other ASP.NET Core and `Microsoft.Extensions` pin already uses. No advisory
   requires it; the vulnerable transitive pieces (`System.Security.Cryptography.Xml` and `.Pkcs`) were already pinned
   to 10.0.13. (#423)
+- `Testcontainers` 4.15.0 → 4.16.0 (test projects only). (#424)
+- GitHub Actions: three action versions in the `github-actions` group. (#422)
 
 ### Changed — CI
 
@@ -203,11 +243,6 @@ version. Read **Upgrading** first: migrations `022` and `023` run at start-up.
   new index. Rolling back leaves nothing stuck: an older API ignores the columns, and a delivery left claimed is still
   `Pending` and due for its retry poll. Until every replica runs this release, an older replica does not honour the
   claims, so a delivery can still be POSTed twice during the rolling deploy. (Platform/ADR-0043) (#406)
-
-- **Migration `024` removes role assignments of users that do not exist, then adds a foreign key from `user_roles`
-  onto `users`.** Rows of `user_roles` whose user is not in `users` (assignments made for an unknown id, and the rows
-  every deleted user left behind) are deleted at upgrade, with no manual step. From then on, deleting a user removes
-  their role assignments. The migration locks `users` and `user_roles` against writes while it runs (reads go on). (#413)
 
 - **Sign-in refusals carry a code.** The account-status and tenant-status 403 refusals of `/auth/login`,
   `/auth/mfa/verify` and `/auth/login/apikey` carry a code in `error`: `account-inactive` instead of
@@ -294,10 +329,6 @@ version. Read **Upgrading** first: migrations `022` and `023` run at start-up.
   first and, when there is none, answers `404` with `{ "error": "user-not-found", "userId": … }` and stores
   nothing. A script that assigns roles before it creates the user must create the user first. (#403)
 
-- **Replacing a user's roles for a user the tenant does not have answers `404`.** `PUT /admin/users/{id}/roles`
-  used to answer `200` and store the roles for any user id. It now answers `404` with
-  `{ "error": "user-not-found", "userId": … }` and stores nothing, as `POST /admin/users/{id}/roles/{roleId}` does. (#413)
-
 - **Refused closes and typifications answer `409` with a stable code instead of `400`.**
   `POST /conversations/{id}/close` and `POST /conversations/{id}/typify` answer `409` with
   `{ "error": … }` set to `typification-required` (a close of an agent-held chat when a published
@@ -358,14 +389,6 @@ version. Read **Upgrading** first: migrations `022` and `023` run at start-up.
   who holds a role that the migration or user creation granted and that no template's id, name or source template
   matches any more, it logs a warning (event `3703`, naming the tenant, the user, the attached role and the held
   roles). (#411)
-
-- **Deleting a user removes their role assignments.** `DELETE /admin/users/{id}` and the GDPR user purge left the
-  user's rows in `user_roles`. Authorization resolves a token's user's permissions from those rows (cached for up to
-  five minutes per replica), so an access token the deleted user still held kept its role permissions until it expired (at most 15 minutes),
-  and a custom role held only by deleted users could not be deleted. The database now removes the rows with the
-  user, in the same transaction; every replica drops the permissions it cached for the user (the replica that ran
-  the delete kept them before); and a role assignment for a user that does not exist is refused (see
-  **Upgrading**). A token whose role claim is `Admin` or `SystemAdmin` still passes on that claim until it expires. (#413)
 
 - **The AI typification suggestion's rate limit now uses the tenant the request resolved.** On
   `POST /api/v1/conversations/{id}/typification-suggestion`, a tenant identified by its subdomain without an
