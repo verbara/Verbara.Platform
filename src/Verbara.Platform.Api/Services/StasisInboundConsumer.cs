@@ -442,17 +442,18 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
     /// </summary>
     private async Task RetireAsync(Connection connection)
     {
+        // Best-effort teardown: any failure is logged and the next half still runs.
         try { connection.Subscription?.Dispose(); }
-        catch (Exception ex) { LogTeardownWarning(ex.Message); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { LogTeardownWarning(ex.Message); }
 
         try { await connection.Client.DisconnectAsync(_stoppingToken); }
-        catch (Exception ex) { LogTeardownWarning(ex.Message); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { LogTeardownWarning(ex.Message); }
 
         if (!await connection.DrainAsync(DrainDeadline, _time))
             LogDrainDeadline(connection.InFlight);
 
         try { await connection.Client.DisposeAsync(); }
-        catch (Exception ex) { LogTeardownWarning(ex.Message); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { LogTeardownWarning(ex.Message); }
     }
 
     /// <summary>
