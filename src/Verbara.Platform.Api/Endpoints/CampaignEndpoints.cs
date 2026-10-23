@@ -522,7 +522,7 @@ internal static class CampaignEndpoints
             ContactsDialed: 0,
             CreatedAt: c.CreatedAt);
 
-    private static Campaign MapFromRequest(CreateCampaignRequest req, string tenantId)
+    internal static Campaign MapFromRequest(CreateCampaignRequest req, string tenantId)
     {
         var mode = req.Mode.ToLowerInvariant() switch
         {

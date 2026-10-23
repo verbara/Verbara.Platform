@@ -27,6 +27,10 @@ internal sealed class PostgresQueueStore : IQueueStore
         return row?.ToQueue();
     }
 
+    // Declared seam (dialer-places-calls-end-to-end, task 1.1): the lookup lands in task 2.6.
+    public Task<Queue?> GetByNameAsync(TenantId tenantId, string name, CancellationToken ct)
+        => Task.FromResult<Queue?>(null);
+
     public async Task<PagedResult<Queue>> ListAsync(TenantId tenantId, PagedQuery query, CancellationToken ct)
     {
         var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(

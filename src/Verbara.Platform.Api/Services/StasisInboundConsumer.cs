@@ -7,6 +7,7 @@ using Verbara.Sdk;
 using Verbara.Sdk.Ari.Client;
 using Verbara.Sdk.Ari.Events;
 using Verbara.Sdk.Pro.Cluster.Leadership;
+using Verbara.Sdk.Pro.Dialer.Campaign;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Verbara.Platform.Api.Services;
@@ -84,6 +85,10 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
     private readonly ILogger<StasisInboundConsumer> _logger;
     private readonly AriClientOptions? _ariOptions;
 
+    // The dialer's campaign store, null when the dialer is not configured (dialer-places-calls-end-to-end, design
+    // D11): the campaign phase loads the answered leg's campaign through it, tenant-scoped.
+    private readonly CampaignStoreBase? _campaigns;
+
     private IAriClient? _client;
     private IDisposable? _subscription;
     private CancellationToken _stoppingToken;
@@ -102,9 +107,11 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
         IReasonHintResolver reasonHints,
         IServiceHeartbeat heartbeat,
         IConfiguration configuration,
-        ILogger<StasisInboundConsumer> logger)
+        ILogger<StasisInboundConsumer> logger,
+        CampaignStoreBase? campaigns = null)
     {
         _factory = factory;
+        _campaigns = campaigns;
         _leader = leader;
         _didRoutes = didRoutes;
         _queues = queues;
@@ -253,6 +260,22 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
     internal static bool IsInboundStart(AriEvent evt) =>
         evt is StasisStartEvent { Args: { Length: > 0 } args }
         && string.Equals(args[0], InboundPhase, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True only for a <see cref="StasisStartEvent"/> of the campaign phase
+    /// (<c>Stasis(verbara,campaign,${DIALER_CAMPAIGN_ID})</c>, dialer-places-calls-end-to-end design D11).
+    /// Declared seam: it matches nothing yet.
+    /// </summary>
+    internal static bool IsCampaignStart(AriEvent evt) => false;
+
+    /// <summary>
+    /// Continues an answered campaign leg into its campaign's target queue (dialer-places-calls-end-to-end design
+    /// D11). Declared seam: it does nothing yet.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static",
+        Justification = "Declared seam (task 1.1); task 2.6 reads the campaign and queue stores here.")]
+    internal Task HandleCampaignStartAsync(IAriClient client, StasisStartEvent evt, CancellationToken ct) =>
+        Task.CompletedTask;
 
     /// <summary>Observer callback — dispatched on the leader's ARI WS thread.</summary>
     private void OnEvent(AriEvent value)
