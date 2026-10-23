@@ -80,7 +80,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - **Each replica records and releases only the calls it placed.** A call holds its concurrency slot only while it
     is up. A contact whose call was up when its process was killed returns to the campaign once a live dialer sweeps
     its claim, `StaleAfter` later (three reconciliation intervals, at least 120 s), so it can be dialed once more,
-    and that earlier call has no row. A graceful stop records every call still in progress as Unknown and releases
+    and that earlier call has no row. Right after such a restart a campaign can also briefly have more calls up than
+    its maximum, while the dead process's calls finish ringing (at most one ring timeout; Verbara.Sdk.Pro #264). A graceful stop records every call still in progress as Unknown and releases
     its slot; the contact of an answered one is not dialed again for 2 hours by default (Pro
     `UnverifiedCallDeferral`), any other not before the retry interval or `StaleAfter`, whichever is longer, so a
     rolling deploy does not redial a customer who may still be on the line. A replica cut off from the database
