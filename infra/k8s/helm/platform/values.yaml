@@ -98,6 +98,9 @@ api:
       username: verbara
       password: r55-staging-only-change-prod
       application: verbara
+      # The per-node ARI client's own Stasis app (Platform/ADR-0044): only the inbound-voice leader may
+      # register `application`. Must differ from it, or the Api refuses to start; empty → "<application>-node".
+      nodeApplication: verbara-node
   licensing:
     # DEPRECATED in Pro v2.4.0-pro; scheduled for removal in Pro v2.5.0-pro.
     # Set to "" (empty) to skip injection — Pro derives effective enforcement

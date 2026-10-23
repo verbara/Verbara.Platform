@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 using Verbara.Platform.Api.Health;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
@@ -6,6 +8,7 @@ using Verbara.Platform.Typification.Resolution;
 using Verbara.Sdk;
 using Verbara.Sdk.Ari.Client;
 using Verbara.Sdk.Ari.Events;
+using Verbara.Sdk.Enums;
 using Verbara.Sdk.Pro.Cluster.Leadership;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -16,14 +19,27 @@ namespace Verbara.Platform.Api.Services;
 /// <c>verbara</c> so inbound calls actually reach a queue (without it the call
 /// enters Stasis, nobody acts, and <c>Hangup()</c> drops it).
 ///
-/// <para><b>Leader-gated (ADR-0022 Phase A.5 pattern):</b> the consumer runs on
-/// every pod but only the elected leader for
-/// <see cref="VoiceLeaderResources.Inbound"/> opens the ARI WebSocket. Asterisk
-/// delivers a Stasis app to exactly one WebSocket; two pods on the same app
-/// produce <c>ApplicationReplaced</c> churn. Because a physical call cannot be
-/// re-emitted, gating the <i>connection</i> (not just per-event fanout) is the
-/// correct contract. Leadership is polled every second; connect/disconnect
+/// <para><b>One registrant (Platform/ADR-0044):</b> Asterisk hands a Stasis app to exactly one
+/// ARI WebSocket, the last one to register it. The consumer runs on every pod but only the
+/// elected leader for <see cref="VoiceLeaderResources.Inbound"/> opens a WebSocket for the
+/// dialplan's app (<see cref="StasisAppNames.Consumer"/>); the per-node ARI client of every
+/// replica registers its own app (<see cref="StasisAppNames.Node"/>), and the Api refuses to
+/// start when the two names are equal. Leadership is polled every second; connect/disconnect
 /// transitions follow the leader flag.</para>
+///
+/// <para><b>Replaced registration:</b> if another client still takes the app, the live
+/// connection receives <c>ApplicationReplaced</c> (its socket stays open, so no fault is ever
+/// reported). The consumer logs a Warning, counts it on <c>voice_stasis_app_replaced_total</c>
+/// and re-registers under a 1/2/4/8/16-s backoff, at most 5 times per rolling 10 minutes (an
+/// Error names the cap), never giving up while leader. A client whose own Sdk reconnects ended
+/// (<see cref="AriConnectionState.Faulted"/>) is replaced too.</para>
+///
+/// <para><b>Make-before-break:</b> a replacement connection is created, subscribed and only then
+/// connected (so an event delivered while connecting is never lost), and published before the
+/// old one is retired. Retiring closes the old event WebSocket at once (releasing the app on
+/// leadership loss, and ending the Sdk's own reconnects) but keeps its REST client until the
+/// call handlers started from its events finish or 30 s pass. Every handler uses the client of
+/// the connection its <c>StasisStart</c> arrived on.</para>
 ///
 /// <para><b>Tenant resolution contract:</b> the inbound <i>trunk</i> channel
 /// name is NOT tenant-prefixed (<c>PJSIP/t-{trunkId}-XXXX</c> — trunk isolation
@@ -73,7 +89,21 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
     /// </summary>
     private const string ReasonVariable = "VERBARA_REASON";
 
+    /// <summary>Meter carrying <c>voice.stasis.app_replaced</c> (exported as <c>voice_stasis_app_replaced_total</c>).</summary>
+    public const string MeterName = "Verbara.Platform.Voice.Stasis";
+
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+
+    /// <summary>How long a retired connection keeps its REST client for the handlers still running on it.</summary>
+    internal static readonly TimeSpan DrainDeadline = TimeSpan.FromSeconds(30);
+
+    /// <summary>Rolling window of the replacement-driven reconnect cap.</summary>
+    internal static readonly TimeSpan ReplacementWindow = TimeSpan.FromMinutes(10);
+
+    /// <summary>Replacement-driven reconnects allowed per <see cref="ReplacementWindow"/>; delays 1, 2, 4, 8, 16 s.</summary>
+    internal const int MaxReplacementReconnects = 5;
+
+    private static readonly TimeSpan FirstReplacementDelay = TimeSpan.FromSeconds(1);
 
     private readonly IAriClientFactory _factory;
     private readonly IClusterLeader _leader;
@@ -84,15 +114,21 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
     private readonly ILogger<StasisInboundConsumer> _logger;
     private readonly AriClientOptions? _ariOptions;
 
-    private IAriClient? _client;
-    private IDisposable? _subscription;
-    private CancellationToken _stoppingToken;
+    private readonly TimeProvider _time;
+    private readonly Meter _meter;
+    private readonly Counter<long> _appReplaced;
 
-    // Set by the observer (pump thread) when the ARI WebSocket errors/completes; read by
-    // EvaluateLeadershipAsync (timer thread) which tears down + reconnects the leader's
-    // connection. Without this a dropped socket would leave the leader "connected-but-deaf"
-    // (non-null _client, no events) until leadership churned. Volatile cross-thread flag.
-    private volatile bool _connectionFaulted;
+    // Guards the connection states, _current and the replacement schedule: the observer (Sdk pump
+    // thread) and EvaluateLeadershipAsync (timer thread) both move them.
+    private readonly Lock _gate = new();
+    private Connection? _current;
+    private DateTimeOffset? _reconnectDue;
+    private readonly Queue<DateTimeOffset> _replacementReconnects = new();
+    private DateTimeOffset? _lastCapError;
+
+    // Retirements in progress (drain then dispose), awaited on shutdown.
+    private readonly ConcurrentDictionary<Task, byte> _retirements = new();
+    private CancellationToken _stoppingToken;
 
     public StasisInboundConsumer(
         IAriClientFactory factory,
@@ -102,7 +138,9 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
         IReasonHintResolver reasonHints,
         IServiceHeartbeat heartbeat,
         IConfiguration configuration,
-        ILogger<StasisInboundConsumer> logger)
+        ILogger<StasisInboundConsumer> logger,
+        TimeProvider? timeProvider = null,
+        IMeterFactory? meterFactory = null)
     {
         _factory = factory;
         _leader = leader;
@@ -112,21 +150,29 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
         _heartbeat = heartbeat;
         _logger = logger;
 
-        var ari = configuration.GetSection("Asterisk:Ari");
-        var baseUrl = ari["BaseUrl"];
-        _ariOptions = string.IsNullOrWhiteSpace(baseUrl)
-            ? null
-            : new AriClientOptions
-            {
-                BaseUrl = baseUrl,
-                Username = ari["Username"] ?? "",
-                Password = ari["Password"] ?? "",
-                Application = ari["Application"] ?? "verbara",
-            };
+        _time = timeProvider ?? TimeProvider.System;
+
+        // The dialplan's app, from the same resolution as the node client's own app (ADR-0044).
+        _ariOptions = StasisAppNames.ConsumerOptions(configuration);
+
+        _meter = meterFactory is null ? new Meter(MeterName) : meterFactory.Create(MeterName);
+        _appReplaced = _meter.CreateCounter<long>(
+            "voice.stasis.app_replaced", unit: "{replacement}",
+            description: "ApplicationReplaced events the inbound-voice leader's live ARI connection received for the dialplan's Stasis app.");
     }
 
     /// <summary>True when <c>Asterisk:Ari:BaseUrl</c> is configured (voice inbound enabled).</summary>
     internal bool IsAriConfigured => _ariOptions is not null;
+
+    /// <summary>Completes when every retirement started so far has drained and disposed its client.</summary>
+    internal Task PendingRetirementsAsync() => Task.WhenAll(_retirements.Keys);
+
+    /// <inheritdoc />
+    public override void Dispose()
+    {
+        _meter.Dispose();
+        base.Dispose();
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -174,76 +220,240 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
         }
         finally
         {
-            await TeardownAsync();
+            // Shutdown: close the leader's socket at once, then let in-flight handlers finish
+            // (each retirement is bounded by DrainDeadline; the handlers' token is already cancelled).
+            if (TakeCurrent() is { } last)
+            {
+                Retire(last);
+                LogDisconnected();
+            }
+
+            await PendingRetirementsAsync();
         }
     }
 
     /// <summary>
-    /// Reconciles the ARI connection with the current leadership flag: the leader
-    /// connects + subscribes; a former leader tears down. Idempotent — repeated
-    /// ticks while leadership is unchanged are no-ops.
+    /// Reconciles the ARI connection with the current leadership flag: the leader connects; a
+    /// former leader retires its connection; a live connection whose app was replaced (after its
+    /// backoff delay) or whose client is <see cref="AriConnectionState.Faulted"/> is replaced
+    /// make-before-break. Idempotent — repeated ticks while nothing changed are no-ops.
     /// </summary>
     internal async Task EvaluateLeadershipAsync(CancellationToken ct)
     {
-        if (_leader.IsLeader)
+        if (!_leader.IsLeader)
         {
-            // A faulted socket (observer signalled OnError/OnCompleted) is torn down so the
-            // reconnect below re-establishes a live connection — never left connected-but-deaf.
-            if (_connectionFaulted && _client is not null)
-                await TeardownAsync();
+            if (TakeCurrent() is { } lost)
+            {
+                Retire(lost);
+                LogDisconnected();
+            }
 
-            if (_client is null)
-                await ConnectAsync(ct);
+            return;
         }
-        else if (_client is not null)
+
+        var current = Volatile.Read(ref _current);
+        if (current is null)
         {
-            await TeardownAsync();
+            await OpenAsync(replacementDriven: false, ct);
+            return;
+        }
+
+        if (current.Faulted || current.Client.State == AriConnectionState.Faulted)
+        {
+            if (current.TryMarkFaultLogged())
+                LogClientFaulted(_ariOptions!.Application);
+            await ReplaceAsync(current, replacementDriven: false, ct);
+            return;
+        }
+
+        bool due;
+        lock (_gate)
+            due = _reconnectDue is { } at && _time.GetUtcNow() >= at;
+        if (due)
+            await ReplaceAsync(current, replacementDriven: true, ct);
+    }
+
+    /// <summary>Detaches the current connection (leadership loss, shutdown) and clears the schedule.</summary>
+    private Connection? TakeCurrent()
+    {
+        lock (_gate)
+        {
+            var current = _current;
+            _current = null;
+            _reconnectDue = null;
+            if (current is not null)
+                current.State = ConnectionState.Retiring;
+            return current;
         }
     }
 
-    private async Task ConnectAsync(CancellationToken ct)
+    /// <summary>
+    /// Make-before-break (design D6): the old connection turns <c>Retiring</c> first, so the
+    /// <c>ApplicationReplaced</c> our own new registration sends it is ignored; the new one is
+    /// opened and published; only then is the old one retired. If the new one cannot connect the
+    /// old one stays current and the next eligible tick retries.
+    /// </summary>
+    private async Task ReplaceAsync(Connection old, bool replacementDriven, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (!ReferenceEquals(_current, old))
+                return;
+            old.State = ConnectionState.Retiring;
+        }
+
+        if (await OpenAsync(replacementDriven, ct) is null)
+        {
+            lock (_gate)
+            {
+                if (ReferenceEquals(_current, old))
+                    old.State = ConnectionState.Live;
+            }
+
+            return;
+        }
+
+        Retire(old);
+    }
+
+    /// <summary>
+    /// Creates a client, subscribes its connection record, then connects (Sdk 2.8.0 delivers events
+    /// from inside <c>ConnectAsync</c> into a subject that does not replay), and publishes it as the
+    /// current <c>Live</c> connection, acting on a replacement it recorded while <c>Pending</c>.
+    /// Returns <see langword="null"/> when it could not connect; the client is then released.
+    /// </summary>
+    private async Task<Connection?> OpenAsync(bool replacementDriven, CancellationToken ct)
     {
         if (_ariOptions is null)
-            return;
+            return null;
 
+        Connection? connection = null;
         try
         {
-            var client = await _factory.CreateAndConnectAsync(_ariOptions, ct);
-            // Publish the (already-connected) client to the field BEFORE subscribing, so that
-            // if Subscribe throws (e.g. ObjectDisposedException from an early socket drop) the
-            // catch's TeardownAsync sees _client and disposes it — no orphaned ARI WebSocket.
-            // Events can't arrive until Subscribe attaches the observer, so OnEvent never reads
-            // a stale field. _connectionFaulted is cleared for the fresh connection.
-            _connectionFaulted = false;
-            _client = client;
-            _subscription = client.Subscribe(new StasisObserver(this));
-            LogConnected(_ariOptions.Application);
+            connection = new Connection(this, _factory.Create(_ariOptions));
+            connection.Subscription = connection.Client.Subscribe(connection);
+            await connection.Client.ConnectAsync(ct);
         }
         catch (Exception ex)
         {
             LogConnectFailed(ex.Message);
-            await TeardownAsync();
+            if (connection is not null)
+            {
+                lock (_gate)
+                    connection.State = ConnectionState.Retiring;
+                Retire(connection);
+            }
+
+            return null;
+        }
+
+        lock (_gate)
+        {
+            var now = _time.GetUtcNow();
+            if (replacementDriven)
+                _replacementReconnects.Enqueue(now);
+            PruneReplacementWindow(now);
+
+            _current = connection;
+            _reconnectDue = null;
+            connection.State = ConnectionState.Live;
+            LogConnected(_ariOptions.Application);
+            if (connection.ReplacedWhilePending)
+                ScheduleReconnectLocked(connection);
+        }
+
+        return connection;
+    }
+
+    /// <summary>Observer callback for <c>ApplicationReplaced</c> (Sdk pump thread), design D4.</summary>
+    private void OnReplaced(Connection connection, AriEvent evt)
+    {
+        if (evt.Application is { Length: > 0 } application
+            && !string.Equals(application, _ariOptions?.Application, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        lock (_gate)
+        {
+            switch (connection.State)
+            {
+                case ConnectionState.Pending:
+                    // Replaced while still connecting: acted on when it is published (OpenAsync).
+                    connection.ReplacedWhilePending = true;
+                    break;
+                case ConnectionState.Live when ReferenceEquals(connection, _current) && !connection.Replaced:
+                    ScheduleReconnectLocked(connection);
+                    break;
+                default:
+                    // Retiring: our own reconnect registered the app on its successor — not a replacement.
+                    break;
+            }
         }
     }
 
-    private async Task TeardownAsync()
+    /// <summary>Warning + counter + the D5 backoff/cap schedule for one replacement. Caller holds <see cref="_gate"/>.</summary>
+    private void ScheduleReconnectLocked(Connection connection)
     {
-        _connectionFaulted = false;
-        _subscription?.Dispose();
-        _subscription = null;
+        connection.Replaced = true;
+        _appReplaced.Add(1);
 
-        var client = _client;
-        _client = null;
-        if (client is null)
+        var now = _time.GetUtcNow();
+        PruneReplacementWindow(now);
+        var nth = _replacementReconnects.Count + 1;
+        var application = _ariOptions!.Application;
+        if (nth <= MaxReplacementReconnects)
+        {
+            var delay = FirstReplacementDelay * (1 << (nth - 1));
+            _reconnectDue = now + delay;
+            LogAppReplaced(application, delay.TotalSeconds);
             return;
+        }
 
-        try { await client.DisconnectAsync(_stoppingToken); }
-        catch (Exception ex) { LogTeardownWarning(ex.Message); }
+        // Capped: wait until the oldest reconnect in the window ages out; never stop while leader.
+        var due = _replacementReconnects.Peek() + ReplacementWindow;
+        _reconnectDue = due;
+        LogAppReplaced(application, (due - now).TotalSeconds);
+        if (_lastCapError is not { } last || now - last >= ReplacementWindow)
+        {
+            _lastCapError = now;
+            LogReplacementCapped(application, nth);
+        }
+    }
 
-        try { await client.DisposeAsync(); }
-        catch (Exception ex) { LogTeardownWarning(ex.Message); }
+    private void PruneReplacementWindow(DateTimeOffset now)
+    {
+        while (_replacementReconnects.TryPeek(out var oldest) && now - oldest >= ReplacementWindow)
+            _replacementReconnects.Dequeue();
+    }
 
-        LogDisconnected();
+    /// <summary>Starts a tracked retirement off the caller's path (the tick loop never waits on a handler).</summary>
+    private void Retire(Connection connection)
+    {
+        var retirement = RetireAsync(connection);
+        _retirements.TryAdd(retirement, 0);
+        _ = retirement.ContinueWith(
+            static (done, state) => ((ConcurrentDictionary<Task, byte>)state!).TryRemove(done, out _),
+            _retirements, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
+    /// <summary>
+    /// Design D6: close the event WebSocket at once (releases the app, cancels the Sdk's own
+    /// reconnect loop), wait for the handlers started on this connection (at most
+    /// <see cref="DrainDeadline"/>), then release the client and its REST <c>HttpClient</c>.
+    /// </summary>
+    private async Task RetireAsync(Connection connection)
+    {
+        // Best-effort teardown: any failure is logged and the next half still runs.
+        try { connection.Subscription?.Dispose(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { LogTeardownWarning(ex.Message); }
+
+        try { await connection.Client.DisconnectAsync(_stoppingToken); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { LogTeardownWarning(ex.Message); }
+
+        if (!await connection.DrainAsync(DrainDeadline, _time))
+            LogDrainDeadline(connection.InFlight);
+
+        try { await connection.Client.DisposeAsync(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { LogTeardownWarning(ex.Message); }
     }
 
     /// <summary>
@@ -254,19 +464,35 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
         evt is StasisStartEvent { Args: { Length: > 0 } args }
         && string.Equals(args[0], InboundPhase, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Observer callback — dispatched on the leader's ARI WS thread.</summary>
-    private void OnEvent(AriEvent value)
+    /// <summary>Observer callback — dispatched on the connection's ARI WS thread.</summary>
+    private void OnEvent(Connection connection, AriEvent value)
     {
+        if (value is ApplicationReplacedEvent)
+        {
+            OnReplaced(connection, value);
+            return;
+        }
+
         if (!IsInboundStart(value))
             return;
 
-        var client = _client;
-        if (client is null)
-            return;
+        // Fire-and-forget with its own guard (HandleStasisStartAsync never throws), on the client of
+        // the connection the call arrived on — never a newer one — and counted so a retiring
+        // connection keeps its REST client until the handler is done.
+        connection.HandlerStarted();
+        _ = RunHandlerAsync(connection, (StasisStartEvent)value);
+    }
 
-        // Fire-and-forget with its own guard (HandleStasisStartAsync never throws),
-        // mirroring PushToHubRelay's `_ = SendXxxAsync(...)` dispatch.
-        _ = HandleStasisStartAsync(client, (StasisStartEvent)value, _stoppingToken);
+    private async Task RunHandlerAsync(Connection connection, StasisStartEvent evt)
+    {
+        try
+        {
+            await HandleStasisStartAsync(connection.Client, evt, _stoppingToken);
+        }
+        finally
+        {
+            connection.HandlerEnded();
+        }
     }
 
     /// <summary>
@@ -398,20 +624,88 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
     }
 
     /// <summary>
-    /// Marks the current ARI connection as faulted so the next leadership tick tears it down
-    /// and reconnects. Called from the observer (pump thread) on OnError/OnCompleted, and
-    /// available to tests to drive the reconnect path deterministically.
+    /// Marks the current ARI connection as faulted so the next leadership tick replaces it. The
+    /// observer's OnError/OnCompleted take the same path; Sdk 2.8.0 never calls them in production
+    /// (it reconnects on its own), so the tick's <see cref="AriConnectionState.Faulted"/> check is
+    /// the path that matters. Available to tests to drive the replacement deterministically.
     /// </summary>
-    internal void SignalConnectionFault() => _connectionFaulted = true;
+    internal void SignalConnectionFault() => Volatile.Read(ref _current)?.MarkFaulted();
 
-    private sealed class StasisObserver(StasisInboundConsumer owner) : IObserver<AriEvent>
+    private enum ConnectionState
     {
-        public void OnNext(AriEvent value) => owner.OnEvent(value);
+        /// <summary>Subscribed, connect in progress.</summary>
+        Pending,
 
-        // A WebSocket error or graceful completion means the leader's connection is dead —
-        // flag it so EvaluateLeadershipAsync re-establishes it (never connected-but-deaf).
-        public void OnError(Exception error) => owner.SignalConnectionFault();
-        public void OnCompleted() => owner.SignalConnectionFault();
+        /// <summary>The consumer's current connection.</summary>
+        Live,
+
+        /// <summary>Being replaced or retired: its replacements are ignored.</summary>
+        Retiring,
+    }
+
+    /// <summary>
+    /// One ARI connection: its client, subscription, state (moved under <see cref="_gate"/>) and the
+    /// count of call handlers running on its client. It is also the connection's own observer.
+    /// </summary>
+    private sealed class Connection(StasisInboundConsumer owner, IAriClient client) : IObserver<AriEvent>
+    {
+        private readonly TaskCompletionSource _drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _inFlight;
+        private volatile bool _draining;
+        private volatile bool _faulted;
+        private int _faultLogged;
+
+        public IAriClient Client { get; } = client;
+
+        public IDisposable? Subscription { get; set; }
+
+        public ConnectionState State { get; set; } = ConnectionState.Pending;
+
+        /// <summary>Its app was replaced while <see cref="ConnectionState.Pending"/>.</summary>
+        public bool ReplacedWhilePending { get; set; }
+
+        /// <summary>A replacement was acted on; the reconnect is scheduled.</summary>
+        public bool Replaced { get; set; }
+
+        public bool Faulted => _faulted;
+
+        public int InFlight => Volatile.Read(ref _inFlight);
+
+        public void MarkFaulted() => _faulted = true;
+
+        public bool TryMarkFaultLogged() => Interlocked.Exchange(ref _faultLogged, 1) == 0;
+
+        public void HandlerStarted() => Interlocked.Increment(ref _inFlight);
+
+        public void HandlerEnded()
+        {
+            if (Interlocked.Decrement(ref _inFlight) == 0 && _draining)
+                _drained.TrySetResult();
+        }
+
+        /// <summary>True when every handler finished; false when <paramref name="deadline"/> passed first.</summary>
+        public async Task<bool> DrainAsync(TimeSpan deadline, TimeProvider time)
+        {
+            _draining = true;
+            if (InFlight == 0)
+                _drained.TrySetResult();
+            if (_drained.Task.IsCompleted)
+                return true;
+
+            using var timer = new CancellationTokenSource();
+            var expired = Task.Delay(deadline, time, timer.Token);
+            var first = await Task.WhenAny(_drained.Task, expired);
+            await timer.CancelAsync();
+            return first == _drained.Task;
+        }
+
+        public void OnNext(AriEvent value) => owner.OnEvent(this, value);
+
+        // A WebSocket error or graceful completion means this connection is dead — flag it so
+        // EvaluateLeadershipAsync replaces it if it is the current one (never connected-but-deaf).
+        public void OnError(Exception error) => MarkFaulted();
+
+        public void OnCompleted() => MarkFaulted();
     }
 
     // ─── Log messages ───────────────────────────────────────────────────────────
@@ -435,6 +729,22 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[STASIS] ARI teardown warning: {Reason}")]
     private partial void LogTeardownWarning(string reason);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[STASIS] Stasis app '{Application}' was taken by another ARI client — re-registering in {DelaySeconds} s.")]
+    private partial void LogAppReplaced(string application, double delaySeconds);
+
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "[STASIS] Stasis app '{Application}' replaced {Count} times in 10 min — re-registration capped; another ARI client registers the same name (check Asterisk:Ari:NodeApplication, a second leader, or an external ARI tool).")]
+    private partial void LogReplacementCapped(string application, int count);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[STASIS] ARI client for app '{Application}' is faulted (its own reconnects ended) — replacing the connection.")]
+    private partial void LogClientFaulted(string application);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[STASIS] {InFlight} call handler(s) still running when the retired ARI connection's 30-s drain ended — releasing it.")]
+    private partial void LogDrainDeadline(int inFlight);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[STASIS] Leadership evaluation failed — will retry next tick: {Reason}")]
