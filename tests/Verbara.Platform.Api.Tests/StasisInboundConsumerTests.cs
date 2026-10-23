@@ -703,7 +703,7 @@ public sealed class StasisInboundConsumerTests
         var (client, channels) = CampaignClient();
         var queues = Substitute.For<IQueueStore>();
         queues.GetByNameAsync(new TenantId(CampaignTenant), "sales", Arg.Any<CancellationToken>())
-            .Returns((Queue?)null);
+            .Returns(default(Queue?));
         var logs = new LogRecordCapture();
         var consumer = NewCampaignConsumer(queues, CampaignStore(11, "sales"), logs);
 

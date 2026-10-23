@@ -362,7 +362,7 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
                 channelId, context: StasisQueueContext, extension: QueueEntryExtension, priority: 1, label: null, ct);
             LogCampaignRoutedToQueue(channelId, tenant, campaignText, asteriskQueue);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogCampaignHandleError(channelId, ex.Message);
             await SafeHangupAsync(client, channelId, ct);
