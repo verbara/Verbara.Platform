@@ -9,6 +9,87 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Upgrading
+
+- **The outbound dialer starts placing real calls (see Fixed).** At start-up, every Active campaign is dialed by
+  every API replica that runs the dialer (it is registered when `ConnectionStrings:Dialer`, or failing that
+  `ConnectionStrings:Postgres`, is set) and is a voice-AMI pod, each replica within its own budgets. A campaign's
+  total concurrency is therefore up to N × `MaxConcurrentCalls` for N such replicas, so on a trunk with a tight
+  channel limit keep `MaxConcurrentCalls` at or below that limit divided by N. Pause any Active campaign that should
+  not call its contacts yet before you upgrade. (#N)
+
+- **Pro migration V003 runs at start-up on the dialer database.** `UsePostgresDialerStorage` adds
+  `dialer_contacts.claim_token` and `call_attempts.action_id`, with a partial unique index on `action_id`.
+  Additive and idempotent; Platform itself has no new migration. (#N)
+
+- **Pull the repository for the dialplan; no image rebuild is needed.** `docker/asterisk-config/extensions.conf`
+  and the demo override `docker/demo/demo-overrides/extensions.conf`, which the compose stacks bind-mount, gain the
+  `[dialer-answered]` context (see Fixed). Asterisk reads them on its next start or `dialplan reload`. (#N)
+
+- **Give each campaign a target queue.** A campaign without `targetQueueName` has its answered calls hung up at the
+  answer. Set it through the API (`targetQueueName` on create or update) or, from console **vX.Y.Z-web**
+  (Platform.Web #N) on, in the campaign wizard and the edit form; consoles before it send no target queue. (#N)
+
+### Fixed
+
+- **The outbound dialer now places campaign calls, records each one and retries its contacts (Pro 2.20.0-pro).**
+  This supersedes two sentences of the 2.30.0 entry "The outbound dialer now finds every tenant's campaigns (Pro
+  2.19.0-pro), but it still places no call" (#435): "It still does not place calls with this Platform" and "so
+  `contactsDialed`, `connectRate` and `abandonRate` stay at 0". Both stop holding with this release.
+  - **Calls are placed on the API's Asterisk node, through the tenant's trunk.** The dialer originated on the node
+    `"default"` while Platform registers its node as `"primary"`, so every originate failed before AMI (`Node
+    default not found in pool`) and the circuit breaker opened. It now originates on `primary`, the constant the
+    cluster registers. Each call is dialed as `PJSIP/t-{id}/sip:{number}@{host}`, the form click-to-dial uses, never
+    `PJSIP/{number}`. The trunk is chosen within the campaign's tenant in this order: a route scoped to the campaign
+    whose pattern is a literal prefix of the number, then the tenant's other routes (lowest priority number first),
+    then the campaign's default trunk, then the trunk named by `Asterisk:Outbound:DefaultTrunk` among the tenant's
+    active trunks. Another tenant's routes and trunks are never used. A number with no usable trunk is not dialed
+    and its contact is closed as no route; a trunk with no dial host, or a trunk lookup that fails, defers the
+    contact one reconciliation interval with a warning, and none of these takes a slot or writes an attempt.
+  - **Every placed call is recorded once, under its tenant.** Each originate gets one `call_attempts` row carrying
+    the campaign's tenant, and its contact is resolved or returned to the campaign and called again after the
+    campaign's retry interval (`retryIntervalMinutes`, which had no effect before), up to `maxAttemptsPerContact`.
+    Busy, no-answer, abandoned and unknown outcomes are retried; an originate that Asterisk reports failed (reason
+    0 or 1) before the ring timeout is recorded Failed and not retried. `contactsDialed`, `connectRate` and
+    `abandonRate` now move in `campaign.metrics_updated` and the supervisor view.
+  - **An answered campaign call is delivered to the campaign's target queue.** The answered leg enters the new
+    `[dialer-answered]` dialplan context (`_X.` and `_+X.`), which hands it to the API's Stasis app with the
+    campaign id. The API's Stasis consumer reads the leg's tenant, loads the campaign within that tenant, finds the
+    queue named by its `targetQueueName` among the tenant's queues (by exact name, an active queue first), and
+    continues the call into `[stasis-queue]`. Platform now creates every campaign on `dialer-answered`, and the
+    shipped `[default]` forwards to it, so campaigns created before this release are routed too (the demo
+    override's `[default]` keeps its fixed extensions and does not forward; recreate such a demo campaign through
+    the API). The context ships in `docker/asterisk-config/extensions.conf` and in the demo override, which also
+    gains the `[stasis-queue]` context it lacked; both are bind-mounted (see Upgrading). A campaign with no target
+    queue, a target queue the tenant does not have or that is inactive, or a campaign id the tenant does not own
+    has its answered calls hung up at the answer, with a warning naming the tenant, the campaign and the reason.
+    A customer who hangs up while waiting for an agent is recorded Abandoned and called again after the retry
+    interval, up to the maximum attempts. The API does not pace dialing on agent availability: staff the queue.
+    The console sets `targetQueueName` from **vX.Y.Z-web** (Platform.Web #N); earlier consoles sent a field the
+    API ignores.
+  - **An answered campaign call that reaches an agent queue becomes a voice Conversation**, as a click-to-dial call
+    does: it follows the inbound queue path (agent assignment, abandon classification, supervisor events). The
+    Conversation carries the campaign as `campaignId` metadata, which also selects the campaign's typification
+    binding, and it is attached to the dialed customer's contact (the leg's `DIALER_NUMBER`), not to the campaign's
+    outbound caller id. The agent's screen-pop and the callback rescue's `callbackNumber` use the dialed number too.
+    When the dialed number cannot be read, the caller-id contact is used and one warning is logged.
+  - **Each replica records and releases only the calls it placed.** A call holds its concurrency slot only while it
+    is up. A contact whose call was up when its process was killed returns to the campaign once a live dialer sweeps
+    its claim, `StaleAfter` later (three reconciliation intervals, at least 120 s), so it can be dialed once more,
+    and that earlier call has no row. A graceful stop records every call still in progress as Unknown and releases
+    its slot; the contact of an answered one is not dialed again for 2 hours by default (Pro
+    `UnverifiedCallDeferral`), any other not before the retry interval or `StaleAfter`, whichever is longer, so a
+    rolling deploy does not redial a customer who may still be on the line. A replica cut off from the database
+    alone for `StaleAfter` is treated as dead by its peers, and its calls in progress can be dialed once more. A
+    record whose write fails is kept and retried while the process runs. A removed campaign's calls in progress
+    keep their slots until they end. (#N)
+
+### Changed — Dependencies
+
+- **Verbara.Sdk.Pro `2.19.0-pro` → `2.20.0-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged. Two
+  transitive floors move with it, `Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions` and
+  `System.IO.Hashing` from 10.0.12 to 10.0.13. (#N)
+
 ## [2.30.0] - 2026-10-18
 
 Minor release, the **WebChat end to end** train. The widget now works on a customer's site: the bundled gateway
