@@ -27,9 +27,21 @@ internal sealed class PostgresQueueStore : IQueueStore
         return row?.ToQueue();
     }
 
-    // Declared seam (dialer-places-calls-end-to-end, task 1.1): the lookup lands in task 2.6.
-    public Task<Queue?> GetByNameAsync(TenantId tenantId, string name, CancellationToken ct)
-        => Task.FromResult<Queue?>(null);
+    // Tenant-scoped lookup by exact name, never a page of ListAsync (dialer-places-calls-end-to-end, design D11).
+    // queue_configs is keyed by (tenant_id, queue_id), so names are not unique: the active queue wins, then the
+    // lowest id, and QueryFirstOrDefaultAsync takes the first of many.
+    public async Task<Queue?> GetByNameAsync(TenantId tenantId, string name, CancellationToken ct)
+    {
+        var row = await _dataSource.QueryFirstOrDefaultAsync(
+            "SELECT queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
+            "required_skills, auto_answer_default, csat_enabled, csat_channel, csat_prompt_id, csat_sampling_rate, " +
+            "created_at, updated_at, created_by, updated_by " +
+            "FROM queue_configs WHERE tenant_id = @TenantId AND name = @Name " +
+            "ORDER BY is_active DESC, queue_id LIMIT 1",
+            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Name", name)); },
+            QueueRow.Map, ct);
+        return row?.ToQueue();
+    }
 
     public async Task<PagedResult<Queue>> ListAsync(TenantId tenantId, PagedQuery query, CancellationToken ct)
     {
