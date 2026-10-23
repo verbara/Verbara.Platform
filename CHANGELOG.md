@@ -32,7 +32,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **The outbound dialer now places campaign calls, records each one and retries its contacts (Pro 2.20.0-pro).**
+- **The outbound dialer now places campaign calls, records each one and retries its contacts (Pro 2.20.1-pro).**
   This supersedes two sentences of the 2.30.0 entry "The outbound dialer now finds every tenant's campaigns (Pro
   2.19.0-pro), but it still places no call" (#435): "It still does not place calls with this Platform" and "so
   `contactsDialed`, `connectRate` and `abandonRate` stay at 0". Both stop holding with this release.
@@ -49,9 +49,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - **Every placed call is recorded once, under its tenant.** Each originate gets one `call_attempts` row carrying
     the campaign's tenant, and its contact is resolved or returned to the campaign and called again after the
     campaign's retry interval (`retryIntervalMinutes`, which had no effect before), up to `maxAttemptsPerContact`.
-    Busy, no-answer, abandoned and unknown outcomes are retried; an originate that Asterisk reports failed (reason
-    0 or 1) before the ring timeout is recorded Failed and not retried. `contactsDialed`, `connectRate` and
-    `abandonRate` now move in `campaign.metrics_updated` and the supervisor view.
+    Busy, no-answer, abandoned and unknown outcomes are retried. A busy number (SIP 486 or 600) is recorded Busy and
+    retried: under PJSIP, Asterisk reports every SIP failure of an originate as reason 0, so the dialer reads the
+    originated channel's hangup cause (Pro 2.20.1-pro). A carrier rejection (SIP 401, 403, 407, 409, 5xx or 603) is
+    recorded Congestion, and any other originate that Asterisk reports failed before the ring timeout is recorded
+    Failed; neither is retried. Each campaign call's channel uniqueid is its originate's action id, so its CDR, CEL
+    and queue_log rows carry that 32-character id. `contactsDialed`, `connectRate` and `abandonRate` now move in
+    `campaign.metrics_updated` and the supervisor view.
   - **An answered campaign call is delivered to the campaign's target queue.** The answered leg enters the new
     `[dialer-answered]` dialplan context (`_X.` and `_+X.`), which hands it to the API's Stasis app with the
     campaign id. The API's Stasis consumer reads the leg's tenant, loads the campaign within that tenant, finds the
@@ -86,9 +90,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed — Dependencies
 
-- **Verbara.Sdk.Pro `2.19.0-pro` → `2.20.0-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged. Two
-  transitive floors move with it, `Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions` and
-  `System.IO.Hashing` from 10.0.12 to 10.0.13. (#N)
+- **Verbara.Sdk.Pro `2.19.0-pro` → `2.20.1-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged.
+  `2.20.1-pro` carries the dialer's busy fix (see Fixed). Two transitive floors move with it,
+  `Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions` and `System.IO.Hashing` from 10.0.12 to 10.0.13. (#N)
 
 ## [2.30.0] - 2026-10-18
 
