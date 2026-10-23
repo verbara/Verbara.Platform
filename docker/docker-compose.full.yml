@@ -71,6 +71,7 @@ services:
       Asterisk__Ari__Username: verbara
       Asterisk__Ari__Password: ${ARI_PASSWORD:-asterisk_ari_secret}
       Asterisk__Ari__Application: verbara
+      Asterisk__Ari__NodeApplication: verbara-node
       Recordings__BasePath: /recordings
       # Pro v2.5.0-pro: Licensing__EnforcementMode is GONE (ADR-0012). License
       # presence drives behaviour — set Licensing__LicenseFilePath to a mounted

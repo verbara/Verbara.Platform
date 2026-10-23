@@ -170,6 +170,10 @@ spec:
               value: {{ .Values.api.asterisk.ari.password }}
             - name: Asterisk__Ari__Application
               value: {{ .Values.api.asterisk.ari.application }}
+            {{- if .Values.api.asterisk.ari.nodeApplication }}
+            - name: Asterisk__Ari__NodeApplication
+              value: {{ .Values.api.asterisk.ari.nodeApplication }}
+            {{- end }}
             {{- if .Values.api.licensing.enforcementMode }}
             # Licensing__EnforcementMode is DEPRECATED in Pro v2.4.0-pro (removal in
             # v2.5.0-pro). Only injected when explicitly set in values.yaml —

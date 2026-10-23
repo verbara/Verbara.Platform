@@ -428,6 +428,7 @@ builder.Services.AddVerbaraOpenTelemetry(b => b
     // ADR-0026 Phase B — realtime.reconciliation.* (queue_memberships → Asterisk Realtime drift).
     .AddMeter(Verbara.Platform.Api.Services.RealtimeReconciliationService.MeterName)
     .AddMeter(Verbara.Platform.Api.Services.RecoveryCodeFamilyMetrics.MeterName) // mfa.recovery_codes.{users,redeemed}
+    .AddMeter(Verbara.Platform.Api.Services.StasisInboundConsumer.MeterName) // voice.stasis.app_replaced (ADR-0044)
     .AddDigitalChannelMeters() // channels.delivery_status.unknown_id, whatsapp.webhook.rejected
     .AddCapacityMeters() // Npgsql pool + operation instruments, auth.write.* (measure-api-multi-replica-baseline D1)
     .WithPrometheusExporter());
@@ -1051,13 +1052,13 @@ if (!string.IsNullOrEmpty(dialerConnectionString))
 }
 
 // ─── Pro.Cluster ─────────────────────────────────────────────────────────────
+var nodeAri = StasisAppNames.NodeOptions(builder.Configuration); // eager: equal app names fail the boot (ADR-0044)
 builder.Services.AddVerbaraCluster(c =>
 {
     c.InstanceId = Environment.MachineName;
 
     // Register the primary Asterisk server as initial cluster node
     var amiSection = builder.Configuration.GetSection("Asterisk:Ami");
-    var ariSection = builder.Configuration.GetSection("Asterisk:Ari");
     var amiHost = amiSection["Hostname"];
     if (!string.IsNullOrEmpty(amiHost))
     {
@@ -1072,19 +1073,7 @@ builder.Services.AddVerbaraCluster(c =>
                 UseSsl = bool.Parse(amiSection["UseSsl"] ?? "false"),
             },
         };
-
-        // ARI is optional — only configured if section exists
-        var ariBaseUrl = ariSection["BaseUrl"];
-        if (!string.IsNullOrEmpty(ariBaseUrl))
-        {
-            nodeOptions.Ari = new Verbara.Sdk.Ari.Client.AriClientOptions
-            {
-                BaseUrl = ariBaseUrl,
-                Username = ariSection["Username"] ?? "",
-                Password = ariSection["Password"] ?? "",
-                Application = ariSection["Application"] ?? "verbara-platform",
-            };
-        }
+        nodeOptions.Ari = nodeAri; // null without Asterisk:Ari:BaseUrl; the node's own Stasis app (ADR-0044)
 
         c.InitialNodes[AsteriskNodeIds.Primary] = nodeOptions;
     }

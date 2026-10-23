@@ -30,6 +30,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   answer. Set it through the API (`targetQueueName` on create or update) or, from console **vX.Y.Z-web**
   (Platform.Web #N) on, in the campaign wizard and the edit form; consoles before it send no target queue. (#N)
 
+- **No configuration change is required for the Stasis app fix below.** Every shipped compose file and the Helm chart
+  now set `Asterisk__Ari__NodeApplication: verbara-node`; any other deployment gets `<Asterisk:Ari:Application>-node`
+  by default. Only a deployment that sets `Asterisk__Ari__NodeApplication` equal to `Asterisk__Ari__Application`
+  (case-insensitive) stops at start-up, with an error naming both settings.
+
+- **A call that enters Stasis before the voice leader's consumer has registered the app is now hung up at once**
+  instead of being held in silence: at start-up, or between losing a leader and the next one connecting. Asterisk
+  logs `Stasis app 'verbara' doesn't exist` (WARNING) or `Stasis app 'verbara' not active` (ERROR), and the dialplan's
+  `Hangup()` ends the call. Alerts on Stasis failures should match both lines.
+
+- **The Helm chart in this repository still pins image `v2.6.0`, which has no Stasis consumer.** The new value is
+  inert there; the chart gets this fix only once its image is raised to a release that contains it.
+
 ### Fixed
 
 - **The outbound dialer now places campaign calls, records each one and retries its contacts (Pro 2.20.2-pro).**
@@ -88,6 +101,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     alone for `StaleAfter` is treated as dead by its peers, and its calls in progress can be dialed once more. A
     record whose write fails is kept and retried while the process runs. A removed campaign's calls in progress
     keep their slots until they end. (#N)
+
+- **With more than one Api replica, calls entering Stasis are handled again.** Every replica's per-node ARI client
+  registered the dialplan's Stasis app (`Asterisk:Ari:Application`, `verbara`) as well as the voice leader's
+  consumer, and Asterisk gives an app to the last registrant only, so a follower that connected after the leader
+  took every inbound call (and, with the dialer, every answered leg) and nobody routed it. The node client now
+  registers an app of its own (`Asterisk:Ari:NodeApplication`, default `<Application>-node`), and the Api refuses to
+  start when the two names are equal. The consumer now treats `ApplicationReplaced` as a fault: it logs a Warning,
+  counts it on `voice_stasis_app_replaced_total`, and re-registers after 1, 2, 4, 8 and 16 s, at most 5 times per
+  10 minutes (an Error names the cap; it never gives up while leader); it also replaces a client whose own reconnects
+  ended. Reconnects are make-before-break, an event that arrives while a connection is being established is no longer
+  lost, and a retired connection closes its WebSocket at once but keeps its REST client until the calls in flight on it
+  finish (30-s limit), so a call is no longer stranded in Stasis by a reconnect or a leadership change.
 
 ### Changed — Dependencies
 
