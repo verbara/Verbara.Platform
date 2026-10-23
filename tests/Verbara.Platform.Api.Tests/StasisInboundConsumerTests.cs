@@ -733,7 +733,7 @@ public sealed class StasisInboundConsumerTests
         {
             if (DateTime.UtcNow > deadline)
                 throw new Xunit.Sdk.XunitException($"Timed out waiting: {because}");
-            await Task.Delay(10);
+            await Task.Delay(10); // fence-allow: LOOP-DRIVER — poll pacing for a fire-and-forget handler, bounded by the 10-s deadline
         }
     }
 
@@ -958,7 +958,7 @@ public sealed class StasisInboundConsumerTests
         await rig.Clients[0].Received(1).DisconnectAsync(Arg.Any<CancellationToken>());
 
         rig.Time.Advance(TimeSpan.FromSeconds(29));
-        await Task.Delay(50);
+        await Task.Delay(50); // fence-allow: SETTLE — give a wrongly-fired drain timer's continuation time to dispose before the negative check
         await rig.Clients[0].DidNotReceive().DisposeAsync();
 
         rig.Time.Advance(TimeSpan.FromSeconds(1));
