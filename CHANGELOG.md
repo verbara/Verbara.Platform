@@ -32,7 +32,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **The outbound dialer now places campaign calls, records each one and retries its contacts (Pro 2.20.1-pro).**
+- **The outbound dialer now places campaign calls, records each one and retries its contacts (Pro 2.20.2-pro).**
   This supersedes two sentences of the 2.30.0 entry "The outbound dialer now finds every tenant's campaigns (Pro
   2.19.0-pro), but it still places no call" (#435): "It still does not place calls with this Platform" and "so
   `contactsDialed`, `connectRate` and `abandonRate` stay at 0". Both stop holding with this release.
@@ -91,9 +91,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed — Dependencies
 
-- **Verbara.Sdk.Pro `2.19.0-pro` → `2.20.1-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged.
-  `2.20.1-pro` carries the dialer's busy fix (see Fixed). Two transitive floors move with it,
-  `Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions` and `System.IO.Hashing` from 10.0.12 to 10.0.13. (#N)
+- **Verbara.Sdk.Pro `2.19.0-pro` → `2.20.2-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged.
+  The dialer's busy fix (see Fixed) shipped in `2.20.1-pro`; `2.20.2-pro` changes no source. Three transitive
+  floors move with it, `Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions`, `System.IO.Hashing` and
+  `Microsoft.Extensions.Diagnostics.HealthChecks`, from 10.0.12 to 10.0.13. (#N)
 
 ## [2.30.0] - 2026-10-18
 
