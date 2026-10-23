@@ -160,6 +160,7 @@ services:
       Asterisk__Ari__Username: verbara
       Asterisk__Ari__Password: ${ARI_PASSWORD}
       Asterisk__Ari__Application: verbara
+      Asterisk__Ari__NodeApplication: verbara-node
       # Auth — JWT signing key. Generate a fresh 64-char string per install.
       Jwt__SigningKey: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY required (64+ chars)}
       Jwt__Issuer: ${JWT_ISSUER:-https://verbara.local}
