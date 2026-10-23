@@ -17,7 +17,9 @@ using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Sessions;
 using Verbara.Sdk.Sessions.Manager;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Verbara.Platform.Api.Tests.Logging;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 
@@ -1219,6 +1221,233 @@ public sealed class VoiceConversationBridgeTests : IDisposable
 
         conversation.Metadata.Should().ContainKey("pendingCallbackEval").WhoseValue.Should().Be("true");
         conversation.Metadata.Should().NotContainKey("callbackNumber");
+    }
+
+    // ─── Campaign calls (dialer-places-calls-end-to-end, design D10) ─────────────────────────────
+    // An answered campaign call that reaches an agent queue is classified Inbound by the Sdk, so it takes the
+    // queue path. Pro's builder sets DIALER_CAMPAIGN_ID and DIALER_NUMBER on the originated trunk leg; the
+    // session's caller id is the campaign's own outbound number (copied once at Newchannel), never the customer's.
+
+    private const string CampaignTrunkLeg = "PJSIP/t-7-0000c001";
+    private const string CampaignAgentLeg = "PJSIP/acme-agent-11111111111111111111111111111111-0000c002";
+    private const string DialedNumber = "+573001234567";
+    private const string CampaignCallerId = "+15550100";
+
+    private VoiceConversationBridge CreateBridge(ILogger<VoiceConversationBridge> logger) =>
+        new(_sessions, _serverPool, _conversations, _contacts, _contactStore, _agents, _queues, _capacity, _eventBus,
+            LeaderStub(true), _clock, logger);
+
+    // SDK-internal AddParticipant via reflection, as AddCaller does, with the leg's caller id.
+    private static void AddLeg(
+        CallSession session, string channel, ParticipantRole role, string? callerIdNum,
+        HangupCause? cause = null, DateTimeOffset? leftAt = null)
+    {
+        var participant = new SessionParticipant
+        {
+            UniqueId = channel,
+            Channel = channel,
+            Technology = "PJSIP",
+            Role = role,
+            CallerIdNum = callerIdNum,
+            HangupCause = cause,
+            LeftAt = leftAt,
+            JoinedAt = DateTimeOffset.UnixEpoch,
+        };
+        var add = typeof(CallSession).GetMethod("AddParticipant", BindingFlags.Instance | BindingFlags.NonPublic)
+                  ?? throw new InvalidOperationException("CallSession.AddParticipant not found.");
+        add.Invoke(session, [participant]);
+    }
+
+    /// <summary>
+    /// A session whose first (trunk) leg carries <paramref name="callerIdNum"/>, with no pre-stamped tenant: the
+    /// bridge reads <c>TENANT_ID</c> off the leg.
+    /// </summary>
+    private CallSession TrunkSession(string linkedId, string? callerIdNum)
+    {
+        var session = MakeSession(linkedId, tenant: null, AgentInterface);
+        AddLeg(session, CampaignTrunkLeg, ParticipantRole.Caller, callerIdNum);
+        _sessions.GetById($"s-{linkedId}").Returns(session);
+        return session;
+    }
+
+    /// <summary>
+    /// The leg's channel variables: <c>TENANT_ID</c> = acme, no <c>VERBARA_OUTBOUND_ID</c> or <c>VERBARA_REASON</c>,
+    /// and the two dialer variables (null = the GetVar returns <c>Error</c>).
+    /// </summary>
+    private void StubLegVariables(string? campaignId, string? dialedNumber)
+    {
+        AddPrimaryServer();
+        StubGetVarFor("TENANT_ID", Tenant);
+        StubGetVarFor("VERBARA_OUTBOUND_ID", null);
+        StubGetVarFor("VERBARA_REASON", null);
+        StubGetVarFor("DIALER_CAMPAIGN_ID", campaignId);
+        StubGetVarFor("DIALER_NUMBER", dialedNumber);
+    }
+
+    /// <summary>
+    /// Records every Conversation saved, and serves the last one back by LinkedId, so a call can be driven through
+    /// start, queue, connect and end against one stored Conversation.
+    /// </summary>
+    private List<Conversation> TrackConversations(string linkedId)
+    {
+        var saved = new List<Conversation>();
+        _conversations.SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var conversation = ci.Arg<Conversation>();
+                if (!saved.Contains(conversation))
+                    saved.Add(conversation);
+                return Task.CompletedTask;
+            });
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), linkedId, Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromResult(saved.LastOrDefault()));
+        return saved;
+    }
+
+    /// <summary>One resolvable voice contact per address; the map turns a ContactId back into its address.</summary>
+    private Dictionary<EntityId, string> StubContactsFor(params string[] addresses)
+    {
+        var byId = new Dictionary<EntityId, string>();
+        foreach (var address in addresses)
+        {
+            var contact = new Contact { ContactId = EntityId.New(), TenantId = new TenantId(Tenant), CreatedAt = _clock.UtcNow };
+            _contacts.ResolveAsync(
+                    Arg.Any<TenantId>(),
+                    Arg.Is<ChannelAddress>(a => a != null && a.Channel == ChannelType.Voice && a.Address == address),
+                    Arg.Any<CancellationToken>())
+                .Returns(contact);
+            byId[contact.ContactId] = address;
+        }
+
+        return byId;
+    }
+
+    private async Task StartAndQueueAsync(VoiceConversationBridge bridge, string linkedId)
+    {
+        await bridge.HandleEventAsync(new CallStartedEvent($"s-{linkedId}", "primary", _clock.UtcNow, CallDirection.Inbound, null));
+        await bridge.HandleEventAsync(new CallQueuedEvent($"s-{linkedId}", "primary", _clock.UtcNow, "acme-Support", 1));
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldMarkTheConversationWithItsCampaign_WhenTheLegCarriesDialerCampaignId()
+    {
+        StubLegVariables(campaignId: "11", dialedNumber: DialedNumber);
+        TrunkSession("link-camp-1", CampaignCallerId);
+        StubContactsFor(DialedNumber, CampaignCallerId, "anonymous");
+        var saved = TrackConversations("link-camp-1");
+        var bridge = CreateBridge();
+
+        await StartAndQueueAsync(bridge, "link-camp-1");
+
+        saved.Should().ContainSingle("the campaign call queued once");
+        saved[0].Channel.Should().Be(ChannelType.Voice);
+        saved[0].TenantId.Value.Should().Be(Tenant);
+        saved[0].Metadata.Should().ContainKey("campaignId").WhoseValue.Should().Be("11");
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldNotMarkACampaign_WhenTheLegHasNoDialerCampaignId()
+    {
+        StubLegVariables(campaignId: null, dialedNumber: null);
+        TrunkSession("link-camp-2", "+15551230000");
+        StubContactsFor("+15551230000", "anonymous");
+        var saved = TrackConversations("link-camp-2");
+        var bridge = CreateBridge();
+
+        await StartAndQueueAsync(bridge, "link-camp-2");
+
+        saved.Should().ContainSingle("the inbound call queued once");
+        saved[0].Metadata.Should().NotContainKey("campaignId");
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldAttachTheCampaignConversationToTheDialedCustomer_WhenTheCallerIdIsTheCampaignsOutboundNumber()
+    {
+        StubLegVariables(campaignId: "11", dialedNumber: DialedNumber);
+        TrunkSession("link-camp-3", CampaignCallerId);
+        var addressOf = StubContactsFor(DialedNumber, CampaignCallerId, "anonymous");
+        var saved = TrackConversations("link-camp-3");
+        _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
+            .Returns(AgentInState(AgentState.Available));
+        var events = CaptureEvents();
+        var bridge = CreateBridge();
+
+        await StartAndQueueAsync(bridge, "link-camp-3");
+        await bridge.HandleEventAsync(new CallConnectedEvent("s-link-camp-3", "primary", _clock.UtcNow, null, "acme-Support", TimeSpan.FromSeconds(3)));
+
+        saved.Should().ContainSingle();
+        addressOf[saved[0].ContactId].Should().Be(DialedNumber,
+            "a campaign Conversation belongs to the customer the campaign dialed, not to the campaign's own caller id");
+        await _contacts.DidNotReceive().ResolveAsync(
+            Arg.Any<TenantId>(),
+            Arg.Is<ChannelAddress>(a => a != null && a.Address == CampaignCallerId),
+            Arg.Any<CancellationToken>());
+        events.OfType<VoiceScreenPopEvent>().Should().ContainSingle()
+            .Which.CallerNumber.Should().Be(DialedNumber);
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldAttachTheCampaignConversationToTheDialedCustomer_WhenTheCallerIdIsAbsent()
+    {
+        StubLegVariables(campaignId: "11", dialedNumber: DialedNumber);
+        TrunkSession("link-camp-4", callerIdNum: null);
+        var addressOf = StubContactsFor(DialedNumber, "anonymous");
+        var saved = TrackConversations("link-camp-4");
+        var bridge = CreateBridge();
+
+        await StartAndQueueAsync(bridge, "link-camp-4");
+
+        saved.Should().ContainSingle();
+        addressOf[saved[0].ContactId].Should().Be(DialedNumber,
+            "a campaign call with no caller id still belongs to the dialed customer, never to the anonymous bucket");
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldFallBackToTheCallerIdAndWarn_WhenDialerNumberCannotBeRead()
+    {
+        StubLegVariables(campaignId: "11", dialedNumber: null);
+        TrunkSession("link-camp-5", CampaignCallerId);
+        var addressOf = StubContactsFor(DialedNumber, CampaignCallerId, "anonymous");
+        var saved = TrackConversations("link-camp-5");
+        var logs = new LogRecordCapture();
+        using var loggerFactory = LoggerFactory.Create(b => b.AddProvider(logs));
+        var bridge = CreateBridge(loggerFactory.CreateLogger<VoiceConversationBridge>());
+
+        await StartAndQueueAsync(bridge, "link-camp-5");
+
+        saved.Should().ContainSingle("the Conversation is still created when the dialed number cannot be read");
+        addressOf[saved[0].ContactId].Should().Be(CampaignCallerId, "with no dialed number the caller-id rule applies");
+        logs.Records.Where(r => r.Level == LogLevel.Warning).Should().ContainSingle(
+            "falling back to the caller id on a campaign call is logged once");
+    }
+
+    [Fact]
+    public async Task OnCallEnded_ShouldStampTheDialedNumberAsCallbackNumber_WhenTheCallIsACampaignCall()
+    {
+        StubLegVariables(campaignId: "11", dialedNumber: DialedNumber);
+        var session = MakeSession("link-camp-6", tenant: null, AgentInterface);
+        session.QueueName = "acme-Support";
+        session.ConnectedAt = _clock.UtcNow.AddSeconds(-30);
+        // The customer's trunk leg (the campaign's caller id), then the agent leg, which drops abnormally first.
+        AddLeg(session, CampaignTrunkLeg, ParticipantRole.Caller, CampaignCallerId,
+            HangupCause.NormalClearing, _clock.UtcNow.AddSeconds(2));
+        AddLeg(session, CampaignAgentLeg, ParticipantRole.Destination, null,
+            HangupCause.NetworkOutOfOrder, _clock.UtcNow);
+        _sessions.GetById("s-link-camp-6").Returns(session);
+        StubContactsFor(DialedNumber, CampaignCallerId, "anonymous");
+        var saved = TrackConversations("link-camp-6");
+        _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
+            .Returns(AgentInState(AgentState.Available));
+        var bridge = CreateBridge();
+
+        await StartAndQueueAsync(bridge, "link-camp-6");
+        await bridge.HandleEventAsync(new CallConnectedEvent("s-link-camp-6", "primary", _clock.UtcNow, null, "acme-Support", TimeSpan.FromSeconds(3)));
+        await bridge.HandleEventAsync(new CallEndedEvent("s-link-camp-6", "primary", _clock.UtcNow, null, TimeSpan.FromSeconds(42), TimeSpan.FromSeconds(30)));
+
+        saved.Should().ContainSingle();
+        saved[0].Metadata.Should().ContainKey("agentLegAbnormal").WhoseValue.Should().Be("true");
+        saved[0].Metadata.Should().ContainKey("callbackNumber").WhoseValue.Should().Be(DialedNumber,
+            "a callback to a campaign customer dials the customer, not the campaign's own outbound number");
     }
 
     public void Dispose() => _eventBus.Dispose();

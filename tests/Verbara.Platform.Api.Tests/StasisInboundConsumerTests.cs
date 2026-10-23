@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Verbara.Platform.Api.Health;
@@ -12,6 +13,9 @@ using Verbara.Sdk;
 using Verbara.Sdk.Ari.Client;
 using Verbara.Sdk.Ari.Events;
 using Verbara.Sdk.Pro.Cluster.Leadership;
+using Verbara.Sdk.Pro.Dialer.Campaign;
+using Verbara.Platform.Api.Tests.Logging;
+using DialerCampaign = Verbara.Sdk.Pro.Dialer.Models.Campaign;
 
 // CA2012: NSubstitute records ValueTask-returning calls (GetVariableAsync,
 // CreateAndConnectAsync) for `.Returns(...)` matching — the ValueTask is consumed
@@ -561,6 +565,213 @@ public sealed class StasisInboundConsumerTests
             LeaderStub(true), Substitute.For<IDidRouteStore>(), Substitute.For<IQueueStore>(),
             configured: false);
         consumer.IsAriConfigured.Should().BeFalse();
+    }
+
+    // ─── Campaign phase (dialer-places-calls-end-to-end, design D11) ──────────────────
+    // An answered campaign leg enters [dialer-answered], which runs Stasis(verbara,campaign,${DIALER_CAMPAIGN_ID}).
+    // The consumer reads the tenant off the leg, loads the campaign tenant-scoped, finds its target queue by exact
+    // name within the tenant, and continues the (already answered) leg into [stasis-queue]. Every unresolved step
+    // hangs up with a Warning naming the tenant, the campaign and the reason.
+
+    private const string CampaignTenant = "acme";
+    private const string CampaignChannel = "1700000000.42";
+
+    private static StasisInboundConsumer NewCampaignConsumer(
+        IQueueStore queues, CampaignStoreBase? campaigns, LogRecordCapture logs)
+    {
+        var loggerFactory = LoggerFactory.Create(b => b.AddProvider(logs));
+        return new StasisInboundConsumer(
+            Substitute.For<IAriClientFactory>(),
+            LeaderStub(true),
+            Substitute.For<IDidRouteStore>(),
+            queues,
+            NoHintResolver(),
+            Substitute.For<IServiceHeartbeat>(),
+            AriConfig(configured: true),
+            loggerFactory.CreateLogger<StasisInboundConsumer>(),
+            campaigns);
+    }
+
+    private static StasisStartEvent CampaignStart(params string[] args) => new()
+    {
+        Type = "StasisStart",
+        Application = "verbara",
+        Args = args,
+        Channel = new AriChannel { Id = CampaignChannel, Name = "PJSIP/t-7-0000c001" },
+    };
+
+    private static (IAriClient Client, IAriChannelsResource Channels) CampaignClient()
+    {
+        var (client, channels) = NewClient();
+        channels.GetVariableAsync(CampaignChannel, "TENANT_ID", Arg.Any<CancellationToken>())
+            .Returns(new AriVariable { Value = CampaignTenant });
+        return (client, channels);
+    }
+
+    private static CampaignStoreBase CampaignStore(long id, string? targetQueueName)
+    {
+        var store = Substitute.For<CampaignStoreBase>();
+        store.GetCampaignAsync(CampaignTenant, id, Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<DialerCampaign?>(new DialerCampaign
+            {
+                Id = id,
+                TenantId = CampaignTenant,
+                Name = "Q4 renewals",
+                TargetQueueName = targetQueueName,
+            }));
+        return store;
+    }
+
+    private static Queue CampaignQueue(string name, bool isActive = true) => new()
+    {
+        QueueId = EntityId.New(),
+        TenantId = new TenantId(CampaignTenant),
+        Name = name,
+        IsActive = isActive,
+        CreatedAt = DateTimeOffset.UtcNow,
+    };
+
+    private static List<CapturedLogRecord> Warnings(LogRecordCapture logs) =>
+        [.. logs.Records.Where(r => r.Level == LogLevel.Warning)];
+
+    private static async Task AssertHungUpWithoutContinueAsync(IAriChannelsResource channels)
+    {
+        await channels.Received(1).HangupAsync(CampaignChannel, Arg.Any<CancellationToken>());
+        await channels.DidNotReceive().ContinueAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await channels.DidNotReceive().AnswerAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleCampaignStartAsync_ShouldContinueToTheCampaignsQueue_WhenTenantCampaignAndQueueResolve()
+    {
+        var (client, channels) = CampaignClient();
+        var queues = Substitute.For<IQueueStore>();
+        queues.GetByNameAsync(new TenantId(CampaignTenant), "sales", Arg.Any<CancellationToken>())
+            .Returns(CampaignQueue("sales"));
+        // A first page of 500 queues none of which is the target (it sorts past them): a page lookup would miss it.
+        var firstPage = Enumerable.Range(0, 500).Select(i => CampaignQueue($"a-{i:D3}")).ToList();
+        queues.ListAsync(new TenantId(CampaignTenant), Arg.Any<PagedQuery>(), Arg.Any<CancellationToken>())
+            .Returns(new PagedResult<Queue>(firstPage, 501, 1, 500));
+        var logs = new LogRecordCapture();
+        var consumer = NewCampaignConsumer(queues, CampaignStore(11, "sales"), logs);
+
+        await consumer.HandleCampaignStartAsync(client, CampaignStart("campaign", "11"), CancellationToken.None);
+
+        await channels.Received(1).SetVariableAsync(CampaignChannel, "QUEUE_NAME", "acme-sales", Arg.Any<CancellationToken>());
+        await channels.Received(1).ContinueAsync(
+            CampaignChannel, "stasis-queue", "s", 1, null, Arg.Any<CancellationToken>());
+        await channels.DidNotReceive().AnswerAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await channels.DidNotReceive().HangupAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await queues.DidNotReceive().ListAsync(Arg.Any<TenantId>(), Arg.Any<PagedQuery>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleCampaignStartAsync_ShouldHangUp_WhenTheCampaignBelongsToAnotherTenant()
+    {
+        var (client, channels) = CampaignClient();
+        // Campaign 42 is not acme's: the tenant-scoped load returns null.
+        var campaigns = Substitute.For<CampaignStoreBase>();
+        campaigns.GetCampaignAsync(CampaignTenant, 42, Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<DialerCampaign?>((DialerCampaign?)null));
+        var queues = Substitute.For<IQueueStore>();
+        var logs = new LogRecordCapture();
+        var consumer = NewCampaignConsumer(queues, campaigns, logs);
+
+        await consumer.HandleCampaignStartAsync(client, CampaignStart("campaign", "42"), CancellationToken.None);
+
+        await AssertHungUpWithoutContinueAsync(channels);
+        Warnings(logs).Should().ContainSingle(r => r.Contains(CampaignTenant) && r.Contains("42"));
+    }
+
+    [Fact]
+    public async Task HandleCampaignStartAsync_ShouldHangUp_WhenTheCampaignHasNoTargetQueue()
+    {
+        var (client, channels) = CampaignClient();
+        var logs = new LogRecordCapture();
+        var consumer = NewCampaignConsumer(Substitute.For<IQueueStore>(), CampaignStore(11, targetQueueName: ""), logs);
+
+        await consumer.HandleCampaignStartAsync(client, CampaignStart("campaign", "11"), CancellationToken.None);
+
+        await AssertHungUpWithoutContinueAsync(channels);
+        Warnings(logs).Should().ContainSingle(r => r.Contains(CampaignTenant) && r.Contains("11"));
+    }
+
+    [Fact]
+    public async Task HandleCampaignStartAsync_ShouldHangUp_WhenTheTargetQueueIsNotTheTenants()
+    {
+        var (client, channels) = CampaignClient();
+        var queues = Substitute.For<IQueueStore>();
+        queues.GetByNameAsync(new TenantId(CampaignTenant), "sales", Arg.Any<CancellationToken>())
+            .Returns((Queue?)null);
+        var logs = new LogRecordCapture();
+        var consumer = NewCampaignConsumer(queues, CampaignStore(11, "sales"), logs);
+
+        await consumer.HandleCampaignStartAsync(client, CampaignStart("campaign", "11"), CancellationToken.None);
+
+        await AssertHungUpWithoutContinueAsync(channels);
+        Warnings(logs).Should().ContainSingle(r => r.Contains(CampaignTenant) && r.Contains("11"));
+    }
+
+    [Fact]
+    public async Task HandleCampaignStartAsync_ShouldHangUp_WhenTheTargetQueueIsInactive()
+    {
+        var (client, channels) = CampaignClient();
+        var queues = Substitute.For<IQueueStore>();
+        queues.GetByNameAsync(new TenantId(CampaignTenant), "sales", Arg.Any<CancellationToken>())
+            .Returns(CampaignQueue("sales", isActive: false));
+        var logs = new LogRecordCapture();
+        var consumer = NewCampaignConsumer(queues, CampaignStore(11, "sales"), logs);
+
+        await consumer.HandleCampaignStartAsync(client, CampaignStart("campaign", "11"), CancellationToken.None);
+
+        await AssertHungUpWithoutContinueAsync(channels);
+        Warnings(logs).Should().ContainSingle(r =>
+            r.Contains(CampaignTenant) && r.Contains("11")
+            && r.Message.Contains("inactive", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task HandleCampaignStartAsync_ShouldHangUp_WhenTheDialerStoreIsAbsent()
+    {
+        var (client, channels) = CampaignClient();
+        var logs = new LogRecordCapture();
+        var consumer = NewCampaignConsumer(Substitute.For<IQueueStore>(), campaigns: null, logs);
+
+        await consumer.HandleCampaignStartAsync(client, CampaignStart("campaign", "11"), CancellationToken.None);
+
+        await AssertHungUpWithoutContinueAsync(channels);
+        Warnings(logs).Should().ContainSingle(r => r.Contains(CampaignTenant) && r.Contains("11"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("abc")]
+    public async Task HandleCampaignStartAsync_ShouldHangUp_WhenTheCampaignIdIsMissingOrNotANumber(string? campaignId)
+    {
+        var (client, channels) = CampaignClient();
+        var campaigns = Substitute.For<CampaignStoreBase>();
+        var logs = new LogRecordCapture();
+        var consumer = NewCampaignConsumer(Substitute.For<IQueueStore>(), campaigns, logs);
+        var start = campaignId is null ? CampaignStart("campaign") : CampaignStart("campaign", campaignId);
+
+        await consumer.HandleCampaignStartAsync(client, start, CancellationToken.None);
+
+        await AssertHungUpWithoutContinueAsync(channels);
+        Warnings(logs).Should().ContainSingle(r => r.Contains(CampaignTenant));
+        await campaigns.DidNotReceive().GetCampaignAsync(Arg.Any<string>(), Arg.Any<long>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("campaign", true)]
+    [InlineData("inbound", false)]
+    [InlineData("", false)]
+    public void IsCampaignStart_ShouldMatchOnlyTheCampaignPhase(string phase, bool expected)
+    {
+        var evt = new StasisStartEvent { Args = [phase, "11"], Channel = new AriChannel { Id = CampaignChannel } };
+
+        StasisInboundConsumer.IsCampaignStart(evt).Should().Be(expected);
     }
 
     private static IClusterLeader LeaderStub(bool isLeader)
