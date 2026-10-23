@@ -41,9 +41,23 @@ public static class DialerHostExtensions
     /// Maps the Api's configuration onto the Pro dialer's options. It is public so the host tests can assert the
     /// mapping without building a host.
     /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>The node is <see cref="AsteriskNodeIds.Primary"/>, the key the cluster registers the Api's Asterisk
+    /// server under, so every activation originates on the node that exists (design D1). Pro's own default,
+    /// <c>"default"</c>, names no node here.</item>
+    /// <item>The default trunk name is <c>Asterisk:Outbound:DefaultTrunk</c>, the key
+    /// <see cref="OutboundTrunkExtensions.AddDialableTrunkResolver"/> reads, so a campaign with no matching route and
+    /// no default trunk of its own falls back to the trunk the Api's other calls use (design D2). Unset or blank, it
+    /// leaves that tier empty, as on the Api's side.</item>
+    /// </list>
+    /// </remarks>
     public static void ConfigureDialerOptions(DialerOptions options, IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(configuration);
+
+        options.NodeId = AsteriskNodeIds.Primary;
+        options.DefaultTrunkName = configuration["Asterisk:Outbound:DefaultTrunk"];
     }
 }
