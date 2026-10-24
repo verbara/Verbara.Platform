@@ -16,6 +16,18 @@ internal sealed class InMemoryQueueStore : IQueueStore
         return Task.FromResult(item);
     }
 
+    // Tenant-scoped, exact (ordinal) name; names are not unique, so the active queue wins, then the lowest id —
+    // the order PostgresQueueStore.GetByNameAsync applies (dialer-places-calls-end-to-end, design D11).
+    public Task<Queue?> GetByNameAsync(TenantId tenantId, string name, CancellationToken ct)
+    {
+        var match = _items.Values
+            .Where(q => q.TenantId == tenantId && string.Equals(q.Name, name, StringComparison.Ordinal))
+            .OrderByDescending(q => q.IsActive)
+            .ThenBy(q => q.QueueId.Value, StringComparer.Ordinal)
+            .FirstOrDefault();
+        return Task.FromResult(match);
+    }
+
     public Task<PagedResult<Queue>> ListAsync(TenantId tenantId, PagedQuery query, CancellationToken ct)
     {
         var filtered = _items.Values

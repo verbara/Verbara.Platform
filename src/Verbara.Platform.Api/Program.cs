@@ -35,8 +35,6 @@ using Verbara.Platform.Surveys;
 using Verbara.Platform.Typification;
 using Verbara.Platform.Billing;
 using Verbara.Platform.Core.Reports;
-using Verbara.Sdk.Pro.Dialer.DependencyInjection;
-using Verbara.Sdk.Pro.Dialer.Storage.Postgres.DependencyInjection;
 using Verbara.Sdk.Pro.EventStore.DependencyInjection;
 using Verbara.Sdk.Pro.EventStore.Postgres.DependencyInjection;
 using Verbara.Sdk.Pro.Analytics.DependencyInjection;
@@ -50,7 +48,6 @@ using Verbara.Sdk.Pro.AgentAssist.Storage.Postgres.DependencyInjection;
 using Verbara.Sdk.Pro.Licensing.DependencyInjection;
 using Verbara.Sdk.Resilience.DependencyInjection;
 using Verbara.Sdk.Pro.Storage.Common.Retention.DependencyInjection;
-using Verbara.Sdk.Pro.Dialer.Storage.Postgres.Retention;
 using Verbara.Sdk.Pro.EventStore.Postgres.Retention;
 using Verbara.Sdk.Pro.Analytics.Storage.Postgres.Retention;
 using Verbara.Sdk.Pro.CallAnalytics.Storage.Postgres.Retention;
@@ -1051,10 +1048,7 @@ var dialerConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
     builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres")) ?? "";
 if (!string.IsNullOrEmpty(dialerConnectionString))
 {
-    builder.Services.UsePostgresDialerStorage(ResolveDataSource(dialerConnectionString, "dialer")!);
-    builder.Services.AddProDialer(o => { });
-    builder.Services.AddDialerRetentionTargets();
-    builder.Services.AddHostedService<CampaignMetricsPoller>();
+    builder.Services.AddPlatformDialer(builder.Configuration, ResolveDataSource(dialerConnectionString, "dialer")!);
 }
 
 // ─── Pro.Cluster ─────────────────────────────────────────────────────────────
@@ -1081,7 +1075,7 @@ builder.Services.AddVerbaraCluster(c =>
         };
         nodeOptions.Ari = nodeAri; // null without Asterisk:Ari:BaseUrl; the node's own Stasis app (ADR-0044)
 
-        c.InitialNodes["primary"] = nodeOptions;
+        c.InitialNodes[AsteriskNodeIds.Primary] = nodeOptions;
     }
 });
 var clusterConn = ConnectionStringDefaults.ApplyPoolDefaults(

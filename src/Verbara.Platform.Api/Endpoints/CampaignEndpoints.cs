@@ -1,5 +1,6 @@
 using System.Globalization;
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Dialer.Campaign;
@@ -522,7 +523,7 @@ internal static class CampaignEndpoints
             ContactsDialed: 0,
             CreatedAt: c.CreatedAt);
 
-    private static Campaign MapFromRequest(CreateCampaignRequest req, string tenantId)
+    internal static Campaign MapFromRequest(CreateCampaignRequest req, string tenantId)
     {
         var mode = req.Mode.ToLowerInvariant() switch
         {
@@ -546,6 +547,9 @@ internal static class CampaignEndpoints
             Status = CampaignStatus.Draft,
             Mode = mode,
             TargetQueueName = req.TargetQueueName,
+            // The answered leg enters [dialer-answered], which hands it to the Api's Stasis consumer with the
+            // campaign id (dialer-places-calls-end-to-end, design D11). DialplanContext is in no DTO.
+            DialplanContext = CampaignDialplan.AnsweredContext,
             MaxConcurrentCalls = req.MaxConcurrentCalls,
             PowerRatio = req.PowerRatio ?? 1.0,
             TargetAbandonRate = req.TargetAbandonRate ?? 0.03,

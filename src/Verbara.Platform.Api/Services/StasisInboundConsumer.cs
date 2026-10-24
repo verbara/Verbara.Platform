@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using System.Globalization;
 using Verbara.Platform.Api.Health;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
@@ -10,6 +11,7 @@ using Verbara.Sdk.Ari.Client;
 using Verbara.Sdk.Ari.Events;
 using Verbara.Sdk.Enums;
 using Verbara.Sdk.Pro.Cluster.Leadership;
+using Verbara.Sdk.Pro.Dialer.Campaign;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Verbara.Platform.Api.Services;
@@ -78,6 +80,12 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
     /// <summary>Phase marker emitted by the dialplan as <c>Stasis(verbara,inbound,${EXTEN})</c>.</summary>
     private const string InboundPhase = "inbound";
 
+    /// <summary>
+    /// Phase marker emitted by <c>[dialer-answered]</c> as <c>Stasis(verbara,campaign,${DIALER_CAMPAIGN_ID})</c>
+    /// (dialer-places-calls-end-to-end, design D11).
+    /// </summary>
+    private const string CampaignPhase = "campaign";
+
     /// <summary>Channel variable carrying the owning tenant id (set via ps_endpoints set_var).</summary>
     private const string TenantVariable = "TENANT_ID";
 
@@ -118,6 +126,10 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
     private readonly Meter _meter;
     private readonly Counter<long> _appReplaced;
 
+    // The dialer's campaign store, null when the dialer is not configured (dialer-places-calls-end-to-end, design
+    // D11): the campaign phase loads the answered leg's campaign through it, tenant-scoped.
+    private readonly CampaignStoreBase? _campaigns;
+
     // Guards the connection states, _current and the replacement schedule: the observer (Sdk pump
     // thread) and EvaluateLeadershipAsync (timer thread) both move them.
     private readonly Lock _gate = new();
@@ -140,9 +152,11 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
         IConfiguration configuration,
         ILogger<StasisInboundConsumer> logger,
         TimeProvider? timeProvider = null,
-        IMeterFactory? meterFactory = null)
+        IMeterFactory? meterFactory = null,
+        CampaignStoreBase? campaigns = null)
     {
         _factory = factory;
+        _campaigns = campaigns;
         _leader = leader;
         _didRoutes = didRoutes;
         _queues = queues;
@@ -464,6 +478,114 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
         evt is StasisStartEvent { Args: { Length: > 0 } args }
         && string.Equals(args[0], InboundPhase, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// True only for a <see cref="StasisStartEvent"/> of the campaign phase
+    /// (<c>Stasis(verbara,campaign,${DIALER_CAMPAIGN_ID})</c>, dialer-places-calls-end-to-end design D11).
+    /// </summary>
+    internal static bool IsCampaignStart(AriEvent evt) =>
+        evt is StasisStartEvent { Args: { Length: > 0 } args }
+        && string.Equals(args[0], CampaignPhase, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Continues an answered campaign leg into its campaign's target queue (dialer-places-calls-end-to-end design
+    /// D11): the tenant from the leg's <c>TENANT_ID</c>, the campaign id from the second Stasis argument, the
+    /// campaign loaded tenant-scoped (another tenant's id never reaches this tenant's queue), its
+    /// <c>TargetQueueName</c> looked up by exact name within the tenant, then <c>QUEUE_NAME</c> =
+    /// <c>{tenantId}-{queueName}</c> and a continue into <c>[stasis-queue]</c>. The leg is already up (an
+    /// originate's dialplan runs only after the answer), so it is not answered, and no reason hint is captured (a
+    /// campaign call has no DID; its typification comes from the <c>campaignId</c> metadata, design D10). Every step
+    /// it cannot resolve fails closed: one Warning naming the tenant, the campaign and the reason, then a hangup.
+    /// Never throws.
+    /// </summary>
+    internal async Task HandleCampaignStartAsync(IAriClient client, StasisStartEvent evt, CancellationToken ct)
+    {
+        var channelId = evt.Channel?.Id;
+        if (string.IsNullOrEmpty(channelId))
+        {
+            LogChannelIdMissing();
+            return;
+        }
+
+        try
+        {
+            var tenant = await ReadTenantAsync(client, channelId, ct);
+            if (string.IsNullOrWhiteSpace(tenant))
+            {
+                LogTenantUnresolved(channelId);
+                await SafeHangupAsync(client, channelId, ct);
+                return;
+            }
+
+            var rawCampaignId = evt.Args is { Length: > 1 } args ? args[1] : null;
+            if (!long.TryParse(rawCampaignId, NumberStyles.None, CultureInfo.InvariantCulture, out var campaignId))
+            {
+                await RefuseCampaignAsync(client, channelId, tenant, rawCampaignId ?? "",
+                    "the campaign id is missing or not a number", ct);
+                return;
+            }
+
+            var campaignText = campaignId.ToString(CultureInfo.InvariantCulture);
+            if (_campaigns is null)
+            {
+                await RefuseCampaignAsync(client, channelId, tenant, campaignText,
+                    "the dialer is not configured on this host (no campaign store)", ct);
+                return;
+            }
+
+            var campaign = await _campaigns.GetCampaignAsync(tenant, campaignId, ct);
+            if (campaign is null)
+            {
+                await RefuseCampaignAsync(client, channelId, tenant, campaignText,
+                    "the tenant has no such campaign", ct);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(campaign.TargetQueueName))
+            {
+                await RefuseCampaignAsync(client, channelId, tenant, campaignText,
+                    "the campaign has no target queue", ct);
+                return;
+            }
+
+            // A tenant-scoped lookup by exact name, never a page of ListAsync: a target sorting past the first page
+            // would otherwise be hung up.
+            var queue = await _queues.GetByNameAsync(new TenantId(tenant), campaign.TargetQueueName, ct);
+            if (queue is null)
+            {
+                await RefuseCampaignAsync(client, channelId, tenant, campaignText,
+                    $"the target queue '{campaign.TargetQueueName}' is not the tenant's", ct);
+                return;
+            }
+
+            // The realtime sync publishes only active queues (PlatformDesiredStateProvider), so Queue() would name a
+            // realtime queue Asterisk does not have.
+            if (!queue.IsActive)
+            {
+                await RefuseCampaignAsync(client, channelId, tenant, campaignText,
+                    $"the target queue '{queue.Name}' is inactive", ct);
+                return;
+            }
+
+            var asteriskQueue = $"{tenant}-{queue.Name}";
+            await client.Channels.SetVariableAsync(channelId, QueueNameVariable, asteriskQueue, ct);
+            await client.Channels.ContinueAsync(
+                channelId, context: StasisQueueContext, extension: QueueEntryExtension, priority: 1, label: null, ct);
+            LogCampaignRoutedToQueue(channelId, tenant, campaignText, asteriskQueue);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            LogCampaignHandleError(channelId, ex.Message);
+            await SafeHangupAsync(client, channelId, ct);
+        }
+    }
+
+    private async Task RefuseCampaignAsync(
+        IAriClient client, string channelId, string tenant, string campaignId, string reason, CancellationToken ct)
+    {
+        LogCampaignRefused(channelId, tenant, campaignId, reason);
+        await SafeHangupAsync(client, channelId, ct);
+    }
+
     /// <summary>Observer callback — dispatched on the connection's ARI WS thread.</summary>
     private void OnEvent(Connection connection, AriEvent value)
     {
@@ -473,21 +595,27 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
             return;
         }
 
-        if (!IsInboundStart(value))
+        // Both phases share the per-record dispatch (ADR-0044 design D4): the campaign phase (design D11) runs on
+        // the client of the connection its StasisStart arrived on, counted in that connection's drain.
+        var inbound = IsInboundStart(value);
+        if (!inbound && !IsCampaignStart(value))
             return;
 
-        // Fire-and-forget with its own guard (HandleStasisStartAsync never throws), on the client of
+        // Fire-and-forget with its own guard (neither phase handler throws), on the client of
         // the connection the call arrived on — never a newer one — and counted so a retiring
         // connection keeps its REST client until the handler is done.
         connection.HandlerStarted();
-        _ = RunHandlerAsync(connection, (StasisStartEvent)value);
+        _ = RunHandlerAsync(connection, (StasisStartEvent)value, inbound);
     }
 
-    private async Task RunHandlerAsync(Connection connection, StasisStartEvent evt)
+    private async Task RunHandlerAsync(Connection connection, StasisStartEvent evt, bool inbound)
     {
         try
         {
-            await HandleStasisStartAsync(connection.Client, evt, _stoppingToken);
+            if (inbound)
+                await HandleStasisStartAsync(connection.Client, evt, _stoppingToken);
+            else
+                await HandleCampaignStartAsync(connection.Client, evt, _stoppingToken);
         }
         finally
         {
@@ -789,6 +917,19 @@ internal sealed partial class StasisInboundConsumer : BackgroundService
     [LoggerMessage(Level = LogLevel.Error,
         Message = "[STASIS] Channel {ChannelId}: error handling inbound call: {Reason}")]
     private partial void LogHandleError(string channelId, string reason);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[STASIS] Channel {ChannelId} (tenant {TenantId}, campaign {CampaignId}): {Reason} — hanging up.")]
+    private partial void LogCampaignRefused(string channelId, string tenantId, string campaignId, string reason);
+
+    // The lab's P8 reads this line (dialer-places-calls-end-to-end task 4.2): keep its shape.
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "[STASIS] Channel {ChannelId} (tenant {TenantId}, campaign {CampaignId}) → queue '{Queue}'")]
+    private partial void LogCampaignRoutedToQueue(string channelId, string tenantId, string campaignId, string queue);
+
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "[STASIS] Channel {ChannelId}: error handling answered campaign call: {Reason}")]
+    private partial void LogCampaignHandleError(string channelId, string reason);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[STASIS] Channel {ChannelId}: hangup failed: {Reason}")]

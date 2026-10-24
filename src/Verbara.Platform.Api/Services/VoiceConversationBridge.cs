@@ -55,6 +55,24 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     /// <c>GetVar</c> when the Conversation is created and persisted as <c>Metadata["reasonPath"]</c>.
     /// </summary>
     private const string ReasonVariable = "VERBARA_REASON";
+    /// <summary>
+    /// Channel var Pro's dialer sets on every campaign originate (the campaign's id). Read at
+    /// <c>CallStarted</c> on the originated leg and stamped on the session under <see cref="CampaignIdKey"/>,
+    /// so the queue path marks the campaign call's Conversation (design D10).
+    /// </summary>
+    private const string CampaignVariable = "DIALER_CAMPAIGN_ID";
+    /// <summary>
+    /// Channel var Pro's dialer sets on every campaign originate: the normalized number it dialed, i.e. the
+    /// customer. The session's caller id is the campaign's own outbound number (or empty), never the customer's.
+    /// </summary>
+    private const string DialedNumberVariable = "DIALER_NUMBER";
+    /// <summary>
+    /// Session and Conversation metadata key of the campaign id. The Conversation key is the one the
+    /// typification resolver reads (<c>DefaultTypificationResolver</c>).
+    /// </summary>
+    private const string CampaignIdKey = "campaignId";
+    /// <summary>Session metadata key of a campaign call's dialed number (read from <see cref="DialedNumberVariable"/>).</summary>
+    private const string DialedNumberKey = "dialedNumber";
     private const string AnonymousCaller = "anonymous";
 
     private readonly ICallSessionManager _sessions;
@@ -207,12 +225,36 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         if (existing is not null)
             return;
 
+        // The caller leg: the inbound trunk leg, or a campaign call's originated trunk leg. The tenant
+        // resolution read TENANT_ID off it, and the reason and dialer vars ride alongside it.
+        var callerChannel = session.Participants.FirstOrDefault(p => p.Role == ParticipantRole.Caller)?.Channel;
+
+        // A campaign call (stamped at CallStarted) belongs to the customer the campaign dialed. Its caller
+        // id is the campaign's own outbound number or empty (copied once at Newchannel), so the contact is
+        // resolved from DIALER_NUMBER, as click-to-dial resolves its dialed number (design D10). A read that
+        // yields nothing falls back to the caller-id rule below, with one Warning.
+        var campaignId = CampaignIdOf(session);
+        string? dialedNumber = null;
+        if (campaignId is not null)
+        {
+            if (!string.IsNullOrEmpty(callerChannel))
+                dialedNumber = await ReadChannelVarAsync(callerChannel, DialedNumberVariable).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(dialedNumber))
+                session.SetMetadata(DialedNumberKey, dialedNumber);
+            else
+            {
+                dialedNumber = null;
+                LogCampaignDialedNumberUnread(evt.SessionId, campaignId, tenant);
+            }
+        }
+
         // Withheld / anonymous caller-id (CLIR) has no number to identify the caller. By design for
         // 3B.0 these calls share one per-tenant "anonymous" voice Contact (the conventional CCaaS
         // bucket) — the Conversations stay distinct (correlated by the per-call voice_linked_id), only
         // the contact identity is shared. Per-caller separation for withheld-CID is deferred to 3B.1
         // (screen-pop / contact UX). Tenant-scoped, so no cross-tenant bleed.
-        var callerNumber = string.IsNullOrWhiteSpace(session.CallerIdNum) ? AnonymousCaller : session.CallerIdNum!;
+        var callerNumber = dialedNumber
+                           ?? (string.IsNullOrWhiteSpace(session.CallerIdNum) ? AnonymousCaller : session.CallerIdNum!);
         var contact = await _contacts.ResolveAsync(tenantId, new ChannelAddress(ChannelType.Voice, callerNumber), CancellationToken.None).ConfigureAwait(false);
 
         var conversation = new Conversation
@@ -232,13 +274,16 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         // (the disposition form falls back to a manual reason). Folded into the create's SaveAsync so
         // the metadata and the row commit atomically. The caller leg is the same channel the tenant
         // resolution read TENANT_ID from (the inbound trunk leg), so the reason var rides alongside it.
-        var callerChannel = session.Participants.FirstOrDefault(p => p.Role == ParticipantRole.Caller)?.Channel;
         if (!string.IsNullOrEmpty(callerChannel))
         {
             var reasonPath = await ResolveReasonFromChannelAsync(callerChannel, CancellationToken.None).ConfigureAwait(false);
             if (!string.IsNullOrEmpty(reasonPath))
                 conversation.SetMetadata(TypificationMetadataKeys.ReasonPath, reasonPath);
         }
+
+        // The campaign mark rides the same create SaveAsync; it also selects the campaign's typification binding.
+        if (campaignId is not null)
+            conversation.SetMetadata(CampaignIdKey, campaignId);
 
         await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
 
@@ -305,7 +350,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
                 nameof(ChannelType.Voice),
                 conversation.ContactId.Value,
                 contactName,
-                session.CallerIdNum ?? "",
+                DialedNumberOf(session) ?? session.CallerIdNum ?? "",
                 session.LinkedId,
                 queueName,
                 queueAutoAnswer));
@@ -523,12 +568,17 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     }
 
     /// <summary>
-    /// Resolves the customer's callable number for a callback: the live SIP <see cref="CallSession.CallerIdNum"/>
-    /// when it's a real number, else the contact's stored Voice <see cref="ChannelAddress"/>. Best-effort —
-    /// a contact-store fault must never throw out of the handler (StopHost), so it logs + returns null.
+    /// Resolves the customer's callable number for a callback: a campaign call's dialed number when the queue
+    /// path stamped it (the caller id there is the campaign's own outbound number), else the live SIP
+    /// <see cref="CallSession.CallerIdNum"/> when it's a real number, else the contact's stored Voice
+    /// <see cref="ChannelAddress"/>. Best-effort — a contact-store fault must never throw out of the handler
+    /// (StopHost), so it logs + returns null.
     /// </summary>
     private async Task<string?> ResolveCallbackNumberAsync(TenantId tenantId, CallSession session, EntityId contactId)
     {
+        if (DialedNumberOf(session) is { } dialed)
+            return dialed;
+
         if (!string.IsNullOrWhiteSpace(session.CallerIdNum))
             return session.CallerIdNum;
 
@@ -758,7 +808,13 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
 
         var correlationId = await GetChannelVarAsync(server, channel, OutboundIdVariable).ConfigureAwait(false);
         if (string.IsNullOrEmpty(correlationId))
-            return; // not an outbound click-to-dial — the var is only set by the dial service
+        {
+            // Not an outbound click-to-dial — the var is only set by the dial service. A campaign call carries
+            // the campaign id the dialer set on the originate instead: stamp it so the queue path marks the
+            // Conversation (design D10). A failed or empty read leaves the session unmarked.
+            await StampCampaignAsync(server, session, channel).ConfigureAwait(false);
+            return;
+        }
 
         var tenant = await GetChannelVarAsync(server, channel, TenantVariable).ConfigureAwait(false);
         if (string.IsNullOrEmpty(tenant))
@@ -815,6 +871,36 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     }
 
     /// <summary>
+    /// Reads <c>DIALER_CAMPAIGN_ID</c> on the call's first leg at <c>CallStarted</c>, while the leg is live, and
+    /// stamps a non-empty value on the session (<see cref="CallSession.SetMetadata"/>). Best-effort: a failed or
+    /// empty read is ignored, never thrown.
+    /// </summary>
+    private async Task StampCampaignAsync(VerbaraServer server, CallSession session, string channel)
+    {
+        var campaignId = await GetChannelVarAsync(server, channel, CampaignVariable).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(campaignId))
+            session.SetMetadata(CampaignIdKey, campaignId);
+    }
+
+    /// <summary>The campaign id stamped on the session at <c>CallStarted</c>, or <see langword="null"/>.</summary>
+    private static string? CampaignIdOf(CallSession session) =>
+        session.Metadata.TryGetValue(CampaignIdKey, out var id) && !string.IsNullOrWhiteSpace(id) ? id : null;
+
+    /// <summary>A campaign call's dialed number stamped by the queue path, or <see langword="null"/>.</summary>
+    private static string? DialedNumberOf(CallSession session) =>
+        session.Metadata.TryGetValue(DialedNumberKey, out var number) && !string.IsNullOrWhiteSpace(number) ? number : null;
+
+    /// <summary>
+    /// Reads <paramref name="variable"/> on <paramref name="channel"/> through the primary AMI server.
+    /// Returns <see langword="null"/> when AMI is unavailable, the read fails or the variable is unset.
+    /// </summary>
+    private async Task<string?> ReadChannelVarAsync(string channel, string variable)
+    {
+        var server = _serverPool.GetServer(AsteriskNodeIds.Primary);
+        return server is null ? null : await GetChannelVarAsync(server, channel, variable).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Reads <paramref name="variable"/> on <paramref name="channel"/> via an AMI GetVar. Returns the
     /// value, or <see langword="null"/> when AMI fails / the variable is unset. (Distinct from
     /// <see cref="ResolveTenantFromChannelAsync"/>, which also stamps the tenant hook.)
@@ -845,6 +931,10 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     [LoggerMessage(Level = LogLevel.Information,
         Message = "[VOICE-CONV] Created voice Conversation {ConversationId} for tenant {TenantId} (call {LinkedId}).")]
     private partial void LogConversationCreated(string conversationId, string tenantId, string linkedId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[VOICE-CONV] Session {SessionId}: campaign {CampaignId} call of tenant {TenantId} — DIALER_NUMBER could not be read; attaching the Conversation by caller id.")]
+    private partial void LogCampaignDialedNumberUnread(string sessionId, string campaignId, string tenantId);
 
     [LoggerMessage(Level = LogLevel.Information,
         Message = "[VOICE-CONV] Linked OUTBOUND Conversation {ConversationId} for tenant {TenantId} to call {LinkedId}.")]

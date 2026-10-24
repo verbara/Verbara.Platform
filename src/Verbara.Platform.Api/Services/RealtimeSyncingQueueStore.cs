@@ -38,6 +38,9 @@ internal sealed class RealtimeSyncingQueueStore : IQueueStore
     public Task<Queue?> GetByIdAsync(TenantId tenantId, EntityId queueId, CancellationToken ct)
         => _inner.GetByIdAsync(tenantId, queueId, ct);
 
+    public Task<Queue?> GetByNameAsync(TenantId tenantId, string name, CancellationToken ct)
+        => _inner.GetByNameAsync(tenantId, name, ct);
+
     public Task<PagedResult<Queue>> ListAsync(TenantId tenantId, PagedQuery query, CancellationToken ct)
         => _inner.ListAsync(tenantId, query, ct);
 
