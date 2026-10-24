@@ -46,16 +46,14 @@ public sealed class DncListEndpointsTests : IClassFixture<UnifiedPlatformApiFact
     }
 
     [Fact]
-    public async Task CreateDncList_ShouldReturn201_WithGlobalScope_WhenScopeIsGlobal()
+    public async Task CreateDncList_ShouldReturn403_WhenScopeIsGlobal()
     {
         var name = $"dnc-{Guid.NewGuid():N}";
         var body = JsonContent.Create(new { name, scope = "Global" });
 
         var response = await _client.PostAsync(BasePath, body);
 
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
-        json["scope"]!.GetValue<string>().Should().Be("Global");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
     [Fact]
@@ -96,14 +94,14 @@ public sealed class DncListEndpointsTests : IClassFixture<UnifiedPlatformApiFact
     {
         var id = await CreateListAsync();
         var newName = $"renamed-{Guid.NewGuid():N}";
-        var body = JsonContent.Create(new { name = newName, scope = "Global" });
+        var body = JsonContent.Create(new { name = newName, scope = "Tenant" });
 
         var response = await _client.PutAsync($"{BasePath}/{id}", body);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
         json["name"]!.GetValue<string>().Should().Be(newName);
-        json["scope"]!.GetValue<string>().Should().Be("Global");
+        json["scope"]!.GetValue<string>().Should().Be("Tenant");
     }
 
     [Fact]
@@ -160,13 +158,11 @@ public sealed class DncListEndpointsTests : IClassFixture<UnifiedPlatformApiFact
     }
 
     [Fact]
-    public async Task ListEntries_ShouldReturn200_WithEmptyArray_WhenListUnknown()
+    public async Task ListEntries_ShouldReturn404_WhenListUnknown()
     {
         var response = await _client.GetAsync($"{BasePath}/888888888/entries");
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var items = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsArray();
-        items.Count.Should().Be(0);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]

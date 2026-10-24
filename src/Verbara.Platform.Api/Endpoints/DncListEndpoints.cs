@@ -1,4 +1,6 @@
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Dialer.Compliance;
@@ -22,11 +24,13 @@ internal static class DncListEndpoints
         // CRUD
         group.MapGet("/", ListDncLists);
         group.MapGet("/{id:long}", GetDncList);
-        group.MapPost("/", CreateDncList);
-        group.MapPut("/{id:long}", UpdateDncList);
+        // A Global-scope list applies to every tenant's campaigns, so only the host operator makes one; this group
+        // admits Customer tenants only (RequireOperationalTenant), so it refuses the Global scope with 403.
+        group.MapPost("/", CreateDncList).Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
+        group.MapPut("/{id:long}", UpdateDncList).Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapDelete("/{id:long}", DeleteDncList);
 
-        // Entries
+        // Entries — each answers 404 when the list is not one of the caller's tenant.
         group.MapGet("/{id:long}/entries", ListEntries);
         group.MapPost("/{id:long}/entries", AddEntry);
         group.MapDelete("/{id:long}/entries/{phone}", RemoveEntry);
@@ -61,7 +65,7 @@ internal static class DncListEndpoints
         return item is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDto(item));
     }
 
-    private static async Task<IResult> CreateDncList(
+    private static async Task<Results<Created<DncListDto>, JsonHttpResult<ErrorResponse>>> CreateDncList(
         HttpContext context,
         [FromBody] CreateDncListRequest body,
         DncListStoreBase store,
@@ -72,10 +76,11 @@ internal static class DncListEndpoints
         var list = new DncList
         {
             Name = body.Name,
-            Scope = body.Scope is not null && Enum.TryParse<DncListScope>(body.Scope, true, out var s)
-                ? s : DncListScope.Tenant,
+            Scope = ParseScope(body.Scope) ?? DncListScope.Tenant,
             CreatedAt = DateTimeOffset.UtcNow,
         };
+        if (list.Scope == DncListScope.Global)
+            return GlobalScopeRefused();
         var id = await store.CreateAsync(list, tenantId, ct);
         list.Id = id;
         await audit.RecordAsync(
@@ -89,10 +94,10 @@ internal static class DncListEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Created($"/admin/dnc-lists/{id}", MapToDto(list));
+        return TypedResults.Created($"/admin/dnc-lists/{id}", MapToDto(list));
     }
 
-    private static async Task<Results<Ok<DncListDto>, NotFound>> UpdateDncList(
+    private static async Task<Results<Ok<DncListDto>, NotFound, JsonHttpResult<ErrorResponse>>> UpdateDncList(
         long id,
         HttpContext context,
         [FromBody] UpdateDncListRequest body,
@@ -100,6 +105,10 @@ internal static class DncListEndpoints
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
+        var scope = ParseScope(body.Scope);
+        if (scope == DncListScope.Global)
+            return GlobalScopeRefused();
+
         var tenantId = GetTenantId(context);
         var existing = await store.GetAsync(id, tenantId, ct);
         if (existing is null) return TypedResults.NotFound();
@@ -107,8 +116,8 @@ internal static class DncListEndpoints
         var before = MapToDto(existing);
 
         if (body.Name is not null) existing.Name = body.Name;
-        if (body.Scope is not null && Enum.TryParse<DncListScope>(body.Scope, true, out var s))
-            existing.Scope = s;
+        if (scope is { } newScope)
+            existing.Scope = newScope;
 
         await store.UpdateAsync(existing, tenantId, ct);
         await audit.RecordAsync(
@@ -151,7 +160,7 @@ internal static class DncListEndpoints
 
     // ─── Entry Handlers ───────────────────────────────────────────────────────
 
-    private static async Task<Ok<List<DncEntryDto>>> ListEntries(
+    private static async Task<Results<Ok<List<DncEntryDto>>, NotFound>> ListEntries(
         long id,
         HttpContext context,
         [FromServices] DncListStoreBase store,
@@ -161,10 +170,12 @@ internal static class DncListEndpoints
     {
         var tenantId = GetTenantId(context);
         var entries = await store.ListEntriesAsync(id, tenantId, offset, limit, ct);
-        return TypedResults.Ok((entries ?? []).Select(MapEntryToDto).ToList());
+        return entries is null
+            ? TypedResults.NotFound()
+            : TypedResults.Ok(entries.Select(MapEntryToDto).ToList());
     }
 
-    private static async Task<IResult> AddEntry(
+    private static async Task<Results<Created<DncEntryDto>, NotFound>> AddEntry(
         long id,
         HttpContext context,
         [FromBody] AddDncEntryRequest body,
@@ -180,11 +191,12 @@ internal static class DncListEndpoints
             CreatedAt = DateTimeOffset.UtcNow,
             ExpiresAt = body.ExpiresAt.ToUtcInstant(),
         };
-        await store.AddEntryAsync(id, tenantId, entry, ct);
-        return Results.Created($"/admin/dnc-lists/{id}/entries/{body.PhoneNumber}", MapEntryToDto(entry));
+        if (!await store.AddEntryAsync(id, tenantId, entry, ct))
+            return TypedResults.NotFound();
+        return TypedResults.Created($"/admin/dnc-lists/{id}/entries/{body.PhoneNumber}", MapEntryToDto(entry));
     }
 
-    private static async Task<IResult> RemoveEntry(
+    private static async Task<Results<NoContent, NotFound>> RemoveEntry(
         long id,
         string phone,
         HttpContext context,
@@ -192,13 +204,14 @@ internal static class DncListEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        await store.RemoveEntryAsync(id, phone, tenantId, ct);
-        return Results.NoContent();
+        return await store.RemoveEntryAsync(id, phone, tenantId, ct)
+            ? TypedResults.NoContent()
+            : TypedResults.NotFound();
     }
 
     // ─── Import Handler ──────────────────────────────────────────────────────
 
-    private static async Task<Results<Ok<DncImportResultDto>, BadRequest<string>>> ImportCsv(
+    private static async Task<Results<Ok<DncImportResultDto>, BadRequest<string>, NotFound>> ImportCsv(
         long id,
         HttpContext context,
         DncListStoreBase store,
@@ -235,13 +248,14 @@ internal static class DncListEndpoints
             });
         }
 
-        var imported = await store.BulkImportAsync(id, tenantId, entries, ct) ?? 0;
+        if (await store.BulkImportAsync(id, tenantId, entries, ct) is not { } imported)
+            return TypedResults.NotFound();
         return TypedResults.Ok(new DncImportResultDto(imported, entries.Count - imported));
     }
 
     // ─── Check Handler ───────────────────────────────────────────────────────
 
-    private static async Task<Ok<DncCheckResultDto>> CheckNumber(
+    private static async Task<Results<Ok<DncCheckResultDto>, NotFound>> CheckNumber(
         long id,
         string phone,
         HttpContext context,
@@ -249,8 +263,9 @@ internal static class DncListEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var exists = await store.CheckNumberAsync(id, phone, tenantId, ct) ?? false;
-        return TypedResults.Ok(new DncCheckResultDto(exists));
+        return await store.CheckNumberAsync(id, phone, tenantId, ct) is { } exists
+            ? TypedResults.Ok(new DncCheckResultDto(exists))
+            : TypedResults.NotFound();
     }
 
     // ─── Mapping Helpers ─────────────────────────────────────────────────────
@@ -262,6 +277,16 @@ internal static class DncListEndpoints
         new(e.Id, e.PhoneNumber, e.Reason, e.CreatedAt, e.ExpiresAt);
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    /// <summary>The scope a request names, or <see langword="null"/> when it names none or an unknown one.</summary>
+    private static DncListScope? ParseScope(string? scope) =>
+        scope is not null && Enum.TryParse<DncListScope>(scope, true, out var parsed) ? parsed : null;
+
+    private static JsonHttpResult<ErrorResponse> GlobalScopeRefused() =>
+        TypedResults.Json(
+            new ErrorResponse("Only the host operator can create or update a Global-scope DNC list."),
+            ApiJsonContext.Default.ErrorResponse,
+            statusCode: StatusCodes.Status403Forbidden);
 
     private static string GetTenantId(HttpContext context)
     {

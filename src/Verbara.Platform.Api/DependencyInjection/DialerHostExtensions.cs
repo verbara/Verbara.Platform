@@ -4,6 +4,7 @@ using Verbara.Sdk.Pro.Dialer;
 using Verbara.Sdk.Pro.Dialer.DependencyInjection;
 using Verbara.Sdk.Pro.Dialer.Storage.Postgres.DependencyInjection;
 using Verbara.Sdk.Pro.Dialer.Storage.Postgres.Retention;
+using Verbara.Sdk.Pro.MultiTenant;
 
 namespace Verbara.Platform.Api.DependencyInjection;
 
@@ -18,8 +19,9 @@ public static class DialerHostExtensions
 {
     /// <summary>
     /// Registers the Postgres dialer storage on <paramref name="dialerDataSource"/>, the Pro dialer engine with the
-    /// options <see cref="ConfigureDialerOptions"/> maps from <paramref name="configuration"/>, the dialer retention
-    /// targets and the <see cref="CampaignMetricsPoller"/>.
+    /// options <see cref="ConfigureDialerOptions"/> maps from <paramref name="configuration"/>, the host tenant as the
+    /// platform DNC tenant (<see cref="AddPlatformDncTenant"/>), the dialer retention targets and the
+    /// <see cref="CampaignMetricsPoller"/>.
     /// </summary>
     public static IServiceCollection AddPlatformDialer(
         this IServiceCollection services,
@@ -32,8 +34,30 @@ public static class DialerHostExtensions
 
         services.UsePostgresDialerStorage(dialerDataSource);
         services.AddProDialer(o => ConfigureDialerOptions(o, configuration));
+        services.AddPlatformDncTenant();
         services.AddDialerRetentionTargets();
         services.AddHostedService<CampaignMetricsPoller>();
+        return services;
+    }
+
+    /// <summary>
+    /// Names the host tenant as the dialer's platform DNC tenant, whose Global-scope DNC lists apply to every tenant's
+    /// campaigns: sets <see cref="DialerOptions.PlatformDncTenantIdResolver"/> to a delegate over
+    /// <see cref="ITenantStore.GetHostTenantAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// The host tenant is created by <c>/api/setup</c> after the first start, so the static
+    /// <see cref="DialerOptions.PlatformDncTenantId"/> cannot name it. The delegate answers <see langword="null"/> until
+    /// then, and Pro calls it at the first DNC check, never while the host starts; building the options reads nothing.
+    /// </remarks>
+    public static IServiceCollection AddPlatformDncTenant(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddOptions<DialerOptions>()
+            .Configure<IServiceProvider>((options, provider) =>
+                options.PlatformDncTenantIdResolver = async ct =>
+                    (await provider.GetRequiredService<ITenantStore>().GetHostTenantAsync(ct).ConfigureAwait(false))
+                        ?.TenantId);
         return services;
     }
 
