@@ -161,7 +161,7 @@ internal static class DncListEndpoints
     {
         var tenantId = GetTenantId(context);
         var entries = await store.ListEntriesAsync(id, tenantId, offset, limit, ct);
-        return TypedResults.Ok(entries.Select(MapEntryToDto).ToList());
+        return TypedResults.Ok((entries ?? []).Select(MapEntryToDto).ToList());
     }
 
     private static async Task<IResult> AddEntry(
@@ -235,7 +235,7 @@ internal static class DncListEndpoints
             });
         }
 
-        var imported = await store.BulkImportAsync(id, tenantId, entries, ct);
+        var imported = await store.BulkImportAsync(id, tenantId, entries, ct) ?? 0;
         return TypedResults.Ok(new DncImportResultDto(imported, entries.Count - imported));
     }
 
@@ -249,7 +249,7 @@ internal static class DncListEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var exists = await store.CheckNumberAsync(id, phone, tenantId, ct);
+        var exists = await store.CheckNumberAsync(id, phone, tenantId, ct) ?? false;
         return TypedResults.Ok(new DncCheckResultDto(exists));
     }
 
