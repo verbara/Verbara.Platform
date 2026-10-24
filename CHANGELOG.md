@@ -9,6 +9,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.31.0] - 2026-10-24
+
+Minor release, the **dialer end to end** train. The outbound dialer now places campaign calls through each campaign's
+own trunk, records every call's outcome, releases its slot, retries contacts per strategy and routes an answered call
+to the campaign's target queue (Pro `2.20.2-pro`, migration V003 at start-up). With more than one Api replica, calls
+entering Stasis are handled again: only the voice leader registers the dialplan's Stasis app. Read **Upgrading**
+before deploying: each campaign needs a target queue, and the dialplan file changes.
+
 ### Upgrading
 
 - **The outbound dialer starts placing real calls (see Fixed).** At start-up, every Active campaign is dialed by
@@ -16,32 +24,32 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ConnectionStrings:Postgres`, is set) and is a voice-AMI pod, each replica within its own budgets. A campaign's
   total concurrency is therefore up to N × `MaxConcurrentCalls` for N such replicas, so on a trunk with a tight
   channel limit keep `MaxConcurrentCalls` at or below that limit divided by N. Pause any Active campaign that should
-  not call its contacts yet before you upgrade. (#N)
+  not call its contacts yet before you upgrade. (#469)
 
 - **Pro migration V003 runs at start-up on the dialer database.** `UsePostgresDialerStorage` adds
   `dialer_contacts.claim_token` and `call_attempts.action_id`, with a partial unique index on `action_id`.
-  Additive and idempotent; Platform itself has no new migration. (#N)
+  Additive and idempotent; Platform itself has no new migration. (#469)
 
 - **Pull the repository for the dialplan; no image rebuild is needed.** `docker/asterisk-config/extensions.conf`
   and the demo override `docker/demo/demo-overrides/extensions.conf`, which the compose stacks bind-mount, gain the
-  `[dialer-answered]` context (see Fixed). Asterisk reads them on its next start or `dialplan reload`. (#N)
+  `[dialer-answered]` context (see Fixed). Asterisk reads them on its next start or `dialplan reload`. (#469)
 
 - **Give each campaign a target queue.** A campaign without `targetQueueName` has its answered calls hung up at the
-  answer. Set it through the API (`targetQueueName` on create or update) or, from console **vX.Y.Z-web**
-  (Platform.Web #N) on, in the campaign wizard and the edit form; consoles before it send no target queue. (#N)
+  answer. Set it through the API (`targetQueueName` on create or update) or, from console **v3.25.2-web**
+  (Platform.Web #459) on, in the campaign wizard and the edit form; consoles before it send no target queue. (#469)
 
 - **No configuration change is required for the Stasis app fix below.** Every shipped compose file and the Helm chart
   now set `Asterisk__Ari__NodeApplication: verbara-node`; any other deployment gets `<Asterisk:Ari:Application>-node`
   by default. Only a deployment that sets `Asterisk__Ari__NodeApplication` equal to `Asterisk__Ari__Application`
-  (case-insensitive) stops at start-up, with an error naming both settings.
+  (case-insensitive) stops at start-up, with an error naming both settings. (#465)
 
 - **A call that enters Stasis before the voice leader's consumer has registered the app is now hung up at once**
   instead of being held in silence: at start-up, or between losing a leader and the next one connecting. Asterisk
   logs `Stasis app 'verbara' doesn't exist` (WARNING) or `Stasis app 'verbara' not active` (ERROR), and the dialplan's
-  `Hangup()` ends the call. Alerts on Stasis failures should match both lines.
+  `Hangup()` ends the call. Alerts on Stasis failures should match both lines. (#465)
 
 - **The Helm chart in this repository still pins image `v2.6.0`, which has no Stasis consumer.** The new value is
-  inert there; the chart gets this fix only once its image is raised to a release that contains it.
+  inert there; the chart gets this fix only once its image is raised to a release that contains it. (#465)
 
 ### Fixed
 
@@ -82,7 +90,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     has its answered calls hung up at the answer, with a warning naming the tenant, the campaign and the reason.
     A customer who hangs up while waiting for an agent is recorded Abandoned and called again after the retry
     interval, up to the maximum attempts. The API does not pace dialing on agent availability: staff the queue.
-    The console sets `targetQueueName` from **vX.Y.Z-web** (Platform.Web #N); earlier consoles sent a field the
+    The console sets `targetQueueName` from **v3.25.2-web** (Platform.Web #459); earlier consoles sent a field the
     API ignores.
   - **An answered campaign call that reaches an agent queue becomes a voice Conversation**, as a click-to-dial call
     does: it follows the inbound queue path (agent assignment, abandon classification, supervisor events). The
@@ -100,7 +108,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     rolling deploy does not redial a customer who may still be on the line. A replica cut off from the database
     alone for `StaleAfter` is treated as dead by its peers, and its calls in progress can be dialed once more. A
     record whose write fails is kept and retried while the process runs. A removed campaign's calls in progress
-    keep their slots until they end. (#N)
+    keep their slots until they end. (#469)
 
 - **With more than one Api replica, calls entering Stasis are handled again.** Every replica's per-node ARI client
   registered the dialplan's Stasis app (`Asterisk:Ari:Application`, `verbara`) as well as the voice leader's
@@ -119,7 +127,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Verbara.Sdk.Pro `2.19.0-pro` → `2.20.2-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged.
   The dialer's busy fix (see Fixed) shipped in `2.20.1-pro`; `2.20.2-pro` changes no source. Three transitive
   floors move with it, `Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions`, `System.IO.Hashing` and
-  `Microsoft.Extensions.Diagnostics.HealthChecks`, from 10.0.12 to 10.0.13. (#N)
+  `Microsoft.Extensions.Diagnostics.HealthChecks`, from 10.0.12 to 10.0.13. (#469)
+- `StackExchange.Redis` 3.3.1 → 3.4.5. (#454)
+- `Scalar.AspNetCore` 2.17.14 → 2.18.0. (#453)
+- `AWSSDK.S3` 4.0.104.2 → 4.0.104.4. (#452)
+- `Microsoft.Extensions.TimeProvider.Testing` 10.10.0 → 10.11.0 (test projects only). (#455)
+- GitHub Actions: `github/codeql-action` 4.38.3 → 4.39.0. (#463)
 
 ## [2.30.0] - 2026-10-18
 
