@@ -1,4 +1,5 @@
 using Verbara.Platform.Api.Middleware;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Dialer.Campaign;
 using Verbara.Sdk.Pro.Licensing;
@@ -18,13 +19,15 @@ internal static class CallAttemptEndpoints
         group.MapPut("/{id:long}/disposition", UpdateDisposition);
     }
 
-    private static async Task<IResult> UpdateDisposition(
+    /// <summary>Sets the disposition of call attempt <paramref name="id"/>; 404 when it is no attempt of the caller's tenant.</summary>
+    private static async Task<Results<NoContent, NotFound>> UpdateDisposition(
         long id, UpdateCallAttemptDispositionRequest request,
         HttpContext context, CampaignStoreBase store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        await store.UpdateCallAttemptDispositionAsync(tenantId, id, request.DispositionId, request.AgentComment, ct);
-        return Results.NoContent();
+        return await store.TryUpdateCallAttemptDispositionAsync(tenantId, id, request.DispositionId, request.AgentComment, ct)
+            ? TypedResults.NoContent()
+            : TypedResults.NotFound();
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────

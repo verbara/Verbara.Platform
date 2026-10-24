@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Verbara.Platform.Api.DependencyInjection;
 using Verbara.Platform.Api.Services;
@@ -10,6 +11,8 @@ using Verbara.Sdk.Pro.Dialer.DependencyInjection;
 using Verbara.Sdk.Pro.Dialer.Execution;
 using Verbara.Sdk.Pro.Dialer.Models;
 using Verbara.Sdk.Pro.Dialer.Routing;
+using Verbara.Sdk.Pro.MultiTenant;
+using Verbara.Platform.Storage.InMemory;
 
 // CA2012: NSubstitute records the ValueTask-returning store calls for `.Returns(...)` matching; the
 // ValueTask is consumed by the extension, not awaited (as in StasisInboundConsumerTests).
@@ -81,5 +84,57 @@ public sealed class DialerHostExtensionsTests
         result.Status.Should().Be(OriginateBuildStatus.Built,
             "with no route and no campaign default trunk, the host's default trunk name is the tier that answers");
         result.Action!.Channel.Should().Be("PJSIP/t-7/sip:+442071234567@203.0.113.10");
+    }
+
+    // ─── dnc-and-dispositions-are-tenant-scoped: the host tenant is the dialer's platform DNC tenant ────────────
+
+    [Fact]
+    public async Task AddPlatformDncTenant_ShouldResolveNull_WhenSetupHasNotCreatedTheHostTenant()
+    {
+        var tenants = new InMemoryTenantStore();
+        await tenants.UpsertAsync(new Tenant { TenantId = "acme", Name = "Acme", Type = TenantType.Customer });
+        await using var provider = DncTenantProvider(tenants);
+
+        var resolver = provider.GetRequiredService<IOptions<DialerOptions>>().Value.PlatformDncTenantIdResolver;
+
+        resolver.Should().NotBeNull("the host tenant is created by /api/setup after start, so only a resolver can name it");
+        (await resolver!(CancellationToken.None)).Should().BeNull(
+            "before setup there is no host tenant, so no list of another tenant applies");
+    }
+
+    [Fact]
+    public async Task AddPlatformDncTenant_ShouldResolveTheHostTenantId_WhenSetupCreatedIt()
+    {
+        var tenants = new InMemoryTenantStore();
+        await using var provider = DncTenantProvider(tenants);
+        var resolver = provider.GetRequiredService<IOptions<DialerOptions>>().Value.PlatformDncTenantIdResolver;
+
+        // Setup runs after the options were built: the resolver reads the store when it is called.
+        await tenants.UpsertAsync(new Tenant { TenantId = "platform", Name = "Host", Type = TenantType.Platform });
+
+        resolver.Should().NotBeNull();
+        (await resolver!(CancellationToken.None)).Should().Be("platform");
+    }
+
+    [Fact]
+    public async Task AddPlatformDncTenant_ShouldNotReadTheTenantStore_WhenOptionsAreBuilt()
+    {
+        var tenants = Substitute.For<ITenantStore>();
+        await using var provider = DncTenantProvider(tenants);
+
+        var options = provider.GetRequiredService<IOptions<DialerOptions>>().Value;
+
+        options.PlatformDncTenantIdResolver.Should().NotBeNull();
+        options.PlatformDncTenantId.Should().BeNull("the static id would win over the resolver");
+        await tenants.DidNotReceiveWithAnyArgs().GetHostTenantAsync(default);
+    }
+
+    private static ServiceProvider DncTenantProvider(ITenantStore tenants)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(tenants);
+        services.AddProDialer(o => DialerHostExtensions.ConfigureDialerOptions(o, Config()));
+        services.AddPlatformDncTenant();
+        return services.BuildServiceProvider();
     }
 }

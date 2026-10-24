@@ -9,6 +9,51 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+DNC lists and call-attempt dispositions are scoped to the caller's tenant (Pro `2.20.3-pro`). Read **Upgrading**:
+three answers of the `/admin/dnc-lists` and `/admin/call-attempts` routes change, and a Global-scope DNC list now
+applies to other tenants only when the host tenant owns it.
+
+### Upgrading
+
+- **A Global-scope DNC list blocks other tenants' campaigns only when the host tenant owns it.** The dialer's DNC
+  check (a campaign with `dncEnabled` on) now counts every unexpired entry of the campaign tenant's own lists, whatever
+  their scope (a Tenant-scope list no longer needs the campaign to name it), and the Global-scope lists of the host
+  tenant, the one `/api/setup` created. A Global-scope list owned by any other tenant now blocks only that tenant's
+  campaigns. To find such lists, run on the dialer database
+  `SELECT tenant_id, id, name FROM dnc_lists WHERE scope = 1 ORDER BY tenant_id;` and compare `tenant_id` with the host
+  tenant's id. The host tenant's own lists are managed in a later release; nothing else changes for them.
+- **`POST /api/v1/admin/dnc-lists` and `PUT /api/v1/admin/dnc-lists/{id}` answer 403 to `"scope": "Global"`.** Create
+  and update lists with `"scope": "Tenant"` (or no scope). The console's DNC list form preselects Global; choose
+  Tenant there until the console is updated. Existing Global lists can still be renamed, and updated to `Tenant`.
+- **The DNC entry routes and the call-attempt disposition route answer 404 for a list or an attempt that is not the
+  caller tenant's**, where they answered 200, 201 or 204 before (see Fixed). A client that relied on a 200 with an
+  empty array for an unknown list's entries gets 404.
+
+### Fixed
+
+- **DNC list entries are read and changed only on a list of the caller's tenant.** `GET` and `POST
+  /admin/dnc-lists/{id}/entries`, `DELETE /admin/dnc-lists/{id}/entries/{phone}`, `POST /admin/dnc-lists/{id}/import`
+  and `GET /admin/dnc-lists/{id}/check/{phone}` answer 404 when list `{id}` is not one of the caller's tenant, and
+  leave it unchanged.
+- **A call attempt's disposition is set only on an attempt of the caller's tenant.**
+  `PUT /admin/call-attempts/{id}/disposition` answers 404 when no attempt `{id}` of the caller's tenant exists, and
+  changes nothing.
+- **Only the host operator makes a DNC list that applies to every tenant.** `/admin/dnc-lists` refuses the Global
+  scope with 403 on create and update (see Upgrading).
+
+### Changed
+
+- **The host tenant is the dialer's platform DNC tenant.** With the dialer registered, the Api sets Pro's
+  `DialerOptions.PlatformDncTenantIdResolver` to the host tenant's id; it answers nothing until `/api/setup` has created
+  the host tenant, and Pro reads it at the first DNC check, not at start-up.
+
+### Changed — Dependencies
+
+- **Verbara.Sdk.Pro `2.20.2-pro` → `2.20.3-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged. No
+  other resolved package moves (every `project.assets.json` differs only in the 22 Pro ids). `DncListStoreBase`'s
+  entry operations report a list the tenant does not own, and `CampaignStoreBase.TryUpdateCallAttemptDispositionAsync`
+  reports whether an attempt of the tenant matched; the routes above map both to 404.
+
 ## [2.31.0] - 2026-10-24
 
 Minor release, the **dialer end to end** train. The outbound dialer now places campaign calls through each campaign's

@@ -221,6 +221,24 @@ internal sealed class InMemoryCampaignStore : CampaignStoreBase
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>The tenant of each call attempt <see cref="SeedCallAttempt"/> registered.</summary>
+    private readonly ConcurrentDictionary<long, string> _callAttemptTenants = new();
+
+    /// <summary>Registers call attempt <paramref name="callAttemptId"/> as one of <paramref name="tenantId"/>.</summary>
+    public void SeedCallAttempt(long callAttemptId, string tenantId) => _callAttemptTenants[callAttemptId] = tenantId;
+
+    /// <summary>
+    /// The Pro <c>2.20.3-pro</c> contract: changes and reports only an attempt of the tenant (one registered through
+    /// <see cref="SeedCallAttempt"/>).
+    /// </summary>
+    public override async ValueTask<bool> TryUpdateCallAttemptDispositionAsync(string tenantId, long callAttemptId, long dispositionId, string? agentComment, CancellationToken ct)
+    {
+        if (!_callAttemptTenants.TryGetValue(callAttemptId, out var owner) || owner != tenantId)
+            return false;
+        await UpdateCallAttemptDispositionAsync(tenantId, callAttemptId, dispositionId, agentComment, ct);
+        return true;
+    }
+
     public override ValueTask<CampaignMetricsSnapshot> GetCampaignMetricsAsync(string tenantId, long campaignId, CancellationToken ct)
     {
         _campaigns.TryGetValue(campaignId, out var campaign);
@@ -609,21 +627,29 @@ internal sealed class InMemoryOutboundRouteStore : OutboundRouteStoreBase
     }
 }
 
+/// <summary>
+/// In-memory <see cref="DncListStoreBase"/> with the Pro <c>2.20.3-pro</c> contract: every operation acts only on a
+/// list the tenant owns, and an entry operation on a list the tenant does not own answers <see langword="false"/> or
+/// <see langword="null"/> (no such list for the tenant).
+/// </summary>
 internal sealed class InMemoryDncListStore : DncListStoreBase
 {
     private long _nextId = 1;
-    private readonly ConcurrentDictionary<long, DncList> _lists = new();
+    private readonly ConcurrentDictionary<long, (string TenantId, DncList List)> _lists = new();
     private readonly ConcurrentDictionary<long, List<DncEntry>> _entries = new();
+
+    private bool Owns(long listId, string tenantId) =>
+        _lists.TryGetValue(listId, out var owned) && owned.TenantId == tenantId;
 
     public override ValueTask<IReadOnlyList<DncList>> ListAsync(string tenantId, CancellationToken ct = default)
     {
-        IReadOnlyList<DncList> result = [.. _lists.Values];
+        IReadOnlyList<DncList> result = [.. _lists.Values.Where(l => l.TenantId == tenantId).Select(l => l.List)];
         return new ValueTask<IReadOnlyList<DncList>>(result);
     }
 
     public override ValueTask<DncList?> GetAsync(long id, string tenantId, CancellationToken ct = default)
     {
-        _lists.TryGetValue(id, out var list);
+        var list = Owns(id, tenantId) ? _lists[id].List : null;
         return new ValueTask<DncList?>(list);
     }
 
@@ -631,57 +657,69 @@ internal sealed class InMemoryDncListStore : DncListStoreBase
     {
         var id = Interlocked.Increment(ref _nextId);
         list.Id = id;
-        _lists[id] = list;
+        _lists[id] = (tenantId, list);
         _entries[id] = [];
         return new ValueTask<long>(id);
     }
 
     public override ValueTask UpdateAsync(DncList list, string tenantId, CancellationToken ct = default)
     {
-        _lists[list.Id] = list;
+        if (Owns(list.Id, tenantId))
+            _lists[list.Id] = (tenantId, list);
         return ValueTask.CompletedTask;
     }
 
     public override ValueTask DeleteAsync(long id, string tenantId, CancellationToken ct = default)
     {
-        _lists.TryRemove(id, out _);
-        _entries.TryRemove(id, out _);
+        if (Owns(id, tenantId))
+        {
+            _lists.TryRemove(id, out _);
+            _entries.TryRemove(id, out _);
+        }
         return ValueTask.CompletedTask;
     }
 
-    public override ValueTask AddEntryAsync(long listId, string tenantId, DncEntry entry, CancellationToken ct = default)
+    public override ValueTask<bool> AddEntryAsync(long listId, string tenantId, DncEntry entry, CancellationToken ct = default)
     {
-        var entries = _entries.GetOrAdd(listId, _ => []);
-        entries.Add(entry);
-        return ValueTask.CompletedTask;
+        if (!Owns(listId, tenantId))
+            return new ValueTask<bool>(false);
+        _entries.GetOrAdd(listId, _ => []).Add(entry);
+        return new ValueTask<bool>(true);
     }
 
-    public override ValueTask RemoveEntryAsync(long listId, string phoneNumber, string tenantId, CancellationToken ct = default)
+    public override ValueTask<bool> RemoveEntryAsync(long listId, string phoneNumber, string tenantId, CancellationToken ct = default)
     {
+        if (!Owns(listId, tenantId))
+            return new ValueTask<bool>(false);
         if (_entries.TryGetValue(listId, out var entries))
             entries.RemoveAll(e => e.PhoneNumber == phoneNumber);
-        return ValueTask.CompletedTask;
+        return new ValueTask<bool>(true);
     }
 
-    public override ValueTask<int> BulkImportAsync(long listId, string tenantId, IReadOnlyList<DncEntry> entries, CancellationToken ct = default)
+    public override ValueTask<int?> BulkImportAsync(long listId, string tenantId, IReadOnlyList<DncEntry> entries, CancellationToken ct = default)
     {
-        var list = _entries.GetOrAdd(listId, _ => []);
-        list.AddRange(entries);
-        return new ValueTask<int>(entries.Count);
+        if (!Owns(listId, tenantId))
+            return new ValueTask<int?>((int?)null);
+        _entries.GetOrAdd(listId, _ => []).AddRange(entries);
+        return new ValueTask<int?>(entries.Count);
     }
 
-    public override ValueTask<bool> CheckNumberAsync(long listId, string phoneNumber, string tenantId, CancellationToken ct = default)
+    public override ValueTask<bool?> CheckNumberAsync(long listId, string phoneNumber, string tenantId, CancellationToken ct = default)
     {
+        if (!Owns(listId, tenantId))
+            return new ValueTask<bool?>((bool?)null);
         var exists = _entries.TryGetValue(listId, out var entries) && entries.Any(e => e.PhoneNumber == phoneNumber);
-        return new ValueTask<bool>(exists);
+        return new ValueTask<bool?>(exists);
     }
 
-    public override ValueTask<IReadOnlyList<DncEntry>> ListEntriesAsync(long listId, string tenantId, int offset, int limit, CancellationToken ct = default)
+    public override ValueTask<IReadOnlyList<DncEntry>?> ListEntriesAsync(long listId, string tenantId, int offset, int limit, CancellationToken ct = default)
     {
-        if (!_entries.TryGetValue(listId, out var entries))
-            return new ValueTask<IReadOnlyList<DncEntry>>(Array.Empty<DncEntry>());
-        IReadOnlyList<DncEntry> result = entries.Skip(offset).Take(limit).ToList();
-        return new ValueTask<IReadOnlyList<DncEntry>>(result);
+        if (!Owns(listId, tenantId))
+            return new ValueTask<IReadOnlyList<DncEntry>?>((IReadOnlyList<DncEntry>?)null);
+        IReadOnlyList<DncEntry> result = _entries.TryGetValue(listId, out var entries)
+            ? entries.Skip(offset).Take(limit).ToList()
+            : [];
+        return new ValueTask<IReadOnlyList<DncEntry>?>(result);
     }
 }
 
