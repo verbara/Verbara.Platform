@@ -112,7 +112,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   10 minutes (an Error names the cap; it never gives up while leader); it also replaces a client whose own reconnects
   ended. Reconnects are make-before-break, an event that arrives while a connection is being established is no longer
   lost, and a retired connection closes its WebSocket at once but keeps its REST client until the calls in flight on it
-  finish (30-s limit), so a call is no longer stranded in Stasis by a reconnect or a leadership change.
+  finish (30-s limit), so a call is no longer stranded in Stasis by a reconnect or a leadership change (#465).
 
 ### Changed — Dependencies
 
