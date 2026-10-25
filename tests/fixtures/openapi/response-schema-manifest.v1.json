@@ -1317,6 +1317,7 @@
           "triggerRetry",
           "retryDelayMinutes",
           "triggerCallback",
+          "addsToDnc",
           "isActive",
           "sortOrder"
         ],

@@ -298,7 +298,7 @@ public sealed class DispositionDispatchLiveDbTests : IAsyncLifetime
             var typify = Task.Run(async () =>
             {
                 barrier.SignalAndWait();
-                await Task.Delay(typifyDelay);
+                await Task.Delay(typifyDelay); // fence-allow: SIMULATED-WORK — staggers the typification so both orders of the two writes occur
                 return await _fixture.Submissions.TryInsertAsync(
                     DispositionDispatchPostgresFixture.Submission(id, "leaf-agent"), _fixture.PreClaimed(id), CancellationToken.None);
             });
