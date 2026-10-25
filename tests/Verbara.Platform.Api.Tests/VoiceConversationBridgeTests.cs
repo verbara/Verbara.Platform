@@ -64,8 +64,8 @@ public sealed class VoiceConversationBridgeTests : IDisposable
             .Returns(new PagedResult<Queue>([], 0, 1, 500));
     }
 
-    private VoiceConversationBridge CreateBridge(bool isLeader = true) =>
-        new(_sessions, _serverPool, _conversations, _contacts, _contactStore, _agents, _queues, _capacity, _eventBus,
+    private VoiceConversationBridge CreateBridge(bool isLeader = true, IAgentCapacityService? capacity = null) =>
+        new(_sessions, _serverPool, _conversations, _contacts, _contactStore, _agents, _queues, capacity ?? _capacity, _eventBus,
             LeaderStub(isLeader), _clock, NullLogger<VoiceConversationBridge>.Instance);
 
     private static IClusterLeader LeaderStub(bool isLeader)
@@ -1498,6 +1498,142 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         saved[0].Metadata.Should().ContainKey("agentLegAbnormal").WhoseValue.Should().Be("true");
         saved[0].Metadata.Should().ContainKey("callbackNumber").WhoseValue.Should().Be(DialedNumber,
             "a callback to a campaign customer dials the customer, not the campaign's own outbound number");
+    }
+
+    // ─── First capacity use after boot (#360) ──────────────────────────────────
+    //
+    // PersistentAgentCapacityService rebuilds its in-memory load from the Active Conversations on its
+    // first use in the process. When that first use is the reservation for a call whose Conversation is
+    // already saved Active, the rebuild counts the call and the reservation counts it again: voice load 2
+    // during the call and a stuck 1 after the hangup. These tests run the real persistent service over a
+    // store that keeps a copy of each saved row, so the rebuild sees only what was saved before it ran.
+
+    private Dictionary<EntityId, Conversation> UseSnapshotConversationStore()
+    {
+        var rows = new Dictionary<EntityId, Conversation>();
+        _conversations.When(s => s.SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>()))
+            .Do(ci => { var c = ci.Arg<Conversation>(); rows[c.ConversationId] = Snapshot(c); });
+        _conversations.GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+            .Returns(ci => rows.TryGetValue(ci.ArgAt<EntityId>(1), out var c) ? Snapshot(c) : null);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => rows.Values.Where(c => c.VoiceLinkedId == ci.ArgAt<string>(1)).Select(Snapshot).FirstOrDefault());
+        _conversations.ListByStateAsync(Arg.Any<TenantId>(), Arg.Any<ConversationState>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(ci => (IReadOnlyList<Conversation>)[.. rows.Values.Where(c => c.State == ci.ArgAt<ConversationState>(1)).Select(Snapshot)]);
+        return rows;
+    }
+
+    private static Conversation Snapshot(Conversation source)
+    {
+        var copy = new Conversation
+        {
+            ConversationId = source.ConversationId,
+            TenantId = source.TenantId,
+            ContactId = source.ContactId,
+            Channel = source.Channel,
+            Owner = source.Owner,
+            State = source.State,
+            CreatedAt = source.CreatedAt,
+            ClosedAt = source.ClosedAt,
+            UpdatedAt = source.UpdatedAt,
+            VoiceLinkedId = source.VoiceLinkedId,
+        };
+        foreach (var (key, value) in source.Metadata)
+            copy.SetMetadata(key, value);
+        return copy;
+    }
+
+    private PersistentAgentCapacityService FreshPersistentCapacity()
+    {
+        var resolver = Substitute.For<IAgentCapacityResolver>();
+        resolver.ResolveAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
+            .Returns(new ChannelCapacity());
+        return new PersistentAgentCapacityService(resolver, Substitute.For<IAgentCapacityStore>(), _conversations);
+    }
+
+    [Fact]
+    public async Task OnCallConnected_ShouldLeaveVoiceLoadZeroAfterHangup_WhenFirstCapacityUseAfterBoot()
+    {
+        var rows = UseSnapshotConversationStore();
+        var queued = VoiceConversation("link-boot", ConversationState.Queued);
+        rows[queued.ConversationId] = queued;
+        _sessions.GetById("s-link-boot").Returns(MakeSession("link-boot", Tenant, AgentInterface));
+        _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
+            .Returns(AgentInState(AgentState.Available));
+        var capacity = FreshPersistentCapacity();
+        var bridge = CreateBridge(capacity: capacity);
+        var tenantId = new TenantId(Tenant);
+        var agentId = EntityId.From(AgentGuid);
+
+        await bridge.HandleEventAsync(new CallConnectedEvent("s-link-boot", "primary", _clock.UtcNow, null, "acme-Support", TimeSpan.FromSeconds(3)));
+        var duringCall = await capacity.GetCurrentLoadAsync(tenantId, agentId, ChannelType.Voice, CancellationToken.None);
+        await bridge.HandleEventAsync(new CallEndedEvent("s-link-boot", "primary", _clock.UtcNow, null, TimeSpan.FromSeconds(42), TimeSpan.FromSeconds(39)));
+        var afterHangup = await capacity.GetCurrentLoadAsync(tenantId, agentId, ChannelType.Voice, CancellationToken.None);
+
+        rows[queued.ConversationId].State.Should().Be(ConversationState.WrapUp);
+        duringCall.Should().Be(1, "the answered call is one unit of voice load, counted once");
+        afterHangup.Should().Be(0, "the hangup releases the only unit the call held");
+    }
+
+    [Fact]
+    public async Task OnCallConnected_ShouldReleaseTheReservation_WhenSavingTheActiveConversationFails()
+    {
+        var conversation = VoiceConversation("link-save-fails", ConversationState.Queued);
+        _sessions.GetById("s-link-save-fails").Returns(MakeSession("link-save-fails", Tenant, AgentInterface));
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-save-fails", Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        _conversations.SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("store down"));
+        var bridge = CreateBridge();
+
+        var act = () => bridge.HandleEventAsync(new CallConnectedEvent("s-link-save-fails", "primary", _clock.UtcNow, null, "acme-Support", TimeSpan.FromSeconds(3)));
+
+        await act.Should().NotThrowAsync("the handler logs a failed event instead of stopping the host");
+        await _capacity.Received(1).ReserveAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), ChannelType.Voice, Arg.Any<CancellationToken>());
+        await _capacity.Received(1).ReleaseAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), ChannelType.Voice, Arg.Any<CancellationToken>());
+        await _agents.DidNotReceive().SaveAsync(Arg.Any<Agent>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task LinkOutboundCall_ShouldLeaveVoiceLoadZeroAfterHangup_WhenFirstCapacityUseAfterBoot()
+    {
+        AddPrimaryServer();
+        StubContact();
+        var rows = UseSnapshotConversationStore();
+        var agentId = EntityId.From(AgentGuid);
+        var tenantId = new TenantId(Tenant);
+        _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
+            .Returns(AgentInState(AgentState.Available));
+        var capacity = FreshPersistentCapacity();
+        var leader = LeaderStub(isLeader: true);
+        var dial = new AgentOutboundDialService(
+            _conversations, capacity, _contacts, _agents, Substitute.For<Verbara.Sdk.Pro.MultiTenant.ITenantStore>(),
+            new AcceptingOriginateExecutor(),
+            OutboundTrunk.TrunkFakes.Resolver(null, new OutboundTrunk.FakeTrunkStore().Add(Tenant, OutboundTrunk.TrunkFakes.IpTrunk(7, "pstn-default")), "pstn-default"),
+            null, leader, _clock, NullLogger<AgentOutboundDialService>.Instance);
+        var bridge = CreateBridge(capacity: capacity);
+
+        var outcome = await dial.DialAsync(tenantId, agentId, "+15551234567", null, CancellationToken.None);
+        outcome.Accepted.Should().BeTrue();
+        StubGetVarFor("VERBARA_OUTBOUND_ID", outcome.CorrelationId);
+        StubGetVarFor("TENANT_ID", Tenant);
+        var session = new CallSession("s-out-boot", "link-out-boot", "primary", CallDirection.Inbound);
+        _sessions.GetById("s-out-boot").Returns(session);
+
+        await bridge.LinkOutboundCallAsync(session, "PJSIP/acme-agent-x");
+        var duringCall = await capacity.GetCurrentLoadAsync(tenantId, agentId, ChannelType.Voice, CancellationToken.None);
+        await bridge.HandleEventAsync(new CallEndedEvent("s-out-boot", "primary", _clock.UtcNow, null, TimeSpan.FromSeconds(42), TimeSpan.FromSeconds(39)));
+        var afterHangup = await capacity.GetCurrentLoadAsync(tenantId, agentId, ChannelType.Voice, CancellationToken.None);
+
+        rows[EntityId.From(outcome.CorrelationId!)].State.Should().Be(ConversationState.WrapUp);
+        duringCall.Should().Be(1, "the placed call is one unit of voice load, counted once");
+        afterHangup.Should().Be(0, "the hangup releases the only unit the call held");
+    }
+
+    private sealed class AcceptingOriginateExecutor : Verbara.Sdk.Pro.Dialer.Execution.OriginateExecutorBase
+    {
+        protected override ValueTask<Verbara.Sdk.Pro.Dialer.Execution.OriginateResult> ExecuteCoreAsync(
+            OriginateAction action, string nodeId, CancellationToken ct) =>
+            ValueTask.FromResult(new Verbara.Sdk.Pro.Dialer.Execution.OriginateResult(true, "act-boot", null));
     }
 
     public void Dispose() => _eventBus.Dispose();

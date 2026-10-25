@@ -1138,6 +1138,7 @@ if (!string.IsNullOrEmpty(clusterConn))
             builder.Services.AddSingleton<Verbara.Platform.Api.Services.IAgentOutboundDialService>(sp =>
                 new Verbara.Platform.Api.Services.AgentOutboundDialService(
                     sp.GetRequiredService<Verbara.Platform.Conversations.IConversationStore>(),
+                    sp.GetRequiredService<IAgentCapacityService>(),
                     sp.GetRequiredService<Verbara.Platform.Conversations.Services.IContactIdentityResolver>(),
                     sp.GetRequiredService<Verbara.Platform.Queues.IAgentStore>(),
                     sp.GetRequiredService<Verbara.Sdk.Pro.MultiTenant.ITenantStore>(),

@@ -75,6 +75,11 @@ Conversation.
 - **The wrap-up timeout no longer replaces an agent's typification with its AI disposition**: with autonomous
   disposition on, a typified Conversation still in `WrapUp` is closed with its typification kept, audited
   `typification.autonomous.skipped` with reason `AlreadyTypified`. (#476)
+- **An agent's first call after an API start no longer leaves the agent's voice load at 1 when it ends.** The first
+  capacity use of a process rebuilds the loads from the Active Conversations, and the call was counted by that rebuild
+  and again by its own reservation: load 2 during the call, then 1 until the next restart, so Platform's routing and
+  capacity views saw the agent as full. The queue call and the agent's click-to-dial now reserve before the
+  Conversation is saved Active, and release the unit if that save fails.
 
 ### Changed — Dependencies
 

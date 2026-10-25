@@ -181,4 +181,30 @@ public class PersistentAgentCapacityServiceTests
         await act.Should().ThrowAsync<InvalidOperationException>();
         (await sut.GetCurrentLoadAsync(Tenant, AgentId, ChannelType.WhatsApp, CancellationToken.None)).Should().Be(0);
     }
+
+    [Fact]
+    public async Task ReserveAsync_ShouldCountConversationOnce_WhenReservedBeforeTheConversationIsSavedActive()
+    {
+        // The contract the voice paths rely on (#360): the first use rebuilds the load from the saved Active
+        // Conversations, so a caller reserves BEFORE it saves its own Conversation Active. Then the rebuild finds
+        // nothing, the reservation is the call's one unit, and the hangup's release brings the load back to 0.
+        var active = new List<Conversation>();
+        var (sut, store, convStore, _) = CreateSut();
+        convStore.ListByStateAsync(Tenant, ConversationState.Active, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromResult<IReadOnlyList<Conversation>>([.. active]));
+
+        await sut.ReserveAsync(Tenant, AgentId, ChannelType.Voice, CancellationToken.None);
+        active.Add(MakeActiveConversation(ChannelType.Voice, "first-call"));
+        var duringCall = await sut.GetCurrentLoadAsync(Tenant, AgentId, ChannelType.Voice, CancellationToken.None);
+        await sut.ReleaseAsync(Tenant, AgentId, ChannelType.Voice, CancellationToken.None);
+
+        duringCall.Should().Be(1);
+        (await sut.GetCurrentLoadAsync(Tenant, AgentId, ChannelType.Voice, CancellationToken.None)).Should().Be(0);
+        await store.Received(1).UpsertAsync(
+            Arg.Is<AgentCapacityRecord>(r => r != null && r.AgentId == AgentId.Value && r.VoiceLoad == 1),
+            Arg.Any<CancellationToken>());
+        await store.Received(1).UpsertAsync(
+            Arg.Is<AgentCapacityRecord>(r => r != null && r.AgentId == AgentId.Value && r.VoiceLoad == 0),
+            Arg.Any<CancellationToken>());
+    }
 }
