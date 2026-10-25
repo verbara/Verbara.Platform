@@ -362,7 +362,22 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         if (!string.IsNullOrEmpty(callerChannel))
             conversation.SetMetadata("customerChannel", callerChannel);
         conversation.UpdatedAt = _clock.UtcNow;
-        await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
+
+        // Reserve BEFORE the Active row is saved, as the switchboard does: the persistent capacity service
+        // rebuilds its load from the saved Active Conversations on its first use after a restart, and a
+        // reservation that runs after this save would be counted by that rebuild and again by itself (#360).
+        var reserved = agentId is { } reservingAgent && await ReserveCapacityAsync(tenantId, reservingAgent).ConfigureAwait(false);
+        try
+        {
+            await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The call never became Active in the store, so it holds no unit: undo the reservation.
+            if (reserved && agentId is { } unreserved)
+                await ReleaseCapacityAsync(tenantId, unreserved).ConfigureAwait(false);
+            throw;
+        }
         _eventBus.Publish(new ConversationStateChangedEvent(tenant, conversation.ConversationId.Value, oldState.ToString(), conversation.State.ToString()));
 
         if (agentId is { } activeAgent)
@@ -384,7 +399,6 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
                 queueName,
                 queueAutoAnswer));
 
-            await ReserveCapacityAsync(tenantId, activeAgent).ConfigureAwait(false);
             await TransitionAgentAsync(tenantId, activeAgent, AgentState.Busy).ConfigureAwait(false);
         }
     }
@@ -780,15 +794,18 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         }
     }
 
-    private async Task ReserveCapacityAsync(TenantId tenantId, EntityId agentId)
+    /// <summary>Best-effort voice reservation; returns whether a unit was reserved.</summary>
+    private async Task<bool> ReserveCapacityAsync(TenantId tenantId, EntityId agentId)
     {
         try
         {
             await _capacity.ReserveAsync(tenantId, agentId, ChannelType.Voice, CancellationToken.None).ConfigureAwait(false);
+            return true;
         }
         catch (Exception ex)
         {
             LogCapacityFailed(agentId.Value, "reserve", ex.Message);
+            return false;
         }
     }
 
@@ -874,7 +891,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         // This method ALSO links W5b voice caller-rescue Conversations: CallbackOriginator pre-creates
         // them with Owner=null (no agent placed the call — it's a system callback to the dropped customer)
         // and the same VERBARA_OUTBOUND_ID correlation var, so the link/stamp above runs for them too. For
-        // those the Owner=null screen-pop / capacity-reserve / Busy block below is intentionally SKIPPED:
+        // those the Owner=null screen-pop / Busy block below is intentionally SKIPPED:
         // a rescue call has no owning agent yet — it enters the [stasis-queue] like any inbound queue call
         // and is activated normally (owner assigned, screen-pop, capacity, Busy) by OnCallConnectedAsync
         // once an agent answers. The rescuedFrom / callbackAttempts / direction metadata is untouched here.
@@ -894,7 +911,8 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
                 false,
                 correlationId));
 
-            await ReserveCapacityAsync(tenantId, owner).ConfigureAwait(false);
+            // No reservation here: the dial service reserved the call's unit before it saved the Conversation
+            // Active (#360), and the hangup releases it.
             await TransitionAgentAsync(tenantId, owner, AgentState.Busy).ConfigureAwait(false);
         }
     }

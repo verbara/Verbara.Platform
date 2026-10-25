@@ -4,6 +4,7 @@ using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
 using Verbara.Sdk;
 using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Pro.Cluster.Leadership;
@@ -14,6 +15,7 @@ using Trunk = Verbara.Sdk.Pro.Dialer.Models.Trunk;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Xunit;
 using static Verbara.Platform.Api.Tests.OutboundTrunk.TrunkFakes;
 
@@ -34,6 +36,7 @@ public sealed class AgentOutboundDialServiceTests
     private static readonly TenantId TenantId = new(Tenant);
 
     private readonly IConversationStore _conversations = Substitute.For<IConversationStore>();
+    private readonly IAgentCapacityService _capacity = Substitute.For<IAgentCapacityService>();
     private readonly IContactIdentityResolver _contacts = Substitute.For<IContactIdentityResolver>();
     private readonly IAgentStore _agents = Substitute.For<IAgentStore>();
     private readonly ITenantStore _tenants = Substitute.For<ITenantStore>();
@@ -69,7 +72,7 @@ public sealed class AgentOutboundDialServiceTests
         leader.IsLeader.Returns(isLeader);
         leader.Resource.Returns(VoiceLeaderResources.AmiOwner);
         return new AgentOutboundDialService(
-            _conversations, _contacts, _agents, _tenants, _executor, Resolver(routes, _trunks, defaultTrunk), dnc, leader,
+            _conversations, _capacity, _contacts, _agents, _tenants, _executor, Resolver(routes, _trunks, defaultTrunk), dnc, leader,
             _clock, NullLogger<AgentOutboundDialService>.Instance);
     }
 
@@ -198,6 +201,79 @@ public sealed class AgentOutboundDialServiceTests
                 && c.Metadata.ContainsKey("direction")
                 && c.Metadata["direction"] == "outbound"),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DialAsync_ShouldReserveVoiceCapacityBeforeSavingTheActiveConversation_WhenOriginateSucceeds()
+    {
+        var sut = CreateService();
+
+        await sut.DialAsync(TenantId, _agentId, "+15551234567", null, CancellationToken.None);
+
+        // The capacity service rebuilds its load from the saved Active Conversations on its first use, so the
+        // reservation must run before the Active row exists or that rebuild counts the call a second time (#360).
+        Received.InOrder(() =>
+        {
+            _capacity.ReserveAsync(TenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>());
+            _conversations.SaveAsync(Arg.Is<Conversation>(c => c != null && c.State == ConversationState.Active), Arg.Any<CancellationToken>());
+        });
+    }
+
+    [Fact]
+    public async Task DialAsync_ShouldReleaseTheReservation_WhenSavingTheConversationFails()
+    {
+        _conversations.SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("store down"));
+        var sut = CreateService();
+
+        var act = () => sut.DialAsync(TenantId, _agentId, "+15551234567", null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        await _capacity.Received(1).ReserveAsync(TenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>());
+        await _capacity.Received(1).ReleaseAsync(TenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DialAsync_ShouldStillTrackTheCall_WhenReservingCapacityFails()
+    {
+        _capacity.ReserveAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("capacity store down"));
+        _conversations.SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("store down"));
+        var sut = CreateService();
+
+        var act = () => sut.DialAsync(TenantId, _agentId, "+15551234567", null, CancellationToken.None);
+
+        // The Originate already rang the agent: a capacity failure is logged, never thrown, and with no unit
+        // reserved the failed save has nothing to release.
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("store down");
+        await _capacity.DidNotReceive().ReleaseAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DialAsync_ShouldSurfaceTheSaveFailure_WhenTheReleaseAlsoFails()
+    {
+        _capacity.ReleaseAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("capacity store down"));
+        _conversations.SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("store down"));
+        var sut = CreateService();
+
+        var act = () => sut.DialAsync(TenantId, _agentId, "+15551234567", null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("store down");
+        await _capacity.Received(1).ReleaseAsync(TenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DialAsync_ShouldNotReserveCapacity_WhenOriginateRejected()
+    {
+        _executor.Result = new OriginateResult(false, null, "trunk-down");
+        var sut = CreateService();
+
+        await sut.DialAsync(TenantId, _agentId, "+15551234567", null, CancellationToken.None);
+
+        await _capacity.DidNotReceive().ReserveAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

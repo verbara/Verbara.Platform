@@ -3,6 +3,7 @@ using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Queues.Services;
 using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Pro.Dialer.Compliance;
@@ -57,6 +58,7 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
     private const long OriginateTimeoutMs = 30_000;
 
     private readonly IConversationStore _conversations;
+    private readonly IAgentCapacityService _capacity;
     private readonly IContactIdentityResolver _contacts;
     private readonly IAgentStore _agents;
     private readonly ITenantStore _tenants;
@@ -69,6 +71,7 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
 
     public AgentOutboundDialService(
         IConversationStore conversations,
+        IAgentCapacityService capacity,
         IContactIdentityResolver contacts,
         IAgentStore agents,
         ITenantStore tenants,
@@ -80,6 +83,7 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
         ILogger<AgentOutboundDialService> logger)
     {
         _conversations = conversations;
+        _capacity = capacity;
         _contacts = contacts;
         _agents = agents;
         _tenants = tenants;
@@ -190,11 +194,56 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
             CreatedAt = _clock.UtcNow,
         };
         conversation.SetMetadata("direction", "outbound");
-        await _conversations.SaveAsync(conversation, ct).ConfigureAwait(false);
+
+        // The call's voice unit is reserved BEFORE the Conversation is saved Active: the persistent capacity
+        // service rebuilds its load from the saved Active Conversations on its first use after a restart, so a
+        // reservation made after this save would be counted twice (#360). The bridge's hangup releases it.
+        var reserved = await ReserveCapacityAsync(tenantId, agentId).ConfigureAwait(false);
+        try
+        {
+            await _conversations.SaveAsync(conversation, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            if (reserved)
+                await ReleaseCapacityAsync(tenantId, agentId).ConfigureAwait(false);
+            throw;
+        }
 
         LogDial(conversationId.Value, agentId.Value, number);
         return new VoiceDialOutcome(true, conversationId.Value, null);
     }
+
+    /// <summary>Best-effort: the Originate already succeeded, so a capacity failure is logged, never thrown.</summary>
+    private async Task<bool> ReserveCapacityAsync(TenantId tenantId, EntityId agentId)
+    {
+        try
+        {
+            await _capacity.ReserveAsync(tenantId, agentId, ChannelType.Voice, CancellationToken.None).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogCapacityFailed(agentId.Value, "reserve", ex.Message);
+            return false;
+        }
+    }
+
+    private async Task ReleaseCapacityAsync(TenantId tenantId, EntityId agentId)
+    {
+        try
+        {
+            await _capacity.ReleaseAsync(tenantId, agentId, ChannelType.Voice, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogCapacityFailed(agentId.Value, "release", ex.Message);
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[VOICE-DIAL] Capacity {Operation} for agent {AgentId} failed: {Reason}")]
+    private partial void LogCapacityFailed(string agentId, string operation, string reason);
 
     [LoggerMessage(Level = LogLevel.Information,
         Message = "[VOICE-DIAL] Conversation {ConversationId}: agent {AgentId} dialing {Number}")]
