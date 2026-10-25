@@ -302,6 +302,18 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             }
         }
 
+        // #476 (dialer-honours-dnc-callbacks-and-agent-dispositions D17): a typified Conversation keeps its
+        // submission. This read is only the common case's shortcut (it saves the suggestion read and the policy); the
+        // guarantee is the stamp's insert-or-nothing below. The close is the same conditional close the stamp uses,
+        // so when several replicas sweep one row, only the one whose close won announces, audits and counts it
+        // (round-6 audit F2).
+        if (await _submissionStore!.GetByConversationIdAsync(conv.TenantId, conv.ConversationId, ct) is not null)
+        {
+            if (await TryCloseWrapUpConditionallyAsync(conv, tid, tenantId, now, ct))
+                await RecordAlreadyTypifiedAsync(conv, tenantId, now, ct);
+            return false;
+        }
+
         var tenantEntityId = EntityId.From(conv.TenantId.Value);
         var suggestion = await _suggestionStore!.GetLatestForConversationAsync(
             tenantEntityId, conv.ConversationId, ct);
@@ -348,19 +360,39 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         }
 
         // State-based CAS: close ONLY if still WrapUp. A concurrent human typify wins (0 rows).
-        var won = await _conversationStore.TryConditionalCloseWrapUpAsync(tid, conv.ConversationId, now, ct);
-        if (!won)
+        if (!await TryCloseWrapUpConditionallyAsync(conv, tid, tenantId, now, ct))
         {
             // A human already typified/closed it — skip silently (do NOT stamp, do NOT overwrite).
             LogAutonomousRaceLost(conv.ConversationId.Value);
             return false;
         }
 
-        // We won the CAS. The authoritative WrapUp→Closed transition already happened atomically in
-        // the store's conditional UPDATE (TryConditionalCloseWrapUpAsync), so we set State/ClosedAt
-        // directly to mirror it on the in-memory entity — do NOT re-route through conv.TransitionTo
-        // (that would re-run guard logic / fire a second transition over a close the DB already owns).
-        // Then publish the same state-change event the blank path emits and stamp the submission + audit.
+        if (!await StampAutonomousDispositionAsync(conv, suggestion, decision, now, ct))
+        {
+            // D17: a typification committed between the read above and the stamp — it is kept, the stamp stored
+            // nothing, and the per-cycle cap does not count it.
+            await RecordAlreadyTypifiedAsync(conv, tenantId, now, ct);
+            return false;
+        }
+
+        _autonomousMetrics!.RecordCommit(tenantId);
+        LogAutonomousCommit(conv.ConversationId.Value, decision.Confidence);
+        return true;
+    }
+
+    /// <summary>
+    /// The state-based conditional close (CAS on <c>state = WrapUp</c>). When it wins, the authoritative WrapUp→Closed
+    /// transition already happened atomically in the store's conditional UPDATE, so State/ClosedAt are mirrored on the
+    /// in-memory entity directly — never re-routed through <c>conv.TransitionTo</c> (that would re-run guard logic over
+    /// a close the database already owns) — and the same state-change event the blank path emits is published.
+    /// </summary>
+    /// <returns><see langword="false"/> when another writer (a human, another replica's sweep) closed it first.</returns>
+    private async Task<bool> TryCloseWrapUpConditionallyAsync(
+        Conversation conv, TenantId tid, string tenantId, DateTimeOffset now, CancellationToken ct)
+    {
+        if (!await _conversationStore.TryConditionalCloseWrapUpAsync(tid, conv.ConversationId, now, ct))
+            return false;
+
         conv.State = ConversationState.Closed;
         conv.ClosedAt ??= now;
         conv.UpdatedAt = now;
@@ -370,19 +402,28 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             conv.ConversationId.Value,
             nameof(ConversationState.WrapUp),
             nameof(ConversationState.Closed)));
-
-        await StampAutonomousDispositionAsync(conv, suggestion, decision, now, ct);
-
-        _autonomousMetrics!.RecordCommit(tenantId);
-        LogAutonomousCommit(conv.ConversationId.Value, decision.Confidence);
         return true;
+    }
+
+    /// <summary>
+    /// D17: the timeout kept a stored submission and only closed the Conversation — one <c>AutonomousSkipped</c> audit
+    /// with reason <see cref="AutonomousSkipReason.AlreadyTypified"/>, the skip metric and a log line; no commit audit
+    /// and no commit metric.
+    /// </summary>
+    private async Task RecordAlreadyTypifiedAsync(Conversation conv, string tenantId, DateTimeOffset now, CancellationToken ct)
+    {
+        await EmitSkippedAuditAsync(conv, now, AutonomousSkipReason.AlreadyTypified, ct);
+        _autonomousMetrics!.RecordSkip(tenantId, AutonomousSkipReason.AlreadyTypified);
+        LogAutonomousSkipped(conv.ConversationId.Value, AutonomousSkipReason.AlreadyTypified);
     }
 
     /// <summary>
     /// Persists the AutoAi <see cref="TypificationSubmission"/> and emits the <c>AutonomousCommit</c>
     /// AI-actor audit (with the correction-window retention floor). Called only after the CAS close won.
+    /// The write is an insert-or-nothing (D17, #476): a submission already stored — the agent's — is kept.
     /// </summary>
-    private async Task StampAutonomousDispositionAsync(
+    /// <returns><see langword="false"/>, having written and audited nothing, when a submission was already stored.</returns>
+    private async Task<bool> StampAutonomousDispositionAsync(
         Conversation conv, AiSuggestionRecord suggestion, AutonomousDispositionDecision decision,
         DateTimeOffset now, CancellationToken ct)
     {
@@ -409,7 +450,8 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             AutonomousActorId = AutonomousActorId,
         };
 
-        await _submissionStore!.SaveAsync(submission, ct);
+        if (!await _submissionStore!.TryInsertAsync(submission, dispatch: null, ct))
+            return false;
 
         var retainUntil = now.AddDays(_options.AutonomousCorrectionWindowDays);
         var nodePathStr = string.Join(" > ", nodePath);
@@ -432,6 +474,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             },
             retainUntil: retainUntil,
             ct: ct);
+        return true;
     }
 
     /// <summary>

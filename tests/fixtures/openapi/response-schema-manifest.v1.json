@@ -977,6 +977,7 @@
           "suggestedNodePath",
           "duration",
           "completedAt",
+          "dialerDisposition",
           "autonomousActorId",
           "correctionState",
           "correctedAt"

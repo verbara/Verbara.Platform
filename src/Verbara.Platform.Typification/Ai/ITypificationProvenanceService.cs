@@ -36,6 +36,25 @@ public interface ITypificationProvenanceService
     /// make the /typify validation + PII-screen Source-aware BEFORE the (mutating) reconcile.
     /// </summary>
     Task<SubmissionSource> DeriveSourceAsync(TenantId tenantId, EntityId conversationId, EntityId committedLeafNodeId, CancellationToken ct);
+
+    /// <summary>
+    /// The derivation half of <see cref="DeriveAsync"/>: reads the latest stored suggestion and returns the provenance
+    /// it gives <paramref name="committedLeafNodeId"/>, with the suggestion's id. A pure read: it does NOT reconcile
+    /// the suggestion and touches no metric (design D15: the voice path derives before its insert-or-nothing write and
+    /// reconciles only when that write stored the submission).
+    /// </summary>
+    Task<ProvenanceResult> ReadAsync(
+        TenantId tenantId,
+        EntityId conversationId,
+        EntityId committedLeafNodeId,
+        CancellationToken ct);
+
+    /// <summary>
+    /// The side-effect half of <see cref="DeriveAsync"/>: when <paramref name="provenance"/> names a suggestion, marks
+    /// it reconciled with <paramref name="committedLeafNodeId"/> (<see cref="IAiSuggestionStore.MarkReconciledAsync"/>)
+    /// and counts the accept or the override once. Does nothing when no suggestion was involved.
+    /// </summary>
+    Task ReconcileAsync(ProvenanceResult provenance, EntityId committedLeafNodeId, CancellationToken ct);
 }
 
 /// <summary>
@@ -50,6 +69,9 @@ public sealed record ProvenanceResult
     public SubmissionSource Source { get; init; }
     public EntityId? SuggestedLeafNodeId { get; init; }
     public IReadOnlyList<string>? SuggestedNodePath { get; init; }
+
+    /// <summary>The id of the stored suggestion the provenance was derived from (null when none exists).</summary>
+    public EntityId? SuggestionId { get; init; }
 
     // ── AI model provenance (B4b — populated only when AiSuggested = true) ──────
 

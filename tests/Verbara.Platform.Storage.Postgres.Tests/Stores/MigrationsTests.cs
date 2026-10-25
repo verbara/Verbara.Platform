@@ -122,4 +122,21 @@ public class MigrationsTests : IClassFixture<MigrationsFixture>
         (await _fixture.ColumnDefinitionAsync("webhook_deliveries", "claim_expires_at"))
             .Should().Be(("timestamp with time zone", true));
     }
+
+    // dialer-honours-dnc-callbacks-and-agent-dispositions (design D16): the dispatch table, its partial index on the
+    // pending rows, and an idempotent re-run.
+    [Fact]
+    public async Task Migration025_ShouldCreateTheDispatchTableAndItsPendingIndex_AndBeIdempotent()
+    {
+        (await _fixture.ColumnDefinitionAsync("dialer_disposition_dispatches", "claim_id"))
+            .Should().Be(("character varying(32)", true));
+        (await _fixture.ColumnDefinitionAsync("dialer_disposition_dispatches", "action_id"))
+            .Should().Be(("text", false));
+        (await _fixture.IndexExistsAsync("ix_dialer_disposition_dispatches_pending")).Should().BeTrue();
+
+        await _fixture.ReapplyMigrationAsync("025_DialerDispositionDispatches.sql");
+
+        (await _fixture.ColumnDefinitionAsync("dialer_disposition_dispatches", "next_attempt_at"))
+            .Should().Be(("timestamp with time zone", false));
+    }
 }

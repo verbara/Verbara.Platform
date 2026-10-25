@@ -759,8 +759,9 @@ internal static class ConversationEndpoints
         [FromServices] ITypificationProvenanceService provenanceService,
         [FromServices] IAuditService auditService,
         [FromServices] IConversationSwitchboard switchboard,
-        CampaignStoreBase campaignStore,
         DispositionCodeStoreBase dispositionCodeStore,
+        [FromServices] DialerDispositionDispatcher? dispatcher,
+        [FromServices] ILogger<DialerDispositionDispatcher> logger,
         PlatformEventBus eventBus,
         IClock clock,
         [FromBody] TypifyRequest body,
@@ -817,15 +818,24 @@ internal static class ConversationEndpoints
 
         // 4. Move to WrapUp only after validation succeeds (close-chat-without-typification-licence D6).
         //    Agent-held digital work goes through the switchboard: a state-and-owner conditional commit that
-        //    releases the owner's capacity unit once, only when it wins (D2/D3). Voice keeps its own path — the voice
-        //    bridge owns that release (D8) — as does a conversation no agent holds (no unit to release).
-        //    Either way the state is checked before any mutation, never with try/catch, and a refusal or a
-        //    lost race is a 409 conversation-not-closable (D9).
+        //    releases the owner's capacity unit once, only when it wins (D2/D3); a digital conversation no agent
+        //    holds has no unit to release and transitions itself. Either way the state is checked before any
+        //    mutation, never with try/catch, and a refusal or a lost race is a 409 conversation-not-closable (D9).
         //    The wrap-up is predicated on the owner the actor check was decided against (`owner`, read before
         //    the resolver ran): a transfer that committed since is a 409, never a submission attributed to
         //    the old owner on the new owner's chat (D3).
-        if (conversation.Channel != ChannelType.Voice
-            && owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } ownerAgentId })
+        //    A voice conversation is never moved here (dialer-honours-dnc-callbacks-and-agent-dispositions D15): the
+        //    voice bridge alone moves it to WrapUp at the hangup and releases the agent's voice capacity then. It is
+        //    typified while Active (the call is up) or WrapUp (the call ended), once: an existing submission is the
+        //    cheap early 409, and the insert-or-nothing write below decides a race.
+        var isVoice = conversation.Channel == ChannelType.Voice;
+        if (isVoice)
+        {
+            if (conversation.State is not (ConversationState.Active or ConversationState.WrapUp)
+                || await submissionStore.GetByConversationIdAsync(tenantId, conversationId, ct) is not null)
+                return ConversationActor.Conflict(ConversationActor.NotClosable);
+        }
+        else if (owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } ownerAgentId })
         {
             var wrapUp = await switchboard.WrapUpAsync(tenantId, conversationId, ownerAgentId, ct);
             if (!wrapUp.Success)
@@ -842,17 +852,17 @@ internal static class ConversationEndpoints
 
         var leafNodeId = path[^1];
 
-        // 4a. Derive the FULL server-authoritative AI provenance (B3) NOW — only after validation
-        //     succeeded AND the disposition is committed (WrapUp + SaveAsync). DeriveAsync is the
-        //     MUTATING derive: it reconciles the stored suggestion (MarkReconciledAsync) and bumps
-        //     the accept/override metrics, so it MUST fire exactly once and only on a committed
-        //     disposition — never on a rejected submission (that was the D3 regression). The
-        //     persisted submission below uses this provenance.* plus the screened fieldValues.
-        //     This re-reads the latest suggestion (already read read-only in step 3a) — an
-        //     acceptable cheap indexed read.
-        var provenance = path.Count > 0
-            ? await provenanceService.DeriveAsync(tenantId, conversationId, leafNodeId, ct)
-            : new ProvenanceResult();
+        // 4a. The server-authoritative AI provenance (B3). A digital typification is committed by now (the WrapUp
+        //     above), so it derives and reconciles in one step (DeriveAsync: MarkReconciledAsync + the accept/override
+        //     metric, exactly once, only on a committed disposition — never on a rejected submission, the D3
+        //     regression). A voice typification is committed only by its insert below, so it reads the provenance
+        //     now and reconciles only after the insert stored it (D15, round-5 audit F2): a refused request writes
+        //     nothing to the suggestion and counts nothing.
+        var provenance = path.Count == 0
+            ? new ProvenanceResult()
+            : isVoice
+                ? await provenanceService.ReadAsync(tenantId, conversationId, leafNodeId, ct)
+                : await provenanceService.DeriveAsync(tenantId, conversationId, leafNodeId, ct);
 
         // 4a (cont.). PII screen (D3, defense-in-depth): on the AI write path re-screen free-text
         //     field values (Text/Textarea/Lookup ONLY — a Phone field legitimately holds a phone)
@@ -888,7 +898,30 @@ internal static class ConversationEndpoints
             CompletedAt = clock.UtcNow,
         };
 
-        await submissionStore.SaveAsync(submission, ct);
+        var dialerState = DialerDispositionState.None;
+        if (isVoice)
+        {
+            // 4b (voice). The disposition the dialer is owed is resolved BEFORE the write (D16) and committed with
+            //     the submission in one insert-or-nothing transaction: the first submission stored wins, a refused
+            //     insert stores, hands over and reconciles nothing (409). Then the request hands the disposition
+            //     to the dialer itself; a failed or interrupted hand-off is completed by any replica's dispatcher.
+            var leafOutcome = schema.Nodes.FirstOrDefault(n => n.NodeId == leafNodeId)?.Leaf;
+            var dispatch = await DialerDispositionBridge.ResolveAsync(
+                conversation, leafOutcome, body, agentId.Value, dispositionCodeStore, dispatcher, logger, ct);
+            if (!await submissionStore.TryInsertAsync(submission, dispatch, ct))
+                return ConversationActor.Conflict(ConversationActor.NotClosable);
+
+            if (dispatch is not null && dispatcher is not null)
+                dialerState = DialerDispositionDispatcher.ToState(
+                    await dispatcher.DispatchAsync(dispatch, dispatch.ClaimId!, ct));
+
+            if (path.Count > 0)
+                await provenanceService.ReconcileAsync(provenance, leafNodeId, ct);
+        }
+        else
+        {
+            await submissionStore.SaveAsync(submission, ct);
+        }
 
         // 4c. Emit AI-disposition audit entry (GDPR Art. 22 traceability — B4b).
         //     Only when an AI suggestion was involved (accepted or overridden).
@@ -918,53 +951,6 @@ internal static class ConversationEndpoints
                 ct: ct);
         }
 
-        // 5. Dialer bridge (PRESERVED behavior): a leaf node may carry a DialerCode
-        //    that maps to a Pro campaign DispositionCode for the outbound call attempt.
-        var leaf = schema.Nodes.FirstOrDefault(n => n.NodeId == leafNodeId)?.Leaf;
-        if (leaf?.DialerCode is { } dialerCode)
-        {
-            var meta = conversation.Metadata;
-            if (meta.TryGetValue("callAttemptId", out var attemptIdStr) &&
-                long.TryParse(attemptIdStr, out var callAttemptId) &&
-                meta.TryGetValue("campaignId", out var campIdStr) &&
-                long.TryParse(campIdStr, out var campaignId))
-            {
-                var tenantStr = tenantId.Value;
-                var agentSubId = context.User.FindFirst("sub")?.Value ?? "";
-
-                var dispositions = await dispositionCodeStore.ListByCampaignAsync(tenantStr, campaignId, ct);
-                var dispo = dispositions.FirstOrDefault(d => d.Code == dialerCode);
-
-                if (dispo is not null)
-                {
-                    // I1/M4 — the dialer bridge intentionally reads RAW body.* (the
-                    // disposition note here, the callback date below): the disposition note is
-                    // the human-authored wrap-up note (not AI-extracted), and callback_date is
-                    // a Date field, never a free-text field, so neither is PII-screened.
-                    await campaignStore.UpdateCallAttemptDispositionAsync(
-                        tenantStr, callAttemptId, dispo.Id, body.Notes, ct);
-                }
-
-                // Schedule a callback when the leaf requests one and a valid date was captured.
-                if (leaf.TriggerCallback &&
-                    body.FieldValues.TryGetValue(TypificationFieldKeys.CallbackDate, out var cbDate) &&
-                    DateTimeOffset.TryParse(
-                        cbDate,
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        System.Globalization.DateTimeStyles.RoundtripKind,
-                        out var scheduledAt) &&
-                    meta.TryGetValue("contactId", out var contactIdStr) &&
-                    long.TryParse(contactIdStr, out var contactId))
-                {
-                    await campaignStore.SaveCallbackAsync(
-                        tenantStr, campaignId, contactId, scheduledAt.ToUtcInstant(), agentSubId, ct);
-                }
-
-                eventBus.Publish(new CampaignDispositionSubmittedEvent(
-                    tenantStr, campaignId, dispo?.Code ?? "", agentSubId));
-            }
-        }
-
         // 6. Broadcast the typification submission (cross-pod via the event bus).
         eventBus.Publish(new TypificationSubmittedEvent(
             tenantId.Value,
@@ -986,7 +972,9 @@ internal static class ConversationEndpoints
                 context, auditService, tenantId, "conversation.typified", conversationId, metadata, ct);
         }
 
-        return TypedResults.Ok(submission);
+        // owner Q8: 200 with the submission once it is stored, whatever the hand-off's outcome; dialerDisposition says
+        // what the dialer did with it. No store keeps the member.
+        return TypedResults.Ok(submission with { DialerDisposition = dialerState });
     }
 
     /// <summary>

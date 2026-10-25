@@ -31,4 +31,9 @@ public enum AutonomousSkipReason
     /// <summary>The conversation is no longer in the <c>WrapUp</c> state (e.g. a human already
     /// moved it).</summary>
     NotWrapUp,
+
+    /// <summary>A submission is already stored for the conversation (its agent typified it, before the timeout or
+    /// while the timeout ran): the timeout kept it and only closed the conversation (Platform #476; design D17 of
+    /// dialer-honours-dnc-callbacks-and-agent-dispositions).</summary>
+    AlreadyTypified,
 }

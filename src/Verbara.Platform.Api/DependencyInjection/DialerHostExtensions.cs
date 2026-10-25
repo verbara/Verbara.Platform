@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using Verbara.Platform.Api.Services;
 using Verbara.Sdk.Pro.Dialer;
@@ -20,8 +21,9 @@ public static class DialerHostExtensions
     /// <summary>
     /// Registers the Postgres dialer storage on <paramref name="dialerDataSource"/>, the Pro dialer engine with the
     /// options <see cref="ConfigureDialerOptions"/> maps from <paramref name="configuration"/>, the host tenant as the
-    /// platform DNC tenant (<see cref="AddPlatformDncTenant"/>), the dialer retention targets and the
-    /// <see cref="CampaignMetricsPoller"/>.
+    /// platform DNC tenant (<see cref="AddPlatformDncTenant"/>), the dialer retention targets, the
+    /// <see cref="CampaignMetricsPoller"/>, and the agent-disposition hand-off (<see cref="DialerDispositionDispatcher"/>
+    /// and its <see cref="DialerDispositionDispatchWorker"/>).
     /// </summary>
     public static IServiceCollection AddPlatformDialer(
         this IServiceCollection services,
@@ -37,6 +39,39 @@ public static class DialerHostExtensions
         services.AddPlatformDncTenant();
         services.AddDialerRetentionTargets();
         services.AddHostedService<CampaignMetricsPoller>();
+        services.AddDialerDispositionHandoff();
+        services.AddDialerDataRepairs(dialerDataSource);
+        return services;
+    }
+
+    /// <summary>
+    /// The one-shot, audited campaign repairs (dialer-honours-dnc-callbacks-and-agent-dispositions, design D1, D13) over
+    /// <paramref name="dialerDataSource"/>, after the dialer migrations <c>UsePostgresDialerStorage</c> ran; their hosted
+    /// service resolves them at first use, after the host started.
+    /// </summary>
+    public static IServiceCollection AddDialerDataRepairs(this IServiceCollection services, NpgsqlDataSource dialerDataSource)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(dialerDataSource);
+        services.TryAddSingleton(sp => new DialerDataRepairs(
+            dialerDataSource,
+            sp.GetRequiredService<Verbara.Platform.Audit.IAuditService>(),
+            sp.GetRequiredService<ILogger<DialerDataRepairs>>()));
+        services.AddHostedService<DialerDataRepairService>();
+        return services;
+    }
+
+    /// <summary>
+    /// The typify endpoint's hand-off of an agent's disposition to the dialer (dialer-honours-dnc-callbacks-and-agent-
+    /// dispositions, design D16): <see cref="DialerDispositionDispatcher"/>, its metrics, and the
+    /// <see cref="DialerDispositionDispatchWorker"/> that completes, on any replica, a hand-off a request could not.
+    /// </summary>
+    public static IServiceCollection AddDialerDispositionHandoff(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.TryAddSingleton<DialerDispositionMetrics>();
+        services.TryAddSingleton<DialerDispositionDispatcher>();
+        services.AddHostedService<DialerDispositionDispatchWorker>();
         return services;
     }
 

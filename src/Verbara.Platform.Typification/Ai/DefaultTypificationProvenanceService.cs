@@ -26,6 +26,18 @@ internal sealed class DefaultTypificationProvenanceService : ITypificationProven
         EntityId committedLeafNodeId,
         CancellationToken ct)
     {
+        var provenance = await ReadAsync(tenantId, conversationId, committedLeafNodeId, ct);
+        await ReconcileAsync(provenance, committedLeafNodeId, ct);
+        return provenance;
+    }
+
+    /// <inheritdoc />
+    public async Task<ProvenanceResult> ReadAsync(
+        TenantId tenantId,
+        EntityId conversationId,
+        EntityId committedLeafNodeId,
+        CancellationToken ct)
+    {
         // IAiSuggestionStore uses EntityId for tenant (consistent with B2 SaveAsync path).
         var tenantEntityId = EntityId.From(tenantId.Value);
 
@@ -47,14 +59,6 @@ internal sealed class DefaultTypificationProvenanceService : ITypificationProven
 
         var aiAccepted = suggestion.SuggestedLeafNodeId == committedLeafNodeId;
 
-        await _suggestionStore.MarkReconciledAsync(
-            suggestion.Id, committedLeafNodeId, aiAccepted, ct);
-
-        if (aiAccepted)
-            _metrics.SuggestionAccepted.Add(1);
-        else
-            _metrics.SuggestionOverridden.Add(1);
-
         return new ProvenanceResult
         {
             AiSuggested = true,
@@ -63,10 +67,27 @@ internal sealed class DefaultTypificationProvenanceService : ITypificationProven
             Source = aiAccepted ? SubmissionSource.AutoAi : SubmissionSource.Manual,
             SuggestedLeafNodeId = suggestion.SuggestedLeafNodeId,
             SuggestedNodePath = suggestion.SuggestedNodePath,
+            SuggestionId = suggestion.Id,
             ModelId = suggestion.ModelId,
             PromptVersion = suggestion.PromptVersion,
             SchemaVersion = suggestion.SchemaVersion,
         };
+    }
+
+    /// <inheritdoc />
+    public async Task ReconcileAsync(ProvenanceResult provenance, EntityId committedLeafNodeId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(provenance);
+        if (provenance.SuggestionId is not { } suggestionId)
+            return;
+
+        var aiAccepted = provenance.AiAccepted ?? false;
+        await _suggestionStore.MarkReconciledAsync(suggestionId, committedLeafNodeId, aiAccepted, ct);
+
+        if (aiAccepted)
+            _metrics.SuggestionAccepted.Add(1);
+        else
+            _metrics.SuggestionOverridden.Add(1);
     }
 
     /// <inheritdoc />

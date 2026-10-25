@@ -73,6 +73,20 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     private const string CampaignIdKey = "campaignId";
     /// <summary>Session metadata key of a campaign call's dialed number (read from <see cref="DialedNumberVariable"/>).</summary>
     private const string DialedNumberKey = "dialedNumber";
+    /// <summary>
+    /// Channel var Pro's dialer sets on every campaign originate: the dialer contact the call was placed for
+    /// (dialer-honours-dnc-callbacks-and-agent-dispositions, design D4).
+    /// </summary>
+    private const string DialerContactVariable = "DIALER_CONTACT_ID";
+    /// <summary>Channel var Pro's dialer sets on every campaign originate: the originate's action id (Pro/ADR-0021).</summary>
+    private const string DialerActionVariable = "DIALER_ACTION_ID";
+    /// <summary>
+    /// Session and Conversation metadata key of the dialer contact id; the typify endpoint hands it to the dialer with
+    /// the action id (design D4, D5).
+    /// </summary>
+    internal const string DialerContactIdKey = "dialerContactId";
+    /// <summary>Session and Conversation metadata key of the originate's action id, the key of the dialer's disposition.</summary>
+    internal const string DialerActionIdKey = "dialerActionId";
     private const string AnonymousCaller = "anonymous";
 
     private readonly ICallSessionManager _sessions;
@@ -282,8 +296,23 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         }
 
         // The campaign mark rides the same create SaveAsync; it also selects the campaign's typification binding.
+        // The dialer's contact id and action id ride with it, both or neither: without them a typification of this
+        // Conversation cannot reach the dialer (design D4), which is logged once.
         if (campaignId is not null)
+        {
             conversation.SetMetadata(CampaignIdKey, campaignId);
+            var dialerContactId = MetadataOf(session, DialerContactIdKey);
+            var dialerActionId = MetadataOf(session, DialerActionIdKey);
+            if (dialerContactId is not null && dialerActionId is not null)
+            {
+                conversation.SetMetadata(DialerContactIdKey, dialerContactId);
+                conversation.SetMetadata(DialerActionIdKey, dialerActionId);
+            }
+            else
+            {
+                LogCampaignDialerIdsUnread(evt.SessionId, campaignId, tenant);
+            }
+        }
 
         await _conversations.SaveAsync(conversation, CancellationToken.None).ConfigureAwait(false);
 
@@ -878,9 +907,22 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     private async Task StampCampaignAsync(VerbaraServer server, CallSession session, string channel)
     {
         var campaignId = await GetChannelVarAsync(server, channel, CampaignVariable).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(campaignId))
-            session.SetMetadata(CampaignIdKey, campaignId);
+        if (string.IsNullOrWhiteSpace(campaignId))
+            return;
+
+        session.SetMetadata(CampaignIdKey, campaignId);
+        // Read with the campaign id, while the leg is live (design D4).
+        var dialerContactId = await GetChannelVarAsync(server, channel, DialerContactVariable).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(dialerContactId))
+            session.SetMetadata(DialerContactIdKey, dialerContactId);
+        var dialerActionId = await GetChannelVarAsync(server, channel, DialerActionVariable).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(dialerActionId))
+            session.SetMetadata(DialerActionIdKey, dialerActionId);
     }
+
+    /// <summary>A non-blank session metadata value, or <see langword="null"/>.</summary>
+    private static string? MetadataOf(CallSession session, string key) =>
+        session.Metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
 
     /// <summary>The campaign id stamped on the session at <c>CallStarted</c>, or <see langword="null"/>.</summary>
     private static string? CampaignIdOf(CallSession session) =>
@@ -935,6 +977,10 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[VOICE-CONV] Session {SessionId}: campaign {CampaignId} call of tenant {TenantId} — DIALER_NUMBER could not be read; attaching the Conversation by caller id.")]
     private partial void LogCampaignDialedNumberUnread(string sessionId, string campaignId, string tenantId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[VOICE-CONV] Session {SessionId}: campaign {CampaignId} call of tenant {TenantId} — DIALER_CONTACT_ID or DIALER_ACTION_ID could not be read; its typification will not reach the dialer.")]
+    private partial void LogCampaignDialerIdsUnread(string sessionId, string campaignId, string tenantId);
 
     [LoggerMessage(Level = LogLevel.Information,
         Message = "[VOICE-CONV] Linked OUTBOUND Conversation {ConversationId} for tenant {TenantId} to call {LinkedId}.")]

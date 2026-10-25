@@ -1274,7 +1274,9 @@ public sealed class VoiceConversationBridgeTests : IDisposable
     /// The leg's channel variables: <c>TENANT_ID</c> = acme, no <c>VERBARA_OUTBOUND_ID</c> or <c>VERBARA_REASON</c>,
     /// and the two dialer variables (null = the GetVar returns <c>Error</c>).
     /// </summary>
-    private void StubLegVariables(string? campaignId, string? dialedNumber)
+    private void StubLegVariables(
+        string? campaignId, string? dialedNumber,
+        string? dialerContactId = DialerContactId, string? dialerActionId = DialerActionId)
     {
         AddPrimaryServer();
         StubGetVarFor("TENANT_ID", Tenant);
@@ -1282,6 +1284,54 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         StubGetVarFor("VERBARA_REASON", null);
         StubGetVarFor("DIALER_CAMPAIGN_ID", campaignId);
         StubGetVarFor("DIALER_NUMBER", dialedNumber);
+        StubGetVarFor("DIALER_CONTACT_ID", campaignId is null ? null : dialerContactId);
+        StubGetVarFor("DIALER_ACTION_ID", campaignId is null ? null : dialerActionId);
+    }
+
+    private const string DialerContactId = "4711";
+    private const string DialerActionId = "5f0c2d9e8a7b4c3d9e1f0a2b3c4d5e6f";
+
+    // dialer-honours-dnc-callbacks-and-agent-dispositions, design D4: the campaign Conversation carries the dialer's
+    // contact id and the originate's action id, read with DIALER_CAMPAIGN_ID, so a typification can reach the dialer.
+    [Fact]
+    public async Task HandleEventAsync_ShouldStampTheDialerContactAndActionIds_WhenTheLegCarriesThem()
+    {
+        StubLegVariables(campaignId: "11", dialedNumber: DialedNumber);
+        TrunkSession("link-camp-ids-1", CampaignCallerId);
+        StubContactsFor(DialedNumber, CampaignCallerId, "anonymous");
+        var saved = TrackConversations("link-camp-ids-1");
+        var bridge = CreateBridge();
+
+        await StartAndQueueAsync(bridge, "link-camp-ids-1");
+
+        saved.Should().ContainSingle();
+        saved[0].Metadata.Should().ContainKey("campaignId").WhoseValue.Should().Be("11");
+        saved[0].Metadata.Should().ContainKey("dialerContactId").WhoseValue.Should().Be(DialerContactId);
+        saved[0].Metadata.Should().ContainKey("dialerActionId").WhoseValue.Should().Be(DialerActionId);
+    }
+
+    [Theory]
+    [InlineData(null, DialerActionId)]
+    [InlineData(DialerContactId, null)]
+    public async Task HandleEventAsync_ShouldStampOnlyTheCampaignAndWarn_WhenADialerIdCannotBeRead(
+        string? dialerContactId, string? dialerActionId)
+    {
+        StubLegVariables(campaignId: "11", dialedNumber: DialedNumber, dialerContactId, dialerActionId);
+        TrunkSession("link-camp-ids-2", CampaignCallerId);
+        StubContactsFor(DialedNumber, CampaignCallerId, "anonymous");
+        var saved = TrackConversations("link-camp-ids-2");
+        var logs = new LogRecordCapture();
+        using var loggerFactory = LoggerFactory.Create(b => b.AddProvider(logs));
+        var bridge = CreateBridge(loggerFactory.CreateLogger<VoiceConversationBridge>());
+
+        await StartAndQueueAsync(bridge, "link-camp-ids-2");
+
+        saved.Should().ContainSingle("the Conversation is still created and marked with its campaign");
+        saved[0].Metadata.Should().ContainKey("campaignId").WhoseValue.Should().Be("11");
+        saved[0].Metadata.Should().NotContainKey("dialerContactId");
+        saved[0].Metadata.Should().NotContainKey("dialerActionId");
+        logs.Records.Where(r => r.Level == LogLevel.Warning).Should().ContainSingle(
+            "a campaign call whose dialer ids cannot be read is logged once");
     }
 
     /// <summary>

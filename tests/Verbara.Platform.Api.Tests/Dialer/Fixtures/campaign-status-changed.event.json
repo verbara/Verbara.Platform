@@ -1,0 +1,11 @@
+{
+  "tenantId": "acme",
+  "campaignId": 11,
+  "campaignName": "Q4 renewals",
+  "oldStatus": "Draft",
+  "newStatus": "Active",
+  "type": "campaign.status_changed",
+  "timestamp": "2026-10-24T15:00:00.0000000+00:00",
+  "metadata": { "tenantId": "acme", "occurredAt": "2026-10-24T15:00:00.0000000+00:00" },
+  "eventType": "campaign.status_changed"
+}

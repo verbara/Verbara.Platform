@@ -429,6 +429,7 @@ builder.Services.AddVerbaraOpenTelemetry(b => b
     .AddMeter(Verbara.Platform.Api.Services.RealtimeReconciliationService.MeterName)
     .AddMeter(Verbara.Platform.Api.Services.RecoveryCodeFamilyMetrics.MeterName) // mfa.recovery_codes.{users,redeemed}
     .AddMeter(Verbara.Platform.Api.Services.StasisInboundConsumer.MeterName) // voice.stasis.app_replaced (ADR-0044)
+    .AddMeter(Verbara.Platform.Api.Services.DialerDispositionMetrics.MeterName) // dialer.disposition_dispatch.* (D16)
     .AddDigitalChannelMeters() // channels.delivery_status.unknown_id, whatsapp.webhook.rejected
     .AddCapacityMeters() // Npgsql pool + operation instruments, auth.write.* (measure-api-multi-replica-baseline D1)
     .WithPrometheusExporter());

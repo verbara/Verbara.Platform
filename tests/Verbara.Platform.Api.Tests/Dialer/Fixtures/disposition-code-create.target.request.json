@@ -1,0 +1,10 @@
+{
+  "code": "DNC",
+  "label": "Do not call again",
+  "category": "failure",
+  "isSuccess": false,
+  "triggerRetry": false,
+  "retryDelayMinutes": null,
+  "triggerCallback": false,
+  "addsToDnc": true
+}

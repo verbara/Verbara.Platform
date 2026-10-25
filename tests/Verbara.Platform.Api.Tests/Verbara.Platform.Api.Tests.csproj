@@ -53,6 +53,9 @@
     <!-- outbound-calls-reach-the-trunk: the frozen dial and voice-transfer bodies (200 and 409 trunk-not-dialable),
          copied verbatim from the change's cross-repo contract fixtures. -->
     <None Include="OutboundTrunk/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- dialer-honours-dnc-callbacks-and-agent-dispositions: the campaign metrics and status shapes Platform.Web's monitor
+         reads, and the disposition-code target shapes with addsToDnc, copied verbatim from the change's contract fixtures. -->
+    <None Include="Dialer/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

@@ -36,6 +36,21 @@ public sealed class DialerHostExtensionsTests
             .AddInMemoryCollection(values.Select(v => new KeyValuePair<string, string?>(v.Key, v.Value)))
             .Build();
 
+    // dialer-honours-dnc-callbacks-and-agent-dispositions D16: AddPlatformDialer registers the hand-off, whose worker
+    // completes on any replica a hand-off a request could not.
+    [Fact]
+    public void AddDialerDispositionHandoff_ShouldRegisterTheDispatchWorkerAsAHostedService()
+    {
+        var services = new ServiceCollection();
+
+        services.AddDialerDispositionHandoff();
+
+        services.Should().ContainSingle(d => d.ServiceType == typeof(Microsoft.Extensions.Hosting.IHostedService)
+                                             && d.ImplementationType == typeof(DialerDispositionDispatchWorker));
+        services.Should().ContainSingle(d => d.ServiceType == typeof(DialerDispositionDispatcher));
+        services.Should().ContainSingle(d => d.ServiceType == typeof(DialerDispositionMetrics));
+    }
+
     [Fact]
     public void ConfigureDialerOptions_ShouldUseTheApiAsteriskNode_WhenConfigured()
     {

@@ -36,7 +36,7 @@ namespace Verbara.Platform.Api.Tests;
 /// fresh factory (clean store graph), so no cross-test binding accumulation can occur.
 /// </para>
 /// </summary>
-public sealed class TypifyEndpointTests : IDisposable
+public sealed partial class TypifyEndpointTests : IDisposable
 {
     private static readonly TenantId s_tenantId = new(AuthenticatedPlatformApiFactory.TestTenantId);
 
@@ -45,12 +45,14 @@ public sealed class TypifyEndpointTests : IDisposable
 
     public TypifyEndpointTests()
     {
-        _factory = new AuthenticatedPlatformApiFactory();
+        _factory = new AuthenticatedPlatformApiFactory { CaptureLogs = true };
         _client = _factory.CreateAuthenticatedClient();
     }
 
     public void Dispose()
     {
+        foreach (var subscription in _subscriptions)
+            subscription.Dispose();
         _client.Dispose();
         _factory.Dispose();
     }
@@ -400,64 +402,9 @@ public sealed class TypifyEndpointTests : IDisposable
             .Should().BeNull();
     }
 
-    [Fact]
-    public async Task Typify_ShouldBridgeToDialer_WhenLeafHasDialerCodeAndOutboundMetadata()
-    {
-        await SeedPublishedTenantSchemaAsync("Typify Bridge");
-
-        // Seed a Pro campaign DispositionCode whose Code == the leaf DialerCode.
-        const long campaignId = 4242L;
-        const long callAttemptId = 99L;
-        const long contactId = 7L;
-        var dispoStore = _factory.Services.GetRequiredService<InMemoryDispositionCodeStore>();
-        await dispoStore.CreateAsync(
-            AuthenticatedPlatformApiFactory.TestTenantId,
-            new DispositionCode
-            {
-                TenantId = AuthenticatedPlatformApiFactory.TestTenantId,
-                CampaignId = campaignId,
-                Code = DialerCodeValue,
-                Label = "Sale",
-                TriggerCallback = true,
-            },
-            CancellationToken.None);
-
-        var campaignStore = _factory.Services.GetRequiredService<InMemoryCampaignStore>();
-        var before = campaignStore.RecordedDispositionUpdates.Count;
-
-        var conv = await SeedConversationAsync(
-            ConversationState.Active,
-            ChannelType.Voice,
-            metadata: new Dictionary<string, string>
-            {
-                ["callAttemptId"] = callAttemptId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["campaignId"] = campaignId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["contactId"] = contactId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            });
-
-        var body = JsonContent.Create(new
-        {
-            selectedNodePath = new[] { RootNodeId, LeafNodeId },
-            fieldValues = new Dictionary<string, string>
-            {
-                [RequiredFieldKey] = "won",
-                ["callback_date"] = DateTimeOffset.UtcNow.AddDays(1).ToString("O"),
-            },
-            notes = "bridge note",
-        });
-
-        var response = await _client.PostAsync($"/api/conversations/{conv.ConversationId.Value}/typify", body);
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        // The call-attempt disposition update ran with the matched DispositionCode id.
-        var recorded = campaignStore.RecordedDispositionUpdates.Skip(before).ToList();
-        recorded.Should().ContainSingle(r => r.CallAttemptId == callAttemptId);
-
-        // TriggerCallback + a valid callback_date scheduled a callback.
-        var callbacks = await campaignStore.GetPendingCallbacksAsync(
-            AuthenticatedPlatformApiFactory.TestTenantId, DateTimeOffset.UtcNow.AddDays(2), CancellationToken.None);
-        callbacks.Should().Contain(c => c.CampaignId == campaignId && c.ContactId == contactId);
-    }
+    // Typify_ShouldBridgeToDialer_WhenLeafHasDialerCodeAndOutboundMetadata (seeded callAttemptId/contactId, which no
+    // writer ever set) is replaced by the dialer hand-off tests in TypifyEndpointTests.Dialer.cs
+    // (dialer-honours-dnc-callbacks-and-agent-dispositions, design D4/D5/D16).
 
     [Fact]
     public async Task Typify_ShouldNotBridge_WhenNoCampaignMetadata()
