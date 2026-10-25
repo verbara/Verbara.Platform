@@ -222,7 +222,7 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
             await _capacity.ReserveAsync(tenantId, agentId, ChannelType.Voice, CancellationToken.None).ConfigureAwait(false);
             return true;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogCapacityFailed(agentId.Value, "reserve", ex.Message);
             return false;
@@ -235,7 +235,7 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
         {
             await _capacity.ReleaseAsync(tenantId, agentId, ChannelType.Voice, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogCapacityFailed(agentId.Value, "release", ex.Message);
         }
