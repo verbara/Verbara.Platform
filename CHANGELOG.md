@@ -76,6 +76,12 @@ Conversation.
   disposition on, a typified Conversation still in `WrapUp` is closed with its typification kept, audited
   `typification.autonomous.skipped` with reason `AlreadyTypified`. (#476)
 
+### Changed — Dependencies
+
+- **Verbara.Sdk.Pro `2.20.3-pro` → `2.21.0-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged. No
+  other resolved package moves (every `project.assets.json` differs only in the 22 Pro ids), and no packed floor
+  moved in Pro. The dialer's DNC, callback and agent-disposition API above comes from it. (Pro #268)
+
 ## [2.31.1] - 2026-10-24
 
 Patch release. DNC lists and call-attempt dispositions are scoped to the caller's tenant (Pro `2.20.3-pro`). Read **Upgrading**:
