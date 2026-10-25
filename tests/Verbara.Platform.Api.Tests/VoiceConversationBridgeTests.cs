@@ -1518,9 +1518,12 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(ci => rows.Values.Where(c => c.VoiceLinkedId == ci.ArgAt<string>(1)).Select(Snapshot).FirstOrDefault());
         _conversations.ListByStateAsync(Arg.Any<TenantId>(), Arg.Any<ConversationState>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns(ci => (IReadOnlyList<Conversation>)[.. rows.Values.Where(c => c.State == ci.ArgAt<ConversationState>(1)).Select(Snapshot)]);
+            .Returns(ci => ActiveRows(rows, ci.ArgAt<ConversationState>(1)));
         return rows;
     }
+
+    private static IReadOnlyList<Conversation> ActiveRows(Dictionary<EntityId, Conversation> rows, ConversationState state) =>
+        [.. rows.Values.Where(c => c.State == state).Select(Snapshot)];
 
     private static Conversation Snapshot(Conversation source)
     {
