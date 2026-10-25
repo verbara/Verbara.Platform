@@ -202,7 +202,7 @@ internal sealed partial class DialerDataRepairService : BackgroundService
         {
             // Shutdown before the repairs ran; they run at the next start.
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogRepairFailed(ex);
         }

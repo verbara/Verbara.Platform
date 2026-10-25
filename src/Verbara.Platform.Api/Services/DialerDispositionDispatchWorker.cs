@@ -65,7 +65,7 @@ public sealed partial class DialerDispositionDispatchWorker : BackgroundService
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogPassFailed(ex);
         }

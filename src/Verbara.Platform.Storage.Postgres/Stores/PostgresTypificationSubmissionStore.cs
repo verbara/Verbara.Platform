@@ -103,7 +103,7 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
         p.Add(new NpgsqlParameter("Source", submission.Source.ToString()));
         p.Add(new NpgsqlParameter("DurationMs", (long)submission.Duration.TotalMilliseconds));
         p.Add(new NpgsqlParameter("CompletedAt", submission.CompletedAt.UtcDateTime));
-        p.Add(new NpgsqlParameter("SuggestedLeafNodeId", NpgsqlDbType.Text) { Value = (object?)submission.SuggestedLeafNodeId?.Value ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("SuggestedLeafNodeId", NpgsqlDbType.Text) { Value = submission.SuggestedLeafNodeId is { } suggestedLeaf ? (object)suggestedLeaf.Value : DBNull.Value });
         p.Add(new NpgsqlParameter("SuggestedNodePath", NpgsqlDbType.Text) { Value = (object?)suggestedNodePathJson ?? DBNull.Value });
         p.Add(new NpgsqlParameter("AutonomousActorId", NpgsqlDbType.Text) { Value = (object?)submission.AutonomousActorId ?? DBNull.Value });
         p.Add(new NpgsqlParameter("CorrectionState", NpgsqlDbType.Smallint) { Value = (short)submission.CorrectionState });

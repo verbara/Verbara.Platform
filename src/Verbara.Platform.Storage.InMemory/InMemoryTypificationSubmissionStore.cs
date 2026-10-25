@@ -10,6 +10,7 @@ internal sealed class InMemoryTypificationSubmissionStore : ITypificationSubmiss
     private readonly ConcurrentDictionary<(TenantId, EntityId), TypificationSubmission> _items = new();
     private readonly InMemoryDialerDispositionDispatchStore _dispatches;
 
+    /// <summary>Creates the store over the dispatch store its <see cref="TryInsertAsync"/> adds rows to.</summary>
     /// <param name="dispatches">The dispatch store the dispatcher claims from; a private one when none is given.</param>
     public InMemoryTypificationSubmissionStore(InMemoryDialerDispositionDispatchStore? dispatches = null)
     {

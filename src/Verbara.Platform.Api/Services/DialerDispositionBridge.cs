@@ -17,6 +17,9 @@ internal static partial class DialerDispositionBridge
 {
     private const string CampaignIdKey = "campaignId";
 
+    /// <summary>
+    /// The dispatch a voice typification of <paramref name="conversation"/> with <paramref name="leaf"/> owes the dialer.
+    /// </summary>
     /// <returns>The pre-claimed dispatch row to store with the submission, or <see langword="null"/> when none is owed.</returns>
     public static async Task<DialerDispositionDispatch?> ResolveAsync(
         Conversation conversation,

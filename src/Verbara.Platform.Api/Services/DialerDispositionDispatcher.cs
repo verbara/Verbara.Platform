@@ -113,8 +113,9 @@ public sealed partial class DialerDispositionDispatcher
                 },
                 ct).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            // Any failure of the hand-off, a cancellation included, releases the row for another attempt.
             await ReleaseAsync(row, claimId, ex).ConfigureAwait(false);
             return DispatchOutcome.Deferred;
         }
@@ -169,7 +170,7 @@ public sealed partial class DialerDispositionDispatcher
             released = await _store.ReleaseAsync(row, error, _clock.UtcNow + backoff, claimId, CancellationToken.None)
                 .ConfigureAwait(false);
         }
-        catch (Exception releaseEx)
+        catch (Exception releaseEx) when (releaseEx is not OutOfMemoryException)
         {
             // The claim's lease still passes, so any dispatcher takes the row over then.
             LogReleaseFailed(row.ConversationId, releaseEx);
