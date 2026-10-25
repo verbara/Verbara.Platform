@@ -1594,6 +1594,26 @@ public sealed class VoiceConversationBridgeTests : IDisposable
     }
 
     [Fact]
+    public async Task OnCallConnected_ShouldStillActivateAndNotRelease_WhenReservingCapacityFails()
+    {
+        var conversation = VoiceConversation("link-reserve-fails", ConversationState.Queued);
+        _sessions.GetById("s-link-reserve-fails").Returns(MakeSession("link-reserve-fails", Tenant, AgentInterface));
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-reserve-fails", Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        _capacity.ReserveAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("capacity store down"));
+        _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
+            .Returns(AgentInState(AgentState.Available));
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallConnectedEvent("s-link-reserve-fails", "primary", _clock.UtcNow, null, "acme-Support", TimeSpan.FromSeconds(3)));
+
+        await _conversations.Received(1).SaveAsync(Arg.Is<Conversation>(c => c != null && c.State == ConversationState.Active), Arg.Any<CancellationToken>());
+        await _capacity.DidNotReceive().ReleaseAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
+        await _agents.Received(1).SaveAsync(Arg.Is<Agent>(a => a != null && a.State == AgentState.Busy), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task LinkOutboundCall_ShouldLeaveVoiceLoadZeroAfterHangup_WhenFirstCapacityUseAfterBoot()
     {
         AddPrimaryServer();

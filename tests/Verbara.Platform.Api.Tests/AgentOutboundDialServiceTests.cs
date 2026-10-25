@@ -234,6 +234,38 @@ public sealed class AgentOutboundDialServiceTests
     }
 
     [Fact]
+    public async Task DialAsync_ShouldStillTrackTheCall_WhenReservingCapacityFails()
+    {
+        _capacity.ReserveAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("capacity store down"));
+        _conversations.SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("store down"));
+        var sut = CreateService();
+
+        var act = () => sut.DialAsync(TenantId, _agentId, "+15551234567", null, CancellationToken.None);
+
+        // The Originate already rang the agent: a capacity failure is logged, never thrown, and with no unit
+        // reserved the failed save has nothing to release.
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("store down");
+        await _capacity.DidNotReceive().ReleaseAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DialAsync_ShouldSurfaceTheSaveFailure_WhenTheReleaseAlsoFails()
+    {
+        _capacity.ReleaseAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<ChannelType>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("capacity store down"));
+        _conversations.SaveAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("store down"));
+        var sut = CreateService();
+
+        var act = () => sut.DialAsync(TenantId, _agentId, "+15551234567", null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("store down");
+        await _capacity.Received(1).ReleaseAsync(TenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task DialAsync_ShouldNotReserveCapacity_WhenOriginateRejected()
     {
         _executor.Result = new OriginateResult(false, null, "trunk-down");
