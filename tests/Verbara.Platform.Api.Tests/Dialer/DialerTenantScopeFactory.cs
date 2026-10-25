@@ -95,6 +95,36 @@ public sealed class DialerTenantScopeFactory : WebApplicationFactory<Program>
         return client;
     }
 
+    /// <summary>The raw management API key <see cref="CreateManagementKeyClient"/> authenticates with.</summary>
+    public const string ManagementApiKeyRaw = "mgmt-dialer-dnc-key";
+
+    /// <summary>
+    /// An HTTP client authenticated by a management API key of the host tenant id — the credential the host-only policy
+    /// admits without a host-tenant lookup, so it reaches a handler even before <c>/api/setup</c>.
+    /// </summary>
+    public HttpClient CreateManagementKeyClient()
+    {
+        using (var scope = Services.CreateScope())
+        {
+            var keys = scope.ServiceProvider.GetRequiredService<IApiKeyStore>();
+            keys.SaveAsync(new ApiKey
+            {
+                KeyId = EntityId.From("mgmt-dialer-dnc"),
+                TenantId = new TenantId(HostTenantId),
+                Name = "Dialer DNC management key",
+                HashedKey = Convert.ToHexStringLower(
+                    System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(ManagementApiKeyRaw))),
+                Scopes = ["platform:*"],
+                KeyType = ApiKeyType.Management,
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None).GetAwaiter().GetResult();
+        }
+
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ManagementApiKeyRaw);
+        return client;
+    }
+
     private void Seed(IServiceProvider services)
     {
         using var scope = services.CreateScope();
@@ -102,7 +132,11 @@ public sealed class DialerTenantScopeFactory : WebApplicationFactory<Program>
         var users = scope.ServiceProvider.GetRequiredService<IUserStore>();
 
         if (_seedHostTenant)
+        {
             Upsert(tenants, HostTenantId, TenantType.Platform, parent: null);
+            users.CreateAsync(Admin(HostTenantId), CancellationToken.None).GetAwaiter().GetResult();
+            AuthenticatedPlatformApiFactory.SeedEnterpriseFeatureGate(services, HostTenantId);
+        }
         foreach (var tenantId in new[] { AcmeTenantId, GlobexTenantId })
         {
             Upsert(tenants, tenantId, TenantType.Customer, parent: _seedHostTenant ? HostTenantId : null);

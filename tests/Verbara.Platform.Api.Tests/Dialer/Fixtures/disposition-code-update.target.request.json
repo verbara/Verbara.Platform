@@ -1,0 +1,11 @@
+{
+  "label": null,
+  "category": null,
+  "isSuccess": null,
+  "triggerRetry": null,
+  "retryDelayMinutes": null,
+  "triggerCallback": null,
+  "addsToDnc": true,
+  "isActive": null,
+  "sortOrder": null
+}

@@ -1,0 +1,12 @@
+{
+  "id": 6,
+  "code": "DNC",
+  "label": "Do not call again",
+  "category": "Failure",
+  "isSuccess": false,
+  "triggerRetry": false,
+  "triggerCallback": false,
+  "addsToDnc": true,
+  "isActive": true,
+  "sortOrder": 4
+}

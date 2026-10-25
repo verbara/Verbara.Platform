@@ -1,15 +1,19 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.DependencyInjection;
+using Verbara.Platform.Api.Tests.Dialer;
 
 namespace Verbara.Platform.Api.Tests;
 
 public sealed class CampaignEndpointTests : IClassFixture<UnifiedPlatformApiFactory>
 {
+    private readonly UnifiedPlatformApiFactory _factory;
     private readonly HttpClient _client;
 
     public CampaignEndpointTests(UnifiedPlatformApiFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateAuthenticatedClient();
     }
 
@@ -608,7 +612,220 @@ public sealed class CampaignEndpointTests : IClassFixture<UnifiedPlatformApiFact
         items.Count.Should().Be(0);
     }
 
+    // ─── dialer-honours-dnc-callbacks-and-agent-dispositions ─────────────────
+
+    // design D1 (#472): an absent dncEnabled stores the check on; only an explicit false turns it off.
+    [Fact]
+    public async Task CreateCampaign_ShouldStoreTheDncCheckOn_WhenTheRequestOmitsDncEnabled()
+    {
+        var body = CampaignBody("No DNC member Campaign", dncEnabled: null);
+
+        var id = await PostCampaignAsync(body);
+
+        var detail = JsonNode.Parse(await _client.GetStringAsync($"/api/admin/campaigns/{id}"))!;
+        detail["dncEnabled"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CreateCampaign_ShouldStoreTheDncCheckOff_WhenTheRequestSendsFalse()
+    {
+        var body = CampaignBody("Explicit DNC off Campaign", dncEnabled: false);
+
+        var id = await PostCampaignAsync(body);
+
+        var detail = JsonNode.Parse(await _client.GetStringAsync($"/api/admin/campaigns/{id}"))!;
+        detail["dncEnabled"]!.GetValue<bool>().Should().BeFalse();
+    }
+
+    // design D6: addsToDnc round-trips through create, update and list (fixtures/disposition-code*.target.*.json).
+    [Fact]
+    public async Task CreateDisposition_ShouldRoundTripAddsToDnc_WhenTheTargetFixtureIsPosted()
+    {
+        var campaignId = await CreateCampaignAsync("AddsToDnc Create Campaign");
+        var body = DialerContractFixtures.Object("disposition-code-create.target.request.json");
+
+        var response = await _client.PostAsync($"/api/admin/campaigns/{campaignId}/dispositions", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        created["addsToDnc"]!.GetValue<bool>().Should().BeTrue();
+        DialerContractFixtures.AssertSameMembers(
+            DialerContractFixtures.Object("disposition-code.target.response.json"), created);
+
+        var listed = JsonNode.Parse(await _client.GetStringAsync($"/api/admin/campaigns/{campaignId}/dispositions"))!.AsArray();
+        listed.Single()!["addsToDnc"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CreateDisposition_ShouldStoreAddsToDncFalse_WhenTheRequestOmitsIt()
+    {
+        var campaignId = await CreateCampaignAsync("AddsToDnc Absent Campaign");
+        await CreateDispositionAsync(campaignId, "BUSY2", "Busy");
+
+        var listed = JsonNode.Parse(await _client.GetStringAsync($"/api/admin/campaigns/{campaignId}/dispositions"))!.AsArray();
+
+        listed.Single()!["addsToDnc"]!.GetValue<bool>().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UpdateDisposition_ShouldSetAddsToDnc_WhenTheTargetFixtureIsPut()
+    {
+        var campaignId = await CreateCampaignAsync("AddsToDnc Update Campaign");
+        var codeId = await CreateDispositionAsync(campaignId, "NI2", "Not Interested");
+        var body = DialerContractFixtures.Object("disposition-code-update.target.request.json");
+
+        var response = await _client.PutAsync($"/api/admin/campaigns/{campaignId}/dispositions/{codeId}", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["addsToDnc"]!.GetValue<bool>().Should().BeTrue();
+        var listed = JsonNode.Parse(await _client.GetStringAsync($"/api/admin/campaigns/{campaignId}/dispositions"))!.AsArray();
+        listed.Single()!["addsToDnc"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UpdateDisposition_ShouldKeepAddsToDnc_WhenTheRequestOmitsIt()
+    {
+        var campaignId = await CreateCampaignAsync("AddsToDnc Kept Campaign");
+        var created = await _client.PostAsync(
+            $"/api/admin/campaigns/{campaignId}/dispositions",
+            JsonContent.Create(DialerContractFixtures.Object("disposition-code-create.target.request.json")));
+        var codeId = JsonNode.Parse(await created.Content.ReadAsStringAsync())!["id"]!.GetValue<long>();
+
+        var response = await _client.PutAsync(
+            $"/api/admin/campaigns/{campaignId}/dispositions/{codeId}", JsonContent.Create(new { label = "Renamed" }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["addsToDnc"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    // design D7 C1: the callback POST writes only for a contact of the campaign and the resolved tenant.
+    [Fact]
+    public async Task CreateCallback_ShouldReturn404_WhenTheContactIsNotOfTheCampaign()
+    {
+        var campaignId = await CreateCampaignAsync("Callback Foreign Contact Campaign");
+
+        var response = await _client.PostAsync(
+            $"/api/admin/campaigns/{campaignId}/callbacks",
+            JsonContent.Create(new { contactId = 987654L, phone = "+573001234567", scheduledAt = "2026-10-27T15:00:00Z" }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var pending = JsonNode.Parse(await _client.GetStringAsync($"/api/admin/campaigns/{campaignId}/callbacks"))!.AsArray();
+        pending.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateCallback_ShouldReturn201_WhenTheContactIsOfTheCampaign()
+    {
+        var campaignId = await CreateCampaignAsync("Callback Own Contact Campaign");
+        _factory.Services.GetRequiredService<InMemoryCampaignStore>()
+            .SeedCampaignContact(UnifiedPlatformApiFactory.TestTenantId, campaignId, 4711L);
+
+        var response = await _client.PostAsync(
+            $"/api/admin/campaigns/{campaignId}/callbacks",
+            JsonContent.Create(new { contactId = 4711L, phone = "+573001234567", scheduledAt = DateTimeOffset.UtcNow.AddDays(1).ToString("O") }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var pending = JsonNode.Parse(await _client.GetStringAsync($"/api/admin/campaigns/{campaignId}/callbacks"))!.AsArray();
+        pending.Single()!["contactId"]!.GetValue<long>().Should().Be(4711L);
+    }
+
+    // design D14 (owner Q6): a present targetAbandonRate outside [0, 1] is refused, whatever the mode.
+    [Fact]
+    public async Task CreateCampaign_ShouldReturn400_WhenTargetAbandonRateIsAboveOne()
+    {
+        var body = CampaignBody("Rate 15 Campaign", dncEnabled: true, mode: "predictive", targetAbandonRate: 15.0);
+
+        var response = await _client.PostAsync("/api/admin/campaigns", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("[0, 1]");
+        var all = JsonNode.Parse(await _client.GetStringAsync("/api/admin/campaigns?pageSize=200"))!["items"]!.AsArray();
+        all.Should().NotContain(c => c!["name"]!.GetValue<string>() == "Rate 15 Campaign");
+    }
+
+    [Theory]
+    [InlineData(-0.01)]
+    [InlineData(1.01)]
+    public async Task CreateCampaign_ShouldReturn400_WhenTargetAbandonRateIsOutsideTheRange(double rate)
+    {
+        var body = CampaignBody($"Rate {rate} Campaign", dncEnabled: true, mode: "progressive", targetAbandonRate: rate);
+
+        var response = await _client.PostAsync("/api/admin/campaigns", JsonContent.Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Theory]
+    [InlineData(0.05)]
+    [InlineData(0.0)]
+    [InlineData(1.0)]
+    [InlineData(null)]
+    public async Task CreateCampaign_ShouldReturn201_WhenTargetAbandonRateIsInRangeOrAbsent(double? rate)
+    {
+        var body = CampaignBody($"Rate ok {rate} Campaign", dncEnabled: true, mode: "predictive", targetAbandonRate: rate);
+
+        var id = await PostCampaignAsync(body);
+
+        var detail = JsonNode.Parse(await _client.GetStringAsync($"/api/admin/campaigns/{id}"))!;
+        detail["targetAbandonRate"]!.GetValue<double>().Should().Be(rate ?? 0.03);
+    }
+
+    [Fact]
+    public async Task UpdateCampaign_ShouldReturn400_WhenTargetAbandonRateIsAboveOne()
+    {
+        var id = await PostCampaignAsync(CampaignBody("Update Rate 15 Campaign", dncEnabled: true, mode: "predictive", targetAbandonRate: 0.05));
+
+        var response = await _client.PutAsync($"/api/admin/campaigns/{id}", JsonContent.Create(new { targetAbandonRate = 15.0 }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("[0, 1]");
+        var detail = JsonNode.Parse(await _client.GetStringAsync($"/api/admin/campaigns/{id}"))!;
+        detail["targetAbandonRate"]!.GetValue<double>().Should().Be(0.05);
+    }
+
+    [Theory]
+    [InlineData(0.05)]
+    [InlineData(0.0)]
+    [InlineData(null)]
+    public async Task UpdateCampaign_ShouldReturn200_WhenTargetAbandonRateIsInRangeOrAbsent(double? rate)
+    {
+        var id = await PostCampaignAsync(CampaignBody($"Update Rate ok {rate} Campaign", dncEnabled: true, mode: "predictive", targetAbandonRate: 0.04));
+
+        var response = await _client.PutAsync($"/api/admin/campaigns/{id}", JsonContent.Create(new { targetAbandonRate = rate }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["targetAbandonRate"]!.GetValue<double>().Should().Be(rate ?? 0.04);
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    private static JsonObject CampaignBody(
+        string name, bool? dncEnabled, string mode = "progressive", double? targetAbandonRate = null)
+    {
+        var body = new JsonObject
+        {
+            ["name"] = name,
+            ["mode"] = mode,
+            ["targetQueueName"] = "default",
+            ["maxConcurrentCalls"] = 5,
+            ["timezone"] = "UTC",
+            ["schedule"] = new JsonArray(),
+            ["holidays"] = new JsonArray(),
+            ["maxAttemptsPerContact"] = 3,
+            ["retryIntervalMinutes"] = 60,
+            ["timeBetweenAttemptsMinutes"] = 5,
+        };
+        if (dncEnabled is { } dnc) body["dncEnabled"] = dnc;
+        if (targetAbandonRate is { } rate) body["targetAbandonRate"] = rate;
+        return body;
+    }
+
+    private async Task<long> PostCampaignAsync(JsonObject body)
+    {
+        var resp = await _client.PostAsync("/api/admin/campaigns", JsonContent.Create(body));
+        resp.StatusCode.Should().Be(HttpStatusCode.Created, await resp.Content.ReadAsStringAsync());
+        return JsonNode.Parse(await resp.Content.ReadAsStringAsync())!["id"]!.GetValue<long>();
+    }
 
     private async Task<long> CreateCampaignAsync(string name)
     {

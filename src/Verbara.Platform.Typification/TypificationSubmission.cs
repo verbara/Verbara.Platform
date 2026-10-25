@@ -48,6 +48,13 @@ public sealed record TypificationSubmission : ITenantScoped
 
     public DateTimeOffset CompletedAt { get; init; }
 
+    /// <summary>
+    /// What the dialer did with the disposition this typification handed it, set only on the typify response
+    /// (design D16, owner Q8). No store maps or writes it, so a submission read from a store has it null and every
+    /// other representation omits it.
+    /// </summary>
+    public DialerDispositionState? DialerDisposition { get; init; }
+
     // ─── Autonomous disposition (ADR-0034) ────────────────────────────────────
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Globalization;
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
@@ -71,6 +72,9 @@ internal static class CampaignEndpoints
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
+        if (OutOfRangeAbandonRate(body.TargetAbandonRate) is { } refused)
+            return refused;
+
         var tenantId = GetTenantId(context);
         var campaign = MapFromRequest(body, tenantId);
         var id = await campaignStore.CreateCampaignAsync(tenantId, campaign, ct);
@@ -116,7 +120,7 @@ internal static class CampaignEndpoints
         return campaign is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDetail(campaign));
     }
 
-    private static async Task<Results<Ok<CampaignDetailDto>, NotFound>> UpdateCampaign(
+    private static async Task<Results<Ok<CampaignDetailDto>, NotFound, BadRequest<ErrorResponse>>> UpdateCampaign(
         long id,
         HttpContext context,
         [FromBody] UpdateCampaignRequest body,
@@ -124,6 +128,9 @@ internal static class CampaignEndpoints
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
+        if (OutOfRangeAbandonRate(body.TargetAbandonRate) is { } refused)
+            return refused;
+
         var tenantId = GetTenantId(context);
         var campaign = await campaignStore.GetCampaignAsync(tenantId, id, ct);
         if (campaign is null)
@@ -379,6 +386,7 @@ internal static class CampaignEndpoints
             TriggerRetry = body.TriggerRetry,
             RetryDelayMinutes = body.RetryDelayMinutes,
             TriggerCallback = body.TriggerCallback,
+            AddsToDnc = body.AddsToDnc ?? false,
             IsActive = true,
         };
         var created = await dispositionStore.CreateAsync(tenantId, code, ct);
@@ -404,6 +412,7 @@ internal static class CampaignEndpoints
         if (body.TriggerRetry.HasValue) existing.TriggerRetry = body.TriggerRetry.Value;
         if (body.RetryDelayMinutes.HasValue) existing.RetryDelayMinutes = body.RetryDelayMinutes.Value;
         if (body.TriggerCallback.HasValue) existing.TriggerCallback = body.TriggerCallback.Value;
+        if (body.AddsToDnc.HasValue) existing.AddsToDnc = body.AddsToDnc.Value;
         if (body.IsActive.HasValue) existing.IsActive = body.IsActive.Value;
         if (body.SortOrder.HasValue) existing.SortOrder = body.SortOrder.Value;
 
@@ -444,7 +453,12 @@ internal static class CampaignEndpoints
         var tenantId = GetTenantId(context);
         if (!DateTimeOffset.TryParse(request.ScheduledAt, out var scheduledAt))
             return Results.BadRequest("Invalid date format");
-        await store.SaveCallbackAsync(tenantId, id, request.ContactId, scheduledAt.ToUtcInstant(), request.AgentId, ct);
+        // design D7 C1: the callback holds its contact from the moment it is written, so it is written only for a
+        // contact of this campaign and tenant; any other contact id is a 404 and nothing is scheduled.
+        var saved = await store.TrySaveCallbackAsync(
+            tenantId, id, request.ContactId, scheduledAt.ToUtcInstant(), request.AgentId, ct);
+        if (!saved)
+            return Results.NotFound();
         return Results.Created($"/admin/campaigns/{id}/callbacks", null);
     }
 
@@ -556,7 +570,9 @@ internal static class CampaignEndpoints
             ContactTimezone = req.Timezone,
             StartsAt = req.CampaignStart is not null ? DateTimeOffset.Parse(req.CampaignStart, CultureInfo.InvariantCulture).ToUtcInstant() : null,
             EndsAt = req.CampaignEnd is not null ? DateTimeOffset.Parse(req.CampaignEnd, CultureInfo.InvariantCulture).ToUtcInstant() : null,
-            CheckGlobalDnc = req.DncEnabled,
+            // design D1 (#472): an absent or null member is a campaign that checks DNC; only an explicit false turns
+            // the check off.
+            CheckGlobalDnc = req.DncEnabled ?? true,
             MaxAttemptsPerContact = req.MaxAttemptsPerContact,
             DefaultRetryDelayMinutes = req.RetryIntervalMinutes,
             ImmediateRetryDelayMs = req.TimeBetweenAttemptsMinutes * 60000,
@@ -588,7 +604,7 @@ internal static class CampaignEndpoints
 
     private static DispositionCodeDto MapToDispositionDto(DispositionCode d) =>
         new(d.Id, d.Code, d.Label, d.Category.ToString(), d.IsSuccess, d.TriggerRetry,
-            d.RetryDelayMinutes, d.TriggerCallback, d.IsActive, d.SortOrder);
+            d.RetryDelayMinutes, d.TriggerCallback, d.AddsToDnc, d.IsActive, d.SortOrder);
 
     private static DispositionCategory ParseDispositionCategory(string category) =>
         category.ToLowerInvariant() switch
@@ -613,6 +629,15 @@ internal static class CampaignEndpoints
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// design D14 (owner Q6): a present <c>targetAbandonRate</c> is a rate in <c>[0, 1]</c>, whatever the mode, so no
+    /// client stores the console's former target wait in seconds as the rate. Absent or null is not checked.
+    /// </summary>
+    private static BadRequest<ErrorResponse>? OutOfRangeAbandonRate(double? rate) =>
+        rate is { } value && (double.IsNaN(value) || value < 0 || value > 1)
+            ? TypedResults.BadRequest(new ErrorResponse("targetAbandonRate must be a rate in [0, 1]"))
+            : null;
+
     private static string GetTenantId(HttpContext context)
     {
         if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
@@ -630,7 +655,7 @@ internal sealed record CreateCampaignRequest(
     int MaxConcurrentCalls, double? PowerRatio, double? TargetAbandonRate,
     string Timezone, string? CampaignStart, string? CampaignEnd,
     ScheduleDayDto[] Schedule, string[] Holidays,
-    bool DncEnabled, int MaxAttemptsPerContact,
+    bool? DncEnabled, int MaxAttemptsPerContact,
     int RetryIntervalMinutes, int TimeBetweenAttemptsMinutes,
     string? ComplianceNotes);
 
@@ -670,9 +695,10 @@ internal sealed record ImportResultDto(int Imported, int Skipped, int Duplicates
 
 // ─── Disposition DTOs ──────────────────────────────────────────────────────────
 
-internal sealed record CreateDispositionCodeRequest(string Code, string Label, string Category, bool IsSuccess, bool TriggerRetry, int? RetryDelayMinutes, bool TriggerCallback);
-internal sealed record UpdateDispositionCodeRequest(string? Label, string? Category, bool? IsSuccess, bool? TriggerRetry, int? RetryDelayMinutes, bool? TriggerCallback, bool? IsActive, int? SortOrder);
-internal sealed record DispositionCodeDto(long Id, string Code, string Label, string Category, bool IsSuccess, bool TriggerRetry, int? RetryDelayMinutes, bool TriggerCallback, bool IsActive, int SortOrder);
+// design D6: addsToDnc — absent on create is false, absent or null on update leaves the code unchanged.
+internal sealed record CreateDispositionCodeRequest(string Code, string Label, string Category, bool IsSuccess, bool TriggerRetry, int? RetryDelayMinutes, bool TriggerCallback, bool? AddsToDnc = null);
+internal sealed record UpdateDispositionCodeRequest(string? Label, string? Category, bool? IsSuccess, bool? TriggerRetry, int? RetryDelayMinutes, bool? TriggerCallback, bool? IsActive, int? SortOrder, bool? AddsToDnc = null);
+internal sealed record DispositionCodeDto(long Id, string Code, string Label, string Category, bool IsSuccess, bool TriggerRetry, int? RetryDelayMinutes, bool TriggerCallback, bool AddsToDnc, bool IsActive, int SortOrder);
 
 // ─── Metrics DTOs ──────────────────────────────────────────────────────────────
 

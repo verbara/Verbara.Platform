@@ -13,6 +13,12 @@ namespace Verbara.Platform.Api.Endpoints;
 
 internal static class DncListEndpoints
 {
+    /// <summary>
+    /// <see cref="HttpContext.Items"/> key of the tenant that owns the lists a request manages, set on the management
+    /// route to the host tenant; the admin route uses the resolved tenant.
+    /// </summary>
+    private const string OwnerTenantItem = "DncListOwnerTenantId";
+
     public static void MapDncListEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/admin/dnc-lists")
@@ -20,12 +26,38 @@ internal static class DncListEndpoints
             .RequireOperationalTenant()
             .RequireLicenseFeature(LicenseFeature.Dialer)
             .RequirePlanFeature(PlanFeature.Dialer);
+        MapDncListRoutes(group);
 
+        // dialer-honours-dnc-callbacks-and-agent-dispositions D2: the host operator's platform-wide lists. The same
+        // handlers, on the host-only policy (ADR-0027 keeps /admin/dnc-lists Customer-only), with the dialer licence
+        // and no operational-tenant gate; every list is owned by the host tenant, read from the tenant store and never
+        // from the resolved tenant, so an impersonating host operator still manages host-owned lists. While no host
+        // tenant exists (before /api/setup) the route answers 503 "Platform not initialized", as every sibling
+        // /management handler does for that condition.
+        var management = app.MapGroup("/management/dnc-lists")
+            .RequireAuthorization(Verbara.Platform.Api.Auth.PlatformAdminRequirement.HostOnlyPolicy)
+            .RequireLicenseFeature(LicenseFeature.Dialer)
+            .AddEndpointFilter(async (invocation, next) =>
+            {
+                var http = invocation.HttpContext;
+                var host = await http.RequestServices.GetRequiredService<Verbara.Sdk.Pro.MultiTenant.ITenantStore>()
+                    .GetHostTenantAsync(http.RequestAborted);
+                if (host is null)
+                    return Results.Problem("Platform not initialized.", statusCode: StatusCodes.Status503ServiceUnavailable);
+                http.Items[OwnerTenantItem] = host.TenantId;
+                return await next(invocation);
+            });
+        MapDncListRoutes(management);
+    }
+
+    private static void MapDncListRoutes(RouteGroupBuilder group)
+    {
         // CRUD
         group.MapGet("/", ListDncLists);
         group.MapGet("/{id:long}", GetDncList);
-        // A Global-scope list applies to every tenant's campaigns, so only the host operator makes one; this group
-        // admits Customer tenants only (RequireOperationalTenant), so it refuses the Global scope with 403.
+        // A Global-scope list applies to every tenant's campaigns, so only the host operator makes one, on the
+        // management route; the admin route admits Customer tenants only (RequireOperationalTenant) and refuses the
+        // Global scope with 403.
         group.MapPost("/", CreateDncList).Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapPut("/{id:long}", UpdateDncList).Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapDelete("/{id:long}", DeleteDncList);
@@ -79,7 +111,7 @@ internal static class DncListEndpoints
             Scope = ParseScope(body.Scope) ?? DncListScope.Tenant,
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        if (list.Scope == DncListScope.Global)
+        if (list.Scope == DncListScope.Global && !IsManagementRoute(context))
             return GlobalScopeRefused();
         var id = await store.CreateAsync(list, tenantId, ct);
         list.Id = id;
@@ -94,7 +126,7 @@ internal static class DncListEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return TypedResults.Created($"/admin/dnc-lists/{id}", MapToDto(list));
+        return TypedResults.Created($"{RouteRoot(context)}/{id}", MapToDto(list));
     }
 
     private static async Task<Results<Ok<DncListDto>, NotFound, JsonHttpResult<ErrorResponse>>> UpdateDncList(
@@ -106,7 +138,7 @@ internal static class DncListEndpoints
         CancellationToken ct)
     {
         var scope = ParseScope(body.Scope);
-        if (scope == DncListScope.Global)
+        if (scope == DncListScope.Global && !IsManagementRoute(context))
             return GlobalScopeRefused();
 
         var tenantId = GetTenantId(context);
@@ -193,7 +225,7 @@ internal static class DncListEndpoints
         };
         if (!await store.AddEntryAsync(id, tenantId, entry, ct))
             return TypedResults.NotFound();
-        return TypedResults.Created($"/admin/dnc-lists/{id}/entries/{body.PhoneNumber}", MapEntryToDto(entry));
+        return TypedResults.Created($"{RouteRoot(context)}/{id}/entries/{body.PhoneNumber}", MapEntryToDto(entry));
     }
 
     private static async Task<Results<NoContent, NotFound>> RemoveEntry(
@@ -288,13 +320,22 @@ internal static class DncListEndpoints
             ApiJsonContext.Default.ErrorResponse,
             statusCode: StatusCodes.Status403Forbidden);
 
+    /// <summary>The tenant whose lists the request manages: the host tenant on the management route, else the resolved tenant.</summary>
     private static string GetTenantId(HttpContext context)
     {
+        if (context.Items.TryGetValue(OwnerTenantItem, out var owner) && owner is string hostTenantId)
+            return hostTenantId;
+
         if (context.Items.TryGetValue("TenantId", out var val) && val is TenantId tid)
             return tid.Value;
 
         throw new InvalidOperationException("Tenant ID not resolved");
     }
+
+    private static bool IsManagementRoute(HttpContext context) => context.Items.ContainsKey(OwnerTenantItem);
+
+    private static string RouteRoot(HttpContext context) =>
+        IsManagementRoute(context) ? "/management/dnc-lists" : "/admin/dnc-lists";
 }
 
 // ─── Request/Response DTOs ────────────────────────────────────────────────────

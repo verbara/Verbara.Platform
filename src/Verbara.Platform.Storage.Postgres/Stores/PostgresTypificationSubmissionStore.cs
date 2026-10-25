@@ -20,26 +20,21 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
 
     public PostgresTypificationSubmissionStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
 
+    private const string InsertSubmissionSql =
+        "INSERT INTO typification_submissions " +
+        "(tenant_id, conversation_id, agent_id, schema_id, schema_version, selected_node_path, leaf_node_id, " +
+        " field_values, notes, ai_suggested, ai_confidence, ai_accepted, source, duration_ms, completed_at, " +
+        " suggested_leaf_node_id, suggested_node_path, " +
+        " autonomous_actor_id, correction_state, corrected_at) " +
+        "VALUES (@TenantId, @ConversationId, @AgentId, @SchemaId, @SchemaVersion, @SelectedNodePath::jsonb, @LeafNodeId, " +
+        " @FieldValues::jsonb, @Notes, @AiSuggested, @AiConfidence, @AiAccepted, @Source, @DurationMs, @CompletedAt, " +
+        " @SuggestedLeafNodeId, @SuggestedNodePath::jsonb, " +
+        " @AutonomousActorId, @CorrectionState, @CorrectedAt) ";
+
     public async Task SaveAsync(TypificationSubmission submission, CancellationToken ct)
     {
-        IReadOnlyList<string> nodePath = submission.SelectedNodePath.Select(n => n.Value).ToList();
-        var nodePathJson = JsonSerializer.Serialize(nodePath, PostgresJson.Ctx.IReadOnlyListString);
-        var fieldValuesJson = JsonSerializer.Serialize(submission.FieldValues, PostgresJson.Ctx.IReadOnlyDictionaryStringString);
-
-        var suggestedNodePathJson = submission.SuggestedNodePath is not null
-            ? JsonSerializer.Serialize(submission.SuggestedNodePath, PostgresJson.Ctx.IReadOnlyListString)
-            : null;
-
         await _dataSource.ExecuteAsync(
-            "INSERT INTO typification_submissions " +
-            "(tenant_id, conversation_id, agent_id, schema_id, schema_version, selected_node_path, leaf_node_id, " +
-            " field_values, notes, ai_suggested, ai_confidence, ai_accepted, source, duration_ms, completed_at, " +
-            " suggested_leaf_node_id, suggested_node_path, " +
-            " autonomous_actor_id, correction_state, corrected_at) " +
-            "VALUES (@TenantId, @ConversationId, @AgentId, @SchemaId, @SchemaVersion, @SelectedNodePath::jsonb, @LeafNodeId, " +
-            " @FieldValues::jsonb, @Notes, @AiSuggested, @AiConfidence, @AiAccepted, @Source, @DurationMs, @CompletedAt, " +
-            " @SuggestedLeafNodeId, @SuggestedNodePath::jsonb, " +
-            " @AutonomousActorId, @CorrectionState, @CorrectedAt) " +
+            InsertSubmissionSql +
             "ON CONFLICT (tenant_id, conversation_id) DO UPDATE SET " +
             "  agent_id = EXCLUDED.agent_id, schema_id = EXCLUDED.schema_id, schema_version = EXCLUDED.schema_version, " +
             "  selected_node_path = EXCLUDED.selected_node_path, leaf_node_id = EXCLUDED.leaf_node_id, " +
@@ -50,30 +45,69 @@ internal sealed class PostgresTypificationSubmissionStore : ITypificationSubmiss
             "  suggested_node_path = EXCLUDED.suggested_node_path, " +
             "  autonomous_actor_id = EXCLUDED.autonomous_actor_id, correction_state = EXCLUDED.correction_state, " +
             "  corrected_at = EXCLUDED.corrected_at",
-            p =>
-            {
-                p.Add(new NpgsqlParameter("TenantId", submission.TenantId.Value));
-                p.Add(new NpgsqlParameter("ConversationId", submission.ConversationId.Value));
-                p.Add(new NpgsqlParameter("AgentId", submission.AgentId.Value));
-                p.Add(new NpgsqlParameter("SchemaId", submission.SchemaId.Value));
-                p.Add(new NpgsqlParameter("SchemaVersion", submission.SchemaVersion));
-                p.Add(new NpgsqlParameter("SelectedNodePath", nodePathJson));
-                p.Add(new NpgsqlParameter("LeafNodeId", submission.LeafNodeId.Value));
-                p.Add(new NpgsqlParameter("FieldValues", fieldValuesJson));
-                p.Add(new NpgsqlParameter("Notes", NpgsqlDbType.Text) { Value = (object?)submission.Notes ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("AiSuggested", submission.AiSuggested));
-                p.Add(new NpgsqlParameter("AiConfidence", NpgsqlDbType.Double) { Value = (object?)submission.AiConfidence ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("AiAccepted", NpgsqlDbType.Boolean) { Value = (object?)submission.AiAccepted ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("Source", submission.Source.ToString()));
-                p.Add(new NpgsqlParameter("DurationMs", (long)submission.Duration.TotalMilliseconds));
-                p.Add(new NpgsqlParameter("CompletedAt", submission.CompletedAt.UtcDateTime));
-                p.Add(new NpgsqlParameter("SuggestedLeafNodeId", NpgsqlDbType.Text) { Value = (object?)submission.SuggestedLeafNodeId?.Value ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("SuggestedNodePath", NpgsqlDbType.Text) { Value = (object?)suggestedNodePathJson ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("AutonomousActorId", NpgsqlDbType.Text) { Value = (object?)submission.AutonomousActorId ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("CorrectionState", NpgsqlDbType.Smallint) { Value = (short)submission.CorrectionState });
-                p.Add(new NpgsqlParameter("CorrectedAt", NpgsqlDbType.TimestampTz) { Value = (object?)submission.CorrectedAt?.UtcDateTime ?? DBNull.Value });
-            },
+            p => BindSubmission(p, submission),
             ct);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// One transaction: the submission's <c>ON CONFLICT DO NOTHING</c> insert decides (a concurrent first insert of
+    /// the same Conversation waits on the key and then inserts nothing), and only when it inserted is the dispatch row
+    /// added. Any failure rolls both back.
+    /// </remarks>
+    public async Task<bool> TryInsertAsync(
+        TypificationSubmission submission, DialerDispositionDispatch? dispatch, CancellationToken ct)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+
+        var inserted = await connection.ExecuteAsync(
+            InsertSubmissionSql + "ON CONFLICT (tenant_id, conversation_id) DO NOTHING",
+            p => BindSubmission(p, submission),
+            transaction,
+            ct);
+        if (inserted != 1)
+        {
+            await transaction.RollbackAsync(ct);
+            return false;
+        }
+
+        if (dispatch is not null)
+            await PostgresDialerDispositionDispatchStore.InsertAsync(connection, transaction, dispatch, ct);
+
+        await transaction.CommitAsync(ct);
+        return true;
+    }
+
+    private static void BindSubmission(NpgsqlParameterCollection p, TypificationSubmission submission)
+    {
+        IReadOnlyList<string> nodePath = submission.SelectedNodePath.Select(n => n.Value).ToList();
+        var nodePathJson = JsonSerializer.Serialize(nodePath, PostgresJson.Ctx.IReadOnlyListString);
+        var fieldValuesJson = JsonSerializer.Serialize(submission.FieldValues, PostgresJson.Ctx.IReadOnlyDictionaryStringString);
+        var suggestedNodePathJson = submission.SuggestedNodePath is not null
+            ? JsonSerializer.Serialize(submission.SuggestedNodePath, PostgresJson.Ctx.IReadOnlyListString)
+            : null;
+
+        p.Add(new NpgsqlParameter("TenantId", submission.TenantId.Value));
+        p.Add(new NpgsqlParameter("ConversationId", submission.ConversationId.Value));
+        p.Add(new NpgsqlParameter("AgentId", submission.AgentId.Value));
+        p.Add(new NpgsqlParameter("SchemaId", submission.SchemaId.Value));
+        p.Add(new NpgsqlParameter("SchemaVersion", submission.SchemaVersion));
+        p.Add(new NpgsqlParameter("SelectedNodePath", nodePathJson));
+        p.Add(new NpgsqlParameter("LeafNodeId", submission.LeafNodeId.Value));
+        p.Add(new NpgsqlParameter("FieldValues", fieldValuesJson));
+        p.Add(new NpgsqlParameter("Notes", NpgsqlDbType.Text) { Value = (object?)submission.Notes ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("AiSuggested", submission.AiSuggested));
+        p.Add(new NpgsqlParameter("AiConfidence", NpgsqlDbType.Double) { Value = (object?)submission.AiConfidence ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("AiAccepted", NpgsqlDbType.Boolean) { Value = (object?)submission.AiAccepted ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("Source", submission.Source.ToString()));
+        p.Add(new NpgsqlParameter("DurationMs", (long)submission.Duration.TotalMilliseconds));
+        p.Add(new NpgsqlParameter("CompletedAt", submission.CompletedAt.UtcDateTime));
+        p.Add(new NpgsqlParameter("SuggestedLeafNodeId", NpgsqlDbType.Text) { Value = submission.SuggestedLeafNodeId is { } suggestedLeaf ? (object)suggestedLeaf.Value : DBNull.Value });
+        p.Add(new NpgsqlParameter("SuggestedNodePath", NpgsqlDbType.Text) { Value = (object?)suggestedNodePathJson ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("AutonomousActorId", NpgsqlDbType.Text) { Value = (object?)submission.AutonomousActorId ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("CorrectionState", NpgsqlDbType.Smallint) { Value = (short)submission.CorrectionState });
+        p.Add(new NpgsqlParameter("CorrectedAt", NpgsqlDbType.TimestampTz) { Value = (object?)submission.CorrectedAt?.UtcDateTime ?? DBNull.Value });
     }
 
     public async Task<TypificationSubmission?> GetByConversationIdAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)

@@ -19,9 +19,11 @@ using Npgsql;
 using Verbara.Platform.Queues;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
+using Verbara.Platform.Api.Tests.Logging;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -40,9 +42,17 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
 
     private static readonly string s_hashedKey = HashKey(TestApiKey);
 
+    /// <summary>When set before the host is built, every log record of the host is kept in <see cref="CapturedLogs"/>.</summary>
+    internal bool CaptureLogs { get; init; }
+
+    /// <summary>The host's log records, when <see cref="CaptureLogs"/> was set.</summary>
+    internal LogRecordCapture CapturedLogs { get; } = new();
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        if (CaptureLogs)
+            builder.ConfigureLogging(logging => logging.AddProvider(CapturedLogs));
 
         builder.ConfigureServices(services =>
         {
@@ -372,6 +382,11 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
         RemoveAll<DispositionCodeStoreBase>(services);
         services.AddSingleton<InMemoryDispositionCodeStore>();
         services.AddSingleton<DispositionCodeStoreBase>(sp => sp.GetRequiredService<InMemoryDispositionCodeStore>());
+
+        // The typify endpoint's dialer hand-off (design D16), which production registers with the dialer
+        // (DialerHostExtensions.AddPlatformDialer); its worker is not started here — a test drives a pass itself.
+        services.TryAddSingleton<Verbara.Platform.Api.Services.DialerDispositionMetrics>();
+        services.TryAddSingleton<Verbara.Platform.Api.Services.DialerDispositionDispatcher>();
 
         // v0.5.0 Dialer config stores — always replace
         RemoveAll<TrunkStoreBase>(services);

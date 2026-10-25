@@ -145,4 +145,85 @@ public sealed class DefaultTypificationProvenanceServiceTests
         await act.Should().NotThrowAsync();
         await store.Received(1).MarkReconciledAsync(suggestion.Id, committedLeaf, false, Arg.Any<CancellationToken>());
     }
+
+    // dialer-honours-dnc-callbacks-and-agent-dispositions, design D15: the voice path derives before its
+    // insert-or-nothing write and reconciles only after it stored the submission.
+
+    [Fact]
+    public async Task ReadAsync_ShouldDeriveProvenanceWithoutWriting_WhenASuggestionExists()
+    {
+        var suggestedLeaf = EntityId.From("leaf-ai");
+        var suggestion = MakeSuggestion(suggestedLeaf, confidence: 0.92);
+        var store = Substitute.For<IAiSuggestionStore>();
+        store.GetLatestForConversationAsync(Arg.Any<EntityId>(), ConversationId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AiSuggestionRecord?>(suggestion));
+        using var metrics = new TypificationAiMetrics();
+        using var counted = new CountingListener(metrics);
+        var sut = new DefaultTypificationProvenanceService(store, metrics);
+
+        var result = await sut.ReadAsync(Tenant, ConversationId, suggestedLeaf, CancellationToken.None);
+
+        result.AiSuggested.Should().BeTrue();
+        result.AiAccepted.Should().BeTrue();
+        result.Source.Should().Be(SubmissionSource.AutoAi);
+        result.SuggestionId.Should().Be(suggestion.Id);
+        await store.DidNotReceive().MarkReconciledAsync(
+            Arg.Any<EntityId>(), Arg.Any<EntityId>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+        counted.Total.Should().Be(0, "a read counts no accept and no override");
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_ShouldMarkTheSuggestionAndCountOnce_WhenCalled()
+    {
+        var suggestedLeaf = EntityId.From("leaf-ai");
+        var committedLeaf = EntityId.From("leaf-agent");
+        var suggestion = MakeSuggestion(suggestedLeaf);
+        var store = Substitute.For<IAiSuggestionStore>();
+        store.GetLatestForConversationAsync(Arg.Any<EntityId>(), ConversationId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AiSuggestionRecord?>(suggestion));
+        using var metrics = new TypificationAiMetrics();
+        using var counted = new CountingListener(metrics);
+        var sut = new DefaultTypificationProvenanceService(store, metrics);
+        var provenance = await sut.ReadAsync(Tenant, ConversationId, committedLeaf, CancellationToken.None);
+
+        await sut.ReconcileAsync(provenance, committedLeaf, CancellationToken.None);
+
+        await store.Received(1).MarkReconciledAsync(suggestion.Id, committedLeaf, false, Arg.Any<CancellationToken>());
+        counted.Total.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_ShouldDoNothing_WhenNoSuggestionWasInvolved()
+    {
+        var store = Substitute.For<IAiSuggestionStore>();
+        using var metrics = new TypificationAiMetrics();
+        var sut = new DefaultTypificationProvenanceService(store, metrics);
+
+        await sut.ReconcileAsync(new ProvenanceResult(), EntityId.From("leaf-x"), CancellationToken.None);
+
+        await store.DidNotReceive().MarkReconciledAsync(
+            Arg.Any<EntityId>(), Arg.Any<EntityId>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>Sums the accept and override counters of one <see cref="TypificationAiMetrics"/> instance.</summary>
+    private sealed class CountingListener : IDisposable
+    {
+        private readonly System.Diagnostics.Metrics.MeterListener _listener = new();
+        private long _total;
+
+        public CountingListener(TypificationAiMetrics metrics)
+        {
+            _listener.InstrumentPublished = (instrument, listener) =>
+            {
+                if (ReferenceEquals(instrument, metrics.SuggestionAccepted) || ReferenceEquals(instrument, metrics.SuggestionOverridden))
+                    listener.EnableMeasurementEvents(instrument);
+            };
+            _listener.SetMeasurementEventCallback<long>((_, m, _, _) => Interlocked.Add(ref _total, m));
+            _listener.Start();
+        }
+
+        public long Total => Interlocked.Read(ref _total);
+
+        public void Dispose() => _listener.Dispose();
+    }
 }

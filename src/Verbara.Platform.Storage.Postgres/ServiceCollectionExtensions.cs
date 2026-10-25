@@ -203,6 +203,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITypificationSchemaStore, PostgresTypificationSchemaStore>();
         services.AddSingleton<ISchemaBindingStore, PostgresSchemaBindingStore>();
         services.AddSingleton<ITypificationSubmissionStore, PostgresTypificationSubmissionStore>();
+        // design D16: the dispositions stored typifications owe the dialer (migration 025).
+        services.AddSingleton<IDialerDispositionDispatchStore, PostgresDialerDispositionDispatchStore>();
         services.AddSingleton<ITypificationSubmissionCorrectionStore, PostgresTypificationSubmissionCorrectionStore>();
         // audit-trail-integrity-fixes (fix 1) — atomic correction+submission+audit write
         // (single Postgres transaction; shares the same NpgsqlDataSource as every other store here).

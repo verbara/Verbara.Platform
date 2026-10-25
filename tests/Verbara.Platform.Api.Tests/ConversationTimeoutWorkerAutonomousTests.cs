@@ -19,7 +19,7 @@ namespace Verbara.Platform.Api.Tests;
 /// determinism idiom — never <c>FakeTimeProvider.Advance</c> on the loop), feeding a single
 /// timed-out wrap-up per case and asserting the commit / skip / CAS-race / cap behaviour.
 /// </summary>
-public sealed class ConversationTimeoutWorkerAutonomousTests
+public sealed class ConversationTimeoutWorkerAutonomousTests : IDisposable
 {
     private const string TestTenantId = "t001";
     private const string AutonomousActorId = "verbara:ai:autonomous-worker";
@@ -46,6 +46,10 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
             .Returns(Array.Empty<Conversation>());
         _conversationStore.ListByStateAsync(Arg.Any<TenantId>(), ConversationState.Queued, 100, Arg.Any<CancellationToken>())
             .Returns(Array.Empty<Conversation>());
+
+        // The stamp is an insert-or-nothing (design D17): an untypified Conversation stores it.
+        _submissionStore.TryInsertAsync(Arg.Any<TypificationSubmission>(), Arg.Any<DialerDispositionDispatch?>(), Arg.Any<CancellationToken>())
+            .Returns(true);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -57,12 +61,12 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
         Status = TenantStatus.Active,
     };
 
-    private Conversation MakeExpiredWrapUp() => new()
+    private Conversation MakeExpiredWrapUp(ChannelType channel = ChannelType.WhatsApp) => new()
     {
         ConversationId = EntityId.New(),
         TenantId = new TenantId(TestTenantId),
         ContactId = EntityId.New(),
-        Channel = ChannelType.WhatsApp,
+        Channel = channel,
         Owner = ConversationOwner.ForAgent(EntityId.From("a1")),
         State = ConversationState.WrapUp,
         CreatedAt = _now.AddMinutes(-10),
@@ -87,9 +91,14 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
         CreatedAt = _now.AddSeconds(-210),
     };
 
+    private readonly AutonomousDispositionMetrics _metrics = new();
+
+    public void Dispose() => _metrics.Dispose();
+
     private ConversationTimeoutWorker CreateWorker(
         bool autonomousEnabled, int perCycleCap = 50, int correctionWindowDays = 30,
-        ITenantAutonomousDispositionStore? gateStore = null)
+        ITenantAutonomousDispositionStore? gateStore = null,
+        ITypificationSubmissionStore? submissionStore = null)
     {
         var options = Options.Create(new DistributionOptions
         {
@@ -110,9 +119,9 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
             policy: null,
             autonomousPolicy: _policy,
             suggestionStore: _suggestionStore,
-            submissionStore: _submissionStore,
+            submissionStore: submissionStore ?? _submissionStore,
             auditService: _audit,
-            autonomousMetrics: new AutonomousDispositionMetrics(),
+            autonomousMetrics: _metrics,
             gateStore: gateStore);
     }
 
@@ -135,7 +144,7 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
         conv.State.Should().Be(ConversationState.Closed);
         conv.ClosedAt.Should().Be(_now);
         await _conversationStore.Received(1).SaveAsync(conv, Arg.Any<CancellationToken>());
-        await _submissionStore.DidNotReceive().SaveAsync(Arg.Any<TypificationSubmission>(), Arg.Any<CancellationToken>());
+        await _submissionStore.DidNotReceive().TryInsertAsync(Arg.Any<TypificationSubmission>(), Arg.Any<DialerDispositionDispatch?>(), Arg.Any<CancellationToken>());
         await _policy.DidNotReceiveWithAnyArgs().EvaluateAsync(default!, default, default);
         await _conversationStore.DidNotReceive().TryConditionalCloseWrapUpAsync(
             Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
@@ -166,7 +175,7 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
         // No blank SaveAsync (the CAS path closes via the conditional update, not SaveAsync).
         await _conversationStore.DidNotReceive().SaveAsync(conv, Arg.Any<CancellationToken>());
 
-        await _submissionStore.Received(1).SaveAsync(
+        await _submissionStore.Received(1).TryInsertAsync(
             Arg.Is<TypificationSubmission>(s => s != null &&
                 s.Source == SubmissionSource.AutoAi
                 && s.AutonomousActorId == AutonomousActorId
@@ -176,6 +185,7 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
                 && s.CompletedAt == _now
                 && s.SchemaId.Value == "schema-1"
                 && s.SchemaVersion == 3),
+            null,
             Arg.Any<CancellationToken>());
 
         await _audit.Received(1).RecordAsync(
@@ -217,7 +227,7 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
 
         await sut.ProcessTimeoutsAsync(CancellationToken.None);
 
-        await _submissionStore.DidNotReceive().SaveAsync(Arg.Any<TypificationSubmission>(), Arg.Any<CancellationToken>());
+        await _submissionStore.DidNotReceive().TryInsertAsync(Arg.Any<TypificationSubmission>(), Arg.Any<DialerDispositionDispatch?>(), Arg.Any<CancellationToken>());
         await _audit.DidNotReceiveWithAnyArgs().RecordAsync(
             default, default!, default!, default!, default!, default!,
             default, default, default, default, default, default, default);
@@ -244,7 +254,7 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
 
         conv.State.Should().Be(ConversationState.Closed);
         await _conversationStore.Received(1).SaveAsync(conv, Arg.Any<CancellationToken>());
-        await _submissionStore.DidNotReceive().SaveAsync(Arg.Any<TypificationSubmission>(), Arg.Any<CancellationToken>());
+        await _submissionStore.DidNotReceive().TryInsertAsync(Arg.Any<TypificationSubmission>(), Arg.Any<DialerDispositionDispatch?>(), Arg.Any<CancellationToken>());
         await _conversationStore.DidNotReceive().TryConditionalCloseWrapUpAsync(
             Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
 
@@ -283,7 +293,7 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
         await sut.ProcessTimeoutsAsync(CancellationToken.None);
 
         conv.State.Should().Be(ConversationState.Closed);
-        await _submissionStore.DidNotReceive().SaveAsync(Arg.Any<TypificationSubmission>(), Arg.Any<CancellationToken>());
+        await _submissionStore.DidNotReceive().TryInsertAsync(Arg.Any<TypificationSubmission>(), Arg.Any<DialerDispositionDispatch?>(), Arg.Any<CancellationToken>());
         await _audit.Received(1).RecordAsync(
             Arg.Any<TenantId>(),
             "conversations",
@@ -320,7 +330,7 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
 
         conv.State.Should().Be(ConversationState.Closed);
         await _conversationStore.Received(1).SaveAsync(conv, Arg.Any<CancellationToken>());
-        await _submissionStore.DidNotReceive().SaveAsync(Arg.Any<TypificationSubmission>(), Arg.Any<CancellationToken>());
+        await _submissionStore.DidNotReceive().TryInsertAsync(Arg.Any<TypificationSubmission>(), Arg.Any<DialerDispositionDispatch?>(), Arg.Any<CancellationToken>());
         // No audit at all for a non-opted-in tenant — byte-identical to the gate-OFF path.
         await _audit.DidNotReceiveWithAnyArgs().RecordAsync(
             default, default!, default!, default!, default!, default!,
@@ -350,7 +360,7 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
         await _suggestionStore.DidNotReceiveWithAnyArgs().GetLatestForConversationAsync(
             default!, default!, default);
         await _policy.DidNotReceiveWithAnyArgs().EvaluateAsync(default!, default, default);
-        await _submissionStore.DidNotReceive().SaveAsync(Arg.Any<TypificationSubmission>(), Arg.Any<CancellationToken>());
+        await _submissionStore.DidNotReceive().TryInsertAsync(Arg.Any<TypificationSubmission>(), Arg.Any<DialerDispositionDispatch?>(), Arg.Any<CancellationToken>());
         // No audit at all for a non-opted-in tenant — byte-identical to the gate-OFF path.
         await _audit.DidNotReceiveWithAnyArgs().RecordAsync(
             default, default!, default!, default!, default!, default!,
@@ -391,7 +401,7 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
 
         await _suggestionStore.Received(1).GetLatestForConversationAsync(
             Arg.Any<EntityId>(), conv.ConversationId, Arg.Any<CancellationToken>());
-        await _submissionStore.Received(1).SaveAsync(Arg.Any<TypificationSubmission>(), Arg.Any<CancellationToken>());
+        await _submissionStore.Received(1).TryInsertAsync(Arg.Any<TypificationSubmission>(), null, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -420,8 +430,124 @@ public sealed class ConversationTimeoutWorkerAutonomousTests
         await sut.ProcessTimeoutsAsync(CancellationToken.None);
 
         // At most 2 stamps + 2 conditional closes; the 3rd candidate is deferred (no CAS, no stamp).
-        await _submissionStore.Received(2).SaveAsync(Arg.Any<TypificationSubmission>(), Arg.Any<CancellationToken>());
+        await _submissionStore.Received(2).TryInsertAsync(Arg.Any<TypificationSubmission>(), null, Arg.Any<CancellationToken>());
         await _conversationStore.Received(2).TryConditionalCloseWrapUpAsync(
             Arg.Any<TenantId>(), Arg.Any<EntityId>(), _now, Arg.Any<CancellationToken>());
+    }
+
+    // ─── #476 / design D17: the timeout keeps a stored typification ─────────────────────────────
+
+    /// <summary>The agent's submission: a different leaf from the suggestion's leaf-9.</summary>
+    private TypificationSubmission AgentSubmission(Conversation conv, SubmissionSource source) => new()
+    {
+        TenantId = conv.TenantId,
+        ConversationId = conv.ConversationId,
+        AgentId = EntityId.From("a1"),
+        SchemaId = EntityId.From("schema-1"),
+        SchemaVersion = 3,
+        SelectedNodePath = [EntityId.From("root"), EntityId.From("leaf-agent")],
+        LeafNodeId = EntityId.From("leaf-agent"),
+        FieldValues = new Dictionary<string, string> { ["disp"] = "agent" },
+        AiSuggested = source == SubmissionSource.AutoAi,
+        AiAccepted = source == SubmissionSource.AutoAi ? true : null,
+        Source = source,
+        CompletedAt = _now.AddSeconds(-150),
+    };
+
+    private void ArrangeCommit(Conversation conv)
+    {
+        var suggestion = MakeSuggestion(conv.ConversationId);
+        _suggestionStore.GetLatestForConversationAsync(Arg.Any<EntityId>(), conv.ConversationId, Arg.Any<CancellationToken>())
+            .Returns(suggestion);
+        _policy.EvaluateAsync(conv, suggestion, Arg.Any<CancellationToken>())
+            .Returns(AutonomousDispositionDecision.Commit(EntityId.From("leaf-9"), ["root", "sales", "completed"], 0.97));
+        _conversationStore.TryConditionalCloseWrapUpAsync(Arg.Any<TenantId>(), conv.ConversationId, _now, Arg.Any<CancellationToken>())
+            .Returns(true);
+    }
+
+    private Task AuditedAsync(int times, string action, Conversation conv, string? reason = null) =>
+        _audit.Received(times).RecordAsync(
+            Arg.Any<TenantId>(),
+            "conversations",
+            action,
+            "info",
+            AutonomousActorId,
+            "ai",
+            conv.ConversationId.Value,
+            "Conversation",
+            Arg.Any<Guid?>(),
+            Arg.Any<AuditChanges?>(),
+            Arg.Is<IReadOnlyDictionary<string, string>>(m => m != null && (reason == null || m["reason"] == reason)),
+            Arg.Any<DateTimeOffset?>(),
+            Arg.Any<CancellationToken>());
+
+    [Theory]
+    [InlineData(ChannelType.Voice, SubmissionSource.Manual)]
+    [InlineData(ChannelType.Voice, SubmissionSource.AutoAi)]
+    [InlineData(ChannelType.WebChat, SubmissionSource.Manual)]
+    [InlineData(ChannelType.WebChat, SubmissionSource.AutoAi)]
+    public async Task ProcessTimeoutsAsync_ShouldKeepTheAgentsSubmissionAndClose_WhenATypifiedConversationTimesOut(
+        ChannelType channel, SubmissionSource source)
+    {
+        var conv = MakeExpiredWrapUp(channel);
+        SeedWrapUp(conv);
+        ArrangeCommit(conv);
+        var store = new Verbara.Platform.Storage.InMemory.InMemoryTypificationSubmissionStore();
+        var agents = AgentSubmission(conv, source);
+        await store.SaveAsync(agents, CancellationToken.None);
+        using var commits = new TypifyEndpointTests.InstrumentCounter(_metrics.Commits);
+        using var skips = new TypifyEndpointTests.InstrumentCounter(_metrics.Skipped);
+        var sut = CreateWorker(autonomousEnabled: true, submissionStore: store);
+
+        await sut.ProcessTimeoutsAsync(CancellationToken.None);
+
+        conv.State.Should().Be(ConversationState.Closed);
+        (await store.GetByConversationIdAsync(conv.TenantId, conv.ConversationId, CancellationToken.None))
+            .Should().BeSameAs(agents, "the timeout keeps the agent's submission, whatever its source");
+        await AuditedAsync(1, "typification.autonomous.skipped", conv, nameof(AutonomousSkipReason.AlreadyTypified));
+        await AuditedAsync(0, "typification.autonomous.commit", conv);
+        skips.Total.Should().Be(1);
+        commits.Total.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ProcessTimeoutsAsync_ShouldKeepTheStoredSubmission_WhenATypificationLandsBetweenTheReadAndTheStamp()
+    {
+        var typified = MakeExpiredWrapUp();
+        var untypified = MakeExpiredWrapUp();
+        SeedWrapUp(typified, untypified);
+        ArrangeCommit(typified);
+        ArrangeCommit(untypified);
+        var inner = new Verbara.Platform.Storage.InMemory.InMemoryTypificationSubmissionStore();
+        var agents = AgentSubmission(typified, SubmissionSource.Manual);
+        await inner.SaveAsync(agents, CancellationToken.None);
+        var store = new ReadMissesStore(inner);
+        using var commits = new TypifyEndpointTests.InstrumentCounter(_metrics.Commits);
+        var sut = CreateWorker(autonomousEnabled: true, perCycleCap: 1, submissionStore: store);
+
+        await sut.ProcessTimeoutsAsync(CancellationToken.None);
+
+        typified.State.Should().Be(ConversationState.Closed);
+        (await inner.GetByConversationIdAsync(typified.TenantId, typified.ConversationId, CancellationToken.None))
+            .Should().BeSameAs(agents);
+        await AuditedAsync(1, "typification.autonomous.skipped", typified, nameof(AutonomousSkipReason.AlreadyTypified));
+        await AuditedAsync(0, "typification.autonomous.commit", typified);
+        (await inner.GetByConversationIdAsync(untypified.TenantId, untypified.ConversationId, CancellationToken.None))!
+            .Source.Should().Be(SubmissionSource.AutoAi, "the refused stamp did not count against the cap of 1");
+        await AuditedAsync(1, "typification.autonomous.commit", untypified);
+        commits.Total.Should().Be(1);
+    }
+
+    /// <summary>A submission store whose read misses every row, so only the insert can refuse (a typification that
+    /// committed between the worker's read and its stamp).</summary>
+    private sealed class ReadMissesStore(ITypificationSubmissionStore inner) : ITypificationSubmissionStore
+    {
+        public Task SaveAsync(TypificationSubmission submission, CancellationToken ct) => inner.SaveAsync(submission, ct);
+
+        public Task<TypificationSubmission?> GetByConversationIdAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct) =>
+            Task.FromResult<TypificationSubmission?>(null);
+
+        public Task<bool> TryInsertAsync(TypificationSubmission submission, DialerDispositionDispatch? dispatch, CancellationToken ct) =>
+            inner.TryInsertAsync(submission, dispatch, ct);
     }
 }

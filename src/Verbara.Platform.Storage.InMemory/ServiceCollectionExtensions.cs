@@ -114,6 +114,10 @@ public static class ServiceCollectionExtensions
         // Typification
         services.AddSingleton<ITypificationSchemaStore, InMemoryTypificationSchemaStore>();
         services.AddSingleton<ISchemaBindingStore, InMemorySchemaBindingStore>();
+        // design D16: the submission store adds a typification's dialer dispatch to the same instance the dispatcher
+        // claims from, so the concrete type is registered once and the interface forwarded to it.
+        services.AddSingleton<InMemoryDialerDispositionDispatchStore>();
+        services.AddSingleton<IDialerDispositionDispatchStore>(sp => sp.GetRequiredService<InMemoryDialerDispositionDispatchStore>());
         services.AddSingleton<ITypificationSubmissionStore, InMemoryTypificationSubmissionStore>();
         services.AddSingleton<ITypificationSubmissionCorrectionStore, InMemoryTypificationSubmissionCorrectionStore>();
         // audit-trail-integrity-fixes (fix 1) — atomic correction+submission+audit write.

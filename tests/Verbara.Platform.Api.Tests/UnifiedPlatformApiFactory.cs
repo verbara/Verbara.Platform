@@ -168,6 +168,26 @@ internal sealed class InMemoryCampaignStore : CampaignStoreBase
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>The contacts of each (tenant, campaign) <see cref="SeedCampaignContact"/> registered.</summary>
+    private readonly ConcurrentDictionary<(string TenantId, long CampaignId, long ContactId), bool> _campaignContacts = new();
+
+    /// <summary>Registers dialer contact <paramref name="contactId"/> as one of <paramref name="campaignId"/>.</summary>
+    public void SeedCampaignContact(string tenantId, long campaignId, long contactId) =>
+        _campaignContacts[(tenantId, campaignId, contactId)] = true;
+
+    /// <summary>
+    /// The Pro <c>2.21.0-pro</c> contract (design D7 C1): writes the callback only for a contact of that campaign and
+    /// tenant (one registered through <see cref="SeedCampaignContact"/>) and reports whether it did.
+    /// </summary>
+    public override async ValueTask<bool> TrySaveCallbackAsync(
+        string tenantId, long campaignId, long contactId, DateTimeOffset scheduledAt, string? agentId, CancellationToken ct)
+    {
+        if (!_campaignContacts.ContainsKey((tenantId, campaignId, contactId)))
+            return false;
+        await SaveCallbackAsync(tenantId, campaignId, contactId, scheduledAt, agentId, ct);
+        return true;
+    }
+
     public override ValueTask<IReadOnlyList<(long CampaignId, long ContactId, DateTimeOffset ScheduledAt, string? AgentId)>>
         GetPendingCallbacksAsync(string tenantId, DateTimeOffset until, CancellationToken ct)
     {
@@ -237,6 +257,77 @@ internal sealed class InMemoryCampaignStore : CampaignStoreBase
             return false;
         await UpdateCallAttemptDispositionAsync(tenantId, callAttemptId, dispositionId, agentComment, ct);
         return true;
+    }
+
+    // ─── ApplyAgentDispositionAsync (dialer-honours-dnc-callbacks-and-agent-dispositions, design D5/D16) ───
+
+    private readonly Lock _dispositionGate = new();
+    private readonly HashSet<(string TenantId, string ActionId)> _acceptedActions = [];
+    private readonly Queue<Func<AgentDisposition, CancellationToken, ValueTask<AgentDispositionResult>>> _dispositionScript = new();
+
+    /// <summary>Every disposition handed to <see cref="ApplyAgentDispositionAsync"/>, in call order (throws included).</summary>
+    public List<AgentDisposition> AgentDispositionCalls { get; } = [];
+
+    /// <summary>
+    /// How many dispositions took effect: a call answered <see cref="AgentDispositionResult.Applied"/> or
+    /// <see cref="AgentDispositionResult.AwaitingOutcome"/>, which Pro answers once per action id.
+    /// </summary>
+    public int AgentDispositionEffects { get; private set; }
+
+    /// <summary>The answer of a call nothing is scripted for, for an action id not accepted before.</summary>
+    public AgentDispositionResult DefaultAgentDispositionResult { get; set; } = AgentDispositionResult.Applied;
+
+    /// <summary>Scripts the next calls: throw <paramref name="throwTimes"/> times, then answer <paramref name="then"/>.</summary>
+    public void ScriptAgentDisposition(int throwTimes, AgentDispositionResult? then = null)
+    {
+        lock (_dispositionGate)
+        {
+            for (var i = 0; i < throwTimes; i++)
+                _dispositionScript.Enqueue((_, _) => throw new InvalidOperationException("Scripted dialer store failure."));
+            if (then is { } result)
+                _dispositionScript.Enqueue((d, _) => ValueTask.FromResult(Accept(d, result)));
+        }
+    }
+
+    /// <summary>Scripts the next call with <paramref name="handler"/> (a barrier, a hold); its answer is counted as any other.</summary>
+    public void ScriptAgentDisposition(Func<AgentDisposition, CancellationToken, ValueTask<AgentDispositionResult>> handler)
+    {
+        lock (_dispositionGate)
+            _dispositionScript.Enqueue(async (d, ct) => Accept(d, await handler(d, ct)));
+    }
+
+    /// <summary>
+    /// The Pro <c>2.21.0-pro</c> contract, simulated: the first disposition of an action id takes effect, a later one
+    /// answers <see cref="AgentDispositionResult.AlreadyApplied"/> (Pro's unique key on the action id).
+    /// </summary>
+    public override ValueTask<AgentDispositionResult> ApplyAgentDispositionAsync(AgentDisposition disposition, CancellationToken ct)
+    {
+        Func<AgentDisposition, CancellationToken, ValueTask<AgentDispositionResult>>? scripted;
+        lock (_dispositionGate)
+        {
+            AgentDispositionCalls.Add(disposition);
+            _dispositionScript.TryDequeue(out scripted);
+        }
+
+        if (scripted is not null)
+            return scripted(disposition, ct);
+
+        return ValueTask.FromResult(Accept(disposition, DefaultAgentDispositionResult));
+    }
+
+    private AgentDispositionResult Accept(AgentDisposition disposition, AgentDispositionResult result)
+    {
+        lock (_dispositionGate)
+        {
+            if (result is AgentDispositionResult.Applied or AgentDispositionResult.AwaitingOutcome)
+            {
+                if (!_acceptedActions.Add((disposition.TenantId, disposition.ActionId)))
+                    return AgentDispositionResult.AlreadyApplied;
+                AgentDispositionEffects++;
+            }
+
+            return result;
+        }
     }
 
     public override ValueTask<CampaignMetricsSnapshot> GetCampaignMetricsAsync(string tenantId, long campaignId, CancellationToken ct)

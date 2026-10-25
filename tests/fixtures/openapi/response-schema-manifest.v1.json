@@ -977,6 +977,7 @@
           "suggestedNodePath",
           "duration",
           "completedAt",
+          "dialerDisposition",
           "autonomousActorId",
           "correctionState",
           "correctedAt"
@@ -1316,6 +1317,7 @@
           "triggerRetry",
           "retryDelayMinutes",
           "triggerCallback",
+          "addsToDnc",
           "isActive",
           "sortOrder"
         ],

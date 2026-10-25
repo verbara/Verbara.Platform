@@ -1,0 +1,13 @@
+[
+  {
+    "campaignId": 11,
+    "campaignName": "Q4 renewals",
+    "status": "Active",
+    "contactsDialed": 120,
+    "contactsRemaining": 380,
+    "connectRate": 0.42,
+    "abandonRate": 0.02,
+    "activeCalls": 0,
+    "pacingRate": 1
+  }
+]

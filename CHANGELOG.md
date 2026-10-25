@@ -9,6 +9,79 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+The outbound dialer honours DNC lists, scheduled callbacks and agents' dispositions (Verbara.Sdk.Pro `2.21.0-pro`).
+Read **Upgrading** and `docs/operations/upgrade-2.32.0.md`: the first start repairs two kinds of stored campaigns,
+once and audited; two campaign routes answer new 400 and 404 refusals; and the voice typification no longer moves the
+Conversation.
+
+### Upgrading
+
+- **The first start turns the DNC check on for campaigns created before 2026-10-23 10:08 UTC with it off**, the ones
+  the console created before v3.25.1-web, which never sent `dncEnabled`. Each changed campaign is audited
+  `campaign.dnc_repaired`; it runs once per database, so a later `PUT` with `"dncEnabled": false` stays. (#472)
+- **The first start resets to `0.03` the `targetAbandonRate` of predictive campaigns that stored a value above 1**, the
+  console's former target wait in seconds, audited `campaign.abandon_rate_repaired` with the old and the new value.
+  Pacing does not read the stored rate, so no dialing changes.
+- **`POST` and `PUT /api/v1/admin/campaigns` answer 400 to a `targetAbandonRate` outside `[0, 1]`**, whatever the mode;
+  an absent or null member is unaffected. A console before v3.26.0-web gets 400 on a predictive campaign until it is
+  upgraded.
+- **`POST /api/v1/admin/campaigns/{id}/callbacks` answers 404 when `contactId` is not a contact of that campaign**, and
+  schedules nothing.
+- **Callbacks scheduled before this release are dialed.** No part of the dialer read them until now; they are due on
+  the first callback poll after the upgrade, and dialed while their campaign is Active. The upgrade note gives the
+  query that retires the ones you do not want dialed. (Pro #229, through the pin)
+- **Migration `025_DialerDispositionDispatches.sql`** adds the table `dialer_disposition_dispatches` (additive).
+
+### Added
+
+- **`/api/v1/management/dnc-lists`: the host operator's platform-wide DNC lists**, with the operations of
+  `/api/v1/admin/dnc-lists`, on the host-only policy and the dialer licence. Every list there is owned by the host
+  tenant, so its Global-scope lists block their numbers for every tenant's campaigns whose DNC check is on; customer
+  tenants neither see them nor reach their entries. Before `/api/setup` the route answers 503 to a management key and
+  403 to other credentials.
+- **`addsToDnc` on campaign disposition codes** (create, update and the code's representation). A call typified with
+  such a code puts its number on the tenant's DNC list as a non-expiring entry and resolves the contact do-not-call.
+- **The typify response's `dialerDisposition`**: `None`, `Applied`, `AlreadyApplied`, `AwaitingOutcome`,
+  `UnknownCall` or `Pending`, what the dialer did with the typification's disposition. Optional; no stored
+  representation carries it. (#461)
+- **The meter `verbara.platform.dialer`**: `dialer.disposition_dispatch.completed` (by `result`),
+  `dialer.disposition_dispatch.released` and the gauge `dialer.disposition_dispatch.pending`.
+
+### Changed
+
+- **`POST /api/v1/admin/campaigns` stores the DNC check on when `dncEnabled` is absent or null**; only `false` turns it
+  off. (#472)
+- **A voice Conversation's typification no longer moves it.** It is accepted while the call is up (`Active`) and after
+  it ended (`WrapUp`), once; a second one, or one of a `Closed` Conversation, answers 409 `conversation-not-closable`
+  with nothing stored. The voice bridge alone moves the Conversation to `WrapUp` at the hangup and releases the agent's
+  voice capacity then. Before, the usual after-call typification answered 409, and one during the call moved the
+  Conversation so the hangup released no capacity.
+- **A campaign Conversation carries the dialer's contact id and the call's action id** (`dialerContactId`,
+  `dialerActionId`, read with `DIALER_CAMPAIGN_ID`); a call whose ids cannot be read is logged once and its
+  typification does not reach the dialer.
+- **A compliance rejection no longer blocks the rest of a campaign's list**: a DNC match is resolved do-not-call, a
+  campaign-wide pause ends the pass, a frequency limit waits the campaign's time between attempts. (Pro #227, through
+  the pin)
+
+### Fixed
+
+- **An agent's typification of a campaign call reaches the dialer**, before or after the call's outcome is recorded:
+  the code and the notes on the call's attempt, then a retry, a callback or a do-not-call entry, applied once per call.
+  The disposition is stored with the typification and handed over by the request, then by any replica until the
+  dialer answers, so a failed or interrupted hand-off is never lost. A leaf code the campaign does not have reaches
+  nothing and is logged, and no longer publishes `campaign.disposition_submitted` with an empty code. (#461)
+- **Scheduled callbacks are dialed once, at their time**, on any number of replicas, and hold their contact until
+  then. (Pro #229, through the pin)
+- **The wrap-up timeout no longer replaces an agent's typification with its AI disposition**: with autonomous
+  disposition on, a typified Conversation still in `WrapUp` is closed with its typification kept, audited
+  `typification.autonomous.skipped` with reason `AlreadyTypified`. (#476)
+
+### Changed — Dependencies
+
+- **Verbara.Sdk.Pro `2.20.3-pro` → `2.21.0-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged. No
+  other resolved package moves (every `project.assets.json` differs only in the 22 Pro ids), and no packed floor
+  moved in Pro. The dialer's DNC, callback and agent-disposition API above comes from it. (Pro #268)
+
 ## [2.31.1] - 2026-10-24
 
 Patch release. DNC lists and call-attempt dispositions are scoped to the caller's tenant (Pro `2.20.3-pro`). Read **Upgrading**:
