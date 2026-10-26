@@ -9,6 +9,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **The AI typification docs and the OpenAPI `aiSource` description name the deployment operator's key**, not a
+  Verbara one: a platform-managed LLM is configured by whoever operates the deployment. No identifier, enum value or
+  JSON shape changes. The README opens with the canonical sentence "Verbara is omnichannel contact-center software,
+  licensed for each company to install and operate on its own infrastructure.", and the operations docs drop the
+  SaaS and CCaaS framing (verbara-meta/PDR-0006).
+
 ## [2.32.0] - 2026-10-25
 
 The outbound dialer honours DNC lists, dials scheduled callbacks and applies agents' dispositions (Verbara.Sdk.Pro

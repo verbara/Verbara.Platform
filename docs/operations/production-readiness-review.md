@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-26
 **Train:** R5.5 "Production Validation con datos reales"
-**Audience:** Operators deploying Verbara Platform to production; partners evaluating Verbara as a CCaaS platform; Verbara maintainers ahead of first customer onboarding.
+**Audience:** Operators deploying Verbara Platform to production; partners evaluating Verbara for a self-hosted deployment; Verbara maintainers ahead of first customer onboarding.
 **Pattern:** Google SRE PRR checklist (https://sre.google/sre-book/evolving-sre-engagement-model/) adapted for a single-tenancy verifiable-by-customer product.
 
 ## Context

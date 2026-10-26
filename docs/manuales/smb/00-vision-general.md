@@ -6,7 +6,7 @@
 
 ## ¿Qué es Verbara Platform?
 
-Verbara es una plataforma omnicanal de contact center que un cliente instala en **su propia infraestructura** (on-premise o cloud VM). Soporta:
+Verbara es software de contact center omnicanal que se licencia para que cada empresa lo instale y opere en su propia infraestructura (on-premise o cloud VM). Soporta:
 
 - **Voz/SIP** — agentes WebRTC en el navegador + trunks SIP externos (Twilio Elastic, carriers PSTN, etc.).
 - **WebChat** — widget embebido en una página web del cliente, conversaciones asignadas a agentes.

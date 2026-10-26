@@ -139,7 +139,7 @@ public sealed class LicensedAgentReportsTests
         var rows = new[] { Daily(null, new DateOnly(2026, 9, 10), 63) };
 
         Peaks(rows, new LicensedAgentLicenseDto("lic", "Owner", "SelfHostBusiness", 50, true)).Deployment.OverBand.Should().BeTrue();
-        Peaks(rows, new LicensedAgentLicenseDto("lic", "Owner", "SaaSBusiness", 0, true)).Deployment.OverBand.Should().BeFalse();
+        Peaks(rows, new LicensedAgentLicenseDto("lic", "Owner", "Developer", 0, true)).Deployment.OverBand.Should().BeFalse();
         Peaks(rows, Undeclared).Deployment.OverBand.Should().BeFalse();
     }
 

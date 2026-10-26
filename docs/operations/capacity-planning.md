@@ -32,7 +32,7 @@ through the procedure at the bottom.
 
 ## Sizing tiers
 
-The four tiers below frame typical CCaaS deployments from a small support team
+The four tiers below frame a self-hosted deployment, from a small support team
 through multi-tenant enterprise. Each tier is bounded by the SLOs in
 [`slos.md`](slos.md) — beyond a tier's envelope, expect SLO breaches (in
 particular `SloBreachQueueIngestion` and `PresenceBacklogGrowing` from
@@ -43,9 +43,9 @@ particular `SloBreachQueueIngestion` and `PresenceBacklogGrowing` from
 | **Small** | 1–5 | ≤ 50 | ≤ 25 | ≤ 10 | 1 (single node) | Single business / pilot / dev sandbox |
 | **Medium** | 5–25 | 50–250 | 25–100 | 10–40 | 2 (active/passive) | Mid-market BPO / multi-team support |
 | **Large** | 25–100 | 250–1,000 | 100–500 | 40–150 | 3 (active/active) | Enterprise contact center / multi-brand |
-| **XL** | 100–500 | 1,000–5,000 | 500–2,500 | 150–500 | 5+ (sharded) | Multi-region BPO / SaaS reseller |
+| **XL** | 100–500 | 1,000–5,000 | 500–2,500 | 150–500 | 5+ (sharded) | Multi-region BPO / service provider running its own tenants |
 
-**Estimate basis:** ~10 concurrent calls per agent (industry CCaaS standard),
+**Estimate basis:** ~10 concurrent calls per agent (contact-center industry standard),
 ~25 agents per queue median, .NET 10 AOT throughput benchmarks (roughly 4× CLR
 JIT for cold-path JWT validation), 4-core typical Asterisk node sizing in
 production.
@@ -286,7 +286,7 @@ incorporate them once measured data and roadmap commitments justify the work.
 - **Multi-region active/active** — deferred to **R6** (per roadmap.md). Current
   capacity envelope assumes single-region deployments; cross-region latency
   budget for the push backplane has not been characterised.
-- **Cost-per-tenant model** — needed once multi-tenant SaaS pricing is published.
+- **Cost-per-tenant model** — not yet characterised.
   Inputs available: `tenant_id` dimension on most Pro meters
   (per R5.2 observability uplift), Postgres rows-per-tenant metrics. Output:
   $/tenant/month based on tier mapping.

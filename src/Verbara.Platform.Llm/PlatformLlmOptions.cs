@@ -1,7 +1,7 @@
 namespace Verbara.Platform.Llm;
 
 /// <summary>
-/// Host-bound configuration for Verbara's <b>operator-managed</b> Typification
+/// Host-bound configuration for the <b>operator-managed</b> Typification
 /// LLM (the provider served when a tenant sets <see cref="AiSource.PlatformManaged"/>).
 /// The key lives only here — never per-tenant, never serialized to any DTO.
 /// </summary>

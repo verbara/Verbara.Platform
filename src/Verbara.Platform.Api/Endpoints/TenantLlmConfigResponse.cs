@@ -12,7 +12,7 @@ namespace Verbara.Platform.Api.Endpoints;
 /// <param name="Model">The configured model identifier.</param>
 /// <param name="Settings">Type-specific (non-secret) provider settings.</param>
 /// <param name="Enabled">Whether AI is enabled for this tenant.</param>
-/// <param name="AiSource">BYO (tenant key) vs platform-managed (Verbara operator key, metered in AI Credits).</param>
+/// <param name="AiSource">BYO (tenant key) vs platform-managed (the deployment operator's key, metered in AI Credits).</param>
 /// <param name="PlatformLlmAvailable">Whether the tenant's plan entitles it to the platform-managed LLM (<c>PlanFeature.PlatformLlm</c>).</param>
 /// <param name="KeySet">Whether an API key is currently stored (the key value is never returned).</param>
 /// <param name="KeyLast4">Last 4 chars of the stored key (non-secret display hint), or <see langword="null"/>.</param>
@@ -71,7 +71,7 @@ public sealed record EmptyLlmConfigResponse(bool Configured, bool PlatformLlmAva
 /// <param name="Settings">Type-specific provider settings (base URL, Azure deployment/version, Anthropic version).</param>
 /// <param name="Enabled">Whether AI is enabled for this tenant.</param>
 /// <param name="AiSource">
-/// BYO (tenant key, default) vs platform-managed (Verbara operator key, metered in AI Credits).
+/// BYO (tenant key, default) vs platform-managed (the deployment operator's key, metered in AI Credits).
 /// Defaulted to <see cref="AiSource.Byo"/> so existing BYO callers stay source-compatible.
 /// <see cref="AiSource.PlatformManaged"/> requires the <c>PlanFeature.PlatformLlm</c> entitlement.
 /// </param>
