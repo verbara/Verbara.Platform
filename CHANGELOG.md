@@ -9,10 +9,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-The outbound dialer honours DNC lists, scheduled callbacks and agents' dispositions (Verbara.Sdk.Pro `2.21.0-pro`).
-Read **Upgrading** and `docs/operations/upgrade-2.32.0.md`: the first start repairs two kinds of stored campaigns,
-once and audited; two campaign routes answer new 400 and 404 refusals; and the voice typification no longer moves the
-Conversation.
+## [2.32.0] - 2026-10-25
+
+The outbound dialer honours DNC lists, dials scheduled callbacks and applies agents' dispositions (Verbara.Sdk.Pro
+`2.21.0-pro`, #477): a typification's disposition reaches the dialer through a stored outbox that any replica hands
+over until the dialer answers, and the typify response says what the dialer did (`dialerDisposition`). The first
+start repairs two kinds of stored campaigns, once and audited, and an agent's voice call is counted once against its
+capacity after an Api start (#479). Pairs with Platform.Web v3.26.0-web. Read **Upgrading** and
+`docs/operations/upgrade-2.32.0.md`: two campaign routes answer new 400 and 404 refusals, and the voice typification
+no longer moves the Conversation.
 
 ### Upgrading
 
@@ -38,7 +43,7 @@ Conversation.
   `/api/v1/admin/dnc-lists`, on the host-only policy and the dialer licence. Every list there is owned by the host
   tenant, so its Global-scope lists block their numbers for every tenant's campaigns whose DNC check is on; customer
   tenants neither see them nor reach their entries. Before `/api/setup` the route answers 503 to a management key and
-  403 to other credentials.
+  403 to other credentials. (#477)
 - **`addsToDnc` on campaign disposition codes** (create, update and the code's representation). A call typified with
   such a code puts its number on the tenant's DNC list as a non-expiring entry and resolves the contact do-not-call.
 - **The typify response's `dialerDisposition`**: `None`, `Applied`, `AlreadyApplied`, `AwaitingOutcome`,
@@ -79,13 +84,13 @@ Conversation.
   capacity use of a process rebuilds the loads from the Active Conversations, and the call was counted by that rebuild
   and again by its own reservation: load 2 during the call, then 1 until the next restart, so Platform's routing and
   capacity views saw the agent as full. The queue call and the agent's click-to-dial now reserve before the
-  Conversation is saved Active, and release the unit if that save fails.
+  Conversation is saved Active, and release the unit if that save fails. (#360, #479)
 
 ### Changed — Dependencies
 
 - **Verbara.Sdk.Pro `2.20.3-pro` → `2.21.0-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged. No
   other resolved package moves (every `project.assets.json` differs only in the 22 Pro ids), and no packed floor
-  moved in Pro. The dialer's DNC, callback and agent-disposition API above comes from it. (Pro #268)
+  moved in Pro. The dialer's DNC, callback and agent-disposition API above comes from it. (#477; Pro #268)
 
 ## [2.31.1] - 2026-10-24
 

@@ -51,7 +51,10 @@ In most installations both are the same database.
    ```
 
 4. **Global-scope DNC lists owned by a tenant that is not the host tenant.** Since 2.31.1 such a list blocks numbers
-   only for its own tenant's campaigns, as a Tenant-scope list does. Count them, and change them to `Tenant` with
+   only for its own tenant's campaigns, as a Tenant-scope list does (published as
+   [GHSA-wp92-r8xv-5ggm](https://github.com/verbara/Verbara.Platform/security/advisories/GHSA-wp92-r8xv-5ggm) and
+   [GHSA-wj85-9pm2-m77q](https://github.com/verbara/Verbara.Platform/security/advisories/GHSA-wj85-9pm2-m77q), both
+   fixed in 2.31.1; 2.32.0 carries those fixes). Count them, and change them to `Tenant` with
    `PUT /api/v1/admin/dnc-lists/{id}` if you want their scope to say what they do:
 
    ```sql
