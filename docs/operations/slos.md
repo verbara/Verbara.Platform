@@ -25,8 +25,8 @@ publishes canonical SLOs so:
 
 - Operators can distinguish "degraded but in-budget" from "violation" without
   paging-judgement calls.
-- Buyer / enterprise procurement teams can answer "what does the platform commit
-  to?" with a single document instead of vendor-specific marketing.
+- Buyer / enterprise procurement teams can answer "what is the software designed
+  to sustain?" with a single document instead of vendor-specific marketing.
 - The 3-tier alert severity model (P0/P1/P2 — see `alerts.yml` + `alerts-runbook.md`)
   derives its thresholds from these targets, not the other way around.
 
@@ -37,7 +37,12 @@ absorbs short-term burst noise without paging on transient blips.
 
 ## Service tiers
 
-| Tier | Availability target | Audience | Notes |
+> **Design targets, not an SLA.** Verbara is self-hosted software: whoever deploys it operates it, on their own
+> infrastructure, and owns its availability. The 99.5% and 99.9% figures below are what a deployment built as each
+> row describes is designed to reach. They are not a service-level agreement, an uptime guarantee or a basis for
+> service credits from Verbara. An operator who offers an SLA to its own customers sets and backs that SLA itself.
+
+| Tier | Design availability target | Audience | Notes |
 |---|---|---|---|
 | **Free baseline** | 99.5% per calendar month | Open-source / self-host / community | Single-node; Postgres mandatory |
 | **Enterprise** | 99.9% per calendar month | Commercial deployments on Pro 1.13.0+ | Cluster ≥ 3 nodes; Redis cache enabled; Pro retention enabled |

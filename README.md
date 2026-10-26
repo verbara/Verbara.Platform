@@ -1,11 +1,11 @@
 # Verbara Platform
 
-> Backend for the **Verbara** open-core contact-center platform.
+> Backend for **Verbara**, self-hosted open-core contact-center software.
 > Formerly `Verbara.Platform` — rebranded to **Verbara** per ADR-0016.
 >
 > **Visibility status (2026-05-10):** This repository is **public**. Licensed under Apache 2.0 (see ADR-0016); the visibility flip executed once all triggers in ADR-0018 went green. Tier 0 (Community) self-host is available.
 
-Composition-root host + REST API for an omnichannel contact center built on the
+Composition-root host + REST API for Verbara, self-hosted omnichannel contact-center software built on the
 Asterisk PBX (Sangoma/Digium) + .NET 10 Native AOT. Consumes [Verbara Sdk](https://github.com/verbara/Verbara.Sdk)
 (MIT) and [Verbara Sdk Pro](https://github.com/verbara/Verbara.Sdk.Pro)
 (commercial) via NuGet. Pairs with
@@ -49,13 +49,13 @@ For security disclosure use `security@verbara.io`. For commercial licensing inqu
 
 This repository is licensed under the **[Apache License 2.0](LICENSE)**. See [`NOTICE`](NOTICE) for attributions.
 
-This is the open-source backend of the **Verbara** open-core contact-center stack:
+This is the open-source backend of **Verbara**, self-hosted open-core contact-center software:
 
 | Repository | License | Role |
 |---|---|---|
 | **Verbara Sdk** | MIT | Telephony primitives (AMI / AGI / ARI / Live API / Sessions / Voice AI) — community attractor |
 | **Verbara Web** | Apache 2.0 | Frontend UI (admin / agent / analytics / operations) |
-| **Verbara Platform** (this repository) | **Apache 2.0** | Backend application — full contact-center engine |
+| **Verbara Platform** (this repository) | **Apache 2.0** | Backend application — the full self-hosted contact-center software |
 | **Verbara Sdk Pro** | Commercial | Enterprise overlays (multi-tenant, analytics, cluster, licensing) |
 
 **Why Apache 2.0 + commercial Pro:** the engineering moat is the runtime ECDSA license-key validation in `Pro.Licensing` (`LicenseGateMiddleware`), not source-license restrictions. Apache maximizes adoption and trial-to-Pro conversion. See ADR-0016 for the full rationale (license decision + rebrand to Verbara).
