@@ -1,6 +1,6 @@
 # Verbara Platform
 
-> Backend for **Verbara**, self-hosted open-core contact-center software.
+> Verbara is omnichannel contact-center software, licensed for each company to install and operate on its own infrastructure.
 > Formerly `Verbara.Platform` — rebranded to **Verbara** per ADR-0016.
 >
 > **Visibility status (2026-05-10):** This repository is **public**. Licensed under Apache 2.0 (see ADR-0016); the visibility flip executed once all triggers in ADR-0018 went green. Tier 0 (Community) self-host is available.

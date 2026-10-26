@@ -503,7 +503,7 @@ internal static class ConversationEndpoints
         var conversationId = EntityId.From(id);
 
         // P2c.2 (C3) — read the tenant's LLM source ONCE. Quota gating + credit metering apply
-        // ONLY when the tenant opted into the platform-managed LLM (Verbara operator key); BYO
+        // ONLY when the tenant opted into the platform-managed LLM (the deployment operator's key); BYO
         // (or no config) is never metered or quota-gated here — the tenant pays its own provider.
         var llmConfig = await llmConfigStore.GetAsync(EntityId.From(tenantId.Value), ct);
         var isPlatformManaged = llmConfig is { AiSource: AiSource.PlatformManaged };
@@ -570,7 +570,7 @@ internal static class ConversationEndpoints
         var transcript = await messageStore.GetConversationMessagesAsync(tenantId, conversationId, limit: TranscriptFetchLimit, offset: 0, ct);
 
         // 3a-platform. P2c.2 (C3) — platform-managed AI credit quota pre-check. Only when the tenant
-        //     opted into Verbara's operator-managed LLM: a SoftBlock/HardBlock on the monthly AiAnalysis
+        //     opted into the operator-managed LLM: a SoftBlock/HardBlock on the monthly AiAnalysis
         //     credit allowance gates the (metered) classify. SoftBlock degrades to the empty suggestion
         //     (AI opt-in floor — same uniform "no suggestion" the client already handles); HardBlock is
         //     surfaced as 402 Payment Required. BYO tenants skip this entirely.
@@ -631,7 +631,7 @@ internal static class ConversationEndpoints
         //     call happened (classification is non-null), so record once regardless of band/mode —
         //     subsequent calls that push the tenant past DailyTokenBudget will fail-closed above.
         // A provider that returns no usage block records 0 → that call's real cost isn't counted
-        // toward the budget (Verbara's OpenAI-compatible provider does populate usage).
+        // toward the budget (the OpenAI-compatible provider does populate usage).
         await budget.RecordUsageAsync(tenantId, classification.Usage?.TotalTokens ?? 0, ct);
 
         // 4c. P2c.2 (C3) — meter the platform-managed classify in AI Credits. ONLY for

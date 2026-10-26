@@ -12,7 +12,7 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 
 | Tier | Operator action | Examples |
 |---|---|---|
-| **P0** | **Page on-call.** Customer impact or outage imminent. SLA clock running. | API down, JWT validation failing, license guard blocking pipeline, retention service stalled. |
+| **P0** | **Page on-call.** Customer impact or outage imminent. Your SLA clock (if you offer one to your customers) is running. | API down, JWT validation failing, license guard blocking pipeline, retention service stalled. |
 | **P1** | **Ticket within 24h.** SLO breach, no customer-visible outage. | Circuit open > 5 min, SLO breach without P0 trigger, audit pipeline degraded. |
 | **P2** | **Review weekly.** Capacity / hygiene. Aggregate during weekly SRE sync. | Pool > 80%, slow queries, retention divergence. |
 
@@ -21,7 +21,7 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 ## Threshold provenance — IMPORTANT
 
 > All thresholds in `alerts.yml` are **v1 provisional estimates** derived from
-> architecture review + .NET 10 AOT benchmarks + standard CCaaS industry
+> architecture review + .NET 10 AOT benchmarks + standard contact-center industry
 > ranges. **They have NOT been validated against measured load tests** — the
 > S5.1 NBomber suite is shipped (`tests/Verbara.Platform.LoadTests/`) but the
 > first authoritative run on staging is pending.

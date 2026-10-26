@@ -16,6 +16,6 @@ public enum PlanFeature
     Recordings,
     RecordingTranscription,
     IpAllowlist,
-    /// <summary>Entitlement to use Verbara's platform-managed Typification LLM (metered in AI Credits).</summary>
+    /// <summary>Entitlement to use the platform-managed Typification LLM (metered in AI Credits).</summary>
     PlatformLlm,
 }
