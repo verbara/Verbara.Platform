@@ -9,6 +9,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.33.0] - 2026-10-27
+
+Verbara as self-hosted software only: the hosted licence tiers retire from the API (Verbara.Sdk.Pro `2.22.0-pro`,
+#487). The licence `tier` on the status and licensed-agent routes is now one of five self-hosted values, and a licence
+signed with a retired tier reports `None`. The README, the operations docs and the AI typification docs describe
+Verbara as software each company installs and operates, with the deployment operator's key for a platform-managed
+LLM, and the SLO availability figures read as design targets, not an SLA (#482, #483). Pairs with Platform.Web
+v3.27.0-web. Read **Changed**: a client that switches on `SaaSBusiness` or `SaaSEnterprise` must drop them.
+
 ### Changed
 
 - **BREAKING: the licence `tier` no longer takes `SaaSBusiness` or `SaaSEnterprise`.** The Verbara.Sdk.Pro pin moved
@@ -17,12 +26,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `GET /api/v1/management/licensing/agents` and `/agents/export`, is now exactly one of `None`, `Developer`,
   `SelfHostStartup`, `SelfHostBusiness` or `WhiteLabel`, and the OpenAPI `LicenseTier` enum lists those five. A
   licence whose signed tier is not one of them is invalid and reports `tier` `None`, never a number or its old name.
-  No field is added, renamed or removed. A client that switches on the two retired names must drop them.
+  No field is added, renamed or removed. A client that switches on the two retired names must drop them. (#487)
+- **The README describes Verbara as self-hosted open-core contact-center software, and `docs/operations/slos.md`
+  states that its 99.5% and 99.9% availability figures are design targets, not an SLA**: whoever deploys Verbara
+  operates it and owns its availability. Documentation only. (#482)
 - **The AI typification docs and the OpenAPI `aiSource` description name the deployment operator's key**, not a
   Verbara one: a platform-managed LLM is configured by whoever operates the deployment. No identifier, enum value or
   JSON shape changes. The README opens with the canonical sentence "Verbara is omnichannel contact-center software,
   licensed for each company to install and operate on its own infrastructure.", and the operations docs drop the
-  SaaS and CCaaS framing (verbara-meta/PDR-0006).
+  SaaS and CCaaS framing (verbara-meta/PDR-0006). (#483)
+
+### Changed — Dependencies
+
+- **Verbara.Sdk.Pro `2.21.0-pro` → `2.22.0-pro`** — all 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk unchanged. The
+  retired hosted licence tiers above come from it. (#487; Pro #273)
 
 ## [2.32.0] - 2026-10-25
 
