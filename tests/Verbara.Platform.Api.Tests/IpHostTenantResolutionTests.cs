@@ -5,6 +5,7 @@ using Verbara.Platform.Core.Branding;
 using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.AspNetCore.Http;
 using NSubstitute;
+using NSubstitute.ReturnsExtensions;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -92,7 +93,7 @@ public sealed class IpHostTenantResolutionTests
         // Pinned here so the IP guard is seen not to widen into a hostname behaviour change.
         _brandingStore
             .GetBySubdomainAsync("unknown", Arg.Any<CancellationToken>())
-            .Returns((TenantBranding?)null);
+            .ReturnsNull();
 
         var context = CreateContext("unknown.platform.example", tenantHeader: "acme");
 

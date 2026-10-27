@@ -250,14 +250,14 @@ public sealed class CrossTenantHeaderAttackFixture : WebApplicationFactory<Progr
     /// cases live in <c>SubdomainResolutionTests</c> and
     /// <c>IpHostTenantResolutionTests</c>.
     /// </summary>
-    public static Task<HttpResponseMessage> SendWithHostOverrideAsync(
+    public static async Task<HttpResponseMessage> SendWithHostOverrideAsync(
         HttpClient client, string host, string path, string? headerTenantId = null, CancellationToken ct = default)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Host = host;
         if (headerTenantId is not null)
             request.Headers.Add("X-Tenant-Id", headerTenantId);
-        return client.SendAsync(request, ct);
+        return await client.SendAsync(request, ct);
     }
 
     /// <summary>
