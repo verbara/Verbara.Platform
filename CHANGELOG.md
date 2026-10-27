@@ -21,7 +21,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is now written down in ADR-0038: login body, webhook path, subdomain, `X-Tenant-Id` header, then JWT `tid` as a
   fallback, and **the subdomain still wins over the header**. A dotted non-IP hostname (for example
   `verbara.acme-corp.lan`) still resolves its first label as the tenant; that is an accepted residual with a
-  follow-up.
+  follow-up. (#491)
 
 ## [2.33.0] - 2026-10-27
 
