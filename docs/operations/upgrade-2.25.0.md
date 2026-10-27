@@ -219,6 +219,12 @@ API keys:
   carries on in that tenant with full rights while the banner still shows the impersonation. End
   impersonation from the banner. A later Web release fixes this.
 
+> *Correction 2026-10-27:* the item above describes a path no console user reaches. No Platform.Web
+> release, 3.20.0 through 3.27.0-web, has a page that starts an impersonation, and no later Web
+> release changed that: "a later Web release fixes this" did not happen and is not scheduled. A
+> session started through the API does not appear in the console. Platform.Web 3.21.0-web made the
+> console's request client safe for impersonation anyway (see its changelog).
+
 ## Role changes move RBAC roles
 
 Server-side permission checks read a user's RBAC roles (`user_roles`), not its role. As of 2.25.0 the
@@ -384,6 +390,9 @@ The token in the reset link is now percent-encoded; links mailed before the upgr
 Resetting a password from the console needs the Platform.Web release after 3.20.0: the 3.20.0 reset
 page sends the token in a field the API does not read, so every reset from it fails, whatever the
 token.
+
+> *Correction 2026-10-27:* the release after 3.20.0 (3.20.1-web) was not enough. Resetting a password
+> from the console against 2.25.0 needs Platform.Web 3.20.2-web or later.
 
 ### Host filtering stays off
 
