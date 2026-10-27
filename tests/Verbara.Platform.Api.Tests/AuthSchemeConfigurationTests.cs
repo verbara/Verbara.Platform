@@ -1,4 +1,7 @@
+using System.Security.Claims;
 using Verbara.Platform.Api.Auth;
+using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Core;
 using Microsoft.AspNetCore.Http;
 
 namespace Verbara.Platform.Api.Tests;
@@ -71,5 +74,47 @@ public sealed class AuthSchemeConfigurationTests
         // Two opposite expectations; assert each individually.
         var expected = path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase);
         AuthSchemeConfiguration.IsQueryTokenPathAllowed(new PathString(path)).Should().Be(expected);
+    }
+
+    // ─── JWT tenant fallback records its source (fix-ip-host-tenant-resolution 3.3) ───
+
+    private static ClaimsPrincipal PrincipalWithTid(string tid)
+        => new(new ClaimsIdentity([new Claim("tid", tid)], "Bearer"));
+
+    [Fact]
+    public void ApplyJwtTenantFallback_ShouldSetTenantAndJwtSource_WhenNothingWasResolved()
+    {
+        var context = new DefaultHttpContext();
+
+        AuthSchemeConfiguration.ApplyJwtTenantFallback(context, PrincipalWithTid("acme"));
+
+        context.Items["TenantId"].Should().Be(new TenantId("acme"));
+        TenantSourceItems.TryGet(context, out var source).Should().BeTrue();
+        source.Should().Be(TenantSource.JwtFallback);
+    }
+
+    [Fact]
+    public void ApplyJwtTenantFallback_ShouldLeaveTenantAndSourceUntouched_WhenAlreadyResolved()
+    {
+        var context = new DefaultHttpContext();
+        context.Items["TenantId"] = new TenantId("globex");
+        TenantSourceItems.Set(context, TenantSource.Header);
+
+        AuthSchemeConfiguration.ApplyJwtTenantFallback(context, PrincipalWithTid("acme"));
+
+        context.Items["TenantId"].Should().Be(new TenantId("globex"));
+        TenantSourceItems.TryGet(context, out var source).Should().BeTrue();
+        source.Should().Be(TenantSource.Header, because: "the fallback records a source only where it writes the tenant");
+    }
+
+    [Fact]
+    public void ApplyJwtTenantFallback_ShouldRecordNoSource_WhenPrincipalHasNoTid()
+    {
+        var context = new DefaultHttpContext();
+
+        AuthSchemeConfiguration.ApplyJwtTenantFallback(context, new ClaimsPrincipal(new ClaimsIdentity()));
+
+        context.Items.ContainsKey("TenantId").Should().BeFalse();
+        context.Items.ContainsKey(TenantSourceItems.ItemKey).Should().BeFalse();
     }
 }

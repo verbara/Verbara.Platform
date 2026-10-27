@@ -116,14 +116,25 @@ internal sealed class TenantBoundaryValidationMiddleware
             return;
         }
 
-        await WriteForbiddenAsync(context);
+        await WriteForbiddenAsync(context, resolved);
     }
 
-    private static async Task WriteForbiddenAsync(HttpContext context)
+    /// <summary>
+    /// Names the tenant resolved from the caller's OWN request and where it came from, so the 403 is
+    /// diagnosable in one read. It never says whether that tenant exists nor names any other; when no
+    /// source was recorded it names the tenant alone rather than attribute it to a source. The tenant is
+    /// not quoted: the JSON encoder escapes <c>'</c> and <c>"</c>, which would garble the raw body.
+    /// </summary>
+    private static string ForbiddenMessage(TenantId resolved, TenantSource? source) => source is { } s
+        ? $"Tenant {resolved.Value} resolved from {TenantSourceItems.ToToken(s)} does not match authenticated principal."
+        : $"Tenant {resolved.Value} does not match authenticated principal.";
+
+    private static async Task WriteForbiddenAsync(HttpContext context, TenantId resolved)
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         context.Response.ContentType = "application/json";
-        var error = new ErrorResponse("Tenant header does not match authenticated principal.");
+        TenantSource? source = TenantSourceItems.TryGet(context, out var recorded) ? recorded : null;
+        var error = new ErrorResponse(ForbiddenMessage(resolved, source));
         await JsonSerializer.SerializeAsync(
             context.Response.Body, error, ApiJsonContext.Default.ErrorResponse, context.RequestAborted);
     }

@@ -1,4 +1,6 @@
+using System.Security.Claims;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
@@ -120,18 +122,29 @@ internal static class AuthSchemeConfiguration
                             }
                         }
 
-                        // Only set tenant from JWT if middleware didn't already resolve one
-                        // (X-Tenant-Id header / subdomain takes precedence for cross-tenant access)
-                        if (!context.HttpContext.Items.ContainsKey("TenantId"))
-                        {
-                            var tenantClaim = context.Principal?.FindFirst("tid")?.Value;
-                            if (tenantClaim is not null)
-                                context.HttpContext.Items["TenantId"] = new TenantId(tenantClaim);
-                        }
+                        ApplyJwtTenantFallback(context.HttpContext, context.Principal);
                     },
                 };
             })
             .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyScheme, _ => { });
+    }
+
+    /// <summary>
+    /// Sets the tenant from the JWT <c>tid</c> claim only when the middleware didn't already resolve
+    /// one — the webhook path / subdomain / <c>X-Tenant-Id</c> header take precedence for cross-tenant
+    /// access (ADR-0038). Records <see cref="TenantSource.JwtFallback"/> only when it writes.
+    /// </summary>
+    internal static void ApplyJwtTenantFallback(HttpContext httpContext, ClaimsPrincipal? principal)
+    {
+        if (httpContext.Items.ContainsKey("TenantId"))
+            return;
+
+        var tenantClaim = principal?.FindFirst("tid")?.Value;
+        if (tenantClaim is null)
+            return;
+
+        httpContext.Items["TenantId"] = new TenantId(tenantClaim);
+        TenantSourceItems.Set(httpContext, TenantSource.JwtFallback);
     }
 
     /// <summary>
