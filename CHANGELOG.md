@@ -11,6 +11,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **BREAKING: the licence `tier` no longer takes `SaaSBusiness` or `SaaSEnterprise`.** The Verbara.Sdk.Pro pin moved
+  to `2.22.0-pro`, which retires the two hosted tiers (verbara-meta/PDR-0006; their integers 4 and 5 are never
+  reused). `tier` on `GET /api/v1/management/system/license/status`, and in the `license` block of
+  `GET /api/v1/management/licensing/agents` and `/agents/export`, is now exactly one of `None`, `Developer`,
+  `SelfHostStartup`, `SelfHostBusiness` or `WhiteLabel`, and the OpenAPI `LicenseTier` enum lists those five. A
+  licence whose signed tier is not one of them is invalid and reports `tier` `None`, never a number or its old name.
+  No field is added, renamed or removed. A client that switches on the two retired names must drop them.
 - **The AI typification docs and the OpenAPI `aiSource` description name the deployment operator's key**, not a
   Verbara one: a platform-managed LLM is configured by whoever operates the deployment. No identifier, enum value or
   JSON shape changes. The README opens with the canonical sentence "Verbara is omnichannel contact-center software,

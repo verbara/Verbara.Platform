@@ -1,0 +1,11 @@
+{
+  "_comment": "EXISTING wire shape of the `license` block that GET /api/v1/management/licensing/agents (peaks) and GET /api/v1/management/licensing/agents/export both carry (PlatformAdminOnly; ManagementLicensingEndpoints.cs License(ILicenseStatus) -> LicensedAgentLicenseDto, whose `tier` is status.Tier.ToString()). Frozen by licensed-agent-metering's licensed-agent-peaks.v1.json and licensed-agent-export.v1.json; v2 changes ONLY the set of `tier` values: exactly one of None | Developer | SelfHostStartup | SelfHostBusiness | WhiteLabel. SaaSBusiness and SaaSEnterprise are retired (verbara-meta/PDR-0006); `tier` is never the string \"4\" or \"5\" (what ToString() of an undefined enum value would print), because Pro reports a licence with an undefined signed Tier as tier None. licenseId and licensee are nullable and always written; maxAgents is advisory (null or 0 = not declared); maxAgentsAdvisory is always true. No field is added, renamed or removed. Every child change's delta spec must cite these field names and tier values VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "license": {
+    "licenseId": "lic-7f3c2a91",
+    "licensee": "Example Contact Ltd",
+    "tier": "SelfHostBusiness",
+    "maxAgents": 50,
+    "maxAgentsAdvisory": true
+  },
+  "_allowedTierValues": ["None", "Developer", "SelfHostStartup", "SelfHostBusiness", "WhiteLabel"]
+}
