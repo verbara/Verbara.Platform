@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Encodings.Web;
 using Verbara.Platform.Api.Auth;
+using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Microsoft.AspNetCore.Authentication;
@@ -188,6 +189,25 @@ public sealed class ApiKeyAuthenticationHandlerTests
 
         result.Succeeded.Should().BeTrue(because: "an owner-less management key has no account status to check");
         await userStore.DidNotReceive().GetByIdAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleAuthenticate_ShouldOverwriteTenantAndRecordApiKeySource_WhenKeyAuthenticates()
+    {
+        // The key's binding overwrites whatever resolution produced, so the recorded source must be
+        // overwritten too — a stale "subdomain" would name a source that did not produce the tenant.
+        var (apiKeyStore, userStore) = StoresWithOwnedKey(ApiKeyType.Standard, OwnerWith(UserStatus.Active));
+        var context = CreateContext($"Bearer {RawOwnedKey}");
+        context.Items["TenantId"] = new TenantId("resolved-from-host");
+        TenantSourceItems.Set(context, TenantSource.Subdomain);
+        var handler = CreateHandler(apiKeyStore, userStore, context);
+
+        var result = await handler.AuthenticateAsync();
+
+        result.Succeeded.Should().BeTrue();
+        context.Items["TenantId"].Should().Be(new TenantId(OwnerTenantId));
+        TenantSourceItems.TryGet(context, out var source).Should().BeTrue();
+        source.Should().Be(TenantSource.ApiKeyBinding);
     }
 
     // ─── Expiry of the authentication ────────────────────────────────────────

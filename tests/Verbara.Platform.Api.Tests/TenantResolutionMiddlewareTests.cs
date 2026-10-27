@@ -18,6 +18,12 @@ public sealed class TenantResolutionMiddlewareTests : IClassFixture<PlatformApiF
     [InlineData("www.platform.com")]
     [InlineData("api.platform.com")]
     [InlineData("localhost")]
+    // Smoke test only — this row asserts "no 500", not which tenant resolves. The IP-host
+    // pinning (fix-ip-host-tenant-resolution) lives in IpHostTenantResolutionTests
+    // (InvokeAsync_ShouldResolveHeaderTenant_WhenHostIsIpv4Literal,
+    // InvokeAsync_ShouldResolveNoTenant_WhenHostIsIpv4LiteralAndNoHeader,
+    // Pipeline_ShouldScopePlatformPrincipalToHeaderTenant_WhenHostIsIpv4Literal) and
+    // IpHostTenantBoundaryTests (end-to-end).
     [InlineData("127.0.0.1")]
     [InlineData("platform.com")]
     public async Task Subdomain_ShouldNotCrash_ForAnyHost(string host)

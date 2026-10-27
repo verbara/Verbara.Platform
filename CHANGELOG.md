@@ -9,6 +9,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A host reached by IP address no longer resolves a phantom tenant** (`decision_ref` Platform/ADR-0038, change
+  `fix-ip-host-tenant-resolution`). `TenantResolutionMiddleware` took the first label of the request host as a
+  subdomain, so `127.0.0.1` or `192.168.1.50` resolved tenant `127` or `192`. That runs before `X-Tenant-Id`, so a
+  correct header could not override it. A Customer then got `403` on every authenticated call after logging in. A
+  Platform caller got no error and read and wrote under the phantom tenant. An IPv4 or IPv6 literal host is now never
+  a subdomain, so the header or path decides the tenant. The `www` / `api` / `localhost` exclusion is now
+  case-insensitive. The tenant-boundary `403` names the resolved tenant and where it came from. The resolution order
+  is now written down in ADR-0038: login body, webhook path, subdomain, `X-Tenant-Id` header, then JWT `tid` as a
+  fallback, and **the subdomain still wins over the header**. A dotted non-IP hostname (for example
+  `verbara.acme-corp.lan`) still resolves its first label as the tenant; that is an accepted residual with a
+  follow-up.
+
 ## [2.33.0] - 2026-10-27
 
 Verbara as self-hosted software only: the hosted licence tiers retire from the API (Verbara.Sdk.Pro `2.22.0-pro`,

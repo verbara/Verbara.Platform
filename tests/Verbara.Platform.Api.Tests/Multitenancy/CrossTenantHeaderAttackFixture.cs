@@ -240,18 +240,25 @@ public sealed class CrossTenantHeaderAttackFixture : WebApplicationFactory<Progr
     }
 
     /// <summary>
-    /// Subdomain-based override is OUT OF SCOPE for this fixture: the
-    /// <see cref="WebApplicationFactory{TEntryPoint}"/> client targets
-    /// <c>localhost</c> and the <c>TenantResolutionMiddleware</c> short-circuits
-    /// for hosts whose first label is <c>localhost</c>/<c>www</c>/<c>api</c>.
-    /// Subdomain attacks are exercised by <c>SubdomainResolutionTests</c> via
-    /// the dedicated <c>HostHeaderClient</c> shim; they are NOT re-tested here.
+    /// Sends the request with an overridden <c>Host</c> header (optionally plus
+    /// <c>X-Tenant-Id</c>). The <see cref="WebApplicationFactory{TEntryPoint}"/>
+    /// client targets <c>localhost</c>, which <c>TenantResolutionMiddleware</c>
+    /// never reads as a subdomain; overriding <c>request.Headers.Host</c> — the
+    /// shape <c>TenantResolutionMiddlewareTests</c> uses — is what reaches the
+    /// subdomain path end-to-end (a hostname such as <c>acme.platform.example</c>,
+    /// or an IP literal such as <c>127.0.0.1:5000</c>). Middleware-level subdomain
+    /// cases live in <c>SubdomainResolutionTests</c> and
+    /// <c>IpHostTenantResolutionTests</c>.
     /// </summary>
-    public static void SendWithSubdomainOverride() =>
-        throw new NotSupportedException(
-            "Subdomain attack-shape probing is performed by SubdomainResolutionTests; " +
-            "the WebApplicationFactory client only exercises the X-Tenant-Id header path. " +
-            "Use SendWithHeaderOverrideAsync for MT-001 regressions.");
+    public static async Task<HttpResponseMessage> SendWithHostOverrideAsync(
+        HttpClient client, string host, string path, string? headerTenantId = null, CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Host = host;
+        if (headerTenantId is not null)
+            request.Headers.Add("X-Tenant-Id", headerTenantId);
+        return await client.SendAsync(request, ct);
+    }
 
     /// <summary>
     /// Phase 2 MFA-001 shape: append <c>?targetTenant=overrideTenant</c> to a

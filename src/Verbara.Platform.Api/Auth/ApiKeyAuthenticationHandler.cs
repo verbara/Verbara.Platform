@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
+using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Push;
@@ -97,8 +98,11 @@ internal sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authen
         var principal = new ClaimsPrincipal(identity);
         var ticket = new AuthenticationTicket(principal, Scheme.Name);
 
-        // Store resolved tenant in HttpContext so middleware can read it
+        // Store resolved tenant in HttpContext so middleware can read it. The key's binding overwrites
+        // whatever was resolved before, so the recorded source is overwritten with it — otherwise it
+        // would name a subdomain/header that did not produce the value in use.
         Context.Items["TenantId"] = new TenantId(apiKey.TenantId.Value);
+        TenantSourceItems.Set(Context, TenantSource.ApiKeyBinding);
 
         // Fire-and-forget stamp of last-used. Debounced in-process so this is
         // a no-op for callers that re-auth within the debounce window.
