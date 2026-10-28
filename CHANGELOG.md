@@ -9,6 +9,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The HTTP licence gate follows the licence validation result and the licence guard** (`decision_ref`
+  verbara-meta/PDR-0003 §E). The gate on Pro endpoints now reads the validation result of the loaded licence as well
+  as its feature list. A licence that fails validation opens no Pro endpoint. A valid licence, or one inside its grace
+  period, opens what it carries, as before. Once a licence has expired, the Dialer, Analytics, CallAnalytics,
+  AgentAssist, CsatRunner, EventStore, AdvancedTypification and TypificationAi endpoints answer 402 when the licence
+  guard stops allowing them, which is the moment the Pro engines that consult the guard stop too. Cluster,
+  MultiTenant, Routing and Realtime (`/admin/skills`, `/admin/agents/{id}/skills`, `/admin/realtime/profiles`) keep
+  working and are never put through the guard. The 402 body is unchanged. Autonomous typification disposition applies
+  the same rule.
+
 ## [2.34.0] - 2026-10-28
 
 A tenant's public branding is inherited from its ancestors, a host reached by IP address never names a tenant, and

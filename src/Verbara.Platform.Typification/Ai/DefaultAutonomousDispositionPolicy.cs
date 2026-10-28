@@ -39,16 +39,19 @@ internal sealed class DefaultAutonomousDispositionPolicy : IAutonomousDispositio
 
     private readonly ITenantAutonomousDispositionStore _gateStore;
     private readonly ILicenseStatus _licenseStatus;
+    private readonly ILicenseGuard _licenseGuard;
     private readonly ITypificationResolver _resolver;
 
     public DefaultAutonomousDispositionPolicy(
         ITenantAutonomousDispositionStore gateStore,
         ILicenseStatus licenseStatus,
-        ITypificationResolver resolver)
+        ITypificationResolver resolver,
+        ILicenseGuard licenseGuard)
     {
         _gateStore = gateStore;
         _licenseStatus = licenseStatus;
         _resolver = resolver;
+        _licenseGuard = licenseGuard;
     }
 
     /// <inheritdoc />
@@ -62,9 +65,9 @@ internal sealed class DefaultAutonomousDispositionPolicy : IAutonomousDispositio
         if (gate is not { IsActive: true })
             return AutonomousDispositionDecision.Skip(AutonomousSkipReason.GateDisabled);
 
-        // 2. License — deployment must hold BOTH Pro entitlements (same ILicenseStatus the
-        //    LicenseGateMiddleware reads). LicenseFeature is the Pro [Flags] enum, NOT Core PlanFeature.
-        if (!_licenseStatus.LicensedFeatures.HasFlag(RequiredFeatures))
+        // 2. License — deployment must hold BOTH Pro entitlements, under the same rule the
+        //    LicenseGateMiddleware applies. LicenseFeature is the Pro [Flags] enum, NOT Core PlanFeature.
+        if (!IsLicensed())
             return AutonomousDispositionDecision.Skip(AutonomousSkipReason.LicenseMissing);
 
         // 3. Pending AI suggestion must exist.
@@ -98,5 +101,37 @@ internal sealed class DefaultAutonomousDispositionPolicy : IAutonomousDispositio
             suggestion.SuggestedLeafNodeId,
             suggestion.SuggestedNodePath,
             suggestion.Confidence);
+    }
+
+    /// <summary>
+    /// The licence rule of <c>LicenseGateMiddleware.IsLicensed</c> for the two features this policy
+    /// needs, both of them PDR-0003 §E modules: the bits alone never decide (the tracker keeps the
+    /// bits of a licence that failed validation). An unauthentic licence (<c>Invalid</c>, or a value
+    /// this code does not know) grants nothing; a signed licence in date grants its bits; a signed
+    /// licence that is no longer current (<c>Expired</c>, <c>UnauthorizedImage</c>) grants them only
+    /// while <see cref="ILicenseGuard"/> allows each one, so the guard's grace window applies. While
+    /// current, the guard is still asked so it records both features as seen valid.
+    /// </summary>
+    private bool IsLicensed()
+    {
+        var result = _licenseStatus.LastResult;
+        if (!_licenseStatus.LicensedFeatures.HasFlag(RequiredFeatures))
+            return false;
+
+        switch (result)
+        {
+            case LicenseValidationResult.MissingFeature:
+                return true;
+            case LicenseValidationResult.Valid
+                or LicenseValidationResult.GracePeriod
+                or LicenseValidationResult.Expired
+                or LicenseValidationResult.UnauthorizedImage:
+                var advanced = _licenseGuard.CanExecute(LicenseFeature.AdvancedTypification).Allowed;
+                var ai = _licenseGuard.CanExecute(LicenseFeature.TypificationAi).Allowed;
+                return result is LicenseValidationResult.Valid or LicenseValidationResult.GracePeriod
+                    || (advanced && ai);
+            default:
+                return false;
+        }
     }
 }

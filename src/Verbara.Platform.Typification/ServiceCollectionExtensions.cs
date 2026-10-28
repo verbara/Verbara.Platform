@@ -50,7 +50,8 @@ public static class ServiceCollectionExtensions
         // ADR-0034 — autonomous disposition policy: the pure commit-or-skip decision the
         // abandoned-wrap-up close path consults (gate + license + confidence + verification).
         // Depends on ITenantAutonomousDispositionStore (registered in the storage extensions) and
-        // ILicenseStatus (registered by the Pro AddProLicensing() in the host composition root).
+        // ILicenseStatus + ILicenseGuard (registered by the Pro AddProLicensing() and
+        // AddProLicenseGuard() in the host composition root).
         services.AddSingleton<IAutonomousDispositionPolicy, DefaultAutonomousDispositionPolicy>();
 
         // ADR-0034 — autonomous disposition metrics (singleton; owns its Meter lifetime). Emits
