@@ -9,6 +9,30 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING for existing installs: the SMB reference stack starts again and pins API `v2.33.1` + Web
+  `v3.27.1-web`** (change `bump-smb-reference-stack-pins`). `docker/docker-compose.reference-smb.yml` defaulted to
+  API `v2.8.1` and Web `v3.4.0-web`, and its template `docker/.env.reference-smb.example` pinned `v2.6.0` and
+  `v3.2.0-web`, so the stack shipped neither side of the IP-host tenant fix; and a current API image did not boot
+  with that compose. Both files now name the same pair, and a new CI step (`python3 scripts/check-smb-pins.py`, in the
+  coverage-scripts job) fails when the compose defaults and the template's `PLATFORM_API_TAG` / `PLATFORM_WEB_TAG`
+  disagree. **Redis is now a default service** (the `identity-redis` profile is gone): the API signs its tokens with
+  the JWT key rotation pool kept in Redis (`Identity__JwtKeyRotation__UseRotationPool`) and realtime validates the
+  console's tokens against the same pool, with `Identity__Redis__KeyPrefix` set to the API's prefix; `REDIS_PASSWORD`,
+  when set, is appended to every Redis connection string and the healthcheck authenticates. **The API's JWT
+  variables are removed**: `JWT_SIGNING_KEY`, `JWT_ISSUER` and `JWT_AUDIENCE` are no longer read. **New required
+  template variables**: `CSAT_REPLY_TOKEN_SECRET` (the compose refuses to start without it) and `CUSTOMER_TENANT_ID`
+  (the tenant the API pushes to Asterisk; empty refuses to start); `PUBLIC_BASE_URL` is now set by default
+  (`http://localhost`), and `LICENSE_DAY_ZONE` (default `UTC`), `IMAP_ENABLED`, `CSAT_REPLY_TO_DOMAIN` and
+  `IMAP_TENANT_ID` are new. **The mail service's IMAP settings now wire the CSAT reply poller**, not an Email-channel
+  inbound: `Imap__Enabled` (off by default), `Imap__TokenSigningSecret`, one mailbox under `Imap__Mailboxes__0__*`
+  with its tenant, and `CsatCapture__*` to forward replies to the API; the API gets `Csat__Email__TokenSigningSecret`
+  and `Csat__Email__ReplyToDomain`. `Licensing__FilePath` is now the in-container mount `/etc/verbara/license.lic`.
+  `scripts/quickstart-smb.sh` checks the new variables, builds the Asterisk image locally instead of pulling it, and
+  probes `/health/ready` through the gateway on `WEB_HTTP_PORT`. The SMB manuals follow. An existing `.env` must be
+  edited before the upgrade: see `docs/manuales/smb/99-troubleshooting.md` §9.
+
 ### Fixed
 
 - **A host reached by IP address no longer resolves a phantom tenant** (`decision_ref` Platform/ADR-0038, change
