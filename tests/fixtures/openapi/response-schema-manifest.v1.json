@@ -1483,6 +1483,24 @@
           "codecs"
         ]
       }
+    },
+    "branding": {
+      "status": "complete",
+      "candidateFiles": [
+        "BrandingEndpoints.cs"
+      ],
+      "schemas": {
+        "PublicBrandingDto": [
+          "displayName",
+          "logoUrl",
+          "faviconUrl",
+          "primaryColor",
+          "secondaryColor",
+          "accentColor",
+          "locale",
+          "timezone"
+        ]
+      }
     }
   }
 }

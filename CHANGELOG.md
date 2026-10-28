@@ -33,6 +33,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   probes `/health/ready` through the gateway on `WEB_HTTP_PORT`. The SMB manuals follow. An existing `.env` must be
   edited before the upgrade: see `docs/manuales/smb/99-troubleshooting.md` §9.
 
+- **The public branding endpoints and the settings view now inherit a tenant's empty branding fields from its
+  ancestors** (`decision_ref` verbara-meta/PDR-0003, change `public-branding-inherits-from-parent`). A field that is
+  null or blank (`""` or whitespace only) takes the value of the nearest ancestor that sets it, up to two hops
+  (Customer → Partner → Platform), on `GET /api/v1/branding/{tenantId}`,
+  `GET /api/v1/branding/by-subdomain/{subdomain}` and the `branding` block of the tenant settings view. Before, the
+  public routes read only the tenant's own row, so a Customer created under a Partner answered `404` until someone
+  filled a row for it, and the settings view merged a single hop. A deleted ancestor is skipped, and its parent
+  still fills the fields. The subdomain is never inherited. A deleted tenant now answers `404` on both public
+  routes, the same `404` as an unknown id. A blank field is no longer sent as `""`: it carries the inherited value,
+  or is omitted when no tenant in the chain sets it, so a row blank in every field with no branded ancestor answers
+  `{}`. The settings view likewise shows a field stored as `""` as the inherited value, or as `null` when no tenant
+  in the chain sets it, and no longer shows a deleted parent's values. The OpenAPI document now declares both
+  routes' `200` body (the new `PublicBrandingDto` schema) and their `404`.
+
 ### Fixed
 
 - **A host reached by IP address no longer resolves a phantom tenant** (`decision_ref` Platform/ADR-0038, change
