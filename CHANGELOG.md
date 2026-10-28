@@ -9,6 +9,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.34.0] - 2026-10-28
+
+A tenant's public branding is inherited from its ancestors, a host reached by IP address never names a tenant, and
+the SMB reference stack starts again on a released pair. The public branding routes and the settings view fill a
+tenant's empty branding fields from up to two ancestors (#493). A request whose host is an IP literal no longer
+resolves a phantom tenant from its first octet, so a Customer who opens the console by LAN IP is no longer refused
+after sign-in (#491; Platform/ADR-0038). The SMB reference compose, its `.env` template and the SMB manuals now
+pin this release with Platform.Web v3.27.1-web, which carries the console side of the same fix (#494, #496). Pairs
+with Platform.Web v3.27.1-web. Read **Changed**: an existing SMB install must edit its `.env` before upgrading.
+
 ### Changed
 
 - **BREAKING for existing installs: the SMB reference stack starts again and pins API `v2.34.0` + Web
@@ -31,7 +41,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `Csat__Email__ReplyToDomain`. `Licensing__FilePath` is now the in-container mount `/etc/verbara/license.lic`.
   `scripts/quickstart-smb.sh` checks the new variables, builds the Asterisk image locally instead of pulling it, and
   probes `/health/ready` through the gateway on `WEB_HTTP_PORT`. The SMB manuals follow. An existing `.env` must be
-  edited before the upgrade: see `docs/manuales/smb/99-troubleshooting.md` §9.
+  edited before the upgrade: see `docs/manuales/smb/99-troubleshooting.md` §9. (#494, #496)
 
 - **The public branding endpoints and the settings view now inherit a tenant's empty branding fields from its
   ancestors** (`decision_ref` verbara-meta/PDR-0003, change `public-branding-inherits-from-parent`). A field that is
@@ -46,6 +56,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `{}`. The settings view likewise shows a field stored as `""` as the inherited value, or as `null` when no tenant
   in the chain sets it, and no longer shows a deleted parent's values. The OpenAPI document now declares both
   routes' `200` body (the new `PublicBrandingDto` schema) and their `404`. (#493)
+
+- **The 2.25.0 upgrade notes correct two Platform.Web caveats**: resetting a password from the console against
+  2.25.0 needs Platform.Web 3.20.2-web or later (not 3.20.1-web), and no console release starts an impersonation, so
+  the impersonation caveat does not reach console users. Documentation only. (#490)
 
 ### Fixed
 
