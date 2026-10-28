@@ -406,7 +406,11 @@ El script ya existe en `scripts/backup-pg.sh` con rotación a 30 días.
    ```bash
    $ dc exec -T postgres psql -U platform -d verbara < scripts/ops/agents-identity-report.sql
    ```
-   El procedimiento de corrección está en `docs/operations/licensed-agent-metering-upgrade.md`.
+   Junto con ese reporte corré el inventario, también de sólo lectura, de filas operativas (agentes, colas, flujos, etc.) que quedaron en un tenant que no es Customer. Lee el contenedor `verbara-postgres` con usuario `platform` y base `verbara` (se cambian con `POSTGRES_CONTAINER`, `POSTGRES_USER`, `POSTGRES_DB`); sale siempre con 0, así que mirá la línea final: en el caso SMB típico (Platform + un Customer) es `Summary: 0 misplaced rows across 9 operational tables.`
+   ```bash
+   $ bash scripts/tenant-type-misplaced-data.sh
+   ```
+   El procedimiento de corrección de ambos está en `docs/operations/licensed-agent-metering-upgrade.md`.
 4. **Si venís de una versión anterior a v2.27.0 — zona del día de medición.** Elegí `LICENSE_DAY_ZONE` (zona IANA, ej. `America/Bogota`; default `UTC`) **antes** del primer arranque: ese arranque la fija en la base y cambiarla después detiene el cierre diario de agentes licenciados hasta que se restaure.
 5. **Si venís de una versión anterior a v2.28.0 — sin vuelta atrás.** El primer arranque de v2.28.0 o posterior cifra los secretos de los canales en la base. Es de un solo sentido: una versión anterior ya no los puede leer. Desde ahí, volver atrás = restaurar el backup del paso 1.
 
@@ -452,8 +456,9 @@ $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
 # Asterisk se construye localmente: reconstruirlo con el Dockerfile del tag nuevo
 $ dc build asterisk
 
-# Pull + up; recrear el gateway para que tome su configuración nueva
-$ dc pull
+# Pull + up; recrear el gateway para que tome su configuración nueva.
+# --ignore-buildable: la imagen de Asterisk no se publica (sin el flag el pull falla)
+$ dc pull --ignore-buildable
 $ dc up -d --wait
 $ dc up -d --force-recreate nginx-gateway
 
@@ -466,7 +471,9 @@ Antes del primer arranque de la versión nueva, volver es un checkout:
 ```bash
 $ git checkout {tag-previo}                         # el tag desde el que venías
 $ ${EDITOR:-nano} docker/.env.reference-smb        # revert tags
-$ dc pull && dc up -d --wait
+$ dc pull --ignore-buildable                       # Asterisk no se publica: se construye localmente
+$ dc build asterisk                                # con el Dockerfile del tag previo
+$ dc up -d --wait
 ```
 
 Si la versión nueva ya arrancó y migró la base (siempre, si cruzaste v2.28.0), restaurar del backup:

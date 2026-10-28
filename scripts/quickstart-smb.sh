@@ -45,11 +45,17 @@ MIN_CPU_CORES=4
 MIN_DISK_GB=100
 
 # Puerto del gateway (consola + API + realtime). Gana el del entorno; si no,
-# el de .env.reference-smb (si ya existe); si no, 80.
-if [ -z "${WEB_HTTP_PORT:-}" ] && [ -f "$ENV_FILE" ]; then
-    WEB_HTTP_PORT=$(grep -E '^WEB_HTTP_PORT=' "$ENV_FILE" | head -1 | cut -d'=' -f2- || true)
-fi
-WEB_HTTP_PORT="${WEB_HTTP_PORT:-80}"
+# el de .env.reference-smb (si ya existe); si no, 80. Se resuelve de nuevo
+# tras el step 9, porque ahí el operador puede crear o editar el .env.
+WEB_HTTP_PORT_FROM_SHELL="${WEB_HTTP_PORT:-}"
+resolve_web_http_port() {
+    local port="$WEB_HTTP_PORT_FROM_SHELL"
+    if [ -z "$port" ] && [ -f "$ENV_FILE" ]; then
+        port=$(grep -E '^WEB_HTTP_PORT=' "$ENV_FILE" | head -1 | cut -d'=' -f2- || true)
+    fi
+    printf '%s' "${port:-80}"
+}
+WEB_HTTP_PORT="$(resolve_web_http_port)"
 
 # Puertos TCP requeridos
 TCP_PORTS_REQUIRED=(5060 5061 8088 8089 "${WEB_HTTP_PORT}")
@@ -560,6 +566,23 @@ for var in "${REQUIRED_VARS[@]}"; do
         ok ".env: $var configurada"
     fi
 done
+
+# El .env pudo crearse o editarse arriba: re-leer WEB_HTTP_PORT (el del entorno
+# sigue ganando) para que el probe de readiness y las URLs usen el puerto real.
+# El step 3 ya chequeó el puerto anterior; si cambió, chequear el nuevo.
+WEB_HTTP_PORT_CHECKED="$WEB_HTTP_PORT"
+WEB_HTTP_PORT="$(resolve_web_http_port)"
+if [ "$WEB_HTTP_PORT" != "$WEB_HTTP_PORT_CHECKED" ]; then
+    info ".env: WEB_HTTP_PORT=${WEB_HTTP_PORT} (el step 3 chequeó ${WEB_HTTP_PORT_CHECKED})"
+    USAGE=$(port_in_use "$WEB_HTTP_PORT" tcp)
+    if [ -n "$USAGE" ]; then
+        fail "TCP/$WEB_HTTP_PORT ocupado"
+        hint "$USAGE"
+        hint "Otro web server (apache2/nginx) en el host. Apagalo o cambiá WEB_HTTP_PORT en .env"
+    else
+        ok "TCP/$WEB_HTTP_PORT libre"
+    fi
+fi
 
 # ─────────────────────────────────────────────────────────────────────────
 # Step 10 — Resumen pre-flight + abort si hay fatales

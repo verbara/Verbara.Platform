@@ -330,7 +330,9 @@ $ dc down -v
 # Actualizar a una nueva release — leé antes el plan de upgrade:
 # 99-troubleshooting.md §9 (backup, saltos de versión, variables nuevas)
 $ git fetch --tags && git checkout vX.Y.Z   # la próxima release publicada
-$ dc pull && dc up -d --wait
+$ dc pull --ignore-buildable   # Asterisk no se publica: se construye localmente (abajo)
+$ dc build asterisk            # reconstruirlo con el Dockerfile del tag nuevo
+$ dc up -d --wait
 
 # Backup de Postgres
 $ docker exec verbara-postgres pg_dump -U platform verbara | gzip > backup-$(date +%F).sql.gz
