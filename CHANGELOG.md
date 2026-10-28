@@ -11,7 +11,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **BREAKING for existing installs: the SMB reference stack starts again and pins API `v2.33.1` + Web
+- **BREAKING for existing installs: the SMB reference stack starts again and pins API `v2.34.0` + Web
   `v3.27.1-web`** (`decision_ref` Platform/ADR-0038, change `bump-smb-reference-stack-pins`). `docker/docker-compose.reference-smb.yml` defaulted to
   API `v2.8.1` and Web `v3.4.0-web`, and its template `docker/.env.reference-smb.example` pinned `v2.6.0` and
   `v3.2.0-web`, so the stack shipped neither side of the IP-host tenant fix; and the stack at the current release did

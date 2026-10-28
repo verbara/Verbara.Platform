@@ -73,10 +73,10 @@ Healthchecks:
 - ☐ `docker exec verbara-asterisk asterisk -rx 'pjsip show transports'` → UDP+TCP+WS+WSS bound
 
 Verificación de firmas (ADR-0023, 5 imágenes signed — cosign v3+ con `--insecure-ignore-tlog`):
-- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/api:v2.33.1` → OK
-- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/realtime:v2.33.1` → OK
-- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/renderer:v2.33.1` → OK
-- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/mail:v2.33.1` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/api:v2.34.0` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/realtime:v2.34.0` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/renderer:v2.34.0` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/mail:v2.34.0` → OK
 - ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/web:v3.27.1-web` → OK
 
 ## 4. Setup inicial (Admin + Tenant + Agente + Queue)
