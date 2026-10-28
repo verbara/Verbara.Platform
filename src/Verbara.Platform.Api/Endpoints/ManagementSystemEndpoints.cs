@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Licensing;
@@ -69,11 +70,22 @@ internal static class ManagementSystemEndpoints
         [FromServices] ILicenseStatus licenseStatus,
         [FromServices] IOptions<LicenseOptions> licenseOptions,
         [FromServices] TimeProvider timeProvider)
+        => TypedResults.Ok(BuildLicenseInfo(
+            licenseStatus, licenseOptions.Value.GracePeriod, timeProvider.GetUtcNow()));
+
+    // Internal so Endpoints unit tests can exercise the mapping without a host.
+    internal static LicenseInfoDto BuildLicenseInfo(
+        ILicenseStatus licenseStatus,
+        TimeSpan gracePeriod,
+        DateTimeOffset now)
     {
+        // Only a signed licence speaks for its fields: the tracker keeps those of a licence that
+        // failed validation, and an unsigned one names no licensee and grants nothing.
+        var authentic = LicenceAuthenticity.IsAuthentic(licenseStatus.LastResult);
         var features = new List<string>();
         foreach (var feature in Enum.GetValues<LicenseFeature>())
         {
-            if (feature != LicenseFeature.None && feature != LicenseFeature.All
+            if (authentic && feature != LicenseFeature.None && feature != LicenseFeature.All
                 && licenseStatus.LicensedFeatures.HasFlag(feature))
             {
                 features.Add(feature.ToString());
@@ -86,24 +98,22 @@ internal static class ManagementSystemEndpoints
         //   GracePeriod result   ⇒ in grace, remaining = ExpiresAt + grace - now
         //   Expired/Invalid      ⇒ blocked (grace is exhausted or never granted)
         //   MissingFeature       ⇒ blocked (license loaded but feature bit absent)
+        //   UnauthorizedImage    ⇒ blocked (the running image is not one the licence authorizes)
         //   Valid                ⇒ neither in grace nor blocked
-        var (inGrace, gracePeriodRemaining, blocked) = ComputeGraceState(
-            licenseStatus,
-            licenseOptions.Value.GracePeriod,
-            timeProvider.GetUtcNow());
+        var (inGrace, gracePeriodRemaining, blocked) = ComputeGraceState(licenseStatus, gracePeriod, now);
 
-        return TypedResults.Ok(new LicenseInfoDto(
+        return new LicenseInfoDto(
             licenseStatus.IsValid,
-            licenseStatus.LicenseId,
-            licenseStatus.Licensee,
+            authentic ? licenseStatus.LicenseId : null,
+            authentic ? licenseStatus.Licensee : null,
             licenseStatus.LastResult.ToString(),
-            licenseStatus.ExpiresAt,
+            authentic ? licenseStatus.ExpiresAt : null,
             features,
-            licenseStatus.MaxNodes,
+            authentic ? licenseStatus.MaxNodes : 0,
             licenseStatus.LastValidatedAt,
             inGrace,
             gracePeriodRemaining,
-            blocked));
+            blocked);
     }
 
     // Internal so Endpoints unit tests can exercise the mapping without spinning
@@ -126,13 +136,12 @@ internal static class ManagementSystemEndpoints
                 // practice because the tracker only emits GracePeriod alongside
                 // a key with ExpiresAt populated).
                 return (InGrace: true, GracePeriodRemaining: null, Blocked: false);
-            case LicenseValidationResult.Expired
-                or LicenseValidationResult.Invalid
-                or LicenseValidationResult.MissingFeature:
-                return (InGrace: false, GracePeriodRemaining: null, Blocked: true);
             case LicenseValidationResult.Valid:
-            default:
                 return (InGrace: false, GracePeriodRemaining: null, Blocked: false);
+            default:
+                // Expired, Invalid, MissingFeature, UnauthorizedImage (the running image is not one
+                // the licence authorizes) and any value this code does not know.
+                return (InGrace: false, GracePeriodRemaining: null, Blocked: true);
         }
     }
 

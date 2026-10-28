@@ -143,4 +143,65 @@ public sealed class ManagementSystemEndpointsTests
         inGrace.Should().BeTrue();
         remaining.Should().Be(TimeSpan.Zero);
     }
+
+    // ─── BuildLicenseInfo — only a signed licence speaks for its fields ─────────
+
+    [Fact]
+    public void BuildLicenseInfo_ShouldListNoFeaturesOrIdentity_WhenTheLoadedLicenceFailedValidation()
+    {
+        var status = Substitute.For<ILicenseStatus>();
+        status.LastResult.Returns(LicenseValidationResult.Invalid);
+        status.LicensedFeatures.Returns(LicenseFeature.Dialer | LicenseFeature.Cluster);
+        status.LicenseId.Returns("lic-someone-else");
+        status.Licensee.Returns("Someone Else Inc");
+        status.ExpiresAt.Returns(DateTimeOffset.UtcNow.AddDays(365));
+        status.MaxNodes.Returns(9);
+
+        var dto = ManagementSystemEndpoints.BuildLicenseInfo(status, TimeSpan.FromDays(7), DateTimeOffset.UtcNow);
+
+        dto.LicensedFeatures.Should().BeEmpty("an unsigned licence grants and names nothing");
+        dto.LicenseId.Should().BeNull();
+        dto.Licensee.Should().BeNull();
+        dto.ExpiresAt.Should().BeNull();
+        dto.MaxNodes.Should().Be(0);
+        dto.Status.Should().Be("Invalid");
+        dto.Blocked.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(LicenseValidationResult.Valid)]
+    [InlineData(LicenseValidationResult.GracePeriod)]
+    [InlineData(LicenseValidationResult.MissingFeature)]
+    [InlineData(LicenseValidationResult.Expired)]
+    [InlineData(LicenseValidationResult.UnauthorizedImage)]
+    public void BuildLicenseInfo_ShouldListTheLicenceFields_WhenTheLicenceIsSigned(LicenseValidationResult result)
+    {
+        var status = Substitute.For<ILicenseStatus>();
+        status.LastResult.Returns(result);
+        status.LicensedFeatures.Returns(LicenseFeature.Dialer);
+        status.LicenseId.Returns("lic-001");
+        status.Licensee.Returns("Acme Corp");
+        status.MaxNodes.Returns(3);
+
+        var dto = ManagementSystemEndpoints.BuildLicenseInfo(status, TimeSpan.FromDays(7), DateTimeOffset.UtcNow);
+
+        dto.LicensedFeatures.Should().Equal(["Dialer"]);
+        dto.LicenseId.Should().Be("lic-001");
+        dto.Licensee.Should().Be("Acme Corp");
+        dto.MaxNodes.Should().Be(3);
+    }
+
+    [Fact]
+    public void ComputeGraceState_ShouldReturnBlocked_WhenTheImageIsNotAuthorized()
+    {
+        var status = Substitute.For<ILicenseStatus>();
+        status.LastResult.Returns(LicenseValidationResult.UnauthorizedImage);
+
+        var (inGrace, remaining, blocked) = ManagementSystemEndpoints.ComputeGraceState(
+            status, gracePeriod: TimeSpan.FromDays(7), DateTimeOffset.UtcNow);
+
+        inGrace.Should().BeFalse();
+        remaining.Should().BeNull();
+        blocked.Should().BeTrue();
+    }
 }

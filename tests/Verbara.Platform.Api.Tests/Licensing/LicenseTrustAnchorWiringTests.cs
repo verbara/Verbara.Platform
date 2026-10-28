@@ -6,7 +6,9 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Verbara.Platform.Api.DependencyInjection;
 using Verbara.Sdk.Pro.Licensing;
 
 namespace Verbara.Platform.Api.Tests.Licensing;
@@ -14,7 +16,8 @@ namespace Verbara.Platform.Api.Tests.Licensing;
 /// <summary>
 /// The licence trust anchor of the fully built Api host is the key embedded in Pro,
 /// <see cref="LicenseTrustAnchor.OfficialPublicKey"/>, whatever the configuration says.
-/// The host registers no <c>byte[]</c> of its own: <c>Licensing:PublicKeyPath</c> is not read.
+/// The host registers no <c>byte[]</c> of its own: <c>Licensing:PublicKeyPath</c> is not read, and a host
+/// whose container resolves any other <c>byte[]</c>, from any registration shape, fails at boot.
 /// </summary>
 public sealed class LicenseTrustAnchorWiringTests : IDisposable
 {
@@ -87,6 +90,78 @@ public sealed class LicenseTrustAnchorWiringTests : IDisposable
         response.StatusCode.Should().Be(HttpStatusCode.PaymentRequired);
     }
 
+    [Fact]
+    public void Boot_ShouldFail_WhenAnotherByteArrayIsRegisteredAfterProLicensing()
+    {
+        using var other = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var otherKey = other.ExportSubjectPublicKeyInfo();
+
+        using var factory = new TrustAnchorFactory(new Dictionary<string, string>(),
+            configure: services => services.AddSingleton(_ => otherKey));
+
+        AssertBootFailsOnTrustAnchor(factory);
+    }
+
+    [Fact]
+    public void Boot_ShouldFail_WhenTheEmbeddedKeyIsReplaced()
+    {
+        using var other = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var otherKey = other.ExportSubjectPublicKeyInfo();
+
+        using var factory = new TrustAnchorFactory(new Dictionary<string, string>(),
+            configure: services => services.Replace(ServiceDescriptor.Singleton(otherKey)));
+
+        AssertBootFailsOnTrustAnchor(factory);
+    }
+
+    [Fact]
+    public void EnsureEmbeddedLicenceTrustAnchor_ShouldPass_WhenOnlyTheEmbeddedKeyIsRegistered()
+    {
+        using var provider = new ServiceCollection()
+            .AddSingleton(LicenseTrustAnchor.OfficialPublicKey)
+            .BuildServiceProvider();
+
+        var act = () => provider.EnsureEmbeddedLicenceTrustAnchor();
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void EnsureEmbeddedLicenceTrustAnchor_ShouldThrow_WhenNoKeyIsRegistered()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+
+        var act = () => provider.EnsureEmbeddedLicenceTrustAnchor();
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*trust anchor*");
+    }
+
+    [Fact]
+    public void EnsureEmbeddedLicenceTrustAnchor_ShouldThrow_WhenAnyRegisteredKeyDiffers()
+    {
+        // The embedded key registered last does not hide an earlier one: every byte[] is checked.
+        using var provider = new ServiceCollection()
+            .AddSingleton(new byte[] { 1, 2, 3 })
+            .AddSingleton(LicenseTrustAnchor.OfficialPublicKey)
+            .BuildServiceProvider();
+
+        var act = () => provider.EnsureEmbeddedLicenceTrustAnchor();
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*trust anchor*");
+    }
+
+    private static void AssertBootFailsOnTrustAnchor(TrustAnchorFactory factory)
+    {
+        var act = () => factory.Services;
+
+        var thrown = act.Should().Throw<Exception>().Which;
+        var chain = new List<Exception>();
+        for (Exception? e = thrown; e is not null; e = e.InnerException)
+            chain.Add(e);
+        chain.Should().Contain(e => e is InvalidOperationException && e.Message.Contains("trust anchor"),
+            "the host must refuse to start with a licence trust anchor other than the embedded key");
+    }
+
     private string WriteFile(string name, byte[] content)
     {
         var path = Path.Join(_dir, name);
@@ -118,7 +193,8 @@ public sealed class LicenseTrustAnchorWiringTests : IDisposable
     /// </summary>
     private sealed class TrustAnchorFactory(
         IReadOnlyDictionary<string, string> settings,
-        bool validateLicence = false) : WebApplicationFactory<Program>
+        bool validateLicence = false,
+        Action<IServiceCollection>? configure = null) : WebApplicationFactory<Program>
     {
         private static readonly string s_hashedKey =
             Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(AuthenticatedPlatformApiFactory.TestApiKey)));
@@ -148,6 +224,7 @@ public sealed class LicenseTrustAnchorWiringTests : IDisposable
                 services.AddSingleton<ILicenseStatus>(sp => sp.GetRequiredService<LicenseStatusTracker>());
 
                 AuthenticatedPlatformApiFactory.RegisterInMemoryStores(services);
+                configure?.Invoke(services);
             });
 
             var host = base.CreateHost(builder);

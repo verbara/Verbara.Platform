@@ -375,9 +375,8 @@ builder.Services.AddSingleton<IIpAllowlistEvaluator, DefaultIpAllowlistEvaluator
 // ─── Pro.Licensing ───────────────────────────────────────────────────────────
 var licenseConfig = builder.Configuration.GetSection("Licensing");
 var licensePath = licenseConfig["FilePath"] ?? "./license.lic";
-// The licence trust anchor is the key embedded in Pro: AddProLicensing() registers
-// LicenseTrustAnchor.OfficialPublicKey and the host never registers a byte[] of its own
-// (scripts/check-endpoint-invariants.py gate #13).
+// The licence trust anchor is the key embedded in Pro (LicenseTrustAnchor.OfficialPublicKey); the host
+// registers no byte[] of its own and refuses to boot if one differs (EnsureEmbeddedLicenceTrustAnchor).
 
 // Pro v2.5.0-pro: EnforcementMode is GONE (ADR-0012). License-presence drives
 // behaviour: file at LicenseFilePath valid → Pro enabled; missing/invalid/
@@ -1476,6 +1475,7 @@ var openApiEnabled = builder.Environment.IsDevelopment()
 builder.Services.AddVerbaraOpenApi(openApiEnabled);
 
 var app = builder.Build();
+app.Services.EnsureEmbeddedLicenceTrustAnchor();
 
 // ─── Phase 2.2 — ensure cluster_distributed_lock schema (leader election) ────
 // AddPostgresDistributedLock registers the lock primitive but does NOT create its

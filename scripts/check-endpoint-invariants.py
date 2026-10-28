@@ -71,9 +71,13 @@ Seven gates, all freeze-current / ratchet posture (fail only on regression):
      through `TryAddSingleton`: a host registration before it pre-empts that
      call, and one after it wins over it, so either one replaces the key every
      licence is checked against. The shipped host registers none (floor is
-     zero). Test factories live under tests/ and are out of scope. A
-     registration of an untyped local that holds a `byte[]` is beyond a text
-     scan; the end-to-end LicenseTrustAnchorWiringTests cover that case.
+     zero). Test factories live under tests/ and are out of scope. This scan is
+     an early warning, not the guarantee: a registration of an untyped local, one
+     made by a referenced package, or one behind a branch a text scan cannot
+     read all pass it. The guarantee is the boot check in the host
+     (`EnsureEmbeddedLicenceTrustAnchor`, right after `builder.Build()`), which
+     refuses to start when any resolved `byte[]` differs from the embedded key;
+     LicenseTrustAnchorWiringTests prove it on the full host.
 
 Exit 0 = all gates pass; 1 = at least one violation (with ::error:: annotations
 so GitHub renders them inline). Run from the repo root:
@@ -172,8 +176,17 @@ _REGISTRATION_VALUE = "realtime,ps_registrations"
 # A `byte[]` service type in any registration, replacement or removal shape: the
 # generic forms (`AddSingleton<byte[]>`, `TryAddSingleton<byte[]>`, keyed and
 # scoped/transient variants, `Replace`/`RemoveAll<byte[]>`,
-# `ServiceDescriptor.Singleton<byte[]>`) and the `typeof(byte[])` forms.
-_BYTE_ARRAY_TYPE = r"byte\s*\[\s*\]"
+# `ServiceDescriptor.Singleton<byte[]>`) and the `typeof(byte[])` forms, with the
+# type spelled `byte[]`, `System.Byte[]` or `global::System.Byte[]`.
+_BYTE_ARRAY_TYPE = r"(?:global::)?(?:System\s*\.\s*)?byte\s*\[\s*\]"
+# Key material an untyped registration would hand the container.
+_KEY_MATERIAL = r"(?:ReadAllBytes|FromBase64String|FromHexString|GetBytes|PublicKey|TrustAnchor)"
+# The untyped registration calls: every lifetime, keyed or not, Try or not, and the
+# untyped `ServiceDescriptor` factories (`ServiceDescriptor.Singleton(sp => ...)`).
+_UNTYPED_REGISTRATION = (
+    r"\b(?:(?:Try)?Add(?:Keyed)?(?:Singleton|Scoped|Transient)"
+    r"|ServiceDescriptor\s*\.\s*(?:Keyed)?(?:Singleton|Scoped|Transient|Describe))\s*\("
+)
 _TRUST_ANCHOR_REGISTRATION = re.compile(
     r"\b(?:Try)?Add(?:Keyed)?(?:Singleton|Scoped|Transient)\s*<\s*" + _BYTE_ARRAY_TYPE + r"\s*>"
     r"|\b(?:RemoveAll|Replace)\s*<\s*" + _BYTE_ARRAY_TYPE + r"\s*>"
@@ -181,9 +194,10 @@ _TRUST_ANCHOR_REGISTRATION = re.compile(
     + r"|\b(?:(?:Try)?Add(?:Keyed)?(?:Singleton|Scoped|Transient)|RemoveAll|Replace|ServiceDescriptor\s*\.\s*\w+"
       r"|new\s+ServiceDescriptor)\s*\(\s*typeof\s*\(\s*" + _BYTE_ARRAY_TYPE + r"\s*\)"
     # An untyped registration whose argument is key material (`AddSingleton(File.ReadAllBytes(p))`,
-    # `AddSingleton(licensePublicKey)`): the argument list up to the statement end names it.
-    + r"|\b(?:Try)?Add(?:Keyed)?Singleton\s*\([^;]*?(?:ReadAllBytes|FromBase64String|FromHexString"
-      r"|PublicKey|TrustAnchor)",
+    # `AddSingleton(licensePublicKey)`): the argument list up to the statement end names it...
+    + r"|" + _UNTYPED_REGISTRATION + r"[^;]*?" + _KEY_MATERIAL
+    # ...or the body of a block lambda does (`AddSingleton(sp => { ...; return File.ReadAllBytes(p); })`).
+    + r"|" + _UNTYPED_REGISTRATION + r"\s*(?:\w+|\([^()]*\))\s*=>\s*\{[^{}]*?" + _KEY_MATERIAL,
     re.IGNORECASE,
 )
 

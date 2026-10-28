@@ -126,7 +126,7 @@ internal sealed partial class LicenseGateMiddleware
     private bool IsLicensed(LicenseFeature feature)
     {
         var result = _licenseStatus.LastResult;
-        if (!IsAuthentic(result) || !_licenseStatus.LicensedFeatures.HasFlag(feature))
+        if (!LicenceAuthenticity.IsAuthentic(result) || !_licenseStatus.LicensedFeatures.HasFlag(feature))
             return false;
 
         var guarded = feature & ~NeverGuardedFeatures;
@@ -144,13 +144,6 @@ internal sealed partial class LicenseGateMiddleware
 
         return result is LicenseValidationResult.Valid or LicenseValidationResult.GracePeriod || allowed;
     }
-
-    private static bool IsAuthentic(LicenseValidationResult result) =>
-        result is LicenseValidationResult.Valid
-            or LicenseValidationResult.GracePeriod
-            or LicenseValidationResult.MissingFeature
-            or LicenseValidationResult.Expired
-            or LicenseValidationResult.UnauthorizedImage;
 
     [LoggerMessage(Level = LogLevel.Error,
         Message = "License gate: feature '{Feature}' not licensed — blocking {Path}")]

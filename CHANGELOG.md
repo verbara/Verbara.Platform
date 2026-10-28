@@ -13,9 +13,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **`Licensing:PublicKeyPath` (`Licensing__PublicKeyPath`) is no longer read.** The licence trust anchor is always
   the public key embedded in Verbara.Sdk.Pro.Licensing (`LicenseTrustAnchor.OfficialPublicKey`); the Api host
-  registers no key of its own. A deployment that still sets the variable starts as before and ignores it. A
-  repository invariant (`scripts/check-endpoint-invariants.py` gate #13) keeps a `byte[]` service registration out
-  of `src/`.
+  registers no key of its own, and it refuses to start when the key its container resolves is any other one, so a
+  registration from any source fails at boot. A deployment that still sets the variable starts as before and ignores
+  it. A repository invariant (`scripts/check-endpoint-invariants.py` gate #13) also keeps a `byte[]` service
+  registration out of `src/`.
 
 ### Fixed
 
@@ -28,6 +29,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   MultiTenant, Routing and Realtime (`/admin/skills`, `/admin/agents/{id}/skills`, `/admin/realtime/profiles`) keep
   working and are never put through the guard. The 402 body is unchanged. Autonomous typification disposition applies
   the same rule.
+- **Only a licence that validates speaks for its fields.** The licensed-agent ledger takes its licence id, and
+  `GET /management/system/license` its feature list, id, licensee, expiry and node limit, only from a licence whose
+  signature verified; for a licence that fails validation they are empty, as with no licence. That endpoint also
+  reports `blocked` for a licence that does not authorize the running image.
 - **`Licensing:RevalidationInterval` always keeps periodic licence revalidation on.** A value of zero, a negative or
   infinite value, or one that does not parse now falls back to the 6-hour default, and a value above 24 hours is
   capped at 24 hours, so a licence that runs out while the process is up is seen as expired within a day.

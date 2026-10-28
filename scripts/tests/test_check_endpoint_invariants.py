@@ -85,6 +85,17 @@ _TRUST_ANCHOR_REGISTRATIONS = (
     "builder.Services.AddSingleton(Convert.FromBase64String(raw));",
     "builder.Services.AddSingleton(licensePublicKey);",
     "services.TryAddSingleton(customTrustAnchor);",
+    # Qualified type names, untyped scoped/transient, untyped descriptors, block lambdas, other decoders.
+    "services.AddSingleton<System.Byte[]>(File.ReadAllBytes(p));",
+    "services.AddSingleton<global::System.Byte[]>(sp => key);",
+    "services.AddSingleton(typeof(global::System.Byte[]), key);",
+    "services.AddTransient(_ => File.ReadAllBytes(p));",
+    "services.AddScoped(_ => File.ReadAllBytes(p));",
+    "services.Replace(ServiceDescriptor.Singleton(sp => File.ReadAllBytes(p)));",
+    "services.Add(ServiceDescriptor.Transient(_ => Convert.FromBase64String(raw)));",
+    "services.AddSingleton(sp => { var c = sp.GetRequiredService<IConfiguration>(); "
+    "return File.ReadAllBytes(c[\"k\"]!); });",
+    "services.AddSingleton(Encoding.ASCII.GetBytes(cfg[\"k\"]!));",
 )
 # byte[] that is not a DI service: return types, locals, serializers, other singletons.
 _TRUST_ANCHOR_NEGATIVES = (
