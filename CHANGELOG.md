@@ -20,6 +20,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   MultiTenant, Routing and Realtime (`/admin/skills`, `/admin/agents/{id}/skills`, `/admin/realtime/profiles`) keep
   working and are never put through the guard. The 402 body is unchanged. Autonomous typification disposition applies
   the same rule.
+- **`Licensing:RevalidationInterval` always keeps periodic licence revalidation on.** A value of zero, a negative or
+  infinite value, or one that does not parse now falls back to the 6-hour default, and a value above 24 hours is
+  capped at 24 hours, so a licence that runs out while the process is up is seen as expired within a day.
 
 ## [2.34.0] - 2026-10-28
 

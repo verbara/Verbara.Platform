@@ -390,9 +390,7 @@ if (!string.IsNullOrEmpty(publicKeyPath) && File.Exists(publicKeyPath))
 builder.Services.AddProLicensing(o =>
 {
     o.LicenseFilePath = licensePath;
-    o.RevalidationInterval = TimeSpan.TryParse(licenseConfig["RevalidationInterval"], out var interval)
-        ? interval
-        : TimeSpan.FromHours(6);
+    o.RevalidationInterval = LicenseRevalidationInterval.Resolve(licenseConfig["RevalidationInterval"]);
 });
 
 // ─── Observability — OpenTelemetry tracing + metrics providers ──────────────
