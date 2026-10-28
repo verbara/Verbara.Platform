@@ -152,7 +152,7 @@ $ docker exec verbara-asterisk asterisk -rx 'pjsip show transports'
 Conseguí un token de tu admin Customer:
 
 ```bash
-$ TOKEN=$(curl -sS -X POST http://localhost:5000/api/v1/auth/login \
+$ TOKEN=$(curl -sS -X POST http://localhost:${WEB_HTTP_PORT:-80}/api/v1/auth/login \
     -H 'Content-Type: application/json' \
     -d '{"tenantId":"acme","email":"admin@acme.local","password":"TU-PASSWORD"}' \
     | jq -r .accessToken)
@@ -181,7 +181,7 @@ Hay **dos modos de identificación** del trunk entrante. Elegí según tu carrie
 El carrier manda llamadas desde IPs fijas; Verbara identifica el INVITE por la IP origen, sin digest.
 
 ```bash
-$ curl -sS -X POST http://localhost:5000/api/v1/admin/trunks \
+$ curl -sS -X POST http://localhost:${WEB_HTTP_PORT:-80}/api/v1/admin/trunks \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
     -d '{
       "name": "twilio-elastic",
@@ -202,7 +202,7 @@ $ curl -sS -X POST http://localhost:5000/api/v1/admin/trunks \
 El trunk se registra contra el carrier con usuario/password.
 
 ```bash
-$ curl -sS -X POST http://localhost:5000/api/v1/admin/trunks \
+$ curl -sS -X POST http://localhost:${WEB_HTTP_PORT:-80}/api/v1/admin/trunks \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
     -d '{
       "name": "voipms",
@@ -261,10 +261,10 @@ Cuando entra una llamada, el `StasisInboundConsumer` resuelve el **DID marcado �
 
 ```bash
 # El id de la cola lo sacás de GET /admin/queues
-$ QUEUE_ID=$(curl -sS http://localhost:5000/api/v1/admin/queues \
+$ QUEUE_ID=$(curl -sS http://localhost:${WEB_HTTP_PORT:-80}/api/v1/admin/queues \
     -H "Authorization: Bearer $TOKEN" | jq -r '.[0].id')
 
-$ curl -sS -X POST http://localhost:5000/api/v1/admin/did-routes \
+$ curl -sS -X POST http://localhost:${WEB_HTTP_PORT:-80}/api/v1/admin/did-routes \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
     -d "{\"did\":\"18005551234\",\"queueId\":\"$QUEUE_ID\",\"isActive\":true}" | jq
 ```
@@ -309,7 +309,7 @@ Para que la cola le haga **ring** a un agente, ese agente necesita un **endpoint
 
 ```bash
 # AGENT_ID = GET /admin/agents → .[].id
-$ curl -sS -X PUT http://localhost:5000/api/v1/admin/agents/$AGENT_ID \
+$ curl -sS -X PUT http://localhost:${WEB_HTTP_PORT:-80}/api/v1/admin/agents/$AGENT_ID \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
     -d '{"extension":"1001","sipPassword":"UNA-PASSWORD-FUERTE"}' | jq
 ```
@@ -384,7 +384,7 @@ $ docker exec verbara-asterisk asterisk -rx 'pjsip show endpoint acme-agent-...'
 
 El agente ya puede **atender y hacer llamadas desde la pestaña del navegador**, sin teléfono externo: un softphone SIP.js + WebRTC se registra contra Asterisk por WSS, la llamada encolada **suena en el navegador**, el agente atiende y hay **audio bidireccional**. La llamada se rastrea como una **conversación de voz** (screen-pop con quién llama + su historial, agent-assist en vivo, y wrap-up/disposición al colgar).
 
-> ⚠️ **Estado de release.** Fase 3 (softphone navegador + audio WebRTC + control de llamada + saliente) **ship en Platform `v2.7.0` + Web `v3.3.0-web`** — los defaults del `docker-compose.reference-smb.yml` (`PLATFORM_API_TAG=v2.7.0`, `PLATFORM_WEB_TAG=v3.3.0-web`). Code-completo + validado en lab (Fase 3 cerrada 2026-06-01). Si fijaste tags previos (`v2.6.0` / `v3.2.0-web`) **no vas a ver el softphone** — son anteriores a Fase 3; usá los defaults o tags ≥ esos. El patrón de **teléfono SIP externo** (§6) sigue válido como alternativa y no depende de esto.
+> ⚠️ **Estado de release.** Fase 3 (softphone navegador + audio WebRTC + control de llamada + saliente) **ship desde Platform 2.7 + Web 3.3** y está incluida en el par que fijan los defaults del `docker-compose.reference-smb.yml` (`PLATFORM_API_TAG=v2.33.1`, `PLATFORM_WEB_TAG=v3.27.1-web`). Code-completo + validado en lab (Fase 3 cerrada 2026-06-01). Si fijaste tags anteriores a Platform 2.7 / Web 3.3 **no vas a ver el softphone**; usá los defaults. El patrón de **teléfono SIP externo** (§6) sigue válido como alternativa y no depende de esto.
 
 ### 9.1 Pre-requisitos
 
@@ -392,7 +392,7 @@ El agente ya puede **atender y hacer llamadas desde la pestaña del navegador**,
 - **Certificado TLS del WSS.** El entrypoint de Asterisk **auto-genera un cert self-signed** en el arranque si no hay uno montado (`docker/gen-asterisk-cert.sh` → `/var/lib/asterisk/keys/`). Para producción, montá un cert real (Let's Encrypt) en su lugar.
 - **Perfil WebRTC** como default del agente — los agentes nuevos se sincronizan con perfil WebRTC automáticamente. Si tu tenant fue creado antes de Fase 3, ejecutá una vez:
   ```bash
-  $ curl -sS -X POST http://localhost:5000/api/v1/admin/realtime/profiles/seed-defaults \
+  $ curl -sS -X POST http://localhost:${WEB_HTTP_PORT:-80}/api/v1/admin/realtime/profiles/seed-defaults \
       -H "Authorization: Bearer $TOKEN"
   # GET .../admin/realtime/profiles debe mostrar "WebRTC Agent" con isDefault:true
   ```

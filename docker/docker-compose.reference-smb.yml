@@ -25,8 +25,8 @@
 #      the host NIC. The cost is that Asterisk reclaims 5060/5061/8088/
 #      8089/5038/8180/9092 of the HOST (no other PBX may run there).
 #
-#   2) Platform.Api + Realtime + Web + Postgres + Redis stay on a docker
-#      bridge (`default` network). The Api reaches Asterisk via
+#   2) Platform.Api + Realtime + Web + Postgres + Redis + Renderer + Mail
+#      stay on a docker bridge (`default` network). The Api reaches Asterisk via
 #      `host.docker.internal:{8088,5038}` thanks to
 #      `extra_hosts: ["host.docker.internal:host-gateway"]`.
 #
@@ -40,11 +40,19 @@
 #      NOT the LAN). This lets Asterisk-on-host-network reach the realtime
 #      DB while keeping the DB invisible from the LAN.
 #
-#   5) Images are tag-pinned to the latest signed release at the time this
-#      file ships (ADR-0023: api/realtime/renderer/mail published to
-#      ghcr.io/verbara/platform/* as cosign-signed Native AOT images).
+#   5) Images are tag-pinned to the Platform release this file ships in
+#      (ADR-0023: api/realtime/renderer/mail published to
+#      ghcr.io/verbara/platform/* as cosign-signed Native AOT images), and
+#      the web image to the console release paired with it. The defaults
+#      below and `.env.reference-smb.example` MUST name the same pair —
+#      `scripts/check-smb-pins.py` fails CI otherwise.
 #      Operators who want byte-for-byte content addressing should use
 #      `docker-compose.verified.yml` instead (digest-pinned).
+#
+#   6) Redis is a default service. Platform.Api signs its tokens with keys
+#      from the rotation pool stored in Redis, and Realtime validates the
+#      console's tokens against that same pool (and relays live updates
+#      over the same Redis). Without Redis the console has no live updates.
 #
 # Capacity envelope (with default .env values):
 #   SMB Standard tier (target sweet-spot): 8 vCPU / 32 GB / 250 GB SSD
@@ -65,9 +73,7 @@
 #                  up -d --wait
 #
 # Optional profiles:
-#   --profile identity-redis  → enable Redis for JWT rotation pool
-#                                (multi-replica / ADR-0012)
-#   --profile coturn          → enable Coturn TURN server for WebRTC
+#   --profile coturn         → enable Coturn TURN server for WebRTC
 #                                agents behind strict NAT (compose with
 #                                docker-compose.coturn.yml)
 #   --profile observability   → enable Prometheus + Grafana + Loki
@@ -138,10 +144,10 @@ services:
           memory: ${ASTERISK_MEM_LIMIT:-4G}
 
   # ──────────────────────────────────────────────────────────────────────
-  # Platform.Api — composition root. Pinned to the latest signed release.
+  # Platform.Api — composition root. Pinned to this file's release (see 5) above).
   # ──────────────────────────────────────────────────────────────────────
   platform-api:
-    image: ghcr.io/verbara/platform/api:${PLATFORM_API_TAG:-v2.8.1}
+    image: ghcr.io/verbara/platform/api:${PLATFORM_API_TAG:-v2.33.1}
     container_name: verbara-platform-api
     logging: *default-logging
     extra_hosts:
@@ -161,10 +167,27 @@ services:
       Asterisk__Ari__Password: ${ARI_PASSWORD}
       Asterisk__Ari__Application: verbara
       Asterisk__Ari__NodeApplication: verbara-node
-      # Auth — JWT signing key. Generate a fresh 64-char string per install.
-      Jwt__SigningKey: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY required (64+ chars)}
-      Jwt__Issuer: ${JWT_ISSUER:-https://verbara.local}
-      Jwt__Audience: ${JWT_AUDIENCE:-verbara-api}
+      # Auth — the API signs its tokens with generated keys kept in the Redis
+      # rotation pool (ADR-0012); Realtime validates against the same pool, so a
+      # recreated API container keeps every session. No signing key is configured
+      # here (the old Jwt__SigningKey/Issuer/Audience settings are no longer read).
+      ConnectionStrings__Redis: "redis:6379${REDIS_PASSWORD:+,password=${REDIS_PASSWORD}}"
+      ConnectionStrings__IdentityRedis: "redis:6379${REDIS_PASSWORD:+,password=${REDIS_PASSWORD}}"
+      Identity__JwtKeyRotation__UseRotationPool: "true"
+      # The tenant whose agents, queues and trunks the API pushes to Asterisk
+      # (PlatformDesiredStateProvider). Required: an empty value would name a
+      # tenant "" instead of falling back. Use the customer tenant id you type
+      # in the setup wizard.
+      Realtime__TenantIds__0: ${CUSTOMER_TENANT_ID:?CUSTOMER_TENANT_ID required (the customer tenant id you create in the setup wizard)}
+      # CSAT by email: the request goes out with Reply-To csat+<token>@<domain>;
+      # the mail service's IMAP poller verifies <token> with the same secret.
+      Csat__Email__TokenSigningSecret: ${CSAT_REPLY_TOKEN_SECRET:?CSAT_REPLY_TOKEN_SECRET required (32+ chars)}
+      # csat+<token>@ this domain MUST be delivered to the mailbox the mail
+      # service polls (IMAP_* below), or replies are never captured.
+      Csat__Email__ReplyToDomain: ${CSAT_REPLY_TO_DOMAIN:-csat.verbara.local}
+      # Licensed-agent day cut (IANA zone id). Fixed in the database at the first
+      # start of v2.27.0 or later; changing it afterwards stops the daily close.
+      Licensing__Metering__DayZone: ${LICENSE_DAY_ZONE:-UTC}
       # CORS — allow only the front-end origin you ship to customers.
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,https://localhost}
       # Public address of the console (nginx-gateway, as users open it). Password-reset
@@ -178,12 +201,14 @@ services:
       # Behind a further load balancer the API sees that balancer's address: it reads only the
       # last X-Forwarded-For entry, the one nginx-gateway appends.
       ForwardedHeaders__TrustedProxies__0: ${VERBARA_GATEWAY_IP:-172.31.252.10}/32
-      # Licensing — point Licensing__FilePath at your signed .lic to enable Pro
-      # features. Empty / unset = community/OSS mode (Pro endpoints respond with
-      # HTTP 402 PaymentRequired + RFC 9457 ProblemDetails carrying actionable
-      # trial / upgrade URLs). Acquire a free Tier 0.5 developer license at
+      # Licensing — the API reads the licence at this path INSIDE the container.
+      # To enable Pro features, set LICENSE_PATH in .env to your signed .lic and
+      # uncomment the bind-mount under `volumes:` below. No file there =
+      # community/OSS mode (Pro endpoints respond with HTTP 402 PaymentRequired +
+      # RFC 9457 ProblemDetails carrying actionable trial / upgrade URLs).
+      # Acquire a free Tier 0.5 developer license at
       # https://verbara.io/developer-license
-      Licensing__FilePath: ${LICENSE_PATH:-}
+      Licensing__FilePath: /etc/verbara/license.lic
       # Pro Layer C image-binding (Pro/ADR-0011). Required only when running a
       # commercial Pro license that has authorized digests. Leave empty for
       # the community/OSS path.
@@ -195,17 +220,17 @@ services:
       Services__Renderer__BaseUrl: http://renderer:5010
       Services__Mail__BaseUrl: http://mail:5020
       Services__ServiceKey: ${SERVICE_KEY:?SERVICE_KEY required (32+ chars)}
-      # Optional Redis for JWT rotation pool / MFA throttle / SignalR backplane.
-      # Uncomment the connection string AND start with --profile identity-redis.
-      # ConnectionStrings__IdentityRedis: redis:6379
     volumes:
       - verbara_recordings:/recordings
       - verbara_media:/app/media
       # To enable Pro features, uncomment the following bind-mount and set
-      # LICENSE_PATH in .env to the host-side path of your .lic file.
+      # LICENSE_PATH in .env to the host-side path of your .lic file
+      # (mounted at Licensing__FilePath above).
       # - ${LICENSE_PATH}:/etc/verbara/license.lic:ro
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       asterisk:
         condition: service_healthy
@@ -233,13 +258,12 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   # Platform.Realtime — SignalR Hub microservice (ADR-0022 Phase A).
   # Owns presence + Hub broadcast; non-AOT by design. Internal-only;
-  # nginx-gateway proxies /hubs/* to port 5030. Single-pod by default;
-  # multi-pod scaling requires Pro.Cluster IsLeader (Phase A.5) + Redis
-  # backplane (uncomment ConnectionStrings__Redis below and enable the
-  # `identity-redis` profile).
+  # nginx-gateway proxies /hubs/* to port 5030. Single-pod. Needs Redis:
+  # it receives the API's live events over the Redis backplane and
+  # validates the console's tokens against the API's key pool in Redis.
   # ──────────────────────────────────────────────────────────────────────
   realtime:
-    image: ghcr.io/verbara/platform/realtime:${PLATFORM_API_TAG:-v2.8.1}
+    image: ghcr.io/verbara/platform/realtime:${PLATFORM_API_TAG:-v2.33.1}
     container_name: verbara-realtime
     logging: *default-logging
     environment:
@@ -251,10 +275,16 @@ services:
       # Postgres-backed leader election (REQUIRED since v2.8.0 — realtime hard-fails
       # at startup without ConnectionStrings:Cluster or :Postgres). Single-host = sole leader.
       ConnectionStrings__Postgres: "Host=postgres;Database=${POSTGRES_DB:-verbara};Username=${POSTGRES_USER:-platform};Password=${POSTGRES_PASSWORD};Maximum Pool Size=5;Minimum Pool Size=1;Pooling=true"
-      # Multi-pod backplane (opt-in). Uncomment when scaling out:
-      # ConnectionStrings__Redis: redis:6379
-      # ConnectionStrings__IdentityRedis: redis:6379
+      # Live-event backplane + the API's JWT key pool. Required: without the
+      # identity Redis, realtime rejects every token the API issues.
+      ConnectionStrings__Redis: "redis:6379${REDIS_PASSWORD:+,password=${REDIS_PASSWORD}}"
+      ConnectionStrings__IdentityRedis: "redis:6379${REDIS_PASSWORD:+,password=${REDIS_PASSWORD}}"
+      # MUST equal the API's key prefix (the API sets none and uses this default
+      # of RedisIdentityOptions; realtime's own fallback differs).
+      Identity__Redis__KeyPrefix: "asterisk:identity:"
     depends_on:
+      redis:
+        condition: service_healthy
       platform-api:
         condition: service_healthy
     expose:
@@ -273,12 +303,12 @@ services:
           memory: ${REALTIME_MEM_LIMIT:-512M}
 
   # ──────────────────────────────────────────────────────────────────────
-  # Platform.Web — React SPA + nginx. Pinned to the latest signed release.
+  # Platform.Web — React SPA + nginx. Pinned to the paired console release.
   # Internal-only — port 80 belongs to `nginx-gateway` below, which fronts
   # web + api + realtime under one hostname (ADR-0022 Phase A).
   # ──────────────────────────────────────────────────────────────────────
   web:
-    image: ghcr.io/verbara/platform/web:${PLATFORM_WEB_TAG:-v3.4.0-web}
+    image: ghcr.io/verbara/platform/web:${PLATFORM_WEB_TAG:-v3.27.1-web}
     container_name: verbara-web
     logging: *default-logging
     expose:
@@ -382,15 +412,19 @@ services:
           memory: ${POSTGRES_MEM_LIMIT:-2G}
 
   # ──────────────────────────────────────────────────────────────────────
-  # Redis 8 — opt-in (--profile identity-redis or --profile cluster).
-  # Required for: JWT rotation pool (ADR-0012, multi-replica), SignalR
-  # backplane (multi-replica), MFA throttle (single-instance optional).
-  # Single-instance SMB without horizontal scaling does NOT need Redis.
+  # Redis 8 — default service, required by platform-api and realtime:
+  # the JWT key rotation pool both of them read (ADR-0012), the live-event
+  # backplane between them, and the MFA / password-reset caches.
+  # REDIS_PASSWORD, when set, becomes --requirepass and is appended to every
+  # connection string above as `,password=…`.
   # ──────────────────────────────────────────────────────────────────────
   redis:
     image: redis:8-alpine
     container_name: verbara-redis
     logging: *default-logging
+    environment:
+      # Read only by the healthcheck below.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     command:
       - redis-server
       - --requirepass
@@ -402,12 +436,13 @@ services:
     volumes:
       - verbara_redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # Authenticates when a password is set; an unauthenticated PING would
+      # get NOAUTH, which redis-cli still exits 0 on.
+      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping; else redis-cli ping; fi | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
-    profiles: [identity-redis, cluster]
     deploy:
       resources:
         limits:
@@ -416,10 +451,10 @@ services:
 
   # ──────────────────────────────────────────────────────────────────────
   # Renderer microservice — QuestPDF + ScottPlot for reports/charts.
-  # Pinned to the latest signed release on ghcr.io (ADR-0023, Native AOT).
+  # Pinned to this file's release on ghcr.io (ADR-0023, Native AOT).
   # ──────────────────────────────────────────────────────────────────────
   renderer:
-    image: ghcr.io/verbara/platform/renderer:${PLATFORM_API_TAG:-v2.8.1}
+    image: ghcr.io/verbara/platform/renderer:${PLATFORM_API_TAG:-v2.33.1}
     container_name: verbara-renderer
     logging: *default-logging
     environment:
@@ -440,11 +475,12 @@ services:
           memory: 512M
 
   # ──────────────────────────────────────────────────────────────────────
-  # Mail microservice — MailKit SMTP + IMAP + Microsoft Graph OAuth.
-  # Pinned to the latest signed release on ghcr.io (ADR-0023, Native AOT).
+  # Mail microservice — MailKit SMTP + CSAT reply IMAP poller + Microsoft
+  # Graph OAuth.
+  # Pinned to this file's release on ghcr.io (ADR-0023, Native AOT).
   # ──────────────────────────────────────────────────────────────────────
   mail:
-    image: ghcr.io/verbara/platform/mail:${PLATFORM_API_TAG:-v2.8.1}
+    image: ghcr.io/verbara/platform/mail:${PLATFORM_API_TAG:-v2.33.1}
     container_name: verbara-mail
     logging: *default-logging
     environment:
@@ -461,13 +497,25 @@ services:
       # Microsoft Graph for OAuth-based send (optional).
       Microsoft__ClientId: ${MS_CLIENT_ID:-}
       Microsoft__TenantId: ${MS_TENANT_ID:-common}
-      # IMAP for inbound email channel (optional — required only if Email
-      # channel uses IMAP polling instead of webhook).
-      Imap__Host: ${IMAP_HOST:-}
-      Imap__Port: ${IMAP_PORT:-993}
-      Imap__UseTls: ${IMAP_USE_TLS:-true}
-      Imap__Username: ${IMAP_USER:-}
-      Imap__Password: ${IMAP_PASSWORD:-}
+      # IMAP = the CSAT reply poller (NOT the Email channel's inbound): it
+      # drains the mailbox that receives csat+<token>@CSAT_REPLY_TO_DOMAIN,
+      # verifies <token> with the secret the API signed it with, and forwards
+      # the rating to the API's internal capture endpoint (CsatCapture__*).
+      # Off by default; set IMAP_ENABLED=true once the mailbox exists.
+      Imap__Enabled: ${IMAP_ENABLED:-false}
+      Imap__TokenSigningSecret: ${CSAT_REPLY_TOKEN_SECRET:?CSAT_REPLY_TOKEN_SECRET required (32+ chars)}
+      # The tenant the mailbox's replies belong to (the customer tenant id
+      # created in the setup wizard).
+      Imap__Mailboxes__0__TenantId: ${IMAP_TENANT_ID:-${CUSTOMER_TENANT_ID:-}}
+      Imap__Mailboxes__0__Host: ${IMAP_HOST:-}
+      Imap__Mailboxes__0__Port: ${IMAP_PORT:-993}
+      Imap__Mailboxes__0__UseTls: ${IMAP_USE_TLS:-true}
+      Imap__Mailboxes__0__Username: ${IMAP_USER:-}
+      Imap__Mailboxes__0__Password: ${IMAP_PASSWORD:-}
+      # Where the poller forwards captured replies, authorized by the same
+      # service key the API checks (Services__ServiceKey on platform-api).
+      CsatCapture__ApiBaseAddress: http://platform-api:5000
+      CsatCapture__ServiceKey: ${SERVICE_KEY:?SERVICE_KEY required (32+ chars)}
       Services__ServiceKey: ${SERVICE_KEY}
     depends_on:
       postgres:

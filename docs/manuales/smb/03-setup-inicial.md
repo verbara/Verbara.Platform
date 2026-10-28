@@ -21,7 +21,7 @@ El resto de la configuración (agente + queue + canales) se hace desde la Web UI
 Desde el host o cualquier máquina con acceso al server:
 
 ```bash
-$ curl -sS -X POST http://{server-ip}:5000/api/v1/setup \
+$ curl -sS -X POST http://{server-ip}/api/v1/setup \
     -H "Content-Type: application/json" \
     -d '{
       "email": "admin@tu-empresa.com",
@@ -163,7 +163,7 @@ Elegir el canal que querés probar primero. **Recomendado para validar rápido: 
 | Canal | Por qué probar primero |
 |---|---|
 | **WebChat** | Funciona out-of-the-box, mensaje round-trip en < 5 min |
-| **Email** | Requiere credenciales SMTP/IMAP — saltarlo si no las tenés a mano |
+| **Email** | Requiere credenciales SMTP y un MDA que entregue al webhook — saltarlo si no los tenés a mano |
 | **Voz/SIP** | Requiere trunk SIP provisionado + firewall NAT bien — saltarlo hasta haber leído [06](06-canal-voz-sip.md) |
 
 Para WebChat:
@@ -195,7 +195,7 @@ Validar desde la API. **Importante:** las colas/agentes/canales viven en el **Cu
 ```bash
 $ TOKEN={el-accessToken-del-Customer-Admin}     # del login del paso 2
 $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
-    http://{server-ip}:5000/api/v1/admin/queues | jq
+    http://{server-ip}/api/v1/admin/queues | jq
 
 [
   {
@@ -207,7 +207,7 @@ $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
 ]
 
 $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
-    http://{server-ip}:5000/api/v1/admin/agents | jq
+    http://{server-ip}/api/v1/admin/agents | jq
 
 [
   {
@@ -220,7 +220,7 @@ $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
 ]
 
 $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
-    http://{server-ip}:5000/api/v1/admin/channels | jq
+    http://{server-ip}/api/v1/admin/channels | jq
 
 [
   {
@@ -264,7 +264,7 @@ El script inserta `(tenant_id, queue_id, agent_id)` para cada par donde `agents.
 El setup del paso 1 ya creó tu primer Customer (`mi-empresa`). Si vas a usar Verbara para **múltiples clientes** (modelo multi-tenant tipo agencia o reseller), creá un tenant Customer adicional por cliente. El tenant `platform` queda como administrativo.
 
 ```bash
-$ curl -sS -X POST http://{server-ip}:5000/api/v1/management/tenants \
+$ curl -sS -X POST http://{server-ip}/api/v1/management/tenants \
     -H "X-Api-Key: $MANAGEMENT_API_KEY" \
     -H "Content-Type: application/json" \
     -d '{
@@ -279,7 +279,7 @@ Para cada tenant nuevo, repetir el wizard de setup interno (`/admin/setup` despu
 ## 6. Crear más usuarios admin
 
 ```bash
-$ curl -sS -X POST http://{server-ip}:5000/api/v1/admin/users \
+$ curl -sS -X POST http://{server-ip}/api/v1/admin/users \
     -H "Authorization: Bearer $TOKEN" \
     -H "X-Tenant-Id: platform" \
     -H "Content-Type: application/json" \
@@ -300,7 +300,7 @@ Ahora que el platform está funcionando, configurá los canales que tu cliente v
 | Canal | Manual | Tiempo | Pre-requisitos del cliente |
 |---|---|---|---|
 | **WebChat** | [04-canal-webchat.md](04-canal-webchat.md) | 20 min | Acceso al HTML/template de su sitio web |
-| **Email** | [05-canal-email.md](05-canal-email.md) | 30 min | Credenciales SMTP + IMAP (o cuenta M365/Gmail con OAuth) |
+| **Email** | [05-canal-email.md](05-canal-email.md) | 30 min | Credenciales SMTP (o cuenta M365/Gmail con OAuth) + MDA hacia el webhook; IMAP sólo para respuestas CSAT |
 | **Voz/SIP** | [06-canal-voz-sip.md](06-canal-voz-sip.md) | 60-90 min | Trunk SIP provisionado (Twilio Elastic / carrier PSTN / etc.) + Manual 01 §3 firewall NAT validado |
 
 > Aunque el wizard del paso 3 te permitía elegir un solo canal, **no estás limitado a uno**. Después de cerrar el wizard, podés configurar los 3 simultáneamente desde `/admin/channels`.

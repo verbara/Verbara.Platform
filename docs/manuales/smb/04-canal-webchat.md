@@ -72,13 +72,13 @@ Necesitás el id de la queue destino. Si seguiste el manual 03, ya tenés una qu
 ```bash
 $ curl -sS -H "Authorization: Bearer $TOKEN" \
     -H "X-Tenant-Id: $CUSTOMER_TENANT_ID" \
-    http://{server-ip}:5000/api/v1/admin/queues | jq '.items[] | {id, name, isActive}'
+    http://{server-ip}/api/v1/admin/queues | jq '.items[] | {id, name, isActive}'
 ```
 
 ### Vía API
 
 ```bash
-$ curl -sS -X PUT http://{server-ip}:5000/api/v1/admin/channels/webchat \
+$ curl -sS -X PUT http://{server-ip}/api/v1/admin/channels/webchat \
     -H "Authorization: Bearer $TOKEN" \
     -H "X-Tenant-Id: $CUSTOMER_TENANT_ID" \
     -H "Content-Type: application/json" \
@@ -260,7 +260,7 @@ No hay un endpoint "resumen por canal". La actividad de WebChat se ve con la ana
 
 ```bash
 $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $CUSTOMER_TENANT_ID" \
-    "http://{server-ip}:5000/api/v1/analytics/dashboard?from=2026-05-01&to=2026-05-31" | jq
+    "http://{server-ip}/api/v1/analytics/dashboard?from=2026-05-01&to=2026-05-31" | jq
 ```
 
 - **CDR / intervalos:** `/api/v1/analytics/cdr`, `/api/v1/analytics/intervals` (agregados por agente/queue, incluyen el tráfico de WebChat).
@@ -268,4 +268,4 @@ $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $CUSTOMER_TENANT_I
 
 ## Próximo paso
 
-→ [05-canal-email.md](05-canal-email.md) — configurar SMTP outbound + IMAP inbound (Gmail App Password, M365 OAuth, o SMTP genérico).
+→ [05-canal-email.md](05-canal-email.md) — configurar SMTP outbound + la entrada por webhook (Gmail App Password, M365 OAuth, o SMTP genérico), y opcionalmente el poller IMAP de respuestas CSAT.

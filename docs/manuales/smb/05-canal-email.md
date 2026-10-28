@@ -1,10 +1,11 @@
-# Manual SMB · 05 — Canal Email (SMTP outbound + IMAP inbound)
+# Manual SMB · 05 — Canal Email (SMTP outbound + entrada por webhook) y respuestas CSAT por IMAP
 
 > **Audiencia:** operador con stack arriba + setup inicial completo.
 > **Tiempo:** 30 minutos.
 > **Pre-requisitos:**
 > - Credenciales SMTP (server + puerto + usuario + password).
-> - Credenciales IMAP (server + puerto + usuario + password) — para recibir mail.
+> - Un MDA o servicio de inbound-email que entregue cada correo entrante (MIME crudo) al webhook del canal — para recibir mail.
+> - Opcional: credenciales IMAP de un buzón para las **respuestas CSAT** (encuestas de satisfacción por email) — ver §2.6.
 > - O cuenta de Microsoft 365 / Gmail con OAuth si preferís ese flujo (más seguro pero requiere config en el provider).
 
 El canal Email convierte cada correo entrante en una **conversación** en Verbara. El agente responde desde la misma UI que usa para WebChat/Voz y la respuesta sale como reply al mismo thread vía SMTP outbound. El threading se preserva con headers `In-Reply-To` y `References`.
@@ -12,29 +13,31 @@ El canal Email convierte cada correo entrante en una **conversación** en Verbar
 Arquitectura:
 
 ```
-   Cuenta IMAP                   Cuenta SMTP
-   soporte@empresa.com           noreply@empresa.com
-        │                              ▲
-        │  (1) poll cada 60s            │  (4) reply
-        ▼                              │
-   Mail microservice ◄───── Platform.Api Channels.Email
-        │                              ▲
-        │  (2) parse + create msg       │  (3) agent responde en UI
-        ▼                              │
-   Inbound pipeline ───► Queue ───► Agente
+   soporte@empresa.com                       Cuenta SMTP
+   (MDA / inbound-email service)             noreply@empresa.com
+        │                                          ▲
+        │  (1) POST MIME crudo a                    │  (4) reply
+        │      /api/v1/webhooks/{tenant}/email      │
+        ▼                                          │
+   Platform.Api Channels.Email ──────────► Mail microservice
+        │  (2) parse + threading                    ▲
+        ▼                                          │  (3) agente responde en UI
+   Inbound pipeline ───► Queue ───► Agente ─────────┘
 ```
+
+> ⚠️ **IMAP no es la entrada del canal Email.** El IMAP del servicio mail (`IMAP_*` en `.env`) es el **poller de respuestas CSAT**: lee el buzón al que llegan las respuestas `csat+<token>@CSAT_REPLY_TO_DOMAIN` de las encuestas de satisfacción y le entrega cada calificación al Api. No crea conversaciones. Ver §2.6.
 
 ## 1. Estrategia: 3 caminos posibles
 
 | Provider | Recomendado para | Complejidad |
 |---|---|---|
-| **SMTP genérico + IMAP genérico** | La mayoría de los casos — funciona con cualquier proveedor (Gmail, Zoho, Yandex, server propio Postfix/Dovecot) | Baja |
+| **SMTP genérico** | La mayoría de los casos — funciona con cualquier proveedor (Gmail, Zoho, Yandex, server propio Postfix/Dovecot) | Baja |
 | **Microsoft 365 OAuth (Graph API)** | Empresas que usan M365 corporativo y no quieren App Passwords | Media (registro de app en Entra ID) |
 | **Gmail OAuth2** | Empresas en Google Workspace | Media (registro de app en GCP Console + service account o consent flow) |
 
-> Para arrancar rápido, recomiendo **SMTP + IMAP** con una cuenta dedicada (`soporte@tu-empresa.com`) y App Password. Migrar a OAuth después es un cambio de `.env` sin downtime.
+> Para arrancar rápido, recomiendo **SMTP** con una cuenta dedicada (`soporte@tu-empresa.com`) y App Password. Migrar a OAuth después es un cambio de `.env` sin downtime.
 
-## 2. Camino A — SMTP + IMAP genérico (recomendado para start)
+## 2. Camino A — SMTP genérico (recomendado para start)
 
 ### 2.1 Crear cuenta dedicada
 
@@ -57,14 +60,9 @@ SMTP_USER=soporte.verbara@gmail.com
 SMTP_PASSWORD={app-password-de-gmail}
 SMTP_FROM=soporte.verbara@gmail.com
 SMTP_FROM_NAME=Soporte ACME Corp
-
-# IMAP inbound (lectura del inbox para crear conversaciones)
-IMAP_HOST=imap.gmail.com
-IMAP_PORT=993
-IMAP_USE_TLS=true
-IMAP_USER=soporte.verbara@gmail.com
-IMAP_PASSWORD={mismo-app-password}
 ```
+
+(Los `IMAP_*` son del poller de respuestas CSAT — §2.6 — no de este paso.)
 
 Tabla de servers comunes:
 
@@ -89,9 +87,13 @@ Buscar en los logs:
 ```
 info: Verbara.Platform.Mail.SmtpClient[0]
       SMTP client initialized for smtp.gmail.com:587 (TLS=true)
-info: Verbara.Platform.Mail.ImapPoller[0]
-      IMAP poller started for soporte.verbara@gmail.com (polling every 60s)
 ```
+
+Con `IMAP_ENABLED=false` (el default) el servicio mail también registra `IMAP inbound poller disabled (Imap:Enabled=false)` — es lo esperado si no usás CSAT por email (§2.6).
+
+### 2.3b Entregar el correo entrante al webhook
+
+El canal recibe cada correo como **MIME crudo** por HTTP: `POST http://{server-ip}/api/v1/webhooks/{tenant}/email` (a través del gateway; `{tenant}` es tu tenant Customer, ej. `mi-empresa`). Configurá el MDA del buzón `soporte@` (Postfix `pipe` + `curl --data-binary @-`, o el "inbound parse"/forward-to-HTTP de tu proveedor de email) para que entregue ahí cada mensaje. El webhook responde 404 mientras el canal Email no esté habilitado para ese tenant (paso 2.4). Tamaño máximo por mensaje: 1 MB.
 
 ### 2.4 Habilitar el canal Email en el admin UI
 
@@ -129,14 +131,14 @@ Subject: Prueba de canal email Verbara
 Body:    Hola, esto es un mensaje de prueba para validar el canal.
 ```
 
-Esperar 60-120 segundos (poll interval). Validar:
+Esperar a que el MDA lo entregue al webhook (§2.3b). Validar:
 
 > **Importante (ADR-0027):** canales/colas/agentes/conversaciones viven en el **Customer**, no en `platform`. Usá el token del **Customer Admin** (login del paso 2 del setup inicial) y `X-Tenant-Id: mi-empresa`. Si pegás contra `X-Tenant-Id: platform`, recibís **HTTP 409** — el tenant `platform` es administrativo y no maneja recursos operacionales por diseño.
 
 ```bash
 $ TOKEN={el-accessToken-del-Customer-Admin}     # del login del setup inicial
 $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
-    "http://{server-ip}:5000/api/v1/conversations?channelType=Email&limit=5" | jq '.[0]'
+    "http://{server-ip}/api/v1/conversations?channelType=Email&limit=5" | jq '.[0]'
 
 {
   "id": "conv_01HX...",
@@ -157,6 +159,33 @@ Body:    Hola, esto es la respuesta del agente
 ```
 
 ✅ Round-trip OK.
+
+### 2.6 Respuestas CSAT por email (poller IMAP — opcional)
+
+Las encuestas de satisfacción (CSAT) por email salen con `Reply-To: csat+<token>@CSAT_REPLY_TO_DOMAIN`. El **poller IMAP del servicio mail** lee el buzón que recibe esas respuestas, verifica `<token>` con `CSAT_REPLY_TOKEN_SECRET` (el mismo secreto con el que el Api lo firmó) y le entrega la calificación al Api (`http://platform-api:5000`, autorizado con `SERVICE_KEY`). Necesita la licencia Pro que habilita CSAT; sin ella el Api responde 402 y la respuesta no se registra.
+
+1. Elegí un dominio (o subdominio) para las respuestas y hacé que **`csat+<cualquier-cosa>@` ese dominio llegue a un buzón** (plus-addressing o catch-all). Si no llegan al buzón, nunca se capturan.
+2. Editá `.env.reference-smb`:
+
+```env
+IMAP_ENABLED=true
+CSAT_REPLY_TO_DOMAIN=csat.tu-empresa.com
+# IMAP_TENANT_ID=                  # el tenant Customer de esas respuestas; sin definir = CUSTOMER_TENANT_ID
+IMAP_HOST=imap.gmail.com
+IMAP_PORT=993
+IMAP_USE_TLS=true
+IMAP_USER=csat@tu-empresa.com
+IMAP_PASSWORD={app-password-del-buzon}
+```
+
+3. Recrear mail y Api (`CSAT_REPLY_TO_DOMAIN` lo lee el Api): `dc up -d mail platform-api`.
+4. En los logs del mail, cada pasada del poller registra:
+
+```
+IMAP mailbox drained: tenant=mi-empresa processed=0
+```
+
+`IMAP poll failed: tenant=… host=…` → host/puerto/credenciales mal, o el proveedor bloquea IMAP.
 
 ## 3. Camino B — Microsoft 365 OAuth (Graph API)
 
@@ -187,12 +216,11 @@ MS_TENANT_ID={tu-directory-tenant-id}
 MS_CLIENT_SECRET={el-secret-del-step-3.1.4}
 MS_MAIL_USER=soporte@tu-empresa.com    # buzón M365 desde el cual mandar/leer
 
-# Dejar SMTP/IMAP vacíos — Graph reemplaza ambos
+# Dejar SMTP vacío — Graph reemplaza el envío SMTP
 # SMTP_HOST=
-# IMAP_HOST=
 ```
 
-> El mail microservice detecta automáticamente que `MS_CLIENT_ID` está seteado y prefiere Graph sobre SMTP/IMAP. No es necesario un flag explícito.
+> El mail microservice detecta automáticamente que `MS_CLIENT_ID` está seteado y prefiere Graph sobre SMTP. El poller de respuestas CSAT (§2.6) sigue usando IMAP. No es necesario un flag explícito.
 
 ### 3.3 Reiniciar mail
 
@@ -228,7 +256,7 @@ Para el detalle paso a paso ver `docs/specs/email-oauth-google.md` (en este repo
 
 Cambiar (config de canal = recurso operacional → Customer tenant + Customer Admin token; usa **PUT**, no PATCH):
 ```bash
-$ curl -sS -X PUT http://{server-ip}:5000/api/v1/admin/channels/email \
+$ curl -sS -X PUT http://{server-ip}/api/v1/admin/channels/email \
     -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
     -H "Content-Type: application/json" \
     -d '{"threadingMode": "SubjectMatch"}'
@@ -237,7 +265,7 @@ $ curl -sS -X PUT http://{server-ip}:5000/api/v1/admin/channels/email \
 ### 5.2 Auto-acknowledge (responder automático "recibimos tu mensaje")
 
 ```bash
-$ curl -sS -X PUT http://{server-ip}:5000/api/v1/admin/channels/email \
+$ curl -sS -X PUT http://{server-ip}/api/v1/admin/channels/email \
     -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
     -H "Content-Type: application/json" \
     -d '{
@@ -266,13 +294,11 @@ Mientras tanto, la **Default queue** del canal (paso 2.4) recibe todos los email
 ### Síntoma: el mail entrante no aparece en la queue
 
 ```bash
-# 1. Verificar que IMAP esté pulleando
-$ dc logs --tail 100 mail | grep -i imap
-info: Verbara.Platform.Mail.ImapPoller[0]
-      Polled 3 new messages from soporte.verbara@gmail.com
-
-# Si dice "Authentication failed" → password wrong / App Password caducado
-# Si dice "Connection refused" → puerto/host mal en .env, o firewall del provider bloquea
+# 1. Verificar que el MDA entrega al webhook (§2.3b): el log del gateway muestra el POST
+$ dc logs --tail 100 nginx-gateway | grep 'webhooks/.*/email'
+# 404 → el canal Email no está habilitado para ese tenant (o el tenant del path es otro)
+# 413 → el mensaje supera 1 MB
+# Ninguna línea → el MDA no está llamando al webhook (revisá su configuración)
 
 # 2. Verificar que llegan al pipeline
 $ dc logs --tail 100 platform-api | grep -i email
@@ -283,7 +309,7 @@ info: Verbara.Platform.Channels.Email[0]
 #    Un agente recibe emails de esa queue SÓLO si tiene un row en queue_memberships
 #    (IsExcluded=false) con AllowedChannels = NULL o que contenga "Email".
 $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: mi-empresa" \
-    "http://{server-ip}:5000/api/v1/admin/agents/agente1/queue-memberships" | jq
+    "http://{server-ip}/api/v1/admin/agents/agente1/queue-memberships" | jq
 # Si AllowedChannels excluye "Email" (ej. ['WebChat']) → editá en
 # /admin/agents/{agentId}/queues y agregá el chip "Email" (o dejá NULL = all-channels).
 ```

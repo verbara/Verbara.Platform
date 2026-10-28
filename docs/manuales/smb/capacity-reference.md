@@ -151,10 +151,10 @@ Mediciones tomadas durante el soak D-L 2026-04-30 (24h × VU=500 × ~11k RPS):
 | asterisk (idle) | 200 MB | — | < 5 % |
 | asterisk (100 calls G.711) | 1.5 GB | 1.8 GB | 200 % (2 cores) |
 | postgres | 1 GB | 1.4 GB | 30-50 % |
-| redis (con identity-redis) | 50 MB | 80 MB | < 5 % |
+| redis | 50 MB | 80 MB | < 5 % |
 | web (nginx) | 30 MB | 40 MB | < 1 % |
 | renderer | 200 MB | 350 MB | < 10 % salvo cuando hace PDF |
-| mail | 150 MB | 250 MB | < 5 % salvo durante IMAP poll |
+| mail | 150 MB | 250 MB | < 5 % salvo durante el poll IMAP de respuestas CSAT |
 
 **Suma de bases (sin calls activas):** ~2.5 GB → SMB Lite (16 GB) tiene 13.5 GB de headroom para 50 calls × 30 MB + buffers.
 
