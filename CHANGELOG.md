@@ -12,10 +12,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - **BREAKING for existing installs: the SMB reference stack starts again and pins API `v2.33.1` + Web
-  `v3.27.1-web`** (change `bump-smb-reference-stack-pins`). `docker/docker-compose.reference-smb.yml` defaulted to
+  `v3.27.1-web`** (`decision_ref` Platform/ADR-0038, change `bump-smb-reference-stack-pins`). `docker/docker-compose.reference-smb.yml` defaulted to
   API `v2.8.1` and Web `v3.4.0-web`, and its template `docker/.env.reference-smb.example` pinned `v2.6.0` and
-  `v3.2.0-web`, so the stack shipped neither side of the IP-host tenant fix; and a current API image did not boot
-  with that compose. Both files now name the same pair, and a new CI step (`python3 scripts/check-smb-pins.py`, in the
+  `v3.2.0-web`, so the stack shipped neither side of the IP-host tenant fix; and the stack at the current release did
+  not start with that compose (mail requires `Imap__TokenSigningSecret`, realtime requires Redis). Both files now name the same pair, and a new CI step (`python3 scripts/check-smb-pins.py`, in the
   coverage-scripts job) fails when the compose defaults and the template's `PLATFORM_API_TAG` / `PLATFORM_WEB_TAG`
   disagree. **Redis is now a default service** (the `identity-redis` profile is gone): the API signs its tokens with
   the JWT key rotation pool kept in Redis (`Identity__JwtKeyRotation__UseRotationPool`) and realtime validates the
