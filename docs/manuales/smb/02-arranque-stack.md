@@ -14,7 +14,7 @@ $ sudo mkdir -p /opt/verbara && sudo chown $USER:$USER /opt/verbara
 $ cd /opt/verbara
 $ git clone https://github.com/verbara/platform.git
 $ cd platform
-$ git checkout v2.33.1     # el tag de la release a deployar
+$ git checkout v2.34.0     # el tag de la release a deployar
 ```
 
 > 💡 Si querés un workdir distinto (ej. `/srv/verbara` o `/home/operator/verbara`), reemplazá `/opt/verbara` por lo que prefieras — el manual asume `/opt/verbara/platform` de aquí en adelante.
@@ -28,9 +28,9 @@ docker/docker-compose.reference-smb.yml
 scripts/quickstart-smb.sh
 ```
 
-Si alguno no aparece, estás en un commit/tag viejo — re-checkout a `v2.33.1` o superior.
+Si alguno no aparece, estás en un commit/tag viejo — re-checkout a `v2.34.0` o superior.
 
-> ⚠️ **El tag que hacés checkout decide qué corrés**: el compose y el `.env` de ejemplo de ese tag fijan el par de imágenes (`PLATFORM_API_TAG=v2.33.1` para api/realtime/renderer/mail, `PLATFORM_WEB_TAG=v3.27.1-web` para la consola). No mezcles el compose de un tag con imágenes de otro.
+> ⚠️ **El tag que hacés checkout decide qué corrés**: el compose y el `.env` de ejemplo de ese tag fijan el par de imágenes (`PLATFORM_API_TAG=v2.34.0` para api/realtime/renderer/mail, `PLATFORM_WEB_TAG=v3.27.1-web` para la consola). No mezcles el compose de un tag con imágenes de otro.
 
 ## 2. Verificar firmas de las imágenes (opcional pero recomendado)
 
@@ -51,7 +51,7 @@ Verificar las cinco imágenes:
 $ cd /opt/verbara/platform
 $ for img in api realtime renderer mail; do
     cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-        ghcr.io/verbara/platform/$img:v2.33.1
+        ghcr.io/verbara/platform/$img:v2.34.0
   done
 
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
@@ -60,7 +60,7 @@ $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
 
 Esperado en cada caso:
 ```
-Verification for ghcr.io/verbara/platform/api:v2.33.1 --
+Verification for ghcr.io/verbara/platform/api:v2.34.0 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - The signatures were verified against the specified public key

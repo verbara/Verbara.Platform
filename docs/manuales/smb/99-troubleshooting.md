@@ -42,7 +42,7 @@ $ dc logs --tail 50 platform-api
 | `required variable CSAT_REPLY_TOKEN_SECRET is missing a value` / `CUSTOMER_TENANT_ID required` (lo imprime `docker compose`, antes de arrancar nada) | Falta una variable obligatoria en `.env` | Completarla (ver [02](02-arranque-stack.md) §3.1): `openssl rand -base64 32` para el secreto; el id del tenant Customer para `CUSTOMER_TENANT_ID` |
 | `Failed to load license` | El `.lic` montado en `/etc/verbara/license.lic` (desde `LICENSE_PATH`) no existe o está corrupto | Volver a comentar el bind-mount del `.lic` en el compose (modo OSS — Pro endpoints retornan HTTP 402 con upgrade URL); o adquirir Tier 0.5 gratis en https://verbara.io/developer-license y montar ese `.lic` |
 | `Asterisk:Ari:NodeApplication ('…') must differ from Asterisk:Ari:Application` | La app Stasis del cliente ARI de nodo (`Asterisk__Ari__NodeApplication`, por defecto `verbara-node`) es igual a la del dialplan (`Asterisk__Ari__Application`, `verbara`): sólo el consumer del líder puede registrar la del dialplan (Platform/ADR-0044) | Dejar `Asterisk__Ari__NodeApplication: verbara-node` como viene en `docker-compose.reference-smb.yml`, o borrarla para usar el valor por defecto |
-| `IMAGE_DIGEST mismatch` | Pro digest binding falla (Pro/ADR-0011) | `IMAGE_DIGEST` debe matchear `docker inspect ghcr.io/verbara/platform/api:v2.33.1` `RepoDigests`, y ese digest tiene que estar autorizado en tu `.lic` (cada release nueva del api trae un digest nuevo) |
+| `IMAGE_DIGEST mismatch` | Pro digest binding falla (Pro/ADR-0011) | `IMAGE_DIGEST` debe matchear `docker inspect ghcr.io/verbara/platform/api:v2.34.0` `RepoDigests`, y ese digest tiene que estar autorizado en tu `.lic` (cada release nueva del api trae un digest nuevo) |
 
 ### Reiniciar uno solo
 ```bash
@@ -418,7 +418,7 @@ El script ya existe en `scripts/backup-pg.sh` con rotación a 30 días.
 
 ```bash
 $ git fetch --tags
-$ git checkout v2.33.1
+$ git checkout v2.34.0
 $ diff <(command grep -oE '^[A-Z_]+=' docker/.env.reference-smb.example | sort) \
        <(command grep -oE '^[A-Z_]+=' docker/.env.reference-smb | sort)
 ```
@@ -434,13 +434,13 @@ $ diff <(command grep -oE '^[A-Z_]+=' docker/.env.reference-smb.example | sort) 
 Actualizá los tags:
 ```bash
 $ ${EDITOR:-nano} docker/.env.reference-smb
-# PLATFORM_API_TAG=v2.33.1         (aplica a api+realtime+renderer+mail; comparten tag)
+# PLATFORM_API_TAG=v2.34.0         (aplica a api+realtime+renderer+mail; comparten tag)
 # PLATFORM_WEB_TAG=v3.27.1-web     (web tiene su propio tren de release)
 ```
 
 ### 9.3 Instalaciones con licencia Pro
 
-Cada release del api tiene un digest nuevo. Si tu `.lic` autoriza digests (Pro/ADR-0011), pedí la autorización del digest de `ghcr.io/verbara/platform/api:v2.33.1` **antes** de arrancar, y poné ese digest en `IMAGE_DIGEST`. Sin eso falla el binding de digest (`IMAGE_DIGEST mismatch`, ver §1).
+Cada release del api tiene un digest nuevo. Si tu `.lic` autoriza digests (Pro/ADR-0011), pedí la autorización del digest de `ghcr.io/verbara/platform/api:v2.34.0` **antes** de arrancar, y poné ese digest en `IMAGE_DIGEST`. Sin eso falla el binding de digest (`IMAGE_DIGEST mismatch`, ver §1).
 
 ### 9.4 Verificar, construir y arrancar
 
@@ -448,7 +448,7 @@ Cada release del api tiene un digest nuevo. Si tu `.lic` autoriza digests (Pro/A
 # Firmas (5 imágenes, ADR-0023) — cosign v3+ con --insecure-ignore-tlog
 $ for img in api realtime renderer mail; do
     cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-        ghcr.io/verbara/platform/$img:v2.33.1
+        ghcr.io/verbara/platform/$img:v2.34.0
   done
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
     ghcr.io/verbara/platform/web:v3.27.1-web

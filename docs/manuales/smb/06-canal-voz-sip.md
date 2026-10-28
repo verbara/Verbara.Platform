@@ -384,7 +384,7 @@ $ docker exec verbara-asterisk asterisk -rx 'pjsip show endpoint acme-agent-...'
 
 El agente ya puede **atender y hacer llamadas desde la pestaña del navegador**, sin teléfono externo: un softphone SIP.js + WebRTC se registra contra Asterisk por WSS, la llamada encolada **suena en el navegador**, el agente atiende y hay **audio bidireccional**. La llamada se rastrea como una **conversación de voz** (screen-pop con quién llama + su historial, agent-assist en vivo, y wrap-up/disposición al colgar).
 
-> ⚠️ **Estado de release.** Fase 3 (softphone navegador + audio WebRTC + control de llamada + saliente) **ship desde Platform 2.7 + Web 3.3** y está incluida en el par que fijan los defaults del `docker-compose.reference-smb.yml` (`PLATFORM_API_TAG=v2.33.1`, `PLATFORM_WEB_TAG=v3.27.1-web`). Code-completo + validado en lab (Fase 3 cerrada 2026-06-01). Si fijaste tags anteriores a Platform 2.7 / Web 3.3 **no vas a ver el softphone**; usá los defaults. El patrón de **teléfono SIP externo** (§6) sigue válido como alternativa y no depende de esto.
+> ⚠️ **Estado de release.** Fase 3 (softphone navegador + audio WebRTC + control de llamada + saliente) **ship desde Platform 2.7 + Web 3.3** y está incluida en el par que fijan los defaults del `docker-compose.reference-smb.yml` (`PLATFORM_API_TAG=v2.34.0`, `PLATFORM_WEB_TAG=v3.27.1-web`). Code-completo + validado en lab (Fase 3 cerrada 2026-06-01). Si fijaste tags anteriores a Platform 2.7 / Web 3.3 **no vas a ver el softphone**; usá los defaults. El patrón de **teléfono SIP externo** (§6) sigue válido como alternativa y no depende de esto.
 
 ### 9.1 Pre-requisitos
 
