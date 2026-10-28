@@ -34,9 +34,10 @@ Resumen — debés validar:
 - ☐ **Round-trip**: visitante manda mensaje → aparece en `/agent/queue` → agente acepta → agente responde → visitante recibe.
 
 ### Canal Email (manual 05)
-- ☐ SMTP / IMAP configurado (o OAuth Graph).
-- ☐ `dc logs mail` muestra `SMTP client initialized` + `IMAP poller started`.
-- ☐ **Round-trip inbound**: enviar mail externo a la cuenta IMAP → en 60s aparece como conversación en `/agent/queue`.
+- ☐ SMTP configurado (o OAuth Graph) y el MDA entregando al webhook `/api/v1/webhooks/{tenant}/email`.
+- ☐ `dc logs mail` muestra `SMTP client initialized`.
+- ☐ **Round-trip inbound**: enviar mail externo a `soporte@` → el MDA lo entrega al webhook → aparece como conversación en `/agent/queue`.
+- ☐ (Opcional, CSAT por email) con `IMAP_ENABLED=true`, `dc logs mail` muestra `IMAP mailbox drained: tenant=…`.
 - ☐ **Round-trip outbound**: agente responde → llega al inbox externo con threading correcto (`Re:` + In-Reply-To).
 
 ### Canal Voz/SIP (manual 06)
@@ -65,7 +66,7 @@ Verbara incluye una suite de tests E2E que valida el setup wizard + los 3 canale
 # Desde una máquina con acceso al server (puede ser el mismo host)
 $ git clone https://github.com/verbara/platform-web.git
 $ cd platform-web
-$ git checkout v3.2.0-web
+$ git checkout v3.27.1-web     # la consola del par que fija el compose
 
 $ npm install
 $ npx playwright install --with-deps chromium
@@ -79,7 +80,7 @@ $ ${EDITOR:-nano} tests/e2e/.env
 ```
 
 ```env
-VERBARA_API_BASE_URL=http://{server-ip}:5000
+VERBARA_API_BASE_URL=http://{server-ip}
 VERBARA_WEB_BASE_URL=http://{server-ip}
 VERBARA_TENANT_ID=mi-empresa                 # el Customer creado por el setup — NO 'platform' (operacional)
 VERBARA_ADMIN_EMAIL=admin@tu-empresa.com     # el Customer Admin (login del paso 2 del manual 03)
@@ -178,12 +179,12 @@ $ alias dc='docker compose -f docker/docker-compose.reference-smb.yml --env-file
 # Test 1 — postgres restart
 $ dc restart postgres
 # Esperar 30s
-$ curl http://localhost:5000/health/ready    # debe volver a 200 OK
+$ curl http://localhost:${WEB_HTTP_PORT:-80}/health/ready    # debe volver a 200 OK
 
 # Test 2 — platform-api restart
 $ dc restart platform-api
 $ sleep 30
-$ curl http://localhost:5000/health/ready
+$ curl http://localhost:${WEB_HTTP_PORT:-80}/health/ready
 
 # Test 3 — asterisk restart (cuidado, corta llamadas activas)
 $ dc restart asterisk
@@ -194,7 +195,7 @@ $ docker exec verbara-asterisk asterisk -rx 'pjsip show transports'
 Después de cada restart, validar:
 - Servicios vuelven a `healthy` en < 60s.
 - Login al Web sigue funcionando.
-- Agentes pueden reconectarse sin re-login (token JWT sobrevive).
+- Agentes pueden reconectarse sin re-login (token JWT sobrevive: las claves de firma viven en Redis).
 
 ## 5. Generar evidencia para el cliente
 
@@ -215,10 +216,10 @@ $ npx playwright test --grep @reference-deployment --reporter=html
 # Sign de las 5 imágenes (proof de imagen no-tampered, ADR-0023) — cosign v3+
 $ for img in api realtime renderer mail; do
     cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-        ghcr.io/verbara/platform/$img:v2.6.0 > /tmp/sig-$img.txt 2>&1
+        ghcr.io/verbara/platform/$img:v2.33.1 > /tmp/sig-$img.txt 2>&1
   done
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-    ghcr.io/verbara/platform/web:v3.2.0-web > /tmp/sig-web.txt 2>&1
+    ghcr.io/verbara/platform/web:v3.27.1-web > /tmp/sig-web.txt 2>&1
 
 # Bundle todo
 $ tar czf /tmp/verbara-install-report-$(date +%F).tar.gz \
@@ -235,6 +236,6 @@ Si todo lo anterior está verde → tu deploy está listo para producción. Reco
 
 1. **Configurar backup automático** de Postgres + asterisk_recordings.
 2. **Monitoring** — al menos un Uptime Robot / cron de cURL contra `/health/ready`.
-3. **Plan de upgrade** — leer release notes antes de bumpear tags en `.env`.
+3. **Plan de upgrade** — seguir [99-troubleshooting.md §9](99-troubleshooting.md) antes de cambiar de release.
 
 → Si encontrás bugs durante producción, revisar [99-troubleshooting.md](99-troubleshooting.md) (general) o [08-troubleshooting-sip.md](08-troubleshooting-sip.md) (SIP).

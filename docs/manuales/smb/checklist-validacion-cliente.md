@@ -60,23 +60,24 @@ $ dc ps
 Servicios `Up (healthy)`:
 - ☐ `verbara-asterisk`
 - ☐ `verbara-platform-api`
-- ☐ `verbara-web`
+- ☐ `verbara-realtime`
+- ☐ `verbara-redis`
 - ☐ `verbara-postgres`
 - ☐ `verbara-renderer`
 - ☐ `verbara-mail`
 
 Healthchecks:
-- ☐ `curl http://localhost:5000/health/ready` → 200 OK y ninguna entry `Unhealthy` (`Degraded` también responde 200: un motor Pro sin licencia aparece `Degraded`, p. ej. `dialer license blocked: …`)
-- ☐ `curl -s http://localhost:5000/health/voice | jq -r .checks.asterisk.status` → `Healthy` (la conexión AMI del Api está arriba; Asterisk ya no forma parte de `/health/ready`)
-- ☐ `curl http://localhost/` → 200 OK
+- ☐ `curl http://localhost:${WEB_HTTP_PORT:-80}/health/ready` → 200 OK y ninguna entry `Unhealthy` (`Degraded` también responde 200: un motor Pro sin licencia aparece `Degraded`, p. ej. `dialer license blocked: …`)
+- ☐ `curl -s http://localhost:${WEB_HTTP_PORT:-80}/health/voice | jq -r .checks.asterisk.status` → `Healthy` (la conexión AMI del Api está arriba; Asterisk ya no forma parte de `/health/ready`)
+- ☐ `curl http://localhost:${WEB_HTTP_PORT:-80}/` → 200 OK (`verbara-web` y `verbara-nginx-gateway` están `Up`, sin healthcheck propio)
 - ☐ `docker exec verbara-asterisk asterisk -rx 'pjsip show transports'` → UDP+TCP+WS+WSS bound
 
 Verificación de firmas (ADR-0023, 5 imágenes signed — cosign v3+ con `--insecure-ignore-tlog`):
-- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/api:v2.6.0` → OK
-- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/realtime:v2.6.0` → OK
-- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/renderer:v2.6.0` → OK
-- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/mail:v2.6.0` → OK
-- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/web:v3.2.0-web` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/api:v2.33.1` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/realtime:v2.33.1` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/renderer:v2.33.1` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/mail:v2.33.1` → OK
+- ☐ `cosign verify --key docker/cosign.pub --insecure-ignore-tlog ghcr.io/verbara/platform/web:v3.27.1-web` → OK
 
 ## 4. Setup inicial (Admin + Tenant + Agente + Queue)
 
@@ -109,11 +110,13 @@ Verificación de firmas (ADR-0023, 5 imágenes signed — cosign v3+ con `--inse
 
 ## 6. Canal Email
 
-- ☐ Camino elegido: ☐ SMTP+IMAP / ☐ MS Graph OAuth / ☐ Gmail OAuth2
+- ☐ Camino elegido: ☐ SMTP / ☐ MS Graph OAuth / ☐ Gmail OAuth2
+- ☐ MDA del buzón entregando al webhook `/api/v1/webhooks/{tenant}/email`
 - ☐ Credenciales guardadas en password manager
-- ☐ `dc logs mail` muestra `SMTP client initialized` + `IMAP poller started`
+- ☐ `dc logs mail` muestra `SMTP client initialized`
+- ☐ (Opcional, CSAT por email) `IMAP_ENABLED=true` + `csat+…@CSAT_REPLY_TO_DOMAIN` llega al buzón IMAP; `dc logs mail` muestra `IMAP mailbox drained: tenant=…`
 - ☐ Canal habilitado en `/admin/channels`
-- ☐ Inbound round-trip: mail externo → conversación en `/agent/queue` (60s polling) ✓
+- ☐ Inbound round-trip: mail externo → webhook → conversación en `/agent/queue` ✓
 - ☐ Outbound round-trip: agente responde → llega al inbox externo con `Re:` + threading correcto ✓
 
 ## 7. Canal Voz/SIP

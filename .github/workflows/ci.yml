@@ -501,6 +501,12 @@ jobs:
         run: pip install --disable-pip-version-check diff_cover==10.3.0
       - name: Run coverage-script unit tests
         run: python3 -m unittest discover scripts/tests
+      # SMB reference stack pin guard (OpenSpec bump-smb-reference-stack-pins, design Decision 3): every
+      # Platform/Web image default in docker/docker-compose.reference-smb.yml must equal the template's
+      # PLATFORM_API_TAG / PLATFORM_WEB_TAG. Agreement only (offline); the Web-floor check needs the sibling
+      # Verbara.Platform.Web checkout and runs locally whenever the pins move (--web-changelog).
+      - name: SMB stack pin agreement
+        run: python3 scripts/check-smb-pins.py
       # CodeQL SARIF filter unit tests. The filter runs only inside codeql.yml's Analyze (C#) job, between
       # analysis and upload, and a wrong rule turns nothing red: it closes alerts about our own code as
       # "fixed", or lets the .NET generator ones back. Same job, same reason as the guards above.

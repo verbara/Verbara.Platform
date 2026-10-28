@@ -44,8 +44,21 @@ MIN_RAM_GB=16
 MIN_CPU_CORES=4
 MIN_DISK_GB=100
 
+# Puerto del gateway (consola + API + realtime). Gana el del entorno; si no,
+# el de .env.reference-smb (si ya existe); si no, 80. Se resuelve de nuevo
+# tras el step 9, porque ahí el operador puede crear o editar el .env.
+WEB_HTTP_PORT_FROM_SHELL="${WEB_HTTP_PORT:-}"
+resolve_web_http_port() {
+    local port="$WEB_HTTP_PORT_FROM_SHELL"
+    if [ -z "$port" ] && [ -f "$ENV_FILE" ]; then
+        port=$(grep -E '^WEB_HTTP_PORT=' "$ENV_FILE" | head -1 | cut -d'=' -f2- || true)
+    fi
+    printf '%s' "${port:-80}"
+}
+WEB_HTTP_PORT="$(resolve_web_http_port)"
+
 # Puertos TCP requeridos
-TCP_PORTS_REQUIRED=(5060 5061 8088 8089 80)
+TCP_PORTS_REQUIRED=(5060 5061 8088 8089 "${WEB_HTTP_PORT}")
 # 5038 (AMI) sólo se valida si EXPOSE_AMI=true (por defecto false = seguro)
 # 8180 plain WS es sólo intra-docker → no se valida en host
 # 443 sólo si TLS habilitado (warn, no fatal)
@@ -312,7 +325,7 @@ for port in "${TCP_TO_CHECK[@]}"; do
         hint "$USAGE"
         case "$port" in
             5060) hint "Otro PBX (FreeSWITCH/Kamailio/PBXact) probablemente corriendo. Apagalo o desinstalalo." ;;
-            80) hint "Otro web server (apache2/nginx) en el host. Apagalo o cambiá WEB_HTTP_PORT en .env" ;;
+            "$WEB_HTTP_PORT") hint "Otro web server (apache2/nginx) en el host. Apagalo o cambiá WEB_HTTP_PORT en .env" ;;
             8088|8089) hint "Otro servicio HTTP. Cambiá ARI_HTTP_PORT/ARI_WSS_PORT en .env si no podés liberar el puerto." ;;
         esac
     else
@@ -527,7 +540,7 @@ if [ ! -f "$ENV_FILE" ]; then
     if [ "$SKIP_EDIT" = "false" ] && [ "$CHECK_ONLY" = "false" ]; then
         echo
         info "DEBÉS editarlo AHORA. Cambiá al menos:"
-        hint "POSTGRES_PASSWORD, JWT_SIGNING_KEY, SERVICE_KEY, AMI_PASSWORD, ARI_PASSWORD, EXTERNAL_IP"
+        hint "POSTGRES_PASSWORD, SERVICE_KEY, CSAT_REPLY_TOKEN_SECRET, CUSTOMER_TENANT_ID, AMI_PASSWORD, ARI_PASSWORD, PUBLIC_BASE_URL, EXTERNAL_IP"
         echo
         read -rp "  Presioná ENTER para abrirlo en ${EDITOR:-nano}..." _
         "${EDITOR:-nano}" "$ENV_FILE"
@@ -539,7 +552,7 @@ else
 fi
 
 # Validar que las vars críticas no sean los placeholders
-REQUIRED_VARS=(POSTGRES_PASSWORD JWT_SIGNING_KEY SERVICE_KEY AMI_PASSWORD ARI_PASSWORD)
+REQUIRED_VARS=(POSTGRES_PASSWORD SERVICE_KEY CSAT_REPLY_TOKEN_SECRET CUSTOMER_TENANT_ID AMI_PASSWORD ARI_PASSWORD)
 PLACEHOLDER_REGEX='^CHANGE_ME'
 
 for var in "${REQUIRED_VARS[@]}"; do
@@ -548,11 +561,28 @@ for var in "${REQUIRED_VARS[@]}"; do
         fail ".env: $var está vacío"
     elif echo "$VAL" | grep -qE "$PLACEHOLDER_REGEX"; then
         fail ".env: $var sigue con el placeholder CHANGE_ME_..."
-        hint "Edítalo con: openssl rand -base64 32  (o 64 para JWT_SIGNING_KEY)"
+        hint "Edítalo con: openssl rand -base64 32"
     else
         ok ".env: $var configurada"
     fi
 done
+
+# El .env pudo crearse o editarse arriba: re-leer WEB_HTTP_PORT (el del entorno
+# sigue ganando) para que el probe de readiness y las URLs usen el puerto real.
+# El step 3 ya chequeó el puerto anterior; si cambió, chequear el nuevo.
+WEB_HTTP_PORT_CHECKED="$WEB_HTTP_PORT"
+WEB_HTTP_PORT="$(resolve_web_http_port)"
+if [ "$WEB_HTTP_PORT" != "$WEB_HTTP_PORT_CHECKED" ]; then
+    info ".env: WEB_HTTP_PORT=${WEB_HTTP_PORT} (el step 3 chequeó ${WEB_HTTP_PORT_CHECKED})"
+    USAGE=$(port_in_use "$WEB_HTTP_PORT" tcp)
+    if [ -n "$USAGE" ]; then
+        fail "TCP/$WEB_HTTP_PORT ocupado"
+        hint "$USAGE"
+        hint "Otro web server (apache2/nginx) en el host. Apagalo o cambiá WEB_HTTP_PORT en .env"
+    else
+        ok "TCP/$WEB_HTTP_PORT libre"
+    fi
+fi
 
 # ─────────────────────────────────────────────────────────────────────────
 # Step 10 — Resumen pre-flight + abort si hay fatales
@@ -581,25 +611,30 @@ step "11/11 Pull + arranque del stack"
 
 cd "$REPO_ROOT"
 info "Pulling images (puede tomar 2-5 min en la primera vez)..."
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull 2>&1 | tail -20
+# La imagen de Asterisk no se publica: se construye localmente (abajo). Sin
+# --ignore-buildable el pull falla al no encontrarla y, con pipefail, aborta el script.
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull --ignore-buildable 2>&1 | tail -20
+
+info "Construyendo la imagen de Asterisk (~7 min la primera vez, cacheada después)..."
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build asterisk 2>&1 | tail -20
 
 info "Levantando servicios..."
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --wait --wait-timeout 300 2>&1 | tail -30
 
-# Esperar a que platform-api responda en /health/ready
-info "Esperando que Platform.Api responda en /health/ready (timeout 5 min)..."
-API_PORT_VAL=$(grep -E '^API_PORT=' "$ENV_FILE" | cut -d'=' -f2 | head -1)
-API_PORT_VAL="${API_PORT_VAL:-5000}"
+# Esperar a que platform-api responda en /health/ready — a través del gateway:
+# el compose no publica el puerto de la API en el host, sólo el del gateway.
+info "Esperando que Platform.Api responda en /health/ready vía el gateway (timeout 5 min)..."
+READY_URL="http://localhost:${WEB_HTTP_PORT}/health/ready"
 DEADLINE=$(($(date +%s) + 300))
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-    if curl -sf "http://localhost:${API_PORT_VAL}/health/ready" >/dev/null 2>&1; then
-        ok "Platform.Api responde en :${API_PORT_VAL}/health/ready"
+    if curl -sf "$READY_URL" >/dev/null 2>&1; then
+        ok "Platform.Api responde en ${READY_URL}"
         break
     fi
     sleep 5
 done
 
-if ! curl -sf "http://localhost:${API_PORT_VAL}/health/ready" >/dev/null 2>&1; then
+if ! curl -sf "$READY_URL" >/dev/null 2>&1; then
     fail "Platform.Api no respondió tras 5 min. Revisá logs:"
     hint "docker compose -f docker/docker-compose.reference-smb.yml --env-file docker/.env.reference-smb logs platform-api"
     exit 1
@@ -614,14 +649,13 @@ echo "${C_BOLD}${C_GREEN}║                  ✓  STACK VERBARA ARRIBA         
 echo "${C_BOLD}${C_GREEN}╚══════════════════════════════════════════════════════════════════════╝${C_RESET}"
 echo
 echo "  ${C_BOLD}URLs:${C_RESET}"
-echo "    Web UI:         http://${LOCAL_IP}:${WEB_HTTP_PORT:-80}/"
-echo "    API health:     http://${LOCAL_IP}:${API_PORT_VAL}/health/ready"
-echo "    API swagger:    http://${LOCAL_IP}:${API_PORT_VAL}/scalar"
+echo "    Web UI:         http://${LOCAL_IP}:${WEB_HTTP_PORT}/"
+echo "    API health:     http://${LOCAL_IP}:${WEB_HTTP_PORT}/health/ready"
 echo "    Asterisk ARI:   http://${LOCAL_IP}:${ARI_HTTP_PORT:-8088}/ari"
 echo "    WebRTC WSS:     wss://${LOCAL_IP}:${ARI_WSS_PORT:-8089}/asterisk/ws"
 echo
 echo "  ${C_BOLD}Siguiente paso — setup inicial:${C_RESET}"
-echo "    Abrí http://${LOCAL_IP}:${WEB_HTTP_PORT:-80}/ en un browser y completá el wizard:"
+echo "    Abrí http://${LOCAL_IP}:${WEB_HTTP_PORT}/ en un browser y completá el wizard:"
 echo "      1. Crear admin platform"
 echo "      2. Crear primer tenant"
 echo "      3. Crear primer agente"

@@ -38,11 +38,11 @@ $ dc logs --tail 50 platform-api
 | Mensaje en log | Causa | Solución |
 |---|---|---|
 | `Connection refused (localhost:5432)` | Postgres no levantó todavía / mal config | Esperar 30s; si persiste, revisar §4 |
-| `Unable to bind to 'http://+:5000'` | Puerto 5000 ya ocupado en el host | `sudo ss -tlnp '( sport = :5000 )'` + matar el ofensor o cambiar `API_PORT` en `.env` |
-| `Could not parse JWT_SIGNING_KEY` | Valor del secret no tiene 32+ chars | Regenerar con `openssl rand -base64 64` |
-| `Failed to load license` | `LICENSE_PATH` apunta a un archivo inexistente o corrupto | Dejar `LICENSE_PATH=` vacío (modo OSS — Pro endpoints retornan HTTP 402 con upgrade URL); o adquirir Tier 0.5 gratis en https://verbara.io/developer-license y mountear el `.lic` |
+| `Bind for 0.0.0.0:80 failed: port is already allocated` (al levantar `nginx-gateway`) | El puerto del gateway ya está ocupado en el host (el Api no publica puerto propio: todo entra por el gateway) | `sudo ss -tlnp '( sport = :80 )'` + matar el ofensor, o cambiar `WEB_HTTP_PORT` en `.env` |
+| `required variable CSAT_REPLY_TOKEN_SECRET is missing a value` / `CUSTOMER_TENANT_ID required` (lo imprime `docker compose`, antes de arrancar nada) | Falta una variable obligatoria en `.env` | Completarla (ver [02](02-arranque-stack.md) §3.1): `openssl rand -base64 32` para el secreto; el id del tenant Customer para `CUSTOMER_TENANT_ID` |
+| `Failed to load license` | El `.lic` montado en `/etc/verbara/license.lic` (desde `LICENSE_PATH`) no existe o está corrupto | Volver a comentar el bind-mount del `.lic` en el compose (modo OSS — Pro endpoints retornan HTTP 402 con upgrade URL); o adquirir Tier 0.5 gratis en https://verbara.io/developer-license y montar ese `.lic` |
 | `Asterisk:Ari:NodeApplication ('…') must differ from Asterisk:Ari:Application` | La app Stasis del cliente ARI de nodo (`Asterisk__Ari__NodeApplication`, por defecto `verbara-node`) es igual a la del dialplan (`Asterisk__Ari__Application`, `verbara`): sólo el consumer del líder puede registrar la del dialplan (Platform/ADR-0044) | Dejar `Asterisk__Ari__NodeApplication: verbara-node` como viene en `docker-compose.reference-smb.yml`, o borrarla para usar el valor por defecto |
-| `IMAGE_DIGEST mismatch` | Pro digest binding falla (Pro/ADR-0011) | `IMAGE_DIGEST` debe matchear `docker inspect ghcr.io/verbara/platform/api:v2.6.0` `RepoDigests` |
+| `IMAGE_DIGEST mismatch` | Pro digest binding falla (Pro/ADR-0011) | `IMAGE_DIGEST` debe matchear `docker inspect ghcr.io/verbara/platform/api:v2.33.1` `RepoDigests`, y ese digest tiene que estar autorizado en tu `.lic` (cada release nueva del api trae un digest nuevo) |
 
 ### Reiniciar uno solo
 ```bash
@@ -107,15 +107,15 @@ Credenciales que sabés que están bien → `401 Unauthorized`.
 #### 3.1 Tenant mismatch
 El user existe en tenant `acme` pero estás logueando contra `platform`. El campo "Tenant ID" del login form debe matchear.
 
-#### 3.2 Password rotado
-Si rotaste `JWT_SIGNING_KEY` post-arranque, todos los tokens emitidos quedan inválidos pero las passwords siguen funcionando. Re-login debería emitir un token nuevo. Si el login sigue fallando con 401, no es JWT — es la password.
+#### 3.2 Token inválido vs. password
+Las claves de firma de los tokens viven en Redis (el Api las genera y rota solo). Si se borró el volumen de Redis, los tokens emitidos quedan inválidos pero las passwords siguen funcionando: re-login emite un token nuevo. Si el login sigue fallando con 401, no es el token — es la password.
 
 #### 3.3 Cuenta locked por intentos fallidos
 Default lockout: 5 fallos en 5 min → cuenta locked por 15 min.
 
 ```bash
 $ curl -sS -H "X-Api-Key: $MANAGEMENT_API_KEY" \
-    http://{server}:5000/api/v1/admin/users/{user-id}/lockout-status | jq
+    http://{server}/api/v1/admin/users/{user-id}/lockout-status | jq
 
 {"isLocked": true, "lockoutEnd": "2026-05-17T15:30:00Z"}
 ```
@@ -123,13 +123,13 @@ $ curl -sS -H "X-Api-Key: $MANAGEMENT_API_KEY" \
 Unlock manual:
 ```bash
 $ curl -sS -X POST -H "X-Api-Key: $MANAGEMENT_API_KEY" \
-    http://{server}:5000/api/v1/admin/users/{user-id}/unlock
+    http://{server}/api/v1/admin/users/{user-id}/unlock
 ```
 
 #### 3.4 MFA enrollment required
 Si el rol del user requiere MFA pero todavía no enrolló:
 ```bash
-$ curl -sS http://{server}:5000/api/v1/auth/login \
+$ curl -sS http://{server}/api/v1/auth/login \
     -d '{"email": "...", "password": "..."}'
 {"state": "mfa_enrollment_required", "userId": "..."}
 ```
@@ -391,48 +391,92 @@ El script ya existe en `scripts/backup-pg.sh` con rotación a 30 días.
 
 ## 9 — Upgrade de versión
 
+> ⚠️ **Documentado, no probado.** Este plan de upgrade se armó leyendo los changelogs; el camino desde una base existente no se ejecutó de punta a punta. Seguilo en orden y **empezá siempre por el backup**.
+
+### 9.1 Antes de tocar nada
+
+1. **Backup obligatorio.** Es el único rollback posible una vez que la versión nueva migró la base:
+   ```bash
+   $ cd /opt/verbara/platform
+   $ docker exec verbara-postgres pg_dump -U platform -Fc verbara > backup-pre-upgrade.dump
+   ```
+2. **¿Desde qué versión venís?** `git describe --tags` en `/opt/verbara/platform`, o el tag de `PLATFORM_API_TAG` en tu `.env`.
+   - **Base creada con una versión anterior a v2.10.0:** v2.10.0 reagrupó las migraciones bajo nombres nuevos. Esas bases tienen que pasar **primero** por `v2.9.1` (checkout de ese tag, `PLATFORM_API_TAG=v2.9.1`, arrancar, esperar `/health/ready` y detener) y recién después saltar a la release nueva.
+3. **Si venís de una versión anterior a v2.27.0 — reporte de agentes duplicados.** La migración de v2.27.0 se niega a correr si un usuario tiene más de un agente en el mismo tenant (el Api no arranca y el log nombra los pares). Corré el reporte de sólo lectura **antes** del primer arranque de la versión nueva, y repetilo tras cada corrección hasta que su sección 1 no devuelva filas:
+   ```bash
+   $ dc exec -T postgres psql -U platform -d verbara < scripts/ops/agents-identity-report.sql
+   ```
+   Junto con ese reporte corré el inventario, también de sólo lectura, de filas operativas (agentes, colas, flujos, etc.) que quedaron en un tenant que no es Customer. Lee el contenedor `verbara-postgres` con usuario `platform` y base `verbara` (se cambian con `POSTGRES_CONTAINER`, `POSTGRES_USER`, `POSTGRES_DB`); sale siempre con 0, así que mirá la línea final: en el caso SMB típico (Platform + un Customer) es `Summary: 0 misplaced rows across 9 operational tables.`
+   ```bash
+   $ bash scripts/tenant-type-misplaced-data.sh
+   ```
+   El procedimiento de corrección de ambos está en `docs/operations/licensed-agent-metering-upgrade.md`.
+4. **Si venís de una versión anterior a v2.27.0 — zona del día de medición.** Elegí `LICENSE_DAY_ZONE` (zona IANA, ej. `America/Bogota`; default `UTC`) **antes** del primer arranque: ese arranque la fija en la base y cambiarla después detiene el cierre diario de agentes licenciados hasta que se restaure.
+5. **Si venís de una versión anterior a v2.28.0 — sin vuelta atrás.** El primer arranque de v2.28.0 o posterior cifra los secretos de los canales en la base. Es de un solo sentido: una versión anterior ya no los puede leer. Desde ahí, volver atrás = restaurar el backup del paso 1.
+
+### 9.2 Cambios del `.env` (comparalo con el `.env.reference-smb.example` del tag nuevo)
+
 ```bash
-$ cd /opt/verbara/platform
-
-# 1. Backup obligatorio antes
-$ docker exec verbara-postgres pg_dump -U platform -Fc verbara > backup-pre-upgrade.dump
-
-# 2. Leer release notes (ej. upgrade desde v2.5.4 hacia v2.6.0)
 $ git fetch --tags
-$ git log v2.5.4..v2.6.0 --oneline -- docs/decisions/ docs/specs/ MIGRATIONS.md
+$ git checkout v2.33.1
+$ diff <(command grep -oE '^[A-Z_]+=' docker/.env.reference-smb.example | sort) \
+       <(command grep -oE '^[A-Z_]+=' docker/.env.reference-smb | sort)
+```
 
-# 3. Checkout
-$ git checkout v2.6.0
+- **Nuevas obligatorias:** `CSAT_REPLY_TOKEN_SECRET` (`openssl rand -base64 32`) y `CUSTOMER_TENANT_ID` (el id de tu tenant Customer — el que ya existe en tu base). Sin ellas `docker compose` no arranca.
+- **Nuevas opcionales:** `LICENSE_DAY_ZONE` (ver 9.1 paso 4), `IMAP_ENABLED` + `CSAT_REPLY_TO_DOMAIN` + `IMAP_TENANT_ID` (el poller de respuestas CSAT; ver [05](05-canal-email.md)).
+- **`PUBLIC_BASE_URL`** viene activa en el ejemplo: con el default de dos orígenes en `CORS_ORIGINS` es obligatoria.
+- **`JWT_SIGNING_KEY`, `JWT_ISSUER`, `JWT_AUDIENCE`: la API ya no los usa.** El Api genera sus claves de firma y las guarda en Redis; el compose ya no se los pasa a `platform-api` y `scripts/quickstart-smb.sh` ya no los pide. Podés borrarlos del `.env`. Al pasar a las claves en Redis, contá con que las sesiones abiertas se invaliden una vez (los usuarios vuelven a iniciar sesión).
+- **Redis ya no es un perfil** (`--profile identity-redis` desapareció): arranca siempre, y `platform-api` y `realtime` dependen de él.
+- **IMAP** ya no es la entrada del canal Email: ahora alimenta el poller de respuestas CSAT y queda apagado hasta `IMAP_ENABLED=true`.
+- **Licencia:** el Api lee el `.lic` en `/etc/verbara/license.lic`; si usás licencia, descomentá el bind-mount de `LICENSE_PATH` en el compose.
 
-# 4. Actualizar tag en .env
+Actualizá los tags:
+```bash
 $ ${EDITOR:-nano} docker/.env.reference-smb
-# PLATFORM_API_TAG=v2.6.0          (aplica a api+realtime+renderer+mail; comparten tag)
-# PLATFORM_WEB_TAG=v3.2.0-web      (web tiene su propio tren de release)
+# PLATFORM_API_TAG=v2.33.1         (aplica a api+realtime+renderer+mail; comparten tag)
+# PLATFORM_WEB_TAG=v3.27.1-web     (web tiene su propio tren de release)
+```
 
-# 5. Verificar firmas (5 imágenes, ADR-0023) — cosign v3+ con --insecure-ignore-tlog
+### 9.3 Instalaciones con licencia Pro
+
+Cada release del api tiene un digest nuevo. Si tu `.lic` autoriza digests (Pro/ADR-0011), pedí la autorización del digest de `ghcr.io/verbara/platform/api:v2.33.1` **antes** de arrancar, y poné ese digest en `IMAGE_DIGEST`. Sin eso falla el binding de digest (`IMAGE_DIGEST mismatch`, ver §1).
+
+### 9.4 Verificar, construir y arrancar
+
+```bash
+# Firmas (5 imágenes, ADR-0023) — cosign v3+ con --insecure-ignore-tlog
 $ for img in api realtime renderer mail; do
     cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-        ghcr.io/verbara/platform/$img:v2.6.0
+        ghcr.io/verbara/platform/$img:v2.33.1
   done
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-    ghcr.io/verbara/platform/web:v3.2.0-web
+    ghcr.io/verbara/platform/web:v3.27.1-web
 
-# 6. Pull + up
-$ dc pull
+# Asterisk se construye localmente: reconstruirlo con el Dockerfile del tag nuevo
+$ dc build asterisk
+
+# Pull + up; recrear el gateway para que tome su configuración nueva.
+# --ignore-buildable: la imagen de Asterisk no se publica (sin el flag el pull falla)
+$ dc pull --ignore-buildable
 $ dc up -d --wait
+$ dc up -d --force-recreate nginx-gateway
 
-# 7. Validar (al menos el healthcheck)
-$ curl http://localhost:5000/health/ready
+# Validar (al menos el healthcheck, a través del gateway)
+$ curl http://localhost:${WEB_HTTP_PORT:-80}/health/ready
 ```
 
 ### Rollback
+Antes del primer arranque de la versión nueva, volver es un checkout:
 ```bash
-$ git checkout v2.5.4                              # tag previo a la upgrade
+$ git checkout {tag-previo}                         # el tag desde el que venías
 $ ${EDITOR:-nano} docker/.env.reference-smb        # revert tags
-$ dc pull && dc up -d --wait
+$ dc pull --ignore-buildable                       # Asterisk no se publica: se construye localmente
+$ dc build asterisk                                # con el Dockerfile del tag previo
+$ dc up -d --wait
 ```
 
-Si una migration de DB rompió la compatibility con la versión vieja, restaurar del backup:
+Si la versión nueva ya arrancó y migró la base (siempre, si cruzaste v2.28.0), restaurar del backup:
 ```bash
 $ dc down
 $ docker volume rm docker_verbara_postgres_data

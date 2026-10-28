@@ -10,7 +10,7 @@ Verbara es software de contact center omnicanal que se licencia para que cada em
 
 - **Voz/SIP** — agentes WebRTC en el navegador + trunks SIP externos (Twilio Elastic, carriers PSTN, etc.).
 - **WebChat** — widget embebido en una página web del cliente, conversaciones asignadas a agentes.
-- **Email** — canal SMTP/IMAP, threading automático, agentes responden desde la misma UI que voz.
+- **Email** — envío SMTP + entrada por webhook, threading automático, agentes responden desde la misma UI que voz.
 - *(Próximos canales — WhatsApp, SMS, Telegram, Messenger, Instagram, RCS, Video, Twitter — están construidos en la plataforma pero no se documentan en esta versión del manual.)*
 
 Todo corre en **un solo servidor** (Docker) para SMB, o en **un cluster Kubernetes on-prem** (Phase 2 — manual separado).
@@ -40,11 +40,11 @@ Todo corre en **un solo servidor** (Docker) para SMB, o en **un cluster Kubernet
 │                                          │  │ (loopback 5432)  │ │   │
 │                                          │  └──────────────────┘ │   │
 │                                          │  ┌──────────────────┐ │   │
-│                                          │  │ Redis 8 (opt)    │ │   │
+│                                          │  │ Redis 8          │ │   │
 │                                          │  └──────────────────┘ │   │
 │                                          │  ┌──────────────────┐ │   │
 │                                          │  │ Renderer (PDF)   │ │   │
-│                                          │  │ Mail (SMTP/IMAP) │ │   │
+│                                          │  │ Mail (SMTP/CSAT) │ │   │
 │                                          │  └──────────────────┘ │   │
 │                                          └────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────────┘
@@ -101,7 +101,7 @@ Verbara SMB se distribuye en **3 tiers** que comparten el mismo binario. Pasás 
 | 02 | [Arranque del stack](02-arranque-stack.md) | 15-20 min | Manual 01 terminado |
 | 03 | [Setup inicial — admin + tenant + agente + queue](03-setup-inicial.md) | 15 min | Stack arriba |
 | 04 | [Canal WebChat](04-canal-webchat.md) | 20 min | Setup inicial terminado |
-| 05 | [Canal Email (SMTP + IMAP)](05-canal-email.md) | 30 min | Credenciales email del cliente |
+| 05 | [Canal Email (SMTP + webhook; CSAT por IMAP)](05-canal-email.md) | 30 min | Credenciales email del cliente |
 | 06 | [Canal Voz/SIP — el más extenso](06-canal-voz-sip.md) | 60-90 min | Trunk SIP del cliente provisionado |
 | 07 | [Validación end-to-end](07-validacion-e2e.md) | 30 min | Los 3 canales configurados |
 | 08 | [Troubleshooting SIP — síntoma → causa → solución](08-troubleshooting-sip.md) | referencia | — |
@@ -125,25 +125,25 @@ Verbara SMB se distribuye en **3 tiers** que comparten el mismo binario. Pasás 
 
 ## Versionado y soporte
 
-Esta guía aplica a:
-- **Verbara.Platform.Api** `v2.6.0` (imagen `ghcr.io/verbara/platform/api:v2.6.0`, Native AOT)
-- **Verbara.Platform.Realtime** `v2.6.0` (imagen `ghcr.io/verbara/platform/realtime:v2.6.0`) — microservicio SignalR Hub (ADR-0022 Phase A)
-- **Verbara.Platform.Renderer** `v2.6.0` (imagen `ghcr.io/verbara/platform/renderer:v2.6.0`, Native AOT)
-- **Verbara.Platform.Mail** `v2.6.0` (imagen `ghcr.io/verbara/platform/mail:v2.6.0`, Native AOT)
-- **Verbara.Platform.Web** `v3.2.0-web` (imagen `ghcr.io/verbara/platform/web:v3.2.0-web`)
+Esta guía aplica a la release **Platform `v2.33.1`** con la consola **Web `v3.27.1-web`** — el par que fijan los defaults de `docker/docker-compose.reference-smb.yml` y `docker/.env.reference-smb.example` (CI verifica que coincidan):
+- **Verbara.Platform.Api** `v2.33.1` (imagen `ghcr.io/verbara/platform/api:v2.33.1`, Native AOT)
+- **Verbara.Platform.Realtime** `v2.33.1` (imagen `ghcr.io/verbara/platform/realtime:v2.33.1`) — microservicio SignalR Hub (ADR-0022 Phase A)
+- **Verbara.Platform.Renderer** `v2.33.1` (imagen `ghcr.io/verbara/platform/renderer:v2.33.1`, Native AOT)
+- **Verbara.Platform.Mail** `v2.33.1` (imagen `ghcr.io/verbara/platform/mail:v2.33.1`, Native AOT)
+- **Verbara.Platform.Web** `v3.27.1-web` (imagen `ghcr.io/verbara/platform/web:v3.27.1-web`)
 - **nginx** `1.27-alpine` — actúa de gateway frente a Web + Api + Realtime, sirviendo el host port 80 (refleja la topología K8s Cilium HTTPRoute)
 - **Asterisk** 22 (build local desde `docker/Dockerfile.asterisk`)
 - **Postgres** 18-alpine
-- **Redis** 8-alpine (opt — solo necesario para multi-pod Realtime + JWT rotation pool)
+- **Redis** 8-alpine (siempre activo — el Api guarda ahí sus claves de firma JWT y Realtime valida los tokens de la consola contra ellas; también transporta las actualizaciones en vivo)
 
 Las cinco imágenes Verbara están **firmadas con cosign** (ADR-0023) — antes del primer pull, validá con cosign v3+:
 ```bash
 $ for img in api realtime renderer mail; do \
     cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-        ghcr.io/verbara/platform/$img:v2.6.0; \
+        ghcr.io/verbara/platform/$img:v2.33.1; \
   done
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-    ghcr.io/verbara/platform/web:v3.2.0-web
+    ghcr.io/verbara/platform/web:v3.27.1-web
 ```
 > `--insecure-ignore-tlog` es **obligatorio**: el workflow de release firma con `--signing-config` + `tlog-upload=false`, así que la firma es válida offline pero no está en la transparency log de Sigstore. La clave pública `docker/cosign.pub` sigue siendo el root of trust.
 
