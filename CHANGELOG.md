@@ -21,8 +21,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   still fills the fields. The subdomain is never inherited. A deleted tenant now answers `404` on both public
   routes, the same `404` as an unknown id. A blank field is no longer sent as `""`: it carries the inherited value,
   or is omitted when no tenant in the chain sets it, so a row blank in every field with no branded ancestor answers
-  `{}`. The OpenAPI document now declares both routes' `200` body (the new `PublicBrandingDto` schema) and their
-  `404`; the bytes of a `200` are otherwise unchanged.
+  `{}`. The settings view likewise shows a field stored as `""` as the inherited value, or as `null` when no tenant
+  in the chain sets it, and no longer shows a deleted parent's values. The OpenAPI document now declares both
+  routes' `200` body (the new `PublicBrandingDto` schema) and their `404`.
 
 ### Fixed
 

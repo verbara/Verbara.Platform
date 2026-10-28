@@ -38,7 +38,12 @@ internal static class EffectiveBranding
     /// chain. Returns a new instance; the store's rows are never modified.
     /// </summary>
     /// <param name="tenantId">The tenant whose branding is computed; the result carries this id.</param>
-    /// <param name="tenant">The tenant's record when the caller already loaded it, so it is not read twice.</param>
+    /// <param name="tenant">
+    /// The tenant's record as the caller read it from <paramref name="tenants"/>, or null when the store does not
+    /// know <paramref name="tenantId"/>. Every caller reads it first (the endpoints for the status check, the
+    /// settings view to build the rest of the response), so it is never read again here; a null stands for an
+    /// unknown tenant, whose row, if any, stands alone.
+    /// </param>
     /// <param name="tenants">Read for the parent pointers and the ancestors' status.</param>
     /// <param name="brandings">Read once per tenant in the chain whose row counts.</param>
     /// <param name="ct">Cancels the reads.</param>
@@ -50,7 +55,6 @@ internal static class EffectiveBranding
         CancellationToken ct)
     {
         var own = await brandings.GetAsync(tenantId, ct);
-        tenant ??= await tenants.GetAsync(tenantId, ct);
 
         var ancestors = new List<TenantBranding>(MaxBrandingHops);
         if (tenant is not null)

@@ -16,7 +16,12 @@ public sealed class EffectiveBrandingTests
     private readonly RecordingTenantStore _tenants = new();
     private readonly RecordingBrandingStore _brandings = new();
 
-    private Task<TenantBranding?> ResolveAsync(string tenantId, Tenant? tenant = null) =>
+    // Reads the record first, as every production caller does, then resolves with it (null when unknown).
+    // That read is recorded, so a test's tenant-store reads include it.
+    private async Task<TenantBranding?> ResolveAsync(string tenantId) =>
+        await ResolveAsync(tenantId, await _tenants.GetAsync(tenantId));
+
+    private Task<TenantBranding?> ResolveAsync(string tenantId, Tenant? tenant) =>
         EffectiveBranding.ResolveAsync(tenantId, tenant, _tenants, _brandings, CancellationToken.None).AsTask();
 
     private void SeedChain(TenantStatus partnerStatus = TenantStatus.Active, TenantStatus customerStatus = TenantStatus.Active)
@@ -67,6 +72,62 @@ public sealed class EffectiveBrandingTests
         result!.PrimaryColor.Should().Be("#00FF00");
         result.AccentColor.Should().Be("#00AA00");
         result.FaviconUrl.Should().Be("F");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldTakeParentValueOverGrandparent_WhenBothSetFieldAndChildHasNoRow()
+    {
+        SeedChain();
+        _brandings.Add(new TenantBranding { TenantId = "h", DisplayName = "Licensee", PrimaryColor = "#0000FF", LogoUrl = "L" });
+        _brandings.Add(new TenantBranding { TenantId = "p", DisplayName = "Partner Brand", PrimaryColor = "#FF0000" });
+
+        var result = await ResolveAsync("c");
+
+        result.Should().NotBeNull();
+        result!.DisplayName.Should().Be("Partner Brand");
+        result.PrimaryColor.Should().Be("#FF0000");
+        result.LogoUrl.Should().Be("L");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldInheritEveryFieldButSubdomain_WhenParentSetsAllAndChildHasNoRow()
+    {
+        SeedChain();
+        _brandings.Add(new TenantBranding
+        {
+            TenantId = "p",
+            DisplayName = "Partner Brand",
+            LogoUrl = "https://cdn.example/logo.png",
+            FaviconUrl = "https://cdn.example/favicon.ico",
+            PrimaryColor = "#FF0000",
+            SecondaryColor = "#00FF00",
+            AccentColor = "#0000FF",
+            Locale = "es-419",
+            Timezone = "America/Bogota",
+            Subdomain = "partner-x",
+            SupportEmail = "help@partner.example",
+            SupportUrl = "https://partner.example/help",
+            EmailFromName = "Partner Support",
+            EmailFromAddress = "noreply@partner.example",
+        });
+
+        var result = await ResolveAsync("c");
+
+        result.Should().NotBeNull();
+        result!.TenantId.Should().Be("c");
+        result.DisplayName.Should().Be("Partner Brand");
+        result.LogoUrl.Should().Be("https://cdn.example/logo.png");
+        result.FaviconUrl.Should().Be("https://cdn.example/favicon.ico");
+        result.PrimaryColor.Should().Be("#FF0000");
+        result.SecondaryColor.Should().Be("#00FF00");
+        result.AccentColor.Should().Be("#0000FF");
+        result.Locale.Should().Be("es-419");
+        result.Timezone.Should().Be("America/Bogota");
+        result.SupportEmail.Should().Be("help@partner.example");
+        result.SupportUrl.Should().Be("https://partner.example/help");
+        result.EmailFromName.Should().Be("Partner Support");
+        result.EmailFromAddress.Should().Be("noreply@partner.example");
+        result.Subdomain.Should().BeNull();
     }
 
     [Theory]
@@ -122,6 +183,22 @@ public sealed class EffectiveBrandingTests
         var result = await ResolveAsync("no-such-tenant");
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldReadTenantRecordOnce_WhenCallerFoundNoRecord()
+    {
+        SeedChain();
+        _brandings.Add(new TenantBranding { TenantId = "h", DisplayName = "Licensee" });
+        _brandings.Add(new TenantBranding { TenantId = "no-such-tenant", DisplayName = "Orphan" });
+
+        var record = await _tenants.GetAsync("no-such-tenant");
+        var result = await ResolveAsync("no-such-tenant", record);
+
+        record.Should().BeNull();
+        result.Should().NotBeNull();
+        result!.DisplayName.Should().Be("Orphan");
+        _tenants.Reads.Should().Equal("no-such-tenant");
     }
 
     [Fact]
