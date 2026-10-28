@@ -168,6 +168,9 @@ El script ejecuta 11 chequeos en orden:
 ▶ 11/11 Pull + arranque del stack
 ```
 
+El paso 11 baja las imágenes publicadas y construye localmente la de Asterisk (`docker compose build asterisk`,
+~7 min la primera vez, cacheada después): esa imagen no se publica en ghcr.io.
+
 ### 4.1 Si el script aborta con fallos críticos
 
 Cada `✗` viene con un `→ hint` que te dice qué hacer. Casos típicos:

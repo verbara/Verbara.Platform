@@ -588,7 +588,12 @@ step "11/11 Pull + arranque del stack"
 
 cd "$REPO_ROOT"
 info "Pulling images (puede tomar 2-5 min en la primera vez)..."
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull 2>&1 | tail -20
+# La imagen de Asterisk no se publica: se construye localmente (abajo). Sin
+# --ignore-buildable el pull falla al no encontrarla y, con pipefail, aborta el script.
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull --ignore-buildable 2>&1 | tail -20
+
+info "Construyendo la imagen de Asterisk (~7 min la primera vez, cacheada después)..."
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build asterisk 2>&1 | tail -20
 
 info "Levantando servicios..."
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --wait --wait-timeout 300 2>&1 | tail -30
