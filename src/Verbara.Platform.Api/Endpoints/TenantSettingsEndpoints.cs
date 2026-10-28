@@ -287,30 +287,27 @@ internal static class TenantSettingsEndpoints
         var enabledFeatures = featureGateService?.GetEnabledFeatures(tenantId)
             ?? (IReadOnlySet<PlanFeature>)PlanDefinition.GetFeatures(plan);
 
-        // Load branding with 3-tier inheritance: Customer → Partner → Platform defaults
+        // Effective branding (EffectiveBranding states the rule). No row in the chain still yields an
+        // all-null object, so the `branding` key stays in the response.
         BrandingSettingsDto? brandingDto = null;
         if (brandingStore is not null)
         {
-            var branding = await brandingStore.GetAsync(tenantId, ct);
-
-            TenantBranding? parentBranding = null;
-            if (tenant.ParentTenantId is not null)
-                parentBranding = await brandingStore.GetAsync(tenant.ParentTenantId, ct);
+            var branding = await EffectiveBranding.ResolveAsync(tenantId, tenant, tenantStore, brandingStore, ct);
 
             brandingDto = new BrandingSettingsDto(
-                DisplayName: branding?.DisplayName ?? parentBranding?.DisplayName,
-                LogoUrl: branding?.LogoUrl ?? parentBranding?.LogoUrl,
-                FaviconUrl: branding?.FaviconUrl ?? parentBranding?.FaviconUrl,
-                PrimaryColor: branding?.PrimaryColor ?? parentBranding?.PrimaryColor,
-                SecondaryColor: branding?.SecondaryColor ?? parentBranding?.SecondaryColor,
-                AccentColor: branding?.AccentColor ?? parentBranding?.AccentColor,
-                Locale: branding?.Locale ?? parentBranding?.Locale,
-                Timezone: branding?.Timezone ?? parentBranding?.Timezone,
-                Subdomain: branding?.Subdomain, // Subdomain does NOT inherit
-                SupportEmail: branding?.SupportEmail ?? parentBranding?.SupportEmail,
-                SupportUrl: branding?.SupportUrl ?? parentBranding?.SupportUrl,
-                EmailFromName: branding?.EmailFromName ?? parentBranding?.EmailFromName,
-                EmailFromAddress: branding?.EmailFromAddress ?? parentBranding?.EmailFromAddress);
+                DisplayName: branding?.DisplayName,
+                LogoUrl: branding?.LogoUrl,
+                FaviconUrl: branding?.FaviconUrl,
+                PrimaryColor: branding?.PrimaryColor,
+                SecondaryColor: branding?.SecondaryColor,
+                AccentColor: branding?.AccentColor,
+                Locale: branding?.Locale,
+                Timezone: branding?.Timezone,
+                Subdomain: branding?.Subdomain,
+                SupportEmail: branding?.SupportEmail,
+                SupportUrl: branding?.SupportUrl,
+                EmailFromName: branding?.EmailFromName,
+                EmailFromAddress: branding?.EmailFromAddress);
         }
 
         return new TenantSettingsDto(
