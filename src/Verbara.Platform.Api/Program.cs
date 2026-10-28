@@ -375,14 +375,9 @@ builder.Services.AddSingleton<IIpAllowlistEvaluator, DefaultIpAllowlistEvaluator
 // ─── Pro.Licensing ───────────────────────────────────────────────────────────
 var licenseConfig = builder.Configuration.GetSection("Licensing");
 var licensePath = licenseConfig["FilePath"] ?? "./license.lic";
-var publicKeyPath = licenseConfig["PublicKeyPath"];
-// ⚠️ Operator-supplied trust anchor override is optional. When unset, do NOT
-// register a byte[] here — let Verbara.Sdk.Pro.Licensing's AddProLicensing()
-// register LicenseTrustAnchor.OfficialPublicKey via its own TryAddSingleton.
-if (!string.IsNullOrEmpty(publicKeyPath) && File.Exists(publicKeyPath))
-{
-    builder.Services.AddSingleton<byte[]>(File.ReadAllBytes(publicKeyPath));
-}
+// The licence trust anchor is the key embedded in Pro: AddProLicensing() registers
+// LicenseTrustAnchor.OfficialPublicKey and the host never registers a byte[] of its own
+// (scripts/check-endpoint-invariants.py gate #13).
 
 // Pro v2.5.0-pro: EnforcementMode is GONE (ADR-0012). License-presence drives
 // behaviour: file at LicenseFilePath valid → Pro enabled; missing/invalid/

@@ -9,6 +9,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **`Licensing:PublicKeyPath` (`Licensing__PublicKeyPath`) is no longer read.** The licence trust anchor is always
+  the public key embedded in Verbara.Sdk.Pro.Licensing (`LicenseTrustAnchor.OfficialPublicKey`); the Api host
+  registers no key of its own. A deployment that still sets the variable starts as before and ignores it. A
+  repository invariant (`scripts/check-endpoint-invariants.py` gate #13) keeps a `byte[]` service registration out
+  of `src/`.
+
 ### Fixed
 
 - **The HTTP licence gate follows the licence validation result and the licence guard** (`decision_ref`

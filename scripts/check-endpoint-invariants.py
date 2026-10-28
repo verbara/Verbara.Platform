@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Endpoint + host invariant gates for Verbara.Platform (deterministic, no model).
 
-Five gates, all freeze-current / ratchet posture (fail only on regression):
+Seven gates, all freeze-current / ratchet posture (fail only on regression):
 
   #6 No silent error-swallowing — an empty `catch {}` (including multi-line and
      `catch (SomeException) {}`) anywhere under an `Endpoints/` directory is
@@ -62,6 +62,19 @@ Five gates, all freeze-current / ratchet posture (fail only on regression):
      operator-visible error. A tree without docker/asterisk-config/ is out of scope;
      a tree that has it must carry both files.
 
+  #13 The licence trust anchor stays the embedded key — no code under src/ may
+     register, replace or remove a `byte[]` service, nor register a value built
+     from key material (`File.ReadAllBytes`, `Convert.FromBase64String`,
+     `Convert.FromHexString`, an identifier naming a public key or trust anchor).
+     The Pro licence validator resolves its public key as the `byte[]` service
+     and `AddProLicensing()` registers `LicenseTrustAnchor.OfficialPublicKey`
+     through `TryAddSingleton`: a host registration before it pre-empts that
+     call, and one after it wins over it, so either one replaces the key every
+     licence is checked against. The shipped host registers none (floor is
+     zero). Test factories live under tests/ and are out of scope. A
+     registration of an untyped local that holds a `byte[]` is beyond a text
+     scan; the end-to-end LicenseTrustAnchorWiringTests cover that case.
+
 Exit 0 = all gates pass; 1 = at least one violation (with ::error:: annotations
 so GitHub renders them inline). Run from the repo root:
     python3 scripts/check-endpoint-invariants.py
@@ -74,7 +87,7 @@ from pathlib import Path
 # Map of repo-relative path -> max lines. Lower a number when the file shrinks;
 # raising one is a reviewed, visible decision to grow an orchestrator file.
 LOC_BUDGETS = {
-    "src/Verbara.Platform.Api/Program.cs": 1749,  # ratcheted 2026-10-22 (dialer-places-calls-end-to-end D7: −6, dialer registration moved to DialerHostExtensions.AddPlatformDialer; 1755 measured before, against a 1756 budget); 1756 earlier 2026-10-16 (merge of origin/main #429 into dialer-sees-every-tenants-campaigns: −7, registration-trunks-register moved trunk AMI wiring to RealtimeSyncingStoresExtensions.AddTrunkAmiServices); 1763 earlier 2026-10-16 (dialer-sees-every-tenants-campaigns D5: −59, cluster leases and single-node stubs moved to ClusterLeadershipExtensions); 1822 earlier 2026-10-15 (harden-recovery-code-digest: −1, recovery-code wiring moved to RecoveryCodesExtensions; #403 had already removed 15); 1838 earlier 2026-10-13 (merge of origin/main #390: −2 near the rate limiter); 1840 earlier 2026-10-13 (readiness-without-asterisk D6: −73, health wiring moved to PlatformHealthExtensions); was 1932 frozen 2026-07-20
+    "src/Verbara.Platform.Api/Program.cs": 1733,  # ratcheted 2026-10-28 (license-gate-follows-the-guard: −5, the host no longer registers a licence key of its own; 1738 measured before); 1749 earlier 2026-10-22 (dialer-places-calls-end-to-end D7: −6, dialer registration moved to DialerHostExtensions.AddPlatformDialer; 1755 measured before, against a 1756 budget); 1756 earlier 2026-10-16 (merge of origin/main #429 into dialer-sees-every-tenants-campaigns: −7, registration-trunks-register moved trunk AMI wiring to RealtimeSyncingStoresExtensions.AddTrunkAmiServices); 1763 earlier 2026-10-16 (dialer-sees-every-tenants-campaigns D5: −59, cluster leases and single-node stubs moved to ClusterLeadershipExtensions); 1822 earlier 2026-10-15 (harden-recovery-code-digest: −1, recovery-code wiring moved to RecoveryCodesExtensions; #403 had already removed 15); 1838 earlier 2026-10-13 (merge of origin/main #390: −2 near the rate limiter); 1840 earlier 2026-10-13 (readiness-without-asterisk D6: −73, health wiring moved to PlatformHealthExtensions); was 1932 frozen 2026-07-20
 }
 
 # Matches `catch {}`, `catch { }`, `catch (Exception) {}`, and the multi-line
@@ -153,6 +166,26 @@ _SECTION_HEADER = re.compile(r"^\[([^\]]+)\]")
 # The sorcery object-type key `registration` (also `=>`); captures the value.
 _REGISTRATION_MAPPING = re.compile(r"^registration\s*=>?\s*(.*?)\s*$", re.IGNORECASE)
 _REGISTRATION_VALUE = "realtime,ps_registrations"
+
+
+# --- Gate #13 config: the licence trust anchor stays the embedded key ---------
+# A `byte[]` service type in any registration, replacement or removal shape: the
+# generic forms (`AddSingleton<byte[]>`, `TryAddSingleton<byte[]>`, keyed and
+# scoped/transient variants, `Replace`/`RemoveAll<byte[]>`,
+# `ServiceDescriptor.Singleton<byte[]>`) and the `typeof(byte[])` forms.
+_BYTE_ARRAY_TYPE = r"byte\s*\[\s*\]"
+_TRUST_ANCHOR_REGISTRATION = re.compile(
+    r"\b(?:Try)?Add(?:Keyed)?(?:Singleton|Scoped|Transient)\s*<\s*" + _BYTE_ARRAY_TYPE + r"\s*>"
+    r"|\b(?:RemoveAll|Replace)\s*<\s*" + _BYTE_ARRAY_TYPE + r"\s*>"
+    r"|\bServiceDescriptor\s*\.\s*(?:Keyed)?(?:Singleton|Scoped|Transient|Describe)\s*<\s*" + _BYTE_ARRAY_TYPE
+    + r"|\b(?:(?:Try)?Add(?:Keyed)?(?:Singleton|Scoped|Transient)|RemoveAll|Replace|ServiceDescriptor\s*\.\s*\w+"
+      r"|new\s+ServiceDescriptor)\s*\(\s*typeof\s*\(\s*" + _BYTE_ARRAY_TYPE + r"\s*\)"
+    # An untyped registration whose argument is key material (`AddSingleton(File.ReadAllBytes(p))`,
+    # `AddSingleton(licensePublicKey)`): the argument list up to the statement end names it.
+    + r"|\b(?:Try)?Add(?:Keyed)?Singleton\s*\([^;]*?(?:ReadAllBytes|FromBase64String|FromHexString"
+      r"|PublicKey|TrustAnchor)",
+    re.IGNORECASE,
+)
 
 
 def _conf_lines(text):
@@ -321,6 +354,24 @@ def find_outbound_registration_regressions(root):
     return violations
 
 
+def find_trust_anchor_registrations(root):
+    """Repo-relative `path:line` for every `byte[]` service registration,
+    replacement or removal, or key-material registration (in code, not a
+    comment) under src/ (gate #13)."""
+    violations = []
+    for path in sorted(root.glob("src/**/*.cs")):
+        if "obj" in path.parts or "bin" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8")
+        spans = _comment_spans(text)
+        for match in _TRUST_ANCHOR_REGISTRATION.finditer(text):
+            if any(start <= match.start() < end for start, end in spans):
+                continue  # the match is inside a comment
+            line = text.count("\n", 0, match.start()) + 1
+            violations.append(f"{path.relative_to(root).as_posix()}:{line}")
+    return violations
+
+
 def main(root=None):
     root = root or Path.cwd()
     failed = False
@@ -382,6 +433,17 @@ def main(root=None):
             print(f"::error::Asterisk outbound registration (gate #12): {violation}")
     else:
         print("Gate #12 (Asterisk outbound registration loadable): OK.")
+
+    trust_anchor = find_trust_anchor_registrations(root)
+    if trust_anchor:
+        failed = True
+        print("::error::byte[] service registration forbidden under src/ (gate #13) — the "
+              "licence trust anchor is the key AddProLicensing() registers; delete the "
+              "registration:")
+        for violation in trust_anchor:
+            print(f"  {violation}")
+    else:
+        print("Gate #13 (licence trust anchor stays the embedded key): OK.")
 
     return 1 if failed else 0
 

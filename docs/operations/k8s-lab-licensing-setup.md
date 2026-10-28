@@ -291,7 +291,7 @@ PgBouncer entered backoff after repeated auth failures. Most common cause: conne
 
 ### Pod crashes with `LicenseException: ... has an invalid signature` but local `--validate` says Valid
 
-**Fixed in Platform v2.3.1.** Pre-fix, Platform.Api unconditionally registered `Array.Empty<byte>()` as `byte[]` singleton, which shadowed Pro's default `LicenseTrustAnchor.OfficialPublicKey`. If you're on v2.3.0 or earlier and cannot upgrade immediately, set `Licensing__PublicKeyPath` env var to point to a file containing the SubjectPublicKeyInfo DER bytes of `LicenseTrustAnchor.OfficialPublicKey` (the file content overrides the buggy registration). Best path: upgrade to v2.3.1+.
+**Fixed in Platform v2.3.1.** Pre-fix, Platform.Api unconditionally registered `Array.Empty<byte>()` as `byte[]` singleton, which shadowed Pro's default `LicenseTrustAnchor.OfficialPublicKey`. If you're on v2.3.0 or earlier, upgrade to >= v2.3.1. The trust anchor is always the embedded `LicenseTrustAnchor.OfficialPublicKey`; current releases do not read `Licensing__PublicKeyPath`.
 
 ### Pod crashes with `LicenseException: UnauthorizedImage`
 

@@ -88,7 +88,7 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 - Check license expiry: `GET /admin/license` (Platform Admin role).
 - If grace remaining > 0, check `grace_remaining_seconds` gauge — runway before hard stop.
 - If grace expired, contact account owner; emergency grace extension via license re-issue.
-- Verify `Pro.Licensing` config (`Asterisk__Pro__Licensing__PublicKey` env var) hasn't been mutated.
+- Verify the licence file at `Licensing__FilePath` is the one issued (the trust anchor is the key embedded in Pro and is not configurable).
 
 ### RetentionServiceStalled
 

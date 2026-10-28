@@ -1,4 +1,4 @@
-"""Unit tests for check-endpoint-invariants.py (gates #6, #7, #9, #10, #11, #12).
+"""Unit tests for check-endpoint-invariants.py (gates #6, #7, #9, #10, #11, #12, #13).
 
 Runs the script as a subprocess against a synthetic src/ tree in a tmp dir and
 asserts exit codes + failure grammar. Stdlib unittest only — NO pip deps, so this
@@ -69,6 +69,33 @@ _SORCERY_UNDER_RES_PJSIP = (
     "endpoint = realtime,ps_endpoints\n"
     "registration = realtime,ps_registrations\n"
 )
+
+# --- Gate #13 fixtures: the licence trust anchor stays the embedded key --------
+_API_HOST = "src/Verbara.Platform.Api/Licensing/TrustAnchorRegistration.cs"
+_TRUST_ANCHOR_REGISTRATIONS = (
+    "builder.Services.AddSingleton<byte[]>(File.ReadAllBytes(keyPath));",
+    "services.TryAddSingleton<byte[]>(key);",
+    "services.AddSingleton<byte []>(key);",
+    "services.AddKeyedSingleton<byte[]>(\"anchor\", key);",
+    "services.Replace(ServiceDescriptor.Singleton<byte[]>(key));",
+    "services.RemoveAll<byte[]>();",
+    "services.AddSingleton(typeof(byte[]), key);",
+    "services.Add(new ServiceDescriptor(typeof(byte[]), key));",
+    "builder.Services.AddSingleton(File.ReadAllBytes(keyPath));",
+    "builder.Services.AddSingleton(Convert.FromBase64String(raw));",
+    "builder.Services.AddSingleton(licensePublicKey);",
+    "services.TryAddSingleton(customTrustAnchor);",
+)
+# byte[] that is not a DI service: return types, locals, serializers, other singletons.
+_TRUST_ANCHOR_NEGATIVES = (
+    "public ValueTask<byte[]> RenderAsync(ReportData data, CancellationToken ct) => default;",
+    "var bytes = File.ReadAllBytes(path);",
+    "services.AddSingleton<IReportRenderer, CsvReportRenderer>();",
+    "services.AddSingleton(TimeProvider.System);",
+    "var fp = LicenseTrustAnchor.OfficialPublicKeyFingerprintSha256;",
+    "var t = typeof(byte[]);",
+)
+
 
 def _store_body(statement):
     """A .cs file whose `statement` sits on LINE 3 (for path:line assertions)."""
@@ -562,6 +589,69 @@ class EndpointInvariantsTest(unittest.TestCase):
                 result = _run(root)
                 self.assertEqual(result.returncode, 1, f"{missing}: {result.stdout}")
                 self.assertIn(f"{missing}.conf: MISSING", result.stdout)
+
+    # --- Gate #13: the licence trust anchor stays the embedded key ---------------
+
+    def test_passes_when_src_registers_no_byte_array_service(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root)
+            for i, statement in enumerate(_TRUST_ANCHOR_NEGATIVES):
+                _write(root, f"src/Verbara.Platform.Api/N{i}.cs", _store_body(statement))
+            result = _run(root)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Gate #13 (licence trust anchor stays the embedded key): OK.", result.stdout)
+
+    def test_fails_when_src_registers_a_trust_anchor(self):
+        for statement in _TRUST_ANCHOR_REGISTRATIONS:
+            with tempfile.TemporaryDirectory() as root:
+                _tree(root)
+                _write(root, _API_HOST, _store_body(statement))
+                result = _run(root)
+                self.assertEqual(result.returncode, 1, f"{statement}: {result.stdout}")
+                self.assertIn("gate #13", result.stdout, statement)
+                self.assertIn(f"{_API_HOST}:3", result.stdout, statement)
+
+    def test_fails_when_host_reads_a_key_path_before_add_pro_licensing(self):
+        # The shape the Api composition root carried before the trust anchor was fixed.
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root)
+            _write(root, _API_HOST,
+                   "var publicKeyPath = licenseConfig[\"PublicKeyPath\"];\n"
+                   "if (!string.IsNullOrEmpty(publicKeyPath) && File.Exists(publicKeyPath))\n"
+                   "{\n"
+                   "    builder.Services.AddSingleton<byte[]>(File.ReadAllBytes(publicKeyPath));\n"
+                   "}\n"
+                   "builder.Services.AddProLicensing(o => o.LicenseFilePath = licensePath);\n")
+            result = _run(root)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn(f"{_API_HOST}:4", result.stdout)
+
+    def test_ignores_trust_anchor_registration_in_comments(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root)
+            _write(root, _API_HOST,
+                   "// a host must never call services.AddSingleton<byte[]>(key)\n"
+                   "/* nor services.AddSingleton(File.ReadAllBytes(p)); */\n"
+                   "class C {}\n")
+            result = _run(root)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_ignores_trust_anchor_registration_outside_src(self):
+        with tempfile.TemporaryDirectory() as root:
+            _tree(root)
+            _write(root, "tests/Verbara.Platform.Api.Tests/Factory.cs",
+                   _store_body("services.AddSingleton<byte[]>([]);"))
+            _write(root, "src/Verbara.Platform.Api/obj/Generated.cs",
+                   _store_body("services.AddSingleton<byte[]>([]);"))
+            result = _run(root)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_repo_src_passes_trust_anchor_gate(self):
+        repo = Path(_HERE).parent.parent
+        result = subprocess.run(
+            [sys.executable, _SCRIPT], cwd=repo, capture_output=True, text=True)
+        self.assertIn("Gate #13 (licence trust anchor stays the embedded key): OK.",
+                      result.stdout, result.stdout)
 
     def test_repo_asterisk_config_passes_gate(self):
         # The shipped config itself — the line #385 found and the section move.
