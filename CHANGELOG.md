@@ -23,7 +23,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   or is omitted when no tenant in the chain sets it, so a row blank in every field with no branded ancestor answers
   `{}`. The settings view likewise shows a field stored as `""` as the inherited value, or as `null` when no tenant
   in the chain sets it, and no longer shows a deleted parent's values. The OpenAPI document now declares both
-  routes' `200` body (the new `PublicBrandingDto` schema) and their `404`.
+  routes' `200` body (the new `PublicBrandingDto` schema) and their `404`. (#493)
 
 ### Fixed
 
