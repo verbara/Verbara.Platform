@@ -43,12 +43,11 @@ services:
     restart: unless-stopped
     environment:
       ASPNETCORE_URLS: http://+:5000
-      # Layer C in-process image-binding check (Pro/ADR-0011, Pro v2.3.x).
-      # Pro's ContainerImageDigest.ReadFromEnvironment() reads IMAGE_DIGEST +
-      # compares against LicenseKey.AuthorizedImageDigests claims at startup.
-      # MUST match the @sha256 digest in the `image:` line above. (Pro can't
-      # self-discover the running image's digest from inside the container —
-      # operator-side env var is the canonical wiring.)
+      # The running image's digest, for Pro (Pro/ADR-0011). Pro compares it
+      # only with a licence that lists image digests — licences issued since
+      # 2026-10-03 list none (verbara-meta/PDR-0003). MUST match the @sha256
+      # digest in the `image:` line above: an image cannot read its own
+      # digest from inside the container, so the operator supplies it.
       IMAGE_DIGEST: sha256:REPLACE_WITH_MANIFEST_LIST_DIGEST
       # Mount your Verbara Pro license at /etc/verbara/license.lic and reference it
       # via VERBARA_LICENSE_PATH (or whatever env var your Pro version expects).

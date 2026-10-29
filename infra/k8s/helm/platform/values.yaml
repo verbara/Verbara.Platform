@@ -2,32 +2,33 @@ namespace: r55-platform
 
 api:
   # ASPNETCORE_ENVIRONMENT — controls behaviour of Pro's ProductionSafetyNet
-  # (Diagnostics/ProductionSafetyNet.cs). When "Production", Pro emits a
-  # `LogError event-id 12002` at startup if IMAGE_DIGEST is unset (warning only,
-  # non-blocking). The K8s lab sets IMAGE_DIGEST below, so 12002 will NOT fire.
+  # (Diagnostics/ProductionSafetyNet.cs). When "Production" and IMAGE_DIGEST is
+  # unset, Pro before 2.23.0-pro logs event 12002 (Error, non-blocking) at
+  # startup; from 2.23.0-pro it logs 12002 only when the licence lists image
+  # digests (licences issued since 2026-10-03 list none: verbara-meta/PDR-0003),
+  # and 12003 (Information, once) for a licence that lists none. This chart sets
+  # IMAGE_DIGEST from api.image.digest below.
   aspnetcoreEnvironment: Production
   image:
-    # Canonical published registry per Pro/ADR-0011 (Pro v2.3.x image-binding).
+    # Canonical published registry (Pro/ADR-0011).
     # Override to the local KVM dev cluster registry when validating against
     # the maintainer's k3s/Talos lab:
     #   --set api.image.repository=192.168.122.1:5050/verbara-platform/api
     repository: ghcr.io/verbara/platform/api
-    tag: "v2.6.0"
-    # Manifest-list digest of the `repository:tag` image, used for Layer-C
-    # in-process image verification (Pro/ADR-0011, Pro v2.3.x). When set, the
-    # Deployment template injects IMAGE_DIGEST env var that
-    # ContainerImageDigest.ReadFromEnvironment() reads + compares against the
-    # license's AuthorizedImageDigests claim. Source: the corresponding entry
-    # in verbara-website/data/authorized-digests.json. Leave empty to opt out
-    # (Pro falls through to permissive path; matches dev-mode semantics).
+    tag: "v2.34.1"
+    # Manifest-list digest of the `repository:tag` image. When set, the
+    # Deployment pulls `repository@digest` (the kubelet pulls those exact bytes)
+    # and injects it as the IMAGE_DIGEST env var. Licences issued since
+    # 2026-10-03 carry no image digests, so the pin does not have to match
+    # anything in the licence. Source: the release notes of the tag, or its
+    # entry in verbara-website/data/authorized-digests.json (the release
+    # ledger). Leave empty to deploy by tag (dev / local registry).
     #
-    # v2.6.0 — captured via `crane digest ghcr.io/verbara/platform/api:v2.6.0`
-    # after the v2.6.0 release.yml run (ADR-0026 Phase A+B membership executive
-    # routing + ADR-0028 mandatory-Customer setup). Authorized in verbara-website
-    # data/authorized-digests.json current[] (PR #23). Capture with
-    # `crane digest <ref:tag>` (NOT `docker manifest inspect | jq .config.digest`
-    # which returns the config-digest — the v2.5.3 mistake fixed in PR #22).
-    digest: "sha256:a627e0aab6b3f48acddf4978c842612ac5f31faa7d8d2bbd9971176ec37bd34a"
+    # v2.34.1 — `crane digest ghcr.io/verbara/platform/api:v2.34.1` matches the
+    # ledger entry, and `cosign verify` with files/cosign.pub passes (2026-10-29).
+    # Capture with `crane digest <ref:tag>` (NOT `docker manifest inspect | jq
+    # .config.digest`, which returns the config digest — the v2.5.3 mistake).
+    digest: "sha256:f3e692d7ce0f3c087240ae434fcd7048af3d401f16a2212535ccb022fc34c15d"
   replicas: 2
   port: 5000
   resources:
@@ -133,12 +134,14 @@ api:
 
 web:
   image:
-    # Canonical published registry per Pro/ADR-0011 (Pro v2.3.x image-binding).
+    # Canonical published registry (Pro/ADR-0011).
     # Override to the local KVM dev cluster registry when validating against
     # the maintainer's k3s/Talos lab:
     #   --set web.image.repository=192.168.122.1:5050/verbara-platform/web
+    # v3.27.1-web is the Web pin the SMB reference stack pairs with this API
+    # line (docker/.env.reference-smb.example, checked by scripts/check-smb-pins.py).
     repository: ghcr.io/verbara/platform/web
-    tag: "v3.2.0-web"
+    tag: "v3.27.1-web"
   replicas: 1
   port: 80
   resources:
@@ -155,12 +158,15 @@ ingress:
   hostnameWeb: r55.local
   tlsEnabled: false
 
-# Cosign-based image verification (Pro v2.3.x Layer B, Pro/ADR-0011).
-# Renders a Kyverno ClusterPolicy that requires every Pod admitted to the
-# release namespace whose image matches ghcr.io/verbara/platform/* to carry a
-# valid cosign signature from the Verbara cosign keypair. Default disabled
-# for back-compat with clusters that have no admission-policy controller
-# installed; opt in once Kyverno >= 1.11 is running in the cluster.
+# Cosign-based image verification at admission (Pro/ADR-0011) — an optional
+# operator control. Renders a Kyverno ClusterPolicy that requires every Pod
+# admitted to the release namespace whose image matches
+# ghcr.io/verbara/platform/* to carry a valid cosign signature from the Verbara
+# cosign keypair. Licences carry no image digests (verbara-meta/PDR-0003,
+# amendment of 2026-10-03), so this signature check and the digest pins are
+# what tie a deployment to Verbara's published images. Default disabled for
+# clusters that have no admission-policy controller installed; opt in once
+# Kyverno >= 1.11 is running in the cluster.
 #
 # Quick start (ghcr.io defaults + verification ON):
 #   helm install platform infra/k8s/helm/platform/ \
@@ -190,17 +196,16 @@ realtime:
     # registry when validating against the maintainer's k3s/Talos lab:
     #   --set realtime.image.repository=192.168.122.1:5050/verbara-platform/realtime
     repository: ghcr.io/verbara/platform/realtime
-    tag: "v2.6.0"
-    # Image-digest binding (Pro/ADR-0011 Layer C) — Pro license verification
-    # extends to the Realtime image via the AuthorizedImageDigests claim.
+    tag: "v2.34.1"
+    # Manifest-list digest pin: when set, the Deployment pulls `repository@digest`.
+    # Realtime does not get IMAGE_DIGEST, and licences carry no image digests
+    # (verbara-meta/PDR-0003, amendment of 2026-10-03). Source: the release
+    # notes of the tag, or its entry in verbara-website/data/authorized-digests.json.
     # Leave empty for tag-only references (dev / local registry).
     #
-    # v2.6.0 — captured via `crane digest ghcr.io/verbara/platform/realtime:v2.6.0`
-    # after the v2.6.0 release.yml run, authorized in verbara-website current[]
-    # (PR #23). Realtime carries no semantic change in v2.6.0 (ADR-0026 Phase A+B
-    # touched Platform.Api + Pro only); the rebuild captures the SDK/Pro restore +
-    # 0-warning compile against main.
-    digest: "sha256:f9cd38911b2773a27f50ccb062dffb2c0845ea7ac17d4400f746c8c92dd009a2"
+    # v2.34.1 — `crane digest ghcr.io/verbara/platform/realtime:v2.34.1` matches
+    # the ledger entry, and `cosign verify` with files/cosign.pub passes (2026-10-29).
+    digest: "sha256:da3f3023e1704ddd26a54a0ef501610f60517190c3082294955b2b776d01a8f3"
   replicas: 1
   port: 5030
   resources:

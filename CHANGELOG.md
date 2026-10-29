@@ -34,6 +34,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   page reads shifted the rows and one agent dropped out for that tick. It now pages by agent id, so **the order of
   the full enumeration is by agent id**, not by display name. Closes #351. (#503)
 
+### Documentation
+
+- **Licence and image texts say that a licence is not tied to an image** (verbara-meta/PDR-0003, amendment of
+  2026-10-03). Licences issued since 2026-10-03 carry no image digests. The Helm chart README, its values and the
+  Kyverno policy comment, the `LicenseImageUnauthorized` alert and its runbook, the SMB troubleshooting guide, the
+  compose comments, the release notes text and the authorized-digests runbook now say so. They describe
+  `authorized-digests.json` as the release ledger and cosign verification at admission as an optional operator
+  control (Kyverno >= 1.11). The alert's meaning changes: it can fire only with a licence issued before 2026-10-03
+  that lists digests. The Helm chart's default images move from `v2.6.0` / `v3.2.0-web` to `v2.34.1` (api and
+  realtime, pinned by manifest-list digest) and `v3.27.1-web`; chart `0.2.12`.
+
 ## [2.34.1] - 2026-10-29
 
 Patch release. Pro endpoints follow the licence validation result and the licence guard, and the licence trust anchor

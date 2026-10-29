@@ -14,7 +14,7 @@ Append-only rule group `platform_licensing` added to the existing `r55-platform-
 
 | Alert | Severity | Fires when | Typical cause | Action |
 |---|---|---|---|---|
-| `LicenseImageUnauthorized` | **P0** | `license_image_unauthorized_total` incremented in last 5min, sustained 1min | Operator deployed image with digest NOT in license's `AuthorizedImageDigests`; stale license; piracy attempt | Drill into Grafana panel 8 (truncated digest table); reconcile against `verbara-website/data/authorized-digests.json` |
+| `LicenseImageUnauthorized` | **P0** | `license_image_unauthorized_total` incremented in last 5min, sustained 1min | The loaded licence lists image digests and the running api image is not among them. Only a licence issued before 2026-10-03 lists digests; licences issued since list none, so with a current licence this never fires | Request a current licence; check the image's cosign signature and compare its digest with the release notes or `verbara-website/data/authorized-digests.json`; Grafana panel 8 (truncated digest table) |
 | `PlatformApiContainerErrorTermination` | **P0** | `kube_pod_container_status_last_terminated_reason{reason="Error"}` incremented in 10min, sustained 2min | License missing/corrupt at boot; ADR-0021 worker silent-death; Postgres/Redis startup failure; DB schema mismatch; config error | `kubectl describe pod` + `kubectl logs --previous`; cross-reference Grafana panel 7 (Loki) |
 | `LicenseGraceWindowExhausted` | **P1** | `license_guard_grace_remaining_seconds == 0` for any feature, sustained 5min | License expired AND grace exhausted; Pro endpoints respond HTTP 402 | Renew license urgently OR upgrade tier; trial at verbara.io/developer-license |
 | `LicenseBlocksRateHigh` | **P2** | `rate(license_guard_blocked_total) > 1 block/s` sustained 15min | Customer hitting Pro endpoints without license; misconfigured client polling | Inspect Grafana panel 5 for feature×reason breakdown |
@@ -70,7 +70,7 @@ After apply, alerts appear in Prometheus UI under `/alerts` filterable by group 
 sum(increase(license_image_unauthorized_total[5m])) > 0
 ```
 
-**Why P0**: Pro/ADR-0011 Layer C image-binding is the defense-in-depth axis against unauthorized image distribution. ANY hit means either an operational mistake (wrong image deployed) or a security event (piracy attempt). Both require immediate triage.
+**Why P0**: when it fires, Pro endpoints answer 402 for that installation. It can only fire with a licence that lists image digests (Pro/ADR-0011); licences issued since 2026-10-03 list none (verbara-meta/PDR-0003, amendment of 2026-10-03), and image integrity rests on the cosign signature and the digest pin instead. A hit means a pre-2026-10-03 licence meets an image it does not list (typically an upgrade: request a current licence) or an image that is not the intended Verbara release (verify its cosign signature).
 
 **Tuning**: this should be ALWAYS-ZERO in correctly-deployed Verbara installations. Do not silence with a higher threshold without understanding why the counter is incrementing.
 
@@ -147,7 +147,7 @@ After applying the rules manifest, induce each alert to verify wiring + Alertman
 
 | Alert | How to induce | Recovery |
 |---|---|---|
-| `LicenseImageUnauthorized` | Deploy with `--set api.image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000` | Revert digest override |
+| `LicenseImageUnauthorized` | Needs a test licence that lists image digests (issued before 2026-10-03); a current licence lists none and cannot fire it. With such a licence, deploy an api digest it does not list | Revert digest override |
 | `LicenseValidationFailedAtBoot` | Delete the Secret + force pod restart | Re-create Secret |
 | `WorkerCrashDetected` | Inject a deliberate worker fault via chaos engineering or temporary `kubectl exec` python kill — see chaos test report | Worker restarts via StopHost; no manual recovery needed |
 | `LicenseGraceWindowExhausted` | Issue a license with `--expires` in the past + 15-day-old grace | Issue new license |

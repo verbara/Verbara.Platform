@@ -6,10 +6,15 @@ cosign-based image verification.
 ## Quick start (ghcr.io defaults)
 
 ```sh
-helm install platform infra/k8s/helm/platform/ \
-  --set api.image.tag=v2.0.1 \
-  --set web.image.tag=v2.0.1
+helm install platform infra/k8s/helm/platform/
 ```
+
+The chart's defaults pin the current release (`api` and `realtime`
+`v2.34.1` by tag and manifest-list digest, `web` `v3.27.1-web`). To deploy
+another release, override the tag **and** the digest of each image you
+change, for example
+`--set api.image.tag=vX.Y.Z --set api.image.digest=sha256:...`; when a
+digest is set, the kubelet pulls by digest and the tag is informational.
 
 The chart defaults `api.image.repository` and `web.image.repository` to
 `ghcr.io/verbara/platform/api` and `ghcr.io/verbara/platform/web` per
@@ -73,7 +78,7 @@ admission webhook "validate.kyverno.svc-fail" denied the request:
 cosign verify \
   --key infra/k8s/helm/platform/files/cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/verbara/platform/api:v2.0.1
+  ghcr.io/verbara/platform/api:v2.34.1
 ```
 
 This is the same check the admission webhook runs internally. The
@@ -82,18 +87,31 @@ workflow signs with `--tlog-upload=false` (offline-verifiable signature,
 matches the `.well-known/cosign.pub` flow used by the docker-compose
 `verbara-verify-image.sh` script).
 
-## Defense-in-depth model (Pro/ADR-0011)
+## Image integrity controls
 
-| Layer | Where it runs | What it catches |
-|-------|---------------|-----------------|
-| F (ECDSA license) | Pro v2.2.0-pro `LicenseTrustAnchor` | Forged license payloads |
-| **B (cosign signature)** | This chart's Kyverno policy | Unsigned/tampered images at admission time |
-| **C (in-process digest check)** | `Verbara.Sdk.Pro.Licensing.ContainerImageDigest` | Authorised-image mismatch at Pro startup |
+| Control | Where it runs | What it catches |
+|---------|---------------|-----------------|
+| Cosign signature | Every release image is signed by `.github/workflows/release.yml`; you verify it with this chart's opt-in Kyverno policy (above) or the cosign CLI | Unsigned or tampered images |
+| Digest pin | `api.image.digest` / `realtime.image.digest`: the kubelet pulls those exact bytes | A tag that was moved to different content |
+| Licence signature | Verbara Pro licensing, inside the api | A licence file that Verbara did not issue |
 
-Layer B (this chart) and Layer C (Pro v2.3.x) reinforce each other.
-Disable Layer B if your cluster has no admission-policy controller; Layer
-C still works because Pro reads `/etc/verbara-image-digest` directly from
-the container filesystem.
+**A licence is not tied to an image.** Licences issued by Verbara do not
+carry image digests (verbara-meta/PDR-0003, amendment of 2026-10-03), so
+upgrading the image never requires a new licence. Image integrity is the
+job of the cosign signature and the digest pin. Verbara publishes every
+release's `api` + `realtime` digests in the release notes, and each one
+is recorded in the release ledger `verbara-website/data/authorized-digests.json`.
 
-For the docker-compose equivalent of Layer B, see
+**Verifying the signature at admission is an optional operator control.**
+The policy is off by default (`imageVerification.enabled: false`). Turn it
+on where Kyverno 1.11 or later runs (see *Verifying image signature* above);
+where no admission controller is available, verify out of band with the
+cosign CLI before you deploy.
+
+Licences issued before 2026-10-03 may still list image digests. The api
+keeps checking such a licence against the running image, so with one of
+those licences an upgrade to a newer image needs a current licence from
+Verbara.
+
+For the docker-compose equivalent of the admission check, see
 `docker/verbara-verify-image.sh` and `docker/docker-compose.verified.yml`.

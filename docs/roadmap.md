@@ -254,7 +254,7 @@ The post-train D-LK rerun (originally tracked as "validate hardening in real clu
 | B | Boot WITHOUT license (v2.5.0-pro: app starts) | indirect | ✅ Pro features 402 from boot |
 | C | Mid-soak license expiration at T+12h | ✅ no worker crash during transition | ✅ in-flight 200→402 graceful |
 | D | Chaos: kill worker under stress → pod restart visible | ✅ `StopHost` E2E + liveness reaction | n/a |
-| E | Chaos: invalid IMAGE_DIGEST + license válida | n/a | ✅ `UnauthorizedImage` 402 path |
+| E | Chaos: invalid IMAGE_DIGEST + license válida que lista digests de imagen | n/a | ✅ `UnauthorizedImage` 402 path *(2026-10-29: solo una licencia emitida antes del 2026-10-03 lista digests; las emitidas desde entonces no llevan ninguno — verbara-meta/PDR-0003, enmienda 2026-10-03 —, así que con ellas este escenario ya no aplica)* |
 
 Canonical: Pro spec [`2026-05-17-pro-v250-licensing-enforcement-mode-removal.md`](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/specs/2026-05-17-pro-v250-licensing-enforcement-mode-removal.md) section "Validation requirements — D-LK protocol extension".
 

@@ -1,7 +1,9 @@
 # Authorized-digest ↔ registry reconciliation monitor.
 #
-# `verbara-website/data/authorized-digests.json` is the source of truth for
-# image-digest binding (Pro/ADR-0011 Layer C — Pro licensing image binding).
+# `verbara-website/data/authorized-digests.json` is the release ledger: the
+# source of truth for which digests are Verbara's published images (Pro/ADR-0011).
+# Licences issued since 2026-10-03 do not embed it (verbara-meta/PDR-0003);
+# operators pin those digests in the Helm chart and compose files.
 # Every entry (current + deprecated) MUST satisfy three properties:
 #   1. The `image_ref` resolves in ghcr.io (anonymous pull).
 #   2. The current registry digest matches the recorded `manifest_list_digest`
@@ -150,7 +152,7 @@ jobs:
           body=$(cat <<EOF
           The daily authorized-digest reconciliation workflow detected drift between \`verbara-website/data/authorized-digests.json\` and ghcr.io reality. Check failed in run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
 
-          This breaks Pro/ADR-0011 Layer C (Pro licensing image-digest binding). Customers running a Pro image whose digest matches an entry in \`current[]\` or \`deprecated[]\` expect that entry to remain valid; drift means a customer with the older digest in their pull-cache may suddenly fail license validation (or worse, validate against a different binary than the one originally authorized).
+          This breaks the release ledger (Pro/ADR-0011). Customers who pin a digest from \`current[]\` or \`deprecated[]\` expect that entry to keep naming the image Verbara published and signed; drift means a recorded digest no longer resolves to that image, and a customer holding a licence issued before 2026-10-03 (which may list digests) can fail license validation.
 
           The run log identifies which dimension drifted per entry:
           - "ghcr.io does not resolve" → entry should be REMOVED from \`authorized-digests.json\` (the tag was deleted or overwritten; the digest is a ghost).

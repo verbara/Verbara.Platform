@@ -368,15 +368,20 @@ spec:
             severity: P0
             service: licensing
           annotations:
-            summary: "Pro/ADR-0011 Layer C breach — license rejects current IMAGE_DIGEST"
+            summary: "Licence lists image digests and rejects the running IMAGE_DIGEST (Pro/ADR-0011)"
             description: |
-              `license.image_unauthorized` counter incremented in last 5min. The running container's
-              manifest digest is NOT in the license's AuthorizedImageDigests claim. Either:
-                (a) operator deployed wrong image (registry mirror skew?);
-                (b) license is stale (issued before current digest registered);
-                (c) intentional pirate attempt — investigate.
+              `license.image_unauthorized` counter incremented in last 5min: the loaded licence lists
+              image digests and the running api image's digest is not among them, so Pro endpoints
+              answer 402. Only a licence issued before 2026-10-03 can list digests; licences issued
+              since carry none (verbara-meta/PDR-0003), so with a current licence this alert never
+              fires. Either:
+                (a) the licence predates the image (an upgrade with a pre-2026-10-03 licence) —
+                    request a current licence from Verbara;
+                (b) the deployed image is not the intended Verbara release (registry mirror skew?) —
+                    check its cosign signature and compare its digest with the release notes or
+                    verbara-website/data/authorized-digests.json.
               Drill-down: Grafana dashboard `verbara-licensing` panel 8 (table) shows truncated digest
-              + authorized_count. Verify against verbara-website/data/authorized-digests.json.
+              + authorized_count.
             runbook_url: "alerts-runbook.md#licenseimageunauthorized"
 
         - alert: PlatformApiContainerErrorTermination
