@@ -1,4 +1,5 @@
 using Verbara.Platform.Conversations;
+using Verbara.Platform.Typification.Licensing;
 using Verbara.Platform.Typification.Resolution;
 using Verbara.Platform.Typification.Stores;
 using Verbara.Sdk.Pro.Licensing;
@@ -104,34 +105,16 @@ internal sealed class DefaultAutonomousDispositionPolicy : IAutonomousDispositio
     }
 
     /// <summary>
-    /// The licence rule of <c>LicenseGateMiddleware.IsLicensed</c> for the two features this policy
-    /// needs, both of them PDR-0003 §E modules: the bits alone never decide (the tracker keeps the
-    /// bits of a licence that failed validation). An unauthentic licence (<c>Invalid</c>, or a value
-    /// this code does not know) grants nothing; a signed licence in date grants its bits; a signed
-    /// licence that is no longer current (<c>Expired</c>, <c>UnauthorizedImage</c>) grants them only
-    /// while <see cref="ILicenseGuard"/> allows each one, so the guard's grace window applies. While
-    /// current, the guard is still asked so it records both features as seen valid.
+    /// The licence rule of <c>LicenseGateMiddleware.IsLicensed</c> (<see cref="LicenceGateRule.IsLicensed"/>)
+    /// for the two features this policy needs, both of them PDR-0003 §E modules that the guard covers
+    /// (so no bit is passed as never-guarded): the bits alone never decide (the tracker keeps the bits of a licence that failed
+    /// validation). An unauthentic licence (<c>Invalid</c>, or a value this code does not know) grants
+    /// nothing; a signed licence in date (<c>Valid</c>, <c>GracePeriod</c>, <c>MissingFeature</c>)
+    /// grants its bits; a signed licence that is no longer current (<c>Expired</c>,
+    /// <c>UnauthorizedImage</c>) grants them only while <see cref="ILicenseGuard"/> allows each one,
+    /// so the guard's grace window applies. While in date, the guard is still asked so it records both
+    /// features as seen valid.
     /// </summary>
-    private bool IsLicensed()
-    {
-        var result = _licenseStatus.LastResult;
-        if (!_licenseStatus.LicensedFeatures.HasFlag(RequiredFeatures))
-            return false;
-
-        switch (result)
-        {
-            case LicenseValidationResult.MissingFeature:
-                return true;
-            case LicenseValidationResult.Valid
-                or LicenseValidationResult.GracePeriod
-                or LicenseValidationResult.Expired
-                or LicenseValidationResult.UnauthorizedImage:
-                var advanced = _licenseGuard.CanExecute(LicenseFeature.AdvancedTypification).Allowed;
-                var ai = _licenseGuard.CanExecute(LicenseFeature.TypificationAi).Allowed;
-                return result is LicenseValidationResult.Valid or LicenseValidationResult.GracePeriod
-                    || (advanced && ai);
-            default:
-                return false;
-        }
-    }
+    private bool IsLicensed() =>
+        LicenceGateRule.IsLicensed(_licenseStatus, _licenseGuard, RequiredFeatures, LicenseFeature.None);
 }

@@ -20,6 +20,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A licence whose result is `MissingFeature` now lets the licence guard see its use** (verbara-meta/PDR-0003). The
+  HTTP licence gate and autonomous typification ask the guard about each guarded feature they open, as they already
+  did for a valid licence, so the guard's grace window after expiry starts from real use. What each surface opens is
+  unchanged; both now share one licence rule. Required before Platform moves to Verbara.Sdk.Pro 2.23.0-pro.
+
 - **The HTTP licence gate follows the licence validation result and the licence guard** (`decision_ref`
   verbara-meta/PDR-0003 §E). The gate on Pro endpoints now reads the validation result of the loaded licence as well
   as its feature list. A licence that fails validation opens no Pro endpoint. A valid licence, or one inside its grace
