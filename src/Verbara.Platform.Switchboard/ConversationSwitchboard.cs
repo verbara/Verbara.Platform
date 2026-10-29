@@ -81,6 +81,11 @@ public sealed partial class ConversationSwitchboard : IConversationSwitchboard
         if (!ConversationStateMachine.CanTransition(conversation.State, ConversationState.Offered))
             return Fail(conversation.State, $"Cannot transition from {conversation.State} to Offered.");
 
+        // licensed-agent-metering-follow-ups (D3): routing chose the agent earlier; its user may have been
+        // suspended since. Re-read before anything changes, so a refused offer leaves the conversation Queued.
+        if (await CheckAgentAccountAsync(tenantId, agentId, ct).ConfigureAwait(false) is { } refusal)
+            return Fail(conversation.State, refusal);
+
         var now = _clock.UtcNow;
         conversation.TransitionTo(ConversationState.Offered, now);
         // Record whom the offer is for in the same write that makes it, so the offer can be accepted or
@@ -113,6 +118,11 @@ public sealed partial class ConversationSwitchboard : IConversationSwitchboard
 
         if (ConversationOffer.IsOfferedToAnotherAgent(conversation, agentId))
             return Fail(conversation.State, OfferedToAnotherAgent);
+
+        // licensed-agent-metering-follow-ups (D3): the user may have been suspended after the offer was made.
+        // Checked before capacity is reserved, so a refused accept leaves the conversation Offered.
+        if (await CheckAgentAccountAsync(tenantId, agentId, ct).ConfigureAwait(false) is { } refusal)
+            return Fail(conversation.State, refusal);
 
         var hasCapacity = await _capacity.HasCapacityAsync(tenantId, agentId, conversation.Channel, ct).ConfigureAwait(false);
         if (!hasCapacity)
@@ -433,6 +443,22 @@ public sealed partial class ConversationSwitchboard : IConversationSwitchboard
     private static partial void LogWrapUpReleaseFailed(ILogger logger, string conversationId, string agentId, string error);
 
     private const string OfferedToAnotherAgent = "The conversation was offered to another agent.";
+    private const string TargetAgentNotFound = "Target agent not found.";
+    private const string AgentAccountNotActive = "Agent account is not active.";
+
+    // licensed-agent-metering-follow-ups (D3): the reason an offer to, or an acceptance by, agentId is refused
+    // — it names no agent of the tenant, or its user is not Active now — or null when it may go ahead. Reads
+    // only; the caller changes nothing when it refuses.
+    private async Task<string?> CheckAgentAccountAsync(TenantId tenantId, EntityId agentId, CancellationToken ct)
+    {
+        var agent = await _agents.GetByIdAsync(tenantId, agentId, ct).ConfigureAwait(false);
+        if (agent is null)
+            return TargetAgentNotFound;
+
+        return await _accountStatus.IsActiveAsync(tenantId, agent.UserId, ct).ConfigureAwait(false)
+            ? null
+            : AgentAccountNotActive;
+    }
 
     // Releases the capacity the current agent owner holds for this conversation (none when an agent
     // does not own it). Called only once the move is known to go ahead.
