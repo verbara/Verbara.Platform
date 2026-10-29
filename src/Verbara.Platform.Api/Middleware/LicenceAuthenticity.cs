@@ -1,3 +1,4 @@
+using Verbara.Platform.Typification.Licensing;
 using Verbara.Sdk.Pro.Licensing;
 
 namespace Verbara.Platform.Api.Middleware;
@@ -15,10 +16,7 @@ internal static class LicenceAuthenticity
     /// <c>MissingFeature</c>, <c>Expired</c>, <c>UnauthorizedImage</c>); false for <c>Invalid</c>
     /// and for any value this code does not know.
     /// </summary>
-    internal static bool IsAuthentic(LicenseValidationResult result) =>
-        result is LicenseValidationResult.Valid
-            or LicenseValidationResult.GracePeriod
-            or LicenseValidationResult.MissingFeature
-            or LicenseValidationResult.Expired
-            or LicenseValidationResult.UnauthorizedImage;
+    /// <remarks>The definition is <see cref="LicenceGateRule.IsAuthentic"/>, which the licence gate
+    /// and the autonomous disposition policy share.</remarks>
+    internal static bool IsAuthentic(LicenseValidationResult result) => LicenceGateRule.IsAuthentic(result);
 }

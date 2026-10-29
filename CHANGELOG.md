@@ -11,6 +11,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A licence whose result is `MissingFeature` now lets the licence guard see its use** (verbara-meta/PDR-0003). The
+  HTTP licence gate and autonomous typification ask the guard about each guarded feature they open, as they already
+  did for a valid licence, so the guard's grace window after expiry starts from real use. What each surface opens is
+  unchanged; both now share one licence rule. Required before Platform moves to Verbara.Sdk.Pro 2.23.0-pro.
+- **README and NOTICE describe what the licence gates** (verbara-meta/PDR-0003 §E). They no longer say that
+  multi-tenancy and clustering need a licence: neither is licence-gated. They name the Pro endpoints a missing licence
+  closes, and say that once a licence has expired and its grace period has passed, routing, realtime, multi-tenancy
+  and clustering keep working.
 - **Ending an impersonation works on a suspended tenant.** When the target tenant was suspended mid-session,
   `DELETE /management/impersonate` answered 403, the token stayed live and the session kept counting toward the
   impersonator's limit of three. That one route is now served whatever the tenant's status; it still revokes only the
