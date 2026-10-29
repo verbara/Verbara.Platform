@@ -59,6 +59,9 @@ internal sealed class RealtimeSyncingAgentStore : IAgentStore
     public Task<PagedResult<Agent>> ListAsync(TenantId tenantId, AgentQuery query, CancellationToken ct)
         => _inner.ListAsync(tenantId, query, ct);
 
+    public Task<IReadOnlyList<Agent>> ListPageAfterAsync(TenantId tenantId, EntityId? afterAgentId, int limit, CancellationToken ct)
+        => _inner.ListPageAfterAsync(tenantId, afterAgentId, limit, ct);
+
     public IAsyncEnumerable<Agent> StreamRoutableAgentsAsync(CancellationToken ct)
         => _inner.StreamRoutableAgentsAsync(ct);
 
