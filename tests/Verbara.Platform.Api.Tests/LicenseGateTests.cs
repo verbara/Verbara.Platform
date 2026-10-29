@@ -582,6 +582,144 @@ public sealed class LicenseGateTests
         body.GetProperty("contact_sales_url").GetString().Should().Be(LicensingDefaults.ContactSalesUrl);
     }
 
+    // ── MissingFeature: the guard sees the use, the bit decides ────────────────
+    //
+    // OpenSpec change licence-gate-records-missing-feature-use. Under MissingFeature the gate asks
+    // the guard about every guarded bit, as under Valid and GracePeriod, so the guard records the bit
+    // as seen valid; it still decides on the signed bit and ignores the guard's answer.
+
+    private static ILicenseStatus StatusOf(LicenseValidationResult result, LicenseFeature features)
+    {
+        var status = Substitute.For<ILicenseStatus>();
+        status.LastResult.Returns(result);
+        status.LicensedFeatures.Returns(features);
+        return status;
+    }
+
+    private static ILicenseGuard GuardThat(bool allows)
+    {
+        var guard = Substitute.For<ILicenseGuard>();
+        guard.CanExecute(Arg.Any<LicenseFeature>())
+            .Returns(new LicenseGuardResult(allows, allows ? null : LicenseBlockReason.NotLicensed));
+        return guard;
+    }
+
+    [Theory]
+    [InlineData(LicenseFeature.AdvancedTypification)]
+    [InlineData(LicenseFeature.All)]
+    public async Task InvokeAsync_ShouldAskTheGuardAndReturn200_WhenMissingFeatureLicenceCarriesTheBitAndTheGuardRefuses(
+        LicenseFeature carried)
+    {
+        var status = StatusOf(LicenseValidationResult.MissingFeature, carried);
+        var guard = GuardThat(allows: false);
+
+        (await StatusFor(status, guard, LicenseFeature.AdvancedTypification))
+            .Should().Be(StatusCodes.Status200OK);
+
+        guard.Received().CanExecute(LicenseFeature.AdvancedTypification);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldAskTheGuardAboutEveryGuardedBit_WhenMissingFeatureLicenceOpensACombinedFeature()
+    {
+        var status = StatusOf(LicenseValidationResult.MissingFeature, LicenseFeature.All);
+        var guard = GuardThat(allows: false);
+
+        (await StatusFor(status, guard, LicenseFeature.AdvancedTypification | LicenseFeature.TypificationAi))
+            .Should().Be(StatusCodes.Status200OK);
+
+        guard.Received().CanExecute(LicenseFeature.AdvancedTypification);
+        guard.Received().CanExecute(LicenseFeature.TypificationAi);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldReturn402_WhenMissingFeatureTier1KeyLacksAnalyticsAndTheGuardAllowsEverything()
+    {
+        var tier1 = FeatureRegistry.GetCanonicalFeaturesForTier(LicenseTier.SelfHostStartup);
+        tier1.HasFlag(LicenseFeature.Analytics).Should().BeFalse("the SelfHostStartup canonical set carries no Analytics");
+        var status = StatusOf(LicenseValidationResult.MissingFeature, tier1);
+        var guard = GuardThat(allows: true);
+
+        (await StatusFor(status, guard, LicenseFeature.Analytics))
+            .Should().Be(StatusCodes.Status402PaymentRequired);
+    }
+
+    private const LicenseFeature TypificationPair = LicenseFeature.AdvancedTypification | LicenseFeature.TypificationAi;
+
+    /// <summary>
+    /// The gate's answer for every validation result (plus an unknown value) × guard allows/denies ×
+    /// a guarded, a never-guarded and a combined feature, with a licence carrying every bit. Captured
+    /// by running the gate on the unfixed code (origin/main 5d1db175); the fix must not change a row.
+    /// </summary>
+    public static TheoryData<LicenseValidationResult, bool, LicenseFeature, int> GateAnswerTable => new()
+    {
+        { LicenseValidationResult.Valid, true, LicenseFeature.Dialer, 200 },
+        { LicenseValidationResult.Valid, true, LicenseFeature.Routing, 200 },
+        { LicenseValidationResult.Valid, true, TypificationPair, 200 },
+        { LicenseValidationResult.Valid, false, LicenseFeature.Dialer, 200 },
+        { LicenseValidationResult.Valid, false, LicenseFeature.Routing, 200 },
+        { LicenseValidationResult.Valid, false, TypificationPair, 200 },
+        { LicenseValidationResult.Invalid, true, LicenseFeature.Dialer, 402 },
+        { LicenseValidationResult.Invalid, true, LicenseFeature.Routing, 402 },
+        { LicenseValidationResult.Invalid, true, TypificationPair, 402 },
+        { LicenseValidationResult.Invalid, false, LicenseFeature.Dialer, 402 },
+        { LicenseValidationResult.Invalid, false, LicenseFeature.Routing, 402 },
+        { LicenseValidationResult.Invalid, false, TypificationPair, 402 },
+        { LicenseValidationResult.Expired, true, LicenseFeature.Dialer, 200 },
+        { LicenseValidationResult.Expired, true, LicenseFeature.Routing, 200 },
+        { LicenseValidationResult.Expired, true, TypificationPair, 200 },
+        { LicenseValidationResult.Expired, false, LicenseFeature.Dialer, 402 },
+        { LicenseValidationResult.Expired, false, LicenseFeature.Routing, 200 },
+        { LicenseValidationResult.Expired, false, TypificationPair, 402 },
+        { LicenseValidationResult.GracePeriod, true, LicenseFeature.Dialer, 200 },
+        { LicenseValidationResult.GracePeriod, true, LicenseFeature.Routing, 200 },
+        { LicenseValidationResult.GracePeriod, true, TypificationPair, 200 },
+        { LicenseValidationResult.GracePeriod, false, LicenseFeature.Dialer, 200 },
+        { LicenseValidationResult.GracePeriod, false, LicenseFeature.Routing, 200 },
+        { LicenseValidationResult.GracePeriod, false, TypificationPair, 200 },
+        { LicenseValidationResult.MissingFeature, true, LicenseFeature.Dialer, 200 },
+        { LicenseValidationResult.MissingFeature, true, LicenseFeature.Routing, 200 },
+        { LicenseValidationResult.MissingFeature, true, TypificationPair, 200 },
+        { LicenseValidationResult.MissingFeature, false, LicenseFeature.Dialer, 200 },
+        { LicenseValidationResult.MissingFeature, false, LicenseFeature.Routing, 200 },
+        { LicenseValidationResult.MissingFeature, false, TypificationPair, 200 },
+        { LicenseValidationResult.UnauthorizedImage, true, LicenseFeature.Dialer, 200 },
+        { LicenseValidationResult.UnauthorizedImage, true, LicenseFeature.Routing, 200 },
+        { LicenseValidationResult.UnauthorizedImage, true, TypificationPair, 200 },
+        { LicenseValidationResult.UnauthorizedImage, false, LicenseFeature.Dialer, 402 },
+        { LicenseValidationResult.UnauthorizedImage, false, LicenseFeature.Routing, 200 },
+        { LicenseValidationResult.UnauthorizedImage, false, TypificationPair, 402 },
+        { (LicenseValidationResult)99, true, LicenseFeature.Dialer, 402 },
+        { (LicenseValidationResult)99, true, LicenseFeature.Routing, 402 },
+        { (LicenseValidationResult)99, true, TypificationPair, 402 },
+        { (LicenseValidationResult)99, false, LicenseFeature.Dialer, 402 },
+        { (LicenseValidationResult)99, false, LicenseFeature.Routing, 402 },
+        { (LicenseValidationResult)99, false, TypificationPair, 402 },
+    };
+
+    [Theory]
+    [MemberData(nameof(GateAnswerTable))]
+    public async Task InvokeAsync_ShouldGiveTheCapturedAnswer_ForEveryResultGuardAndFeature(
+        LicenseValidationResult result, bool guardAllows, LicenseFeature feature, int expectedStatus)
+    {
+        var status = StatusOf(result, LicenseFeature.All);
+        var guard = GuardThat(guardAllows);
+
+        (await StatusFor(status, guard, feature)).Should().Be(expectedStatus);
+    }
+
+    [Fact]
+    public void GateAnswerTable_ShouldCoverEveryValidationResult_WhenTheEnumGrows()
+    {
+        var rows = GateAnswerTable.Select(row => ((LicenseValidationResult)row[0], (bool)row[1], (LicenseFeature)row[2])).ToHashSet();
+        LicenseFeature[] features = [LicenseFeature.Dialer, LicenseFeature.Routing, TypificationPair];
+
+        foreach (var result in Enum.GetValues<LicenseValidationResult>())
+            foreach (var allows in new[] { true, false })
+                foreach (var feature in features)
+                    rows.Should().Contain((result, allows, feature), $"{result} × guard {allows} × {feature} needs a captured answer");
+    }
+
     private static async Task<int> StatusFor(
         ILicenseStatus status, ILicenseGuard guard, LicenseFeature feature)
     {

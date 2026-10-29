@@ -6,6 +6,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Verbara.Platform.Typification.Tests" />
+    <!-- LicenceGateRule: the licence gate and LicenceAuthenticity in the Api share the policy's rule. -->
+    <InternalsVisibleTo Include="Verbara.Platform.Api" />
     <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
   </ItemGroup>
 
