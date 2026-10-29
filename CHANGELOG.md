@@ -9,6 +9,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Verbara.Sdk.Pro 2.23.0-pro** (the 22 `Verbara.Sdk.Pro.*` pins; no other package changes version). A licence
+  whose key lacks the feature of an installed Pro package is now `MissingFeature` after a hot reload or a periodic
+  re-validation too, as it already was after a restart; before, those two paths reported it `Valid`. The status
+  endpoint shows the new result; what the HTTP licence gate and autonomous typification open is unchanged. A
+  `MissingFeature` licence that is used and then expires now keeps the features its key carries open for the same
+  grace window as a valid licence that expires; before, they closed at expiry. Features the key does not carry stay
+  closed.
+
 ### Fixed
 
 - **A licence whose result is `MissingFeature` now lets the licence guard see its use** (verbara-meta/PDR-0003). The
