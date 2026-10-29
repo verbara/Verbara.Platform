@@ -110,12 +110,20 @@ public sealed class DefaultAutonomousDispositionPolicyTests
         LicenseFeature licensedFeatures,
         TypificationSchema? resolvedSchema)
     {
+        var (tracker, guard, _) = RealLicenceStack();
+        tracker.Update(LicenseValidationResult.Valid, KeyWith(licensedFeatures));
+        return BuildSut(gate, tracker, guard, resolvedSchema);
+    }
+
+    private static DefaultAutonomousDispositionPolicy BuildSut(
+        TenantAutonomousDisposition? gate,
+        ILicenseStatus licenseStatus,
+        ILicenseGuard licenseGuard,
+        TypificationSchema? resolvedSchema)
+    {
         var gateStore = Substitute.For<ITenantAutonomousDispositionStore>();
         gateStore.GetAsync(Tenant, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(gate));
-
-        var licenseStatus = Substitute.For<ILicenseStatus>();
-        licenseStatus.LicensedFeatures.Returns(licensedFeatures);
 
         var resolver = Substitute.For<ITypificationResolver>();
         resolver.ResolveForConversationAsync(Arg.Any<Conversation>(), Arg.Any<CancellationToken>())
@@ -124,8 +132,34 @@ public sealed class DefaultAutonomousDispositionPolicyTests
                     ? null
                     : new ResolvedTypification(resolvedSchema, SubtreeRoot: null, resolvedSchema.AiConfig)));
 
-        return new DefaultAutonomousDispositionPolicy(gateStore, licenseStatus, resolver);
+        return new DefaultAutonomousDispositionPolicy(gateStore, licenseStatus, resolver, licenseGuard);
     }
+
+    // ── Licence state (real tracker + real guard) ────────────────────────────────
+
+    private static readonly DateTimeOffset s_start = new(2026, 10, 1, 8, 0, 0, TimeSpan.Zero);
+
+    private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = now;
+
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private static (LicenseStatusTracker Tracker, LicenseGuard Guard, ManualTimeProvider Time) RealLicenceStack()
+    {
+        var time = new ManualTimeProvider(s_start);
+        var tracker = new LicenseStatusTracker(time);
+        var guard = new LicenseGuard(
+            tracker,
+            Microsoft.Extensions.Options.Options.Create(new LicenseGuardOptions()),
+            time);
+        return (tracker, guard, time);
+    }
+
+    private static LicenseKey KeyWith(LicenseFeature features) =>
+        new("lic-test", "Test Licensee", LicenseTier.SelfHostBusiness, s_start.AddDays(-30), features,
+            MaxAgents: 50, MaxNodes: 3, Signature: "not-checked-by-the-policy");
 
     // ── Gating-path tests ───────────────────────────────────────────────────────
 
@@ -161,6 +195,58 @@ public sealed class DefaultAutonomousDispositionPolicyTests
 
         decision.ShouldCommit.Should().BeFalse();
         decision.Reason.Should().Be(AutonomousSkipReason.LicenseMissing);
+    }
+
+    [Theory]
+    [InlineData(LicenseValidationResult.Invalid)]
+    [InlineData(LicenseValidationResult.Expired)]
+    [InlineData(LicenseValidationResult.UnauthorizedImage)]
+    public async Task EvaluateAsync_ShouldSkipLicenseMissing_WhenLicenceIsNotCurrentDespiteEveryBit(
+        LicenseValidationResult result)
+    {
+        var (tracker, guard, _) = RealLicenceStack();
+        tracker.Update(result, KeyWith(LicenseFeature.All));
+        var sut = BuildSut(ActiveGate(), tracker, guard, Schema(autonomousThreshold: 0.95));
+
+        var decision = await sut.EvaluateAsync(Conversation(), Suggestion(confidence: 0.97), CancellationToken.None);
+
+        decision.ShouldCommit.Should().BeFalse();
+        decision.Reason.Should().Be(AutonomousSkipReason.LicenseMissing);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_ShouldSkipLicenseMissing_WhenExpiredAfterTheGuardWindow()
+    {
+        var (tracker, guard, time) = RealLicenceStack();
+        tracker.Update(LicenseValidationResult.Valid, KeyWith(LicenseFeature.All));
+        var sut = BuildSut(ActiveGate(), tracker, guard, Schema(autonomousThreshold: 0.95));
+        (await sut.EvaluateAsync(Conversation(), Suggestion(confidence: 0.97), CancellationToken.None))
+            .ShouldCommit.Should().BeTrue();
+
+        tracker.Update(LicenseValidationResult.Expired, KeyWith(LicenseFeature.All));
+        time.Now += new LicenseGuardOptions().GracePeriod + TimeSpan.FromHours(1);
+
+        var decision = await sut.EvaluateAsync(Conversation(), Suggestion(confidence: 0.97), CancellationToken.None);
+
+        decision.ShouldCommit.Should().BeFalse();
+        decision.Reason.Should().Be(AutonomousSkipReason.LicenseMissing);
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_ShouldCommit_WhenExpiredInsideTheGuardWindow()
+    {
+        var (tracker, guard, time) = RealLicenceStack();
+        tracker.Update(LicenseValidationResult.Valid, KeyWith(LicenseFeature.All));
+        var sut = BuildSut(ActiveGate(), tracker, guard, Schema(autonomousThreshold: 0.95));
+        (await sut.EvaluateAsync(Conversation(), Suggestion(confidence: 0.97), CancellationToken.None))
+            .ShouldCommit.Should().BeTrue();
+
+        tracker.Update(LicenseValidationResult.Expired, KeyWith(LicenseFeature.All));
+        time.Now += TimeSpan.FromDays(1);
+
+        var decision = await sut.EvaluateAsync(Conversation(), Suggestion(confidence: 0.97), CancellationToken.None);
+
+        decision.ShouldCommit.Should().BeTrue();
     }
 
     [Fact]

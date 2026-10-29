@@ -375,14 +375,8 @@ builder.Services.AddSingleton<IIpAllowlistEvaluator, DefaultIpAllowlistEvaluator
 // ─── Pro.Licensing ───────────────────────────────────────────────────────────
 var licenseConfig = builder.Configuration.GetSection("Licensing");
 var licensePath = licenseConfig["FilePath"] ?? "./license.lic";
-var publicKeyPath = licenseConfig["PublicKeyPath"];
-// ⚠️ Operator-supplied trust anchor override is optional. When unset, do NOT
-// register a byte[] here — let Verbara.Sdk.Pro.Licensing's AddProLicensing()
-// register LicenseTrustAnchor.OfficialPublicKey via its own TryAddSingleton.
-if (!string.IsNullOrEmpty(publicKeyPath) && File.Exists(publicKeyPath))
-{
-    builder.Services.AddSingleton<byte[]>(File.ReadAllBytes(publicKeyPath));
-}
+// The licence trust anchor is the key embedded in Pro (LicenseTrustAnchor.OfficialPublicKey); the host
+// registers no byte[] of its own and refuses to boot if one differs (EnsureEmbeddedLicenceTrustAnchor).
 
 // Pro v2.5.0-pro: EnforcementMode is GONE (ADR-0012). License-presence drives
 // behaviour: file at LicenseFilePath valid → Pro enabled; missing/invalid/
@@ -390,9 +384,7 @@ if (!string.IsNullOrEmpty(publicKeyPath) && File.Exists(publicKeyPath))
 builder.Services.AddProLicensing(o =>
 {
     o.LicenseFilePath = licensePath;
-    o.RevalidationInterval = TimeSpan.TryParse(licenseConfig["RevalidationInterval"], out var interval)
-        ? interval
-        : TimeSpan.FromHours(6);
+    o.RevalidationInterval = LicenseRevalidationInterval.Resolve(licenseConfig["RevalidationInterval"]);
 });
 
 // ─── Observability — OpenTelemetry tracing + metrics providers ──────────────
@@ -1483,6 +1475,7 @@ var openApiEnabled = builder.Environment.IsDevelopment()
 builder.Services.AddVerbaraOpenApi(openApiEnabled);
 
 var app = builder.Build();
+app.Services.EnsureEmbeddedLicenceTrustAnchor();
 
 // ─── Phase 2.2 — ensure cluster_distributed_lock schema (leader election) ────
 // AddPostgresDistributedLock registers the lock primitive but does NOT create its
