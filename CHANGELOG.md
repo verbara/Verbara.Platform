@@ -15,6 +15,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   HTTP licence gate and autonomous typification ask the guard about each guarded feature they open, as they already
   did for a valid licence, so the guard's grace window after expiry starts from real use. What each surface opens is
   unchanged; both now share one licence rule. Required before Platform moves to Verbara.Sdk.Pro 2.23.0-pro.
+- **README and NOTICE describe what the licence gates** (verbara-meta/PDR-0003 §E). They no longer say that
+  multi-tenancy and clustering need a licence: neither is licence-gated. They name the Pro endpoints a missing licence
+  closes, and say that once a licence has expired and its grace period has passed, routing, realtime, multi-tenancy
+  and clustering keep working.
 
 ## [2.34.1] - 2026-10-29
 
