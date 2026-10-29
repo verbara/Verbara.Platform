@@ -44,6 +44,9 @@ public sealed class ConversationSwitchboardTests : IDisposable
     {
         _ownership = new RecordingOwnershipWriter(_store);
         _clock.UtcNow.Returns(_now);
+        // Offer and accept read the agent (licensed-agent-metering-follow-ups D3): the default agent exists
+        // and its user is Active unless a test says otherwise.
+        AgentExists(_agentId);
     }
 
     private void AgentExists(EntityId agentId) =>
@@ -875,6 +878,88 @@ public sealed class ConversationSwitchboardTests : IDisposable
         stateEvent.TenantId.Should().Be(_tenantId.Value);
         stateEvent.ConversationId.Should().Be(_conversationId.Value);
         stateEvent.NewState.Should().Be("Queued");
+    }
+
+    // ─── licensed-agent-metering-follow-ups L17 (D3): offer and accept re-check the agent ──
+
+    [Fact]
+    public async Task OfferToAgentAsync_ShouldFailAndChangeNothing_WhenAgentUserIsNotActive()
+    {
+        var conversation = BuildConversation(ConversationState.Queued, ConversationOwner.ForQueue(_queueId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+        _accountStatus.Inactive.Add(EntityId.From($"user-of-{_agentId.Value}"));
+        var events = new List<PlatformEvent>();
+        using var sub = _eventBus.Events.Subscribe(e => events.Add(e));
+
+        var sut = CreateSut();
+        var result = await sut.OfferToAgentAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.FailureReason.Should().Be("Agent account is not active.");
+        conversation.State.Should().Be(ConversationState.Queued);
+        conversation.Metadata.Should().NotContainKey(ConversationOffer.OfferedToKey);
+        await _store.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+        events.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task OfferToAgentAsync_ShouldFailWithTargetAgentNotFound_WhenAgentDoesNotExist()
+    {
+        var conversation = BuildConversation(ConversationState.Queued, ConversationOwner.ForQueue(_queueId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.OfferToAgentAsync(_conversationId, _tenantId, EntityId.From("ghost-agent"), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.FailureReason.Should().Be("Target agent not found.");
+        conversation.State.Should().Be(ConversationState.Queued);
+        await _store.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task AcceptAsync_ShouldFailAndReserveNothing_WhenAgentUserIsNotActive()
+    {
+        var queueOwner = ConversationOwner.ForQueue(_queueId);
+        var conversation = BuildConversation(ConversationState.Offered, queueOwner);
+        conversation.SetMetadata(ConversationOffer.OfferedToKey, _agentId.Value);
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+        _capacity.HasCapacityAsync(_tenantId, _agentId, ChannelType.Voice, Arg.Any<CancellationToken>())
+                 .Returns(true);
+        _accountStatus.Inactive.Add(EntityId.From($"user-of-{_agentId.Value}"));
+        var events = new List<PlatformEvent>();
+        using var sub = _eventBus.Events.Subscribe(e => events.Add(e));
+
+        var sut = CreateSut();
+        var result = await sut.AcceptAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.FailureReason.Should().Be("Agent account is not active.");
+        conversation.State.Should().Be(ConversationState.Offered);
+        conversation.Owner.Should().Be(queueOwner);
+        await _capacity.DidNotReceiveWithAnyArgs().ReserveAsync(default, default, default, default);
+        await _store.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
+        events.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AcceptAsync_ShouldFailWithTargetAgentNotFound_WhenAgentDoesNotExist()
+    {
+        var conversation = BuildConversation(ConversationState.Offered, ConversationOwner.ForQueue(_queueId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+              .Returns(conversation);
+
+        var sut = CreateSut();
+        var result = await sut.AcceptAsync(_conversationId, _tenantId, EntityId.From("ghost-agent"), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.FailureReason.Should().Be("Target agent not found.");
+        conversation.State.Should().Be(ConversationState.Offered);
+        await _capacity.DidNotReceiveWithAnyArgs().ReserveAsync(default, default, default, default);
+        await _store.DidNotReceiveWithAnyArgs().SaveAsync(default!, default);
     }
 
     [Fact]

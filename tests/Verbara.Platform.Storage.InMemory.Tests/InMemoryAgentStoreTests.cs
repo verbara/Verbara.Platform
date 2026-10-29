@@ -258,4 +258,110 @@ public sealed class InMemoryAgentStoreTests
         loaded.Should().NotBeNull();
         loaded!.OfflineSince.Should().Be(offlineSince);
     }
+
+    // licensed-agent-metering-follow-ups (design D2) — keyset page in ordinal agent_id order.
+    private static Agent MakeAgentWithId(TenantId tenantId, string agentId) =>
+        new()
+        {
+            AgentId = EntityId.From(agentId),
+            TenantId = tenantId,
+            UserId = EntityId.New(),
+            DisplayName = "Agent " + agentId,
+            State = AgentState.Offline,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+    private static async Task<InMemoryAgentStore> SeedKeysetStoreAsync(TenantId tenant, TenantId other)
+    {
+        var store = new InMemoryAgentStore();
+        // Saved out of order; "B" sorts before "a" ordinally, unlike a culture-aware comparison.
+        foreach (var id in new[] { "agent-d", "agent-a", "agent-B", "agent-c", "agent-b" })
+            await store.SaveAsync(MakeAgentWithId(tenant, id), CancellationToken.None);
+        // The other tenant's ids interleave with this tenant's, so a missing tenant filter would show.
+        foreach (var id in new[] { "agent-0", "agent-bb", "agent-cc", "agent-z" })
+            await store.SaveAsync(MakeAgentWithId(other, id), CancellationToken.None);
+        return store;
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldReturnThisTenantsAgentsInOrdinalOrder_WhenAfterIsNull()
+    {
+        var tenant = new TenantId("tenant-a");
+        var store = await SeedKeysetStoreAsync(tenant, new TenantId("tenant-b"));
+
+        var page = await store.ListPageAfterAsync(tenant, null, 100, CancellationToken.None);
+
+        page.Select(a => a.AgentId.Value).Should().Equal("agent-B", "agent-a", "agent-b", "agent-c", "agent-d");
+        page.Should().OnlyContain(a => a.TenantId == tenant);
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldExcludeTheAfterBound_WhenAfterIsAnExistingAgent()
+    {
+        var tenant = new TenantId("tenant-a");
+        var store = await SeedKeysetStoreAsync(tenant, new TenantId("tenant-b"));
+
+        var page = await store.ListPageAfterAsync(tenant, EntityId.From("agent-b"), 100, CancellationToken.None);
+
+        page.Select(a => a.AgentId.Value).Should().Equal("agent-c", "agent-d");
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldStartAfterTheBound_WhenAfterIsNotAnAgent()
+    {
+        var tenant = new TenantId("tenant-a");
+        var store = await SeedKeysetStoreAsync(tenant, new TenantId("tenant-b"));
+
+        var page = await store.ListPageAfterAsync(tenant, EntityId.From("agent-bb"), 100, CancellationToken.None);
+
+        page.Select(a => a.AgentId.Value).Should().Equal("agent-c", "agent-d");
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldReturnAtMostLimit_WhenMoreAgentsFollow()
+    {
+        var tenant = new TenantId("tenant-a");
+        var store = await SeedKeysetStoreAsync(tenant, new TenantId("tenant-b"));
+
+        var first = await store.ListPageAfterAsync(tenant, null, 2, CancellationToken.None);
+        var second = await store.ListPageAfterAsync(tenant, first[^1].AgentId, 2, CancellationToken.None);
+        var third = await store.ListPageAfterAsync(tenant, second[^1].AgentId, 2, CancellationToken.None);
+
+        first.Select(a => a.AgentId.Value).Should().Equal("agent-B", "agent-a");
+        second.Select(a => a.AgentId.Value).Should().Equal("agent-b", "agent-c");
+        third.Select(a => a.AgentId.Value).Should().Equal("agent-d");
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldReturnEmpty_WhenAfterIsTheLastAgent()
+    {
+        var tenant = new TenantId("tenant-a");
+        var store = await SeedKeysetStoreAsync(tenant, new TenantId("tenant-b"));
+
+        var page = await store.ListPageAfterAsync(tenant, EntityId.From("agent-d"), 100, CancellationToken.None);
+
+        page.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldReturnNoOtherTenantsAgent_WhenTheTenantHasNone()
+    {
+        var store = await SeedKeysetStoreAsync(new TenantId("tenant-a"), new TenantId("tenant-b"));
+
+        var page = await store.ListPageAfterAsync(new TenantId("tenant-c"), null, 100, CancellationToken.None);
+
+        page.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task ListPageAfterAsync_ShouldThrow_WhenLimitIsNotPositive(int limit)
+    {
+        var store = new InMemoryAgentStore();
+
+        var act = () => store.ListPageAfterAsync(new TenantId("tenant-a"), null, limit, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
 }

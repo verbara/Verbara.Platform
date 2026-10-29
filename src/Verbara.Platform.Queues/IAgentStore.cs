@@ -9,6 +9,14 @@ public interface IAgentStore
     Task<Agent?> GetByUserIdAsync(TenantId tenantId, EntityId userId, CancellationToken ct);
     Task<Agent?> GetByExtensionAsync(TenantId tenantId, string extension, CancellationToken ct);
     Task<PagedResult<Agent>> ListAsync(TenantId tenantId, AgentQuery query, CancellationToken ct);
+
+    /// <summary>
+    /// Keyset page of this tenant's agents (licensed-agent-metering-follow-ups, design D2): the agents whose id
+    /// sorts after <paramref name="afterAgentId"/> (every agent when it is <see langword="null"/>), in ascending
+    /// <c>agent_id</c> order, at most <paramref name="limit"/>. The order is the store's own and is stable, which
+    /// is all a keyset walk needs: an agent that exists for the whole walk is returned exactly once.
+    /// </summary>
+    Task<IReadOnlyList<Agent>> ListPageAfterAsync(TenantId tenantId, EntityId? afterAgentId, int limit, CancellationToken ct);
     Task SaveAsync(Agent agent, CancellationToken ct);
     Task DeleteAsync(TenantId tenantId, EntityId agentId, CancellationToken ct);
 

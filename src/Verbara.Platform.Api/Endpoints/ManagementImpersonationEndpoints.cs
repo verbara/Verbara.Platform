@@ -110,9 +110,12 @@ internal static class ManagementImpersonationEndpoints
         // tenant fails the platform/Partner gate above, so End needs a group of its own (still
         // under /management inside the versioned group, so its route template is unchanged). The
         // handler refuses a caller that is not impersonating and ends only the caller's own token
-        // and session, so authentication is the whole gate.
+        // and session, so authentication is the whole gate. It is also the one route served whatever the
+        // target tenant's status (design D1, #344): a session into a tenant suspended mid-session must still
+        // end, or its token stays live and its slot keeps counting against the impersonator's limit.
         var endGroup = app.MapGroup("/management").RequireAuthorization();
-        endGroup.MapDelete("/impersonate", EndImpersonation);
+        endGroup.MapDelete("/impersonate", EndImpersonation)
+            .ServedWhateverTenantStatus();
 
         // R5.2 PB.2 — admin session-management surface, double-gated by
         // PlatformAdminRequirement + `system:impersonation:manage`.

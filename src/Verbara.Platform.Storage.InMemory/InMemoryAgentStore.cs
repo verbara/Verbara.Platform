@@ -59,6 +59,21 @@ internal sealed class InMemoryAgentStore : IAgentStore
         return Task.FromResult(new PagedResult<Agent>(items, totalCount, query.Page, query.PageSize));
     }
 
+    public Task<IReadOnlyList<Agent>> ListPageAfterAsync(TenantId tenantId, EntityId? afterAgentId, int limit, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        // Ordinal order on agent_id: consistent with itself, which is all a keyset walk needs (design D2).
+        string? after = afterAgentId is { } afterId ? afterId.Value : null;
+        IReadOnlyList<Agent> page = _items.Values
+            .Where(a => a.TenantId == tenantId)
+            .Where(a => after is null || string.CompareOrdinal(a.AgentId.Value, after) > 0)
+            .OrderBy(a => a.AgentId.Value, StringComparer.Ordinal)
+            .Take(limit)
+            .ToList();
+        return Task.FromResult(page);
+    }
+
     public Task SaveAsync(Agent agent, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(agent);

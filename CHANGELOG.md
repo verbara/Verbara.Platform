@@ -19,6 +19,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   multi-tenancy and clustering need a licence: neither is licence-gated. They name the Pro endpoints a missing licence
   closes, and say that once a licence has expired and its grace period has passed, routing, realtime, multi-tenancy
   and clustering keep working.
+- **Ending an impersonation works on a suspended tenant.** When the target tenant was suspended mid-session,
+  `DELETE /management/impersonate` answered 403, the token stayed live and the session kept counting toward the
+  impersonator's limit of three. That one route is now served whatever the tenant's status; it still revokes only the
+  caller's own token and closes only the caller's own session, and every other route on a suspended tenant is
+  refused as before. Closes #344.
+- **Offering a conversation to an agent, and accepting one, refuse an agent that does not exist or whose user is not
+  Active.** Routing already filtered by account status, but an agent suspended between the routing decision (or the
+  offer) and the write could still receive or accept the conversation. Both now read the agent and its user first
+  and refuse with no transition, offer metadata, capacity change or event: `Target agent not found.` or
+  `Agent account is not active.`. Closes #352.
+- **Enumerating all of a tenant's agents no longer skips one when another is deleted mid-walk.** The full
+  enumeration (queue membership, PJSIP desired state) paged by offset in display-name order, so a delete between two
+  page reads shifted the rows and one agent dropped out for that tick. It now pages by agent id, so **the order of
+  the full enumeration is by agent id**, not by display name. Closes #351.
 
 ## [2.34.1] - 2026-10-29
 

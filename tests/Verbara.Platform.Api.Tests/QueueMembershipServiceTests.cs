@@ -66,8 +66,8 @@ public sealed class QueueMembershipServiceTests
 
     private void SetupAgents(params Agent[] agents)
     {
-        _agentStore.ListAsync(Arg.Any<TenantId>(), Arg.Any<AgentQuery>(), Arg.Any<CancellationToken>())
-            .Returns(new PagedResult<Agent>(agents, agents.Length, 1, 1000));
+        _agentStore.ListPageAfterAsync(Arg.Any<TenantId>(), Arg.Any<EntityId?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Agent>>(agents));
     }
 
     private void SetupAgentSkills(string agentId, params AgentSkill[] skills)

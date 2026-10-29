@@ -134,6 +134,33 @@ internal sealed class PostgresAgentStore : IAgentStore
         return new PagedResult<Agent>(items, total, query.Page, query.PageSize);
     }
 
+    /// <summary>
+    /// Keyset page on the primary key <c>(tenant_id, agent_id)</c> (licensed-agent-metering-follow-ups, design D2).
+    /// </summary>
+    public async Task<IReadOnlyList<Agent>> ListPageAfterAsync(
+        TenantId tenantId, EntityId? afterAgentId, int limit, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT agent_id, tenant_id, user_id, display_name, state, capacity, team_id, skills, " +
+            "extension, sip_password, auto_answer, pending_state, pending_reason, pending_since, " +
+            "offline_since, created_at, updated_at, created_by, updated_by " +
+            "FROM agents WHERE tenant_id = @TenantId AND (@After IS NULL OR agent_id > @After) " +
+            "ORDER BY agent_id LIMIT @Limit",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("After", NpgsqlDbType.Text)
+                {
+                    Value = afterAgentId is { } after ? after.Value : DBNull.Value,
+                });
+                p.Add(new NpgsqlParameter("Limit", NpgsqlDbType.Integer) { Value = limit });
+            },
+            AgentRow.Map, ct).ConfigureAwait(false);
+        return rows.Select(r => r.ToAgent()).ToList();
+    }
+
     // licensed-agent-metering (design D5) — an agent row is inserted and deleted only inside the licensed-agent
     // writer's transaction, together with its ledger row (InsertAsync / DeleteAsync overloads below). SaveAsync
     // updates an existing agent and never creates one: a presence or admin save racing a delete changes no

@@ -282,4 +282,30 @@ public sealed class TenantStatusMiddlewareTests
         context.Response.StatusCode.Should().Be(404);
         ReadError(context).Should().Be("Not found");
     }
+
+    [Theory]
+    [InlineData(TenantStatus.Suspended)]
+    [InlineData(TenantStatus.PendingDeletion)]
+    [InlineData(TenantStatus.Deleted)]
+    [InlineData(TenantStatus.Active)]
+    public async Task Invoke_ShouldCallNextWithoutPopulatingCaches_WhenEndpointServedWhateverTenantStatus(
+        TenantStatus status)
+    {
+        _tenantStore.GetAsync("acme", Arg.Any<CancellationToken>())
+            .Returns(new Tenant { TenantId = "acme", Name = "ACME", Status = status });
+        var middleware = CreateMiddleware();
+        var context = CreateContext("acme");
+        context.SetEndpoint(new Endpoint(
+            _ => Task.CompletedTask,
+            new EndpointMetadataCollection(ServedWhateverTenantStatusMetadata.Instance),
+            "end-impersonation"));
+
+        await middleware.InvokeAsync(context);
+
+        _nextCalled.Should().BeTrue();
+        context.Response.StatusCode.Should().Be(200);
+        context.Items.Should().NotContainKey("Tenant");
+        _featureGateCache.Get("acme").Should().BeNull(because: "the exempt route must not populate the tenant caches");
+        await _tenantStore.DidNotReceive().GetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
 }
