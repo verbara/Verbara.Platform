@@ -51,21 +51,30 @@ public static class AgentAccountStatusLookupExtensions
     }
 
     /// <summary>
-    /// Every agent of <paramref name="tenantId"/>, read page by page until the store's total is reached,
-    /// so no caller is silently capped at one page.
+    /// Every agent of <paramref name="tenantId"/>, in ascending agent-id order, read in keyset pages of
+    /// <see cref="EnumerationPageSize"/> (<see cref="IAgentStore.ListPageAfterAsync"/>) until a page comes back
+    /// shorter than that, so no caller is silently capped at one page.
     /// </summary>
+    /// <remarks>
+    /// licensed-agent-metering-follow-ups (design D2): each page starts after the last agent id already read,
+    /// never at a row offset, so an agent deleted while the walk runs cannot shift another agent out of it. Every
+    /// agent that exists from the start of the walk to its end is returned exactly once. An agent created during
+    /// the walk may be missing; one deleted after its page was read is still returned (the snapshot the caller
+    /// had).
+    /// </remarks>
     public static async Task<IReadOnlyList<Agent>> ListAllAsync(
         this IAgentStore store, TenantId tenantId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(store);
         var all = new List<Agent>();
-        for (var page = 1; ; page++)
+        EntityId? after = null;
+        while (true)
         {
-            var result = await store.ListAsync(
-                tenantId, new AgentQuery { Page = page, PageSize = EnumerationPageSize }, ct).ConfigureAwait(false);
-            all.AddRange(result.Items);
-            if (result.Items.Count < EnumerationPageSize || all.Count >= result.TotalCount)
+            var page = await store.ListPageAfterAsync(tenantId, after, EnumerationPageSize, ct).ConfigureAwait(false);
+            all.AddRange(page);
+            if (page.Count < EnumerationPageSize)
                 return all;
+            after = page[^1].AgentId;
         }
     }
 }

@@ -184,8 +184,8 @@ public sealed partial class SupervisorListenEndpointProvisioningTests
     {
         var agentStore = agents ?? Substitute.For<IAgentStore>();
         if (agents is null)
-            agentStore.ListAsync(Arg.Any<TenantId>(), Arg.Any<AgentQuery>(), Arg.Any<CancellationToken>())
-                .Returns(PagedResult<Agent>.Empty(1, 1000));
+            agentStore.ListPageAfterAsync(Arg.Any<TenantId>(), Arg.Any<EntityId?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<IReadOnlyList<Agent>>([]));
         var queueStore = Substitute.For<IQueueStore>();
         var membership = new QueueMembershipService(queueStore, agentStore, new Verbara.Sdk.Pro.Routing.Skills.InMemorySkillCatalog(),
             Substitute.For<IQueueMembershipStore>(), NullLogger<QueueMembershipService>.Instance);

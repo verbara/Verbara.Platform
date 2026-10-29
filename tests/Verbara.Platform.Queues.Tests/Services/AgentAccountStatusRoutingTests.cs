@@ -88,11 +88,14 @@ public class AgentAccountStatusRoutingTests
         const int total = 2 * AgentAccountStatusLookupExtensions.EnumerationPageSize + 7;
         var all = Enumerable.Range(0, total).Select(i => MakeAgent($"a{i:D5}")).ToList();
         var store = Substitute.For<IAgentStore>();
-        store.ListAsync(Tenant, Arg.Any<AgentQuery>(), Arg.Any<CancellationToken>()).Returns(call =>
+        store.ListPageAfterAsync(Tenant, Arg.Any<EntityId?>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(call =>
         {
-            var q = call.ArgAt<AgentQuery>(1);
-            var page = all.Skip((q.Page - 1) * q.PageSize).Take(q.PageSize).ToList();
-            return Task.FromResult(new PagedResult<Agent>(page, total, q.Page, q.PageSize));
+            var after = call.ArgAt<EntityId?>(1);
+            var limit = call.ArgAt<int>(2);
+            IReadOnlyList<Agent> page = all
+                .Where(a => after is not { } bound || string.CompareOrdinal(a.AgentId.Value, bound.Value) > 0)
+                .Take(limit).ToList();
+            return Task.FromResult(page);
         });
 
         var result = await store.ListAllAsync(Tenant, CancellationToken.None);

@@ -79,8 +79,8 @@ public sealed class PlatformDesiredStateProviderTests
             MakeAgent("a3", "Agent 3", "1003", ""),        // empty password
             MakeAgent("a4", "Agent 4", "1004", "pass4"),
         };
-        _agentStore.ListAsync(tid, Arg.Any<AgentQuery>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new PagedResult<Agent>(agents, agents.Length, 1, 1000)));
+        _agentStore.ListPageAfterAsync(tid, Arg.Any<EntityId?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Agent>>(agents));
 
         var sut = CreateSut();
         var result = await sut.GetExpectedAgentsAsync("t1");
@@ -94,8 +94,8 @@ public sealed class PlatformDesiredStateProviderTests
     {
         var tid = new TenantId("t1");
         var agents = new[] { MakeAgent("agent-99", "Jane Doe", "2099", "secret99") };
-        _agentStore.ListAsync(tid, Arg.Any<AgentQuery>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new PagedResult<Agent>(agents, 1, 1, 1000)));
+        _agentStore.ListPageAfterAsync(tid, Arg.Any<EntityId?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Agent>>(agents));
 
         var sut = CreateSut();
         var result = await sut.GetExpectedAgentsAsync("t1");
@@ -162,8 +162,8 @@ public sealed class PlatformDesiredStateProviderTests
         var queue = MakeQueue("support", true);
         queue.RequiredSkills = [];
 
-        _agentStore.ListAsync(tid, Arg.Any<AgentQuery>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new PagedResult<Agent>([agent], 1, 1, 1000)));
+        _agentStore.ListPageAfterAsync(tid, Arg.Any<EntityId?>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Agent>>([agent]));
         _agentStore.GetByIdsAsync(tid, Arg.Any<IReadOnlyCollection<EntityId>>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Agent>>([agent]));
         _queueStore.ListAsync(tid, Arg.Any<PagedQuery>(), Arg.Any<CancellationToken>())
