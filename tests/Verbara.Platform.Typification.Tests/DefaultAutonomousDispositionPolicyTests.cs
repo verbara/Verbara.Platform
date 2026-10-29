@@ -249,6 +249,45 @@ public sealed class DefaultAutonomousDispositionPolicyTests
         decision.ShouldCommit.Should().BeTrue();
     }
 
+    // OpenSpec change pro-2-23-0-pin-cascade: since Verbara.Sdk.Pro 2.23.0-pro the guard records the
+    // bits used under MissingFeature, so the licence keeps the guard window a Valid one gets.
+    private const LicenseFeature TypificationBits = LicenseFeature.AdvancedTypification | LicenseFeature.TypificationAi;
+
+    [Fact]
+    public async Task EvaluateAsync_ShouldCommit_WhenUsedMissingFeatureLicenceExpiresInsideTheGuardWindow()
+    {
+        var (tracker, guard, time) = RealLicenceStack();
+        tracker.Update(LicenseValidationResult.MissingFeature, KeyWith(TypificationBits));
+        var sut = BuildSut(ActiveGate(), tracker, guard, Schema(autonomousThreshold: 0.95));
+        (await sut.EvaluateAsync(Conversation(), Suggestion(confidence: 0.97), CancellationToken.None))
+            .ShouldCommit.Should().BeTrue();
+
+        tracker.Update(LicenseValidationResult.Expired, KeyWith(TypificationBits));
+        time.Now += TimeSpan.FromDays(1);
+
+        var decision = await sut.EvaluateAsync(Conversation(), Suggestion(confidence: 0.97), CancellationToken.None);
+
+        decision.ShouldCommit.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_ShouldSkipLicenseMissing_WhenUsedMissingFeatureLicenceExpiresAfterTheGuardWindow()
+    {
+        var (tracker, guard, time) = RealLicenceStack();
+        tracker.Update(LicenseValidationResult.MissingFeature, KeyWith(TypificationBits));
+        var sut = BuildSut(ActiveGate(), tracker, guard, Schema(autonomousThreshold: 0.95));
+        (await sut.EvaluateAsync(Conversation(), Suggestion(confidence: 0.97), CancellationToken.None))
+            .ShouldCommit.Should().BeTrue();
+
+        tracker.Update(LicenseValidationResult.Expired, KeyWith(TypificationBits));
+        time.Now += new LicenseGuardOptions().GracePeriod + TimeSpan.FromHours(1);
+
+        var decision = await sut.EvaluateAsync(Conversation(), Suggestion(confidence: 0.97), CancellationToken.None);
+
+        decision.ShouldCommit.Should().BeFalse();
+        decision.Reason.Should().Be(AutonomousSkipReason.LicenseMissing);
+    }
+
     [Fact]
     public async Task EvaluateAsync_ShouldSkipNoSuggestion_WhenSuggestionNull()
     {
