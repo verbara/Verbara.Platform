@@ -14,25 +14,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **A licence whose result is `MissingFeature` now lets the licence guard see its use** (verbara-meta/PDR-0003). The
   HTTP licence gate and autonomous typification ask the guard about each guarded feature they open, as they already
   did for a valid licence, so the guard's grace window after expiry starts from real use. What each surface opens is
-  unchanged; both now share one licence rule. Required before Platform moves to Verbara.Sdk.Pro 2.23.0-pro.
+  unchanged; both now share one licence rule. Required before Platform moves to Verbara.Sdk.Pro 2.23.0-pro. (#501)
 - **README and NOTICE describe what the licence gates** (verbara-meta/PDR-0003 §E). They no longer say that
   multi-tenancy and clustering need a licence: neither is licence-gated. They name the Pro endpoints a missing licence
   closes, and say that once a licence has expired and its grace period has passed, routing, realtime, multi-tenancy
-  and clustering keep working.
+  and clustering keep working. (#499)
 - **Ending an impersonation works on a suspended tenant.** When the target tenant was suspended mid-session,
   `DELETE /management/impersonate` answered 403, the token stayed live and the session kept counting toward the
   impersonator's limit of three. That one route is now served whatever the tenant's status; it still revokes only the
   caller's own token and closes only the caller's own session, and every other route on a suspended tenant is
-  refused as before. Closes #344.
+  refused as before. Closes #344. (#503)
 - **Offering a conversation to an agent, and accepting one, refuse an agent that does not exist or whose user is not
   Active.** Routing already filtered by account status, but an agent suspended between the routing decision (or the
   offer) and the write could still receive or accept the conversation. Both now read the agent and its user first
   and refuse with no transition, offer metadata, capacity change or event: `Target agent not found.` or
-  `Agent account is not active.`. Closes #352.
+  `Agent account is not active.`. Closes #352. (#503)
 - **Enumerating all of a tenant's agents no longer skips one when another is deleted mid-walk.** The full
   enumeration (queue membership, PJSIP desired state) paged by offset in display-name order, so a delete between two
   page reads shifted the rows and one agent dropped out for that tick. It now pages by agent id, so **the order of
-  the full enumeration is by agent id**, not by display name. Closes #351.
+  the full enumeration is by agent id**, not by display name. Closes #351. (#503)
 
 ## [2.34.1] - 2026-10-29
 
