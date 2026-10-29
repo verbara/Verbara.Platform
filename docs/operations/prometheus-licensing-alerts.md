@@ -28,7 +28,7 @@ The following three alerts require LogQL syntax that PromQL does not parse. Defe
 |---|---|---|---|
 | `LicenseValidationFailedAtBoot` | **P0** | `sum(count_over_time({pod=~"platform-api-.*"} \|~ "LicenseException" [10m])) > 0` | `PlatformApiContainerErrorTermination` — pins it to license-specific failures |
 | `WorkerCrashDetected` | **P1** | `sum(count_over_time({pod=~"platform-api-.*"} \|~ "WorkerCrash" [15m])) > 0` | `PlatformApiContainerErrorTermination` — pins it to ADR-0021 worker silent deaths |
-| `ProductionWithoutImageDigest` | **P3** | `sum(count_over_time({pod=~"platform-api-.*"} \|~ "event.id=12002" [15m])) > 0` | Catches Pro/ADR-0011 Layer C opt-out (event-id 12002) |
+| `ProductionWithoutImageDigest` | **P3** | `sum(count_over_time({pod=~"platform-api-.*"} \|~ "event.id=12002" [15m])) > 0` | Production api pod without `IMAGE_DIGEST` while the licence lists image digests (event-id 12002, Pro/ADR-0011) |
 
 Until Loki Ruler is configured, the Prometheus-native `PlatformApiContainerErrorTermination` covers the cluster-visible signal (Reason=Error); operators distinguish license-vs-worker-vs-other via Loki panel 7 in the Grafana dashboard.
 
@@ -135,7 +135,7 @@ min(license_guard_grace_remaining_seconds) > 0
 sum(count_over_time({pod=~"platform-api-.*"} |~ "event.id=12002" [15m])) > 0
 ```
 
-**Why P3**: documented opt-out — Pro emits the warning but app continues. Persistent firing means operator chose to skip Pro/ADR-0011 Layer C (image-binding) for the deployment. Acceptable for OSS users; review with licensed customers.
+**Why P3**: a diagnostic, not a failure — Pro logs the event and the app continues. Current Pro logs 12002 only when the loaded licence lists image digests (a licence issued before 2026-10-03) and `IMAGE_DIGEST` is unset; with a licence that lists none, it logs 12003 (Information) instead. Persistent firing means the deployment does not supply the api image digest: set `api.image.digest` (Helm) or `IMAGE_DIGEST` (compose), which also pins the pull.
 
 **Tuning**: silence if your deployment intentionally doesn't pin the digest (some K8s lab patterns). Don't silence in commercial customer environments.
 

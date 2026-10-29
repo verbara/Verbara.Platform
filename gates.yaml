@@ -80,5 +80,5 @@ gates:
     impl: >-
       .github/workflows/dependency-review.yml (Dependency Review — fail-on-severity high + deny AGPL/GPL/SSPL) +
       dependabot-automerge.yml + codeql.yml (security-extended) + release.yml (cosign v3 signing of all 4 images,
-      verified against .github/cosign.pub) + digest-reconciliation.yml (daily authorized-digests.json drift check,
-      Layer-C license binding).
+      verified against .github/cosign.pub) + digest-reconciliation.yml (daily drift check of the authorized-digests.json
+      release ledger).

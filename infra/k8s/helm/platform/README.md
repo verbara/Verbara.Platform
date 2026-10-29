@@ -95,7 +95,7 @@ matches the `.well-known/cosign.pub` flow used by the docker-compose
 | Digest pin | `api.image.digest` / `realtime.image.digest`: the kubelet pulls those exact bytes | A tag that was moved to different content |
 | Licence signature | Verbara Pro licensing, inside the api | A licence file that Verbara did not issue |
 
-**A licence is not tied to an image.** Licences issued by Verbara do not
+**A licence is not tied to an image.** Licences issued since 2026-10-03 do not
 carry image digests (verbara-meta/PDR-0003, amendment of 2026-10-03), so
 upgrading the image never requires a new licence. Image integrity is the
 job of the cosign signature and the digest pin. Verbara publishes every

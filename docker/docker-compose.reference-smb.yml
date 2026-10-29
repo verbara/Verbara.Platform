@@ -209,9 +209,10 @@ services:
       # Acquire a free Tier 0.5 developer license at
       # https://verbara.io/developer-license
       Licensing__FilePath: /etc/verbara/license.lic
-      # Pro Layer C image-binding (Pro/ADR-0011). Required only when running a
-      # commercial Pro license that has authorized digests. Leave empty for
-      # the community/OSS path.
+      # The running api image's digest, for Pro (Pro/ADR-0011). Pro compares it
+      # only with a licence that lists image digests; licences issued since
+      # 2026-10-03 list none (verbara-meta/PDR-0003). Set it to the digest of
+      # the api image you pulled (see .env.reference-smb.example).
       IMAGE_DIGEST: ${IMAGE_DIGEST:-}
       # Recording storage. Default = local filesystem; override to s3:// to
       # offload to MinIO / AWS S3 / GCS / Azure Blob.

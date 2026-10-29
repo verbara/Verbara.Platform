@@ -3,10 +3,7 @@ namespace: r55-platform
 api:
   # ASPNETCORE_ENVIRONMENT — controls behaviour of Pro's ProductionSafetyNet
   # (Diagnostics/ProductionSafetyNet.cs). When "Production" and IMAGE_DIGEST is
-  # unset, Pro before 2.23.0-pro logs event 12002 (Error, non-blocking) at
-  # startup; from 2.23.0-pro it logs 12002 only when the licence lists image
-  # digests (licences issued since 2026-10-03 list none: verbara-meta/PDR-0003),
-  # and 12003 (Information, once) for a licence that lists none. This chart sets
+  # unset, Pro logs a diagnostic event (12002 or 12003). This chart sets
   # IMAGE_DIGEST from api.image.digest below.
   aspnetcoreEnvironment: Production
   image:

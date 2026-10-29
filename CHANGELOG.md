@@ -37,9 +37,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Documentation
 
 - **Licence and image texts say that a licence is not tied to an image** (verbara-meta/PDR-0003, amendment of
-  2026-10-03). Licences issued since 2026-10-03 carry no image digests. The Helm chart README, its values and the
-  Kyverno policy comment, the `LicenseImageUnauthorized` alert and its runbook, the SMB troubleshooting guide, the
-  compose comments, the release notes text and the authorized-digests runbook now say so. They describe
+  2026-10-03). Licences issued since 2026-10-03 carry no image digests. The Helm chart README, its values, the api
+  Deployment and Kyverno policy comments, the `LicenseImageUnauthorized` and `ProductionWithoutImageDigest` alerts and
+  their runbook, the Grafana licensing panels guide and dashboard, the K8s lab licensing setup guide, the SMB
+  troubleshooting guide, `docker/README.md`, the compose and `Dockerfile` comments, the release notes text, the
+  digest-reconciliation issue text and the authorized-digests runbook now say so. `docker/verbara-verify-image.sh` now
+  tells you to compare the digest with the release notes and pin it, instead of decoding the licence. They describe
   `authorized-digests.json` as the release ledger and cosign verification at admission as an optional operator
   control (Kyverno >= 1.11). The alert's meaning changes: it can fire only with a licence issued before 2026-10-03
   that lists digests. The Helm chart's default images move from `v2.6.0` / `v3.2.0-web` to `v2.34.1` (api and

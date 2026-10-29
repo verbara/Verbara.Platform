@@ -55,11 +55,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app .
-# Layer C in-process check (Pro ADR-0011) reads the running image's OCI
-# manifest-list digest from the IMAGE_DIGEST env var (set by the Helm chart's
-# api.image.digest / the compose template). When unset (local `docker run`,
-# dev), Pro's ContainerImageDigest.ReadFromEnvironment() returns null and
-# license validation falls through to the expiry check (dev-mode semantics).
+# The running image's OCI manifest-list digest reaches Pro (Pro/ADR-0011)
+# through the IMAGE_DIGEST env var, set by the Helm chart's api.image.digest /
+# the compose template: an image cannot read its own digest. Pro compares it
+# only with a licence that lists image digests; licences issued since
+# 2026-10-03 list none (verbara-meta/PDR-0003).
 
 # Build provenance. Without these, a running container cannot be traced back to
 # the commit it was built from — `docker inspect` shows only the base image's
