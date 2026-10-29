@@ -323,6 +323,92 @@ public sealed class DefaultAutonomousDispositionPolicyTests
         decision.Reason.Should().Be(AutonomousSkipReason.SchemaMutation);
     }
 
+    // ── MissingFeature: the guard sees the use, the bits decide ───────────────────
+    //
+    // OpenSpec change licence-gate-records-missing-feature-use. Under MissingFeature the policy asks
+    // the guard about both bits, as under Valid and GracePeriod, and decides on the signed bits.
+
+    private static ILicenseStatus StatusOf(LicenseValidationResult result, LicenseFeature features)
+    {
+        var status = Substitute.For<ILicenseStatus>();
+        status.LastResult.Returns(result);
+        status.LicensedFeatures.Returns(features);
+        return status;
+    }
+
+    private static ILicenseGuard GuardThat(bool allows)
+    {
+        var guard = Substitute.For<ILicenseGuard>();
+        guard.CanExecute(Arg.Any<LicenseFeature>())
+            .Returns(new LicenseGuardResult(allows, allows ? null : LicenseBlockReason.NotLicensed));
+        return guard;
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_ShouldPassTheLicenceCheckAndAskTheGuardAboutBothBits_WhenMissingFeatureLicenceCarriesBoth()
+    {
+        var guard = GuardThat(allows: false);
+        var sut = BuildSut(
+            ActiveGate(), StatusOf(LicenseValidationResult.MissingFeature, FullLicense), guard,
+            Schema(autonomousThreshold: 0.95));
+
+        var decision = await sut.EvaluateAsync(Conversation(), Suggestion(confidence: 0.97), CancellationToken.None);
+
+        decision.ShouldCommit.Should().BeTrue();
+        decision.Reason.Should().BeNull();
+        guard.Received().CanExecute(LicenseFeature.AdvancedTypification);
+        guard.Received().CanExecute(LicenseFeature.TypificationAi);
+    }
+
+    /// <summary>
+    /// The policy's licence answer for every validation result (plus an unknown value) × guard
+    /// allows/denies, with a licence carrying every bit and every later gate passing, so a skip is
+    /// the licence check's. Captured by running the policy on the unfixed code (origin/main
+    /// 5d1db175); the fix must not change a row.
+    /// </summary>
+    public static TheoryData<LicenseValidationResult, bool, bool> PolicyLicenceAnswerTable => new()
+    {
+        { LicenseValidationResult.Valid, true, true },
+        { LicenseValidationResult.Valid, false, true },
+        { LicenseValidationResult.Invalid, true, false },
+        { LicenseValidationResult.Invalid, false, false },
+        { LicenseValidationResult.Expired, true, true },
+        { LicenseValidationResult.Expired, false, false },
+        { LicenseValidationResult.GracePeriod, true, true },
+        { LicenseValidationResult.GracePeriod, false, true },
+        { LicenseValidationResult.MissingFeature, true, true },
+        { LicenseValidationResult.MissingFeature, false, true },
+        { LicenseValidationResult.UnauthorizedImage, true, true },
+        { LicenseValidationResult.UnauthorizedImage, false, false },
+        { (LicenseValidationResult)99, true, false },
+        { (LicenseValidationResult)99, false, false },
+    };
+
+    [Theory]
+    [MemberData(nameof(PolicyLicenceAnswerTable))]
+    public async Task EvaluateAsync_ShouldGiveTheCapturedLicenceAnswer_ForEveryResultAndGuard(
+        LicenseValidationResult result, bool guardAllows, bool expectedCommit)
+    {
+        var sut = BuildSut(
+            ActiveGate(), StatusOf(result, LicenseFeature.All), GuardThat(guardAllows),
+            Schema(autonomousThreshold: 0.95));
+
+        var decision = await sut.EvaluateAsync(Conversation(), Suggestion(confidence: 0.97), CancellationToken.None);
+
+        decision.ShouldCommit.Should().Be(expectedCommit);
+        decision.Reason.Should().Be(expectedCommit ? null : AutonomousSkipReason.LicenseMissing);
+    }
+
+    [Fact]
+    public void PolicyLicenceAnswerTable_ShouldCoverEveryValidationResult_WhenTheEnumGrows()
+    {
+        var rows = PolicyLicenceAnswerTable.Select(row => ((LicenseValidationResult)row[0], (bool)row[1])).ToHashSet();
+
+        foreach (var result in Enum.GetValues<LicenseValidationResult>())
+            foreach (var allows in new[] { true, false })
+                rows.Should().Contain((result, allows), $"{result} × guard {allows} needs a captured answer");
+    }
+
     // ── Happy path ──────────────────────────────────────────────────────────────
 
     [Fact]
