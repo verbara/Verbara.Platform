@@ -18,6 +18,14 @@ internal sealed class TenantStatusMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
+        // The one route served whatever the tenant's status (ending an impersonation, design D1): read from the
+        // routed endpoint, never matched by path. Neither refused nor used to populate the tenant caches.
+        if (IsServedWhateverTenantStatus(context))
+        {
+            await _next(context);
+            return;
+        }
+
         if (!context.Items.TryGetValue("TenantId", out var tenantIdObj) || tenantIdObj is not TenantId tenantId)
         {
             await _next(context);
@@ -74,6 +82,13 @@ internal sealed class TenantStatusMiddleware
     /// </summary>
     private static bool AnswersWithCode(HttpContext context) =>
         context.GetEndpoint()?.Metadata.GetMetadata<TenantRefusalCodeMetadata>() is not null;
+
+    /// <summary>
+    /// True when the matched endpoint carries <see cref="ServedWhateverTenantStatusMetadata"/>
+    /// (<see cref="ServedWhateverTenantStatusEndpointExtensions.ServedWhateverTenantStatus"/>).
+    /// </summary>
+    private static bool IsServedWhateverTenantStatus(HttpContext context) =>
+        context.GetEndpoint()?.Metadata.GetMetadata<ServedWhateverTenantStatusMetadata>() is not null;
 
     private static async Task PopulateCaches(HttpContext context, Tenant tenant)
     {
