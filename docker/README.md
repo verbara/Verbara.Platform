@@ -49,8 +49,8 @@ docker compose -f docker-compose.verified.yml up -d
 
 ### Why this matters
 
-The licence does not identify the image, so nothing at runtime tells a
-Verbara release from a tampered one. `verbara-verify-image.sh` (or the
+Licences issued since 2026-10-03 do not name the image, so the cosign
+signature and the digest pin are what tie a deployment to a Verbara release. `verbara-verify-image.sh` (or the
 `quickstart` wrapper) checks the cosign signature before the pull, and the
 `@sha256:` pin keeps docker running exactly the bytes you verified.
 

@@ -440,7 +440,7 @@ $ ${EDITOR:-nano} docker/.env.reference-smb
 
 ### 9.3 Instalaciones con licencia Pro
 
-Cada release del api tiene un digest nuevo. Si tu `.lic` autoriza digests (Pro/ADR-0011), pedí la autorización del digest de `ghcr.io/verbara/platform/api:v2.34.0` **antes** de arrancar, y poné ese digest en `IMAGE_DIGEST`. Sin eso falla el binding de digest (`IMAGE_DIGEST mismatch`, ver §1).
+Cada release del api tiene un digest nuevo; poné el de `ghcr.io/verbara/platform/api:v2.34.0` en `IMAGE_DIGEST` (está en las notas de la release). Las licencias emitidas desde el 2026-10-03 no llevan digests de imagen (verbara-meta/PDR-0003), así que actualizar no exige licencia nueva. Si tu `.lic` es anterior y lista digests (Pro/ADR-0011), pedí a Verbara una licencia actual **antes** de arrancar; si no, el api responde `License '…' is not authorised for the running container image.` (ver §1).
 
 ### 9.4 Verificar, construir y arrancar
 
