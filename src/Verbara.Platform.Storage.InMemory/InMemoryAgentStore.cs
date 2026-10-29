@@ -64,7 +64,7 @@ internal sealed class InMemoryAgentStore : IAgentStore
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
 
         // Ordinal order on agent_id: consistent with itself, which is all a keyset walk needs (design D2).
-        var after = afterAgentId?.Value;
+        string? after = afterAgentId is { } afterId ? afterId.Value : null;
         IReadOnlyList<Agent> page = _items.Values
             .Where(a => a.TenantId == tenantId)
             .Where(a => after is null || string.CompareOrdinal(a.AgentId.Value, after) > 0)
