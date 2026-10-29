@@ -59,6 +59,24 @@ public sealed class LicenseGateLicenceStateHttpTests
     }
 
     [Theory]
+    [InlineData(SkillsPath, HttpStatusCode.OK)]
+    [InlineData(RealtimeProfilesPath, HttpStatusCode.NotFound)]
+    public async Task Get_ShouldReachTheHandler_WhenImageIsUnauthorizedForRoutingAndRealtime(string path, HttpStatusCode expected)
+    {
+        using var factory = new LicenceStateFactory(LicenseValidationResult.UnauthorizedImage);
+
+        (await GetAsync(factory, path)).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task Get_ShouldReturn402_WhenImageIsUnauthorizedForTheDialer()
+    {
+        using var factory = new LicenceStateFactory(LicenseValidationResult.UnauthorizedImage);
+
+        (await GetAsync(factory, CampaignsPath)).Should().Be(HttpStatusCode.PaymentRequired);
+    }
+
+    [Theory]
     [InlineData(SkillsPath)]
     [InlineData(RealtimeProfilesPath)]
     [InlineData(CampaignsPath)]

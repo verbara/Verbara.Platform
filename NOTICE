@@ -10,8 +10,15 @@ This product is part of the Verbara open-core ecosystem:
 
 This product runtime-requires Verbara Sdk Pro for production use. Pro
 features are gated by ECDSA-validated license keys (see `Pro.Licensing`).
-A valid Pro license is required to enable multi-tenant isolation,
-advanced analytics, cluster mode, and licensed plan features.
+Without a valid license, Pro endpoints answer HTTP 402: the predictive
+dialer, analytics and call analytics, agent assist, CSAT surveys,
+advanced typification with its AI suggestion, routing skills and
+realtime profiles; the Pro event store records nothing. Once a license
+has expired and its grace period has passed, the dialer, analytics,
+call analytics, agent assist, CSAT, event store and typification
+modules switch off, while routing, realtime, multi-tenancy and
+clustering keep working. Multi-tenancy and clustering are not
+license-gated.
 
 This product includes software developed by various contributors and
 incorporates open-source components. See the respective `.csproj` files

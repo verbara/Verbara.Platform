@@ -36,6 +36,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`Licensing:RevalidationInterval` always keeps periodic licence revalidation on.** A value of zero, a negative or
   infinite value, or one that does not parse now falls back to the 6-hour default, and a value above 24 hours is
   capped at 24 hours, so a licence that runs out while the process is up is seen as expired within a day.
+- **README and NOTICE describe what the licence gates** (verbara-meta/PDR-0003 §E). They no longer say that
+  multi-tenancy and clustering need a licence: neither is licence-gated. They name the Pro endpoints a missing licence
+  closes, and say that once a licence has expired and its grace period has passed, routing, realtime, multi-tenancy
+  and clustering keep working.
 
 ## [2.34.0] - 2026-10-28
 
