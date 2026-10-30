@@ -68,4 +68,88 @@ public sealed class InMemoryQueueStoreTests
 
         found.Should().BeNull();
     }
+
+    private static async Task<InMemoryQueueStore> SeedKeysetStoreAsync()
+    {
+        var store = new InMemoryQueueStore();
+        // Named against the id order, so the page order can only come from the id. "queue-B" sorts first: Ordinal.
+        foreach (var (id, name) in new[]
+                 {
+                     ("queue-d", "w"), ("queue-a", "z"), ("queue-B", "u"), ("queue-c", "x"), ("queue-b", "y"),
+                 })
+        {
+            await store.SaveAsync(MakeQueue(Acme, id, name), CancellationToken.None);
+        }
+
+        // The other tenant's ids interleave with this tenant's, so a missing tenant filter would show.
+        foreach (var id in new[] { "queue-0", "queue-bb", "queue-cc", "queue-z" })
+            await store.SaveAsync(MakeQueue(Beta, id, id), CancellationToken.None);
+
+        return store;
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldReturnThisTenantsQueuesInOrdinalOrder_WhenAfterIsNull()
+    {
+        var store = await SeedKeysetStoreAsync();
+
+        var page = await store.ListPageAfterAsync(Acme, null, 100, CancellationToken.None);
+
+        page.Select(q => q.QueueId.Value).Should().Equal("queue-B", "queue-a", "queue-b", "queue-c", "queue-d");
+        page.Should().OnlyContain(q => q.TenantId == Acme);
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldExcludeTheAfterBound_WhenAfterIsAnExistingQueue()
+    {
+        var store = await SeedKeysetStoreAsync();
+
+        var page = await store.ListPageAfterAsync(Acme, EntityId.From("queue-b"), 100, CancellationToken.None);
+
+        page.Select(q => q.QueueId.Value).Should().Equal("queue-c", "queue-d");
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldStartAfterTheBound_WhenAfterIsNotAQueue()
+    {
+        var store = await SeedKeysetStoreAsync();
+
+        var page = await store.ListPageAfterAsync(Acme, EntityId.From("queue-bb"), 100, CancellationToken.None);
+
+        page.Select(q => q.QueueId.Value).Should().Equal("queue-c", "queue-d");
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldReturnAtMostLimit_WhenMoreQueuesFollow()
+    {
+        var store = await SeedKeysetStoreAsync();
+
+        var first = await store.ListPageAfterAsync(Acme, null, 2, CancellationToken.None);
+        var second = await store.ListPageAfterAsync(Acme, first[^1].QueueId, 2, CancellationToken.None);
+        var third = await store.ListPageAfterAsync(Acme, second[^1].QueueId, 2, CancellationToken.None);
+
+        first.Select(q => q.QueueId.Value).Should().Equal("queue-B", "queue-a");
+        second.Select(q => q.QueueId.Value).Should().Equal("queue-b", "queue-c");
+        third.Select(q => q.QueueId.Value).Should().Equal("queue-d");
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldReturnEmpty_WhenAfterIsTheLastQueue()
+    {
+        var store = await SeedKeysetStoreAsync();
+
+        var page = await store.ListPageAfterAsync(Acme, EntityId.From("queue-d"), 100, CancellationToken.None);
+
+        page.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldThrow_WhenLimitIsNotPositive()
+    {
+        var store = await SeedKeysetStoreAsync();
+
+        var act = () => store.ListPageAfterAsync(Acme, null, 0, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
 }

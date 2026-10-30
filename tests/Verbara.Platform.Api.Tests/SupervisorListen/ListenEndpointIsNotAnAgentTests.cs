@@ -117,6 +117,7 @@ public sealed class ListenEndpointIsNotAnAgentTests
         services.AddSingleton<ISupervisorListenProfileStore>(await ProvisionedProfilesAsync());
         var reconciler = new RealtimeReconciliationService(services.BuildServiceProvider(), new ServiceHeartbeat(),
             Options.Create(new RealtimeOptions { ReconcilerIntervalSeconds = 60 }), new AgentPauseCoordinator(),
+            QueueWrapUpRefresherRig.Build(tenants, Substitute.For<IQueueStore>(), new QueueWrapUpDurationProvider(NullLogger<QueueWrapUpDurationProvider>.Instance)),
             NullLogger<RealtimeReconciliationService>.Instance);
 
         await reconciler.ReconcileAsync(CancellationToken.None);

@@ -13,6 +13,7 @@ using Verbara.Sdk.Pro.Realtime.Decorators;
 using Verbara.Sdk.Pro.Realtime.Storage.Postgres;
 using Verbara.Sdk.Live.Server;
 using Verbara.Sdk.Pro.Cluster.Leadership;
+using Verbara.Sdk.Sessions.Manager;
 
 namespace Verbara.Platform.Api.DependencyInjection;
 
@@ -56,6 +57,13 @@ public static class RealtimeSyncingStoresExtensions
         // membership decorator (queue-members-stay-unpaused-across-reconcile). No external seam.
         services.TryAddSingleton<AgentPauseCoordinator>();
 
+        // The in-memory wrap-up answers, written by the queue decorator and the reconciliation worker.
+        services.TryAddSingleton<QueueWrapUpDurationProvider>();
+        services.TryAddSingleton<QueueWrapUpDurationRefresher>();
+
+        // The session engine asks the same instance; it picks the constructor that takes it when one is registered.
+        services.TryAddSingleton<IWrapUpDurationProvider>(sp => sp.GetRequiredService<QueueWrapUpDurationProvider>());
+
         // Re-key each concrete store as the inner, drop the unkeyed alias, then re-register
         // the unkeyed service as the decorator (which falls back to the inner when realtime
         // is not registered).
@@ -67,7 +75,8 @@ public static class RealtimeSyncingStoresExtensions
             return sync is null
                 ? inner
                 : new RealtimeSyncingQueueStore(
-                    inner, sync, sp.GetRequiredService<ILogger<RealtimeSyncingQueueStore>>());
+                    inner, sync, sp.GetRequiredService<QueueWrapUpDurationProvider>(),
+                    sp.GetRequiredService<ILogger<RealtimeSyncingQueueStore>>());
         });
 
         RekeyInnerFromUnkeyed<IAgentStore>(services, AgentStoreInner);

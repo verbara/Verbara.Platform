@@ -59,6 +59,34 @@ internal sealed class PostgresQueueStore : IQueueStore
         return new PagedResult<Queue>(items, total, query.Page, query.PageSize);
     }
 
+    /// <summary>
+    /// Keyset page on the primary key <c>(tenant_id, queue_id)</c>, never a row offset: names are not unique, and a
+    /// delete between two offset pages would shift a surviving queue out of the walk.
+    /// </summary>
+    public async Task<IReadOnlyList<Queue>> ListPageAfterAsync(
+        TenantId tenantId, EntityId? afterQueueId, int limit, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
+            "required_skills, auto_answer_default, csat_enabled, csat_channel, csat_prompt_id, csat_sampling_rate, " +
+            "created_at, updated_at, created_by, updated_by " +
+            "FROM queue_configs WHERE tenant_id = @TenantId AND (@After IS NULL OR queue_id > @After) " +
+            "ORDER BY queue_id LIMIT @Limit",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("After", NpgsqlDbType.Text)
+                {
+                    Value = afterQueueId is { } after ? after.Value : DBNull.Value,
+                });
+                p.Add(new NpgsqlParameter("Limit", NpgsqlDbType.Integer) { Value = limit });
+            },
+            QueueRow.Map, ct).ConfigureAwait(false);
+        return rows.Select(r => r.ToQueue()).ToList();
+    }
+
     public async Task SaveAsync(Queue queue, CancellationToken ct)
     {
         var slaJson = queue.SlaTargets != null

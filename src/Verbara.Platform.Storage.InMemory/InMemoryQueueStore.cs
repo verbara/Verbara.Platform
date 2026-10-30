@@ -40,6 +40,21 @@ internal sealed class InMemoryQueueStore : IQueueStore
         return Task.FromResult(new PagedResult<Queue>(items, totalCount, query.Page, query.PageSize));
     }
 
+    public Task<IReadOnlyList<Queue>> ListPageAfterAsync(TenantId tenantId, EntityId? afterQueueId, int limit, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        // Ordinal order on queue_id: consistent with itself, which is all a keyset walk needs.
+        string? after = afterQueueId is { } afterId ? afterId.Value : null;
+        IReadOnlyList<Queue> page = _items.Values
+            .Where(q => q.TenantId == tenantId)
+            .Where(q => after is null || string.CompareOrdinal(q.QueueId.Value, after) > 0)
+            .OrderBy(q => q.QueueId.Value, StringComparer.Ordinal)
+            .Take(limit)
+            .ToList();
+        return Task.FromResult(page);
+    }
+
     public Task SaveAsync(Queue queue, CancellationToken ct)
     {
         _items[(queue.TenantId, queue.QueueId)] = queue;

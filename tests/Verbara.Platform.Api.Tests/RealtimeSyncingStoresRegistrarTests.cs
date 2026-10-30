@@ -2,6 +2,7 @@ using Verbara.Platform.Api.DependencyInjection;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Storage.InMemory;
+using Verbara.Sdk.Pro.MultiTenant;
 using Verbara.Sdk.Pro.Realtime;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
@@ -101,6 +102,31 @@ public sealed class RealtimeSyncingStoresRegistrarTests
         await save.WaitAsync(TimeSpan.FromSeconds(5));
         await provider.GetRequiredService<IRealtimeSyncService>().Received(1)
             .SyncAgentPausedAsync("t-reg", agent.AgentId.Value, false, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AddRealtimeSyncingStores_ShouldLeaveASaveToTheNextTick_WhenRealtimeSyncIsNotRegistered()
+    {
+        const string key = "t-reg-sales";
+        var provider = BuildProvider(withRealtime: false);
+        var queues = provider.GetRequiredService<IQueueStore>();
+        var wrapUps = provider.GetRequiredService<QueueWrapUpDurationProvider>();
+        var refresher = provider.GetRequiredService<QueueWrapUpDurationRefresher>();
+        await provider.GetRequiredService<ITenantStore>().UpsertAsync(new Tenant
+        {
+            TenantId = "t-reg", Name = "t-reg", Type = TenantType.Customer, Status = TenantStatus.Active,
+        });
+        await queues.SaveAsync(QueueWrapUpRefresherRig.Queue("t-reg", "q-1", "sales", 12), CancellationToken.None);
+        await refresher.RefreshAsync(CancellationToken.None);
+
+        await queues.SaveAsync(QueueWrapUpRefresherRig.Queue("t-reg", "q-1", "sales", 18), CancellationToken.None);
+
+        wrapUps.GetWrapUpDuration("primary", key).Should().Be(
+            TimeSpan.FromSeconds(12), "with no realtime sync the save applies at the next tick");
+
+        await refresher.RefreshAsync(CancellationToken.None);
+
+        wrapUps.GetWrapUpDuration("primary", key).Should().Be(TimeSpan.FromSeconds(18));
     }
 
     [Fact]

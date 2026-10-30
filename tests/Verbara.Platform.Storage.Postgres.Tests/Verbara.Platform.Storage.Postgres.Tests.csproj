@@ -11,6 +11,7 @@
   <ItemGroup>
     <!-- licensed-agent-metering-follow-ups L16: the same widened-window decorator on both stores. -->
     <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\DeleteAfterFirstPageAgentStore.cs" Link="Stores\DeleteAfterFirstPageAgentStore.cs" />
+    <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\DeleteAfterFirstPageQueueStore.cs" Link="Stores\DeleteAfterFirstPageQueueStore.cs" />
   </ItemGroup>
 
   <ItemGroup>

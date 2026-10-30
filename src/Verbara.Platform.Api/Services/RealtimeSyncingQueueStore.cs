@@ -13,25 +13,30 @@ namespace Verbara.Platform.Api.Services;
 /// storage seam. A <see cref="SaveAsync"/> upserts the Asterisk queue row; a <see cref="DeleteAsync"/>
 /// removes it (resolving the queue name from the inner store BEFORE the delete). Every sync is
 /// best-effort: a throw is swallowed + logged (EventId 4130) so the store write still succeeds —
-/// the <see cref="RealtimeReconciliationService"/> re-converges any missed upsert.
+/// the <see cref="RealtimeReconciliationService"/> re-converges any missed upsert. A save also hands
+/// the wrap-up to <see cref="QueueWrapUpDurationProvider"/> before the sync, so a failed sync still applies it.
 /// </summary>
 internal sealed class RealtimeSyncingQueueStore : IQueueStore
 {
     private readonly IQueueStore _inner;
     private readonly IRealtimeSyncService _sync;
+    private readonly QueueWrapUpDurationProvider _wrapUps;
     private readonly ILogger<RealtimeSyncingQueueStore> _logger;
 
     public RealtimeSyncingQueueStore(
         IQueueStore inner,
         IRealtimeSyncService sync,
+        QueueWrapUpDurationProvider wrapUps,
         ILogger<RealtimeSyncingQueueStore> logger)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentNullException.ThrowIfNull(sync);
+        ArgumentNullException.ThrowIfNull(wrapUps);
         ArgumentNullException.ThrowIfNull(logger);
 
         _inner = inner;
         _sync = sync;
+        _wrapUps = wrapUps;
         _logger = logger;
     }
 
@@ -44,11 +49,18 @@ internal sealed class RealtimeSyncingQueueStore : IQueueStore
     public Task<PagedResult<Queue>> ListAsync(TenantId tenantId, PagedQuery query, CancellationToken ct)
         => _inner.ListAsync(tenantId, query, ct);
 
+    public Task<IReadOnlyList<Queue>> ListPageAfterAsync(TenantId tenantId, EntityId? afterQueueId, int limit, CancellationToken ct)
+        => _inner.ListPageAfterAsync(tenantId, afterQueueId, limit, ct);
+
     public async Task SaveAsync(Queue queue, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(queue);
 
         await _inner.SaveAsync(queue, ct).ConfigureAwait(false);
+
+        _wrapUps.Update(
+            QueueWrapUpDurationProvider.KeyOf(queue.TenantId, queue.Name),
+            TimeSpan.FromSeconds(queue.WrapUp.DefaultWrapUpSeconds));
 
         try
         {

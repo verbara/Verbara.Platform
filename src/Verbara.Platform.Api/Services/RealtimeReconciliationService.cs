@@ -56,6 +56,12 @@ namespace Verbara.Platform.Api.Services;
 /// <see cref="IServiceHeartbeat"/> + <c>StopHost</c> fatal behavior.
 /// </para>
 /// <para>
+/// <b>Queue wrap-ups.</b> This worker also reloads <see cref="QueueWrapUpDurationProvider"/>: once right after
+/// boot, before the stagger, and at the top of each tick. The reload sits outside the resilience policy and
+/// outside <see cref="ReconcileAsync"/>, so an open circuit or a missing <see cref="IRealtimeSyncService"/> does
+/// not stop it. A failed reload logs a Warning and keeps the last values.
+/// </para>
+/// <para>
 /// <b>Meter</b>: <c>Verbara.Platform.Realtime.Reconciliation</c> exposes
 /// <c>realtime.reconciliation.{tenants,memberships,sync_failures}</c> so
 /// Grafana can show drift activity and silent-failure rate.
@@ -74,6 +80,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
     private readonly TimeSpan _interval;
     private readonly ResiliencePolicy _policy;
     private readonly AgentPauseCoordinator _pauseCoordinator;
+    private readonly QueueWrapUpDurationRefresher _wrapUps;
     private readonly ILogger<RealtimeReconciliationService> _logger;
 
     private readonly Meter _meter;
@@ -86,6 +93,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         IServiceHeartbeat heartbeat,
         Microsoft.Extensions.Options.IOptions<RealtimeOptions> options,
         AgentPauseCoordinator pauseCoordinator,
+        QueueWrapUpDurationRefresher wrapUps,
         ILogger<RealtimeReconciliationService> logger,
         [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
     {
@@ -93,6 +101,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         ArgumentNullException.ThrowIfNull(heartbeat);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(pauseCoordinator);
+        ArgumentNullException.ThrowIfNull(wrapUps);
         ArgumentNullException.ThrowIfNull(logger);
 
         _services = services;
@@ -101,6 +110,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         _interval = TimeSpan.FromSeconds(intervalSeconds);
         _policy = policy ?? ResiliencePolicy.NoOp;
         _pauseCoordinator = pauseCoordinator;
+        _wrapUps = wrapUps;
         _logger = logger;
 
         _meter = new Meter(MeterName);
@@ -116,6 +126,10 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
     {
         try
         {
+            await Task.Yield();
+
+            await RefreshWrapUpsAsync(stoppingToken);
+
             // Stagger by 10 s after boot so the foreground sync paths get a
             // chance to land first (QueueMembersEndpoints + AdminEndpoints fire
             // synchronously on every membership write).
@@ -126,6 +140,8 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
                 _heartbeat.RecordTick(nameof(RealtimeReconciliationService), _interval);
+
+                await RefreshWrapUpsAsync(stoppingToken);
 
                 try
                 {
@@ -160,6 +176,22 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         {
             LogWorkerCrash(nameof(RealtimeReconciliationService), fatalEx.Message, fatalEx);
             throw;
+        }
+    }
+
+    private async Task RefreshWrapUpsAsync(CancellationToken ct)
+    {
+        try
+        {
+            await _wrapUps.RefreshAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogWrapUpRefreshFailed(ex);
         }
     }
 
@@ -315,6 +347,10 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Realtime reconciliation could not converge the paused state of agent {AgentId} in tenant {TenantId}.")]
     private partial void LogConvergeFailure(string tenantId, string agentId, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[QUEUE-WRAPUP] Refreshing the queue wrap-ups failed; the last values stay until the next tick.")]
+    private partial void LogWrapUpRefreshFailed(Exception ex);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Realtime reconciliation cycle failed.")]
     private partial void LogReconcileCycleError(Exception ex);
