@@ -6,26 +6,23 @@
 #   - realtime  — IL (SignalR can't be AOT). Non-crown-jewel Pro plumbing only (guarded).
 #   - renderer  — IL (QuestPDF/ScottPlot). No Pro deps.
 #   - mail      — IL (MailKit/Graph). No Pro deps.
-# All four are pushed PUBLIC + cosign-signed. The api AND realtime digests BOTH feed the
-# Layer-C authorized-digests allow-list: verbara-website's data/authorized-digests.json
-# carries ONE `current[]` entry PER IMAGE per version — an api+realtime PAIR for every
-# release since v2.5.1 (v2.4.2/v2.4.3 were the last api-only entries). renderer/mail carry
-# no Pro licensing code and are not image-bound. The "Authorized-digests reminder" step
-# below therefore runs on BOTH the api and the realtime matrix leg, each printing its own
-# digest. Recording only one breaks the since-v2.5.1 pair convention, drops the realtime
-# digest from every newly issued AuthorizedImageDigests claim, and hides the realtime image
-# from digest-reconciliation.yml's drift sweep. NOTE the runtime Layer-C check only fires
-# where a digest is readable: the Helm chart injects IMAGE_DIGEST on the api Deployment ONLY
-# (realtime is digest-PINNED, not digest-BOUND), so ContainerImageDigest.ReadFromEnvironment()
-# returns null in realtime and LicenseValidator takes its documented permissive path.
+# All four are pushed PUBLIC + cosign-signed. The api AND realtime digests BOTH go into the
+# release ledger: verbara-website's data/authorized-digests.json carries ONE `current[]`
+# entry PER IMAGE per version — an api+realtime PAIR for every release since v2.5.1
+# (v2.4.2/v2.4.3 were the last api-only entries). renderer/mail carry no Pro licensing code
+# and get no entry. The "Authorized-digests reminder" step below therefore runs on BOTH the
+# api and the realtime matrix leg, each printing its own digest. Recording only one breaks
+# the since-v2.5.1 pair convention and hides that image from digest-reconciliation.yml's
+# drift sweep. The ledger is NOT embedded in licences: no licence issued since 2026-10-03
+# carries image digests (verbara-meta/PDR-0003, amendment of 2026-10-03), so the ledger
+# serves the drift sweep and the chart's digest pins.
 #
 # Single-pass build (since v2.1.0-rc4): an OCI image cannot self-reference its own
-# manifest digest, so digest injection is operator-side (Pro/ADR-0011 Status update 2026-05-10).
-# Layer-B verification (cosign signature): docker/verbara-verify-image.sh
-# Layer-C verification (Pro reads IMAGE_DIGEST env at runtime):
-#   Verbara.Sdk.Pro.Licensing.ContainerImageDigest.ReadFromEnvironment() -> compares against
-#   LicenseKey.AuthorizedImageDigests. Operator wiring sourced from
-#   verbara-website/data/authorized-digests.json (issuer Worker reads it when minting licenses).
+# manifest digest, so the digest is supplied operator-side (Pro/ADR-0011 Status update
+# 2026-05-10): Helm `<image>.image.digest` pins the pull, and the api Deployment also
+# exports it as IMAGE_DIGEST. Image integrity is the cosign signature plus that pin;
+# verification is docker/verbara-verify-image.sh, the cosign CLI, or the chart's optional
+# Kyverno admission policy (Kyverno >= 1.11).
 
 name: Release
 
@@ -79,8 +76,8 @@ jobs:
         # steps are skipped — the registry tag was produced via an alternate
         # path (e.g. direct `docker buildx push` from a maintainer machine,
         # documented in ADR-0024 §v2.4.2 anomaly) and re-running this workflow
-        # would overwrite the existing image digest, breaking Layer C image-
-        # binding for every customer that already pulled the original digest.
+        # would overwrite the existing image digest, breaking the digest pin of
+        # every customer that already pulled the original digest.
         #
         # To use:
         #   git tag -a v2.4.2 <commit> -m "RETROACTIVE-TAG: rationale + digests"
@@ -391,13 +388,13 @@ jobs:
           path: digests/${{ matrix.name }}.txt
           retention-days: 1
 
-      # Fires on BOTH image-bound legs (api + realtime). verbara-website's
+      # Fires on BOTH ledger legs (api + realtime). verbara-website's
       # data/authorized-digests.json stores one `current[]` entry PER IMAGE per version, so a
       # release needs TWO entries; before v2.22.0 this step ran only on `api` and the operator
       # had to hand-dig realtime's digest out of the other matrix job's log every release.
       # Each leg prints ONLY its own digest — the image name is on every line, and the
       # copy-paste block below is echoed into the run's Step Summary so both legs land on one
-      # page instead of two logs. renderer/mail are not image-bound (no Pro licensing code).
+      # page instead of two logs. renderer/mail get no ledger entry (no Pro licensing code).
       - name: Authorized-digests reminder (api + realtime)
         # Informational only — must never red a release whose image is already pushed+signed.
         continue-on-error: true
@@ -412,7 +409,7 @@ jobs:
           if [ "${IMAGE_KIND}" = "api" ]; then OTHER_KIND="realtime"; else OTHER_KIND="api"; fi
           # `released_at` is derived from the TAG, not from wall-clock, so both matrix legs
           # emit the SAME timestamp — the two entries for one version must not disagree
-          # (the issuer sorts `current` by released_at DESC). NOTE this is the tag/commit
+          # (the ledger keeps `current` sorted by released_at DESC). NOTE this is the tag/commit
           # time, NOT the run-completion time every pre-v2.22.0 entry recorded (a LIGHTWEIGHT
           # tag yields the tagged commit's date, which can be hours earlier) — see the
           # runbook's Step Summary note before pasting. Fallback keeps this
@@ -422,7 +419,7 @@ jobs:
             "refs/tags/${GITHUB_REF_NAME}" 2>/dev/null || true)"
           if [ -z "${RELEASED_AT}" ]; then RELEASED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; fi
 
-          echo "[${IMAGE_KIND}] Next step — Layer-C image-binding for the '${IMAGE_KIND}' image:"
+          echo "[${IMAGE_KIND}] Next step — release-ledger entry for the '${IMAGE_KIND}' image:"
           echo "[${IMAGE_KIND}] append ONE entry to verbara-website data/authorized-digests.json 'current'."
           echo "[${IMAGE_KIND}] This leg covers the '${IMAGE_KIND}' entry ONLY. The '${OTHER_KIND}' leg of this"
           echo "[${IMAGE_KIND}] same matrix prints its own, DIFFERENT digest — this release needs BOTH."
@@ -567,7 +564,7 @@ jobs:
             printf '      %s/verbara/platform/api:%s\n\n' "$REGISTRY" "$TAG"
             printf 'The `api` + `realtime` pair is also published in '
             printf '[verbara-website `data/authorized-digests.json`](https://github.com/verbara/verbara-website/blob/main/data/authorized-digests.json) '
-            printf '(Pro license image binding, ADR-0023 Layer C).\n'
+            printf '(the release ledger; licences carry no image digests).\n'
           } >> "$NOTES_FILE"
 
           # Claim the `Latest` badge only when this really is the highest version

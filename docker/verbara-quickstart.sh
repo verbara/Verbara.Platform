@@ -1,12 +1,11 @@
 #!/bin/sh
 # verbara-quickstart.sh — one-command verified Verbara Platform deploy for
-# docker-compose customers (Pro v2.3.x Layer B convenience wrapper, Pro/ADR-0011).
+# docker-compose customers (cosign pre-flight convenience wrapper, Pro/ADR-0011).
 #
 # Workflow:
 #   1. Look up the requested Platform version's manifest-list digest from
-#      verbara.io/data/authorized-digests.json (the same registry the
-#      verbara-website issuer Worker reads when embedding AuthorizedImageDigests
-#      into newly issued licenses).
+#      verbara.io/data/authorized-digests.json (the release ledger; licences
+#      issued since 2026-10-03 carry no image digests, verbara-meta/PDR-0003).
 #   2. Pre-flight verify the cosign signature on that digest.
 #   3. Generate a docker-compose.verified.yml with the resolved digests
 #      substituted.
@@ -49,8 +48,8 @@ REGISTRY_URL="https://verbara.io/data/authorized-digests.json"
 echo "Fetching authorized digests from ${REGISTRY_URL} ..."
 REGISTRY_JSON="$(curl -fsS "$REGISTRY_URL")"
 
-# Find the entry matching the requested version. For now the registry only
-# carries the API image (web image-binding is a v2.4 follow-up — see Pro/ADR-0011).
+# Find the entry matching the requested version. The ledger carries api and
+# realtime entries (no web entry yet — see Pro/ADR-0011).
 API_DIGEST="$(echo "$REGISTRY_JSON" \
   | jq -r --arg v "$VERSION" '.current[] | select(.platform_version == $v) | .manifest_list_digest' \
   | head -n 1)"
@@ -72,9 +71,8 @@ cosign verify \
   --insecure-ignore-tlog \
   "$API_PINNED_REF"
 
-# TODO(web-image-binding): the web image is not yet in authorized-digests.json
-# (v2.3.x ships API-only image-binding). Until v2.4 adds web-image-binding,
-# the web service is left tag-pinned in the generated compose and is NOT
+# TODO(web-digest-pin): the web image is not in authorized-digests.json.
+# Until it is, the web service is left tag-pinned in the generated compose and is NOT
 # verified. Operators who want to verify the web image manually can run
 # `./verbara-verify-image.sh ghcr.io/verbara/platform/web:${VERSION}` before
 # `docker compose up`.
@@ -85,11 +83,11 @@ echo "Generating ${GENERATED} ..."
 # Substitute the resolved digest. Use a sed alternative that handles the `/`
 # in the digest cleanly by anchoring on the literal sentinel. THREE substitutions:
 #   1. image: line for the API service (digest-pinned image reference)
-#   2. IMAGE_DIGEST env var (Layer C in-process check, Pro/ADR-0011 Pro v2.3.x;
+#   2. IMAGE_DIGEST env var (the running image's digest, for Pro, Pro/ADR-0011;
 #      Pro can't self-discover the running image's digest from inside the
 #      container — operator-side env var is the canonical wiring)
 #   3. image: line for the Web service (still tag-pinned per
-#      TODO(web-image-binding) above; will become digest-pinned in v2.4)
+#      TODO(web-digest-pin) above)
 sed \
   -e "s|ghcr.io/verbara/platform/api@sha256:REPLACE_WITH_MANIFEST_LIST_DIGEST|${API_PINNED_REF}|g" \
   -e "s|IMAGE_DIGEST: sha256:REPLACE_WITH_MANIFEST_LIST_DIGEST|IMAGE_DIGEST: ${API_DIGEST}|g" \

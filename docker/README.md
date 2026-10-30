@@ -8,11 +8,12 @@ and observability sidecars (`docker-compose.observability.yml`).
 
 ## Verifying image signature (Docker Compose)
 
-Pro v2.3.x ships image-binding (Pro/ADR-0011)
-that detects unauthorised Verbara Platform images at runtime via Layer C
-(in-process digest check). The docker-compose tooling here adds Layer B
-(pre-flight cosign signature verification) so customers catch a tampered
-image at pull time, before any container code runs.
+Image integrity rests on the cosign signature plus the digest pin
+(Pro/ADR-0011): licences issued since 2026-10-03 carry no image digests
+(verbara-meta/PDR-0003, amendment of 2026-10-03). The docker-compose tooling
+here verifies the cosign signature before the pull and writes a
+digest-pinned compose file, so customers catch a tampered image before any
+container code runs.
 
 ### Quick path: `verbara-quickstart.sh`
 
@@ -48,11 +49,10 @@ docker compose -f docker-compose.verified.yml up -d
 
 ### Why this matters
 
-Without running `verbara-verify-image.sh` (or the `quickstart` wrapper),
-docker-compose customers get only the **in-process Layer-C check** —
-which is still a real defense (Pro rejects unauthorised images at
-startup) but does NOT detect a tampered image being **pulled** in the
-first place. Pre-flight verification closes that gap.
+Licences issued since 2026-10-03 do not name the image, so the cosign
+signature and the digest pin are what tie a deployment to a Verbara release. `verbara-verify-image.sh` (or the
+`quickstart` wrapper) checks the cosign signature before the pull, and the
+`@sha256:` pin keeps docker running exactly the bytes you verified.
 
 The Kyverno admission policy that K8s customers get via the Helm chart
 (`infra/k8s/helm/platform/templates/cosign-admission-policy.yaml`)
@@ -60,13 +60,17 @@ enforces the equivalent guarantee — a tampered image is rejected at Pod
 admission, before kubelet pulls the layers. This script provides the
 docker-compose equivalent.
 
-### Defense-in-depth (Pro/ADR-0011)
+### Image integrity controls (Pro/ADR-0011)
 
-| Layer | Where it runs | What it catches |
-|-------|---------------|-----------------|
-| F (ECDSA license) | Pro v2.2.0-pro `LicenseTrustAnchor` | Forged license payloads |
-| **B (cosign signature)** | `verbara-verify-image.sh` (or Kyverno on K8s) | Unsigned/tampered images at pull/admission time |
-| **C (in-process digest check)** | `Verbara.Sdk.Pro.Licensing.ContainerImageDigest` | Authorised-image mismatch at Pro startup |
+| Control | Where it runs | What it catches |
+|---------|---------------|-----------------|
+| Cosign signature | `verbara-verify-image.sh` (or the Helm chart's optional Kyverno policy on K8s) | Unsigned or tampered images, before the pull or at admission |
+| Digest pin | `image: ...@sha256:` in the compose file | A tag that was moved to different content |
+| Licence signature | Verbara Pro licensing, inside the api | A licence file that Verbara did not issue |
+
+A licence issued before 2026-10-03 may still list image digests; the api
+keeps checking such a licence against the running image (`IMAGE_DIGEST`), so
+with one of those licences an upgrade needs a current licence from Verbara.
 
 ### Files
 

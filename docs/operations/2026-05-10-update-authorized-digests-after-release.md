@@ -8,6 +8,18 @@
 - [Verbara.Platform `.github/workflows/release.yml`](../../.github/workflows/release.yml)
 - [Verbara website registry: `data/authorized-digests.json`](https://github.com/verbara/verbara-website) (private)
 
+> **Status 2026-10-29 — the ledger is no longer embedded in licences.** Since
+> 2026-10-03 no licence carries `AuthorizedImageDigests`: the free Developer
+> licence (Tier 0.5) omits the field (verbara-website #122) and Tier 2/5
+> issuance omits it too (verbara-meta/PDR-0003, amendment of 2026-10-03; Pro
+> ADR-0011 status note, Verbara.Sdk.Pro #277). `data/authorized-digests.json`
+> stays the **release ledger**: the daily drift sweep
+> (`.github/workflows/digest-reconciliation.yml` and the verbara-website cron)
+> re-verifies every entry, and operators pin those digests in the Helm chart
+> (`api.image.digest` / `realtime.image.digest`) and the compose files. Keep
+> running this runbook after every release; the steps below that checked the
+> digests inside an issued `.lic` were removed.
+
 ## When to run this
 
 After **every** Verbara.Platform tagged release.
@@ -15,8 +27,8 @@ After **every** Verbara.Platform tagged release.
 > **Stop condition — do not run this while that tag's Release run is not green.** If the
 > release's Release workflow run shows any `Build, push, and sign` job as failed, or its
 > `Post-release functional smoke` job as failed **or skipped**, do **not** register the
-> `api` + `realtime` digests: registering binds every newly issued license's
-> `AuthorizedImageDigests` claim to an unverified image set (Pro/ADR-0011 Layer C). A
+> `api` + `realtime` digests: registering records an unverified image set as a Verbara
+> release, and operators pin what the ledger lists. A
 > skipped smoke is not a pass: when one image fails the provenance gate before its push,
 > the smoke is skipped while the passing `api` and `realtime` legs still print their
 > digest blocks. Re-run or fix the release first; register only once every release job
@@ -27,29 +39,21 @@ After **every** Verbara.Platform tagged release.
 > **TWO entries per release — `api` AND `realtime`.**
 > `data/authorized-digests.json` stores **one `current[]` entry per image per
 > version**, and every release since **v2.5.1** is an `api` + `realtime` **pair**
-> (v2.4.2/v2.4.3 were the last api-only entries). Record both: the realtime digest
-> lands in every newly issued license's `AuthorizedImageDigests` claim, keeps
-> `.github/workflows/digest-reconciliation.yml`'s drift sweep covering the realtime
-> image, and keeps the allow-list forward-compatible.
+> (v2.4.2/v2.4.3 were the last api-only entries). Record both: the realtime entry
+> keeps `.github/workflows/digest-reconciliation.yml`'s drift sweep covering the
+> realtime image, and it is the published digest operators pin in
+> `realtime.image.digest`.
 >
-> **What recording both does NOT do today: gate the realtime pod.** The Helm chart
-> injects `IMAGE_DIGEST` on the **api** Deployment only; `realtime-deployment.yaml`
-> uses `realtime.image.digest` for kubelet pinning (Layer B) and sets no
-> `IMAGE_DIGEST`, and no image writes the `/etc/verbara-image-digest` sentinel — so
-> `ContainerImageDigest.ReadFromEnvironment()` returns null inside realtime and
-> `LicenseValidator` takes its documented permissive path. Layer C is api-only at
-> runtime today; the realtime entry is allow-list hygiene and future-proofing.
->
-> `renderer` and `mail` carry no Pro licensing code and are **not** image-bound —
+> `renderer` and `mail` carry no Pro licensing code and get no ledger entry —
 > do not add entries for them.
 
 `.github/workflows/release.yml` builds a 4-image matrix and its
-"Authorized-digests reminder (api + realtime)" step fires on **both** image-bound
+"Authorized-digests reminder (api + realtime)" step fires on **both** ledger
 legs. Each leg prefixes every line with its own image so the two digests can
 never be confused:
 
 ```
-[api] Next step — Layer-C image-binding for the 'api' image:
+[api] Next step — release-ledger entry for the 'api' image:
 [api] This leg covers the 'api' entry ONLY. The 'realtime' leg of this
 [api] same matrix prints its own, DIFFERENT digest — this release needs BOTH.
 [api]   platform_version     = vX.Y.Z
@@ -70,22 +74,15 @@ tag is *lightweight* (e.g. v2.20.0, v2.21.2) `%(creatordate)` is the tagged comm
 date, which can be hours earlier than the publish. Before pasting, confirm the value
 still sorts AFTER the previous release's `released_at`; if the tag was cut materially
 earlier than it was pushed, overwrite it on BOTH entries with the run's completion time.
-`current` is sorted by `released_at` DESC and truncated at `MAX_EMBEDDED_DIGESTS`, so an
-artificially early stamp can evict the newest digest from freshly issued licenses.
+`current` is kept sorted by `released_at` DESC, so an artificially early stamp
+misorders the ledger.
 
-Until **both** entries land in `verbara-website` and the Worker is redeployed,
-**newly issued Pro licenses will NOT include the new image digests**, which
-means the api image is NOT covered by those licenses. Two outcomes, depending on the
-operator's posture: an api pod deployed WITHOUT `api.image.digest` has no readable
-digest, so `ContainerImageDigest.ReadFromEnvironment()` returns null and validation
-falls through permissively; an api pod deployed digest-pinned (the recommended Layer-B
-posture, which also injects `IMAGE_DIGEST`) has a readable digest that is absent from
-the license's non-empty allow-list, and `LicenseValidator` returns **`UnauthorizedImage`**
-— the customer is BLOCKED, not merely unguarded. Realtime is unaffected either way (no
-digest is readable there). Layer B (cosign admission policy) still works because it
-verifies the signature directly, not the license.
+Until **both** entries land in `verbara-website`, the drift sweep does not cover
+the new images and the ledger does not list the digests operators are told to pin.
+Licences are unaffected: none carries image digests, so no licence has to be
+reissued for a new release.
 
-Run this runbook within 24h of every release to keep the issuer in sync.
+Run this runbook within 24h of every release to keep the ledger in sync.
 
 ## Step 1 — Capture BOTH manifest-list digests (`api` + `realtime`)
 
@@ -121,7 +118,7 @@ prevent.
 
 Clone `github.com/verbara/verbara-website` and edit
 `data/authorized-digests.json`. Append **two** objects to the `current`
-array — one per image-bound image, sharing the same `platform_version` and
+array — one per ledger image (api, realtime), sharing the same `platform_version` and
 `released_at`:
 
 ```diff
@@ -150,8 +147,7 @@ Validation rules enforced by the schema (see
 
 - `manifest_list_digest` MUST match `sha256:<64 lowercase hex>` — the exact shape
   `verbara-website/scripts/validate-authorized-digests.mjs` enforces (`DIGEST_RE`,
-  `/^sha256:[0-9a-f]{64}$/`) and the shape Pro v2.3.x's `LicenseReader.Load`
-  parse-time validator accepts (a malformed digest raises `LicenseException`)
+  `/^sha256:[0-9a-f]{64}$/`)
 - `image_ref` MUST be the `ghcr.io/verbara/platform/<api|realtime>:vX.Y.Z` form (NOT
   `@sha256:...` form — operators read this as a human-friendly reference,
   the digest is the load-bearing field)
@@ -163,14 +159,10 @@ Before opening the PR, run the repo's structural guard:
 npm run validate:digests   # scripts/validate-authorized-digests.mjs
 ```
 
-**Rotation arithmetic — count ENTRIES, not releases.** The Worker embeds the
-**last 6 `current` entries** sorted by `released_at` DESC
-(`MAX_EMBEDDED_DIGESTS` in `functions/api/developer-license/authorized-digests.ts`),
-per the Pro/ADR-0011 § "Issuer rotation cadence". Because each release contributes a
-**pair**, 6 entries is **3 releases** of headroom, not 6. After 3 future releases the
-older entries become eligible to move to `deprecated` — a separate operator decision,
-not required for each release. Always move a version's `api` and `realtime` entries
-**together**; splitting a pair authorizes half a deployment.
+**Moving entries to `deprecated`** is a separate operator decision, not required for
+each release; nothing reads a fixed number of `current` entries any more. Always move a
+version's `api` and `realtime` entries **together**; splitting a pair leaves half a
+deployment out of `current`.
 
 ## Step 3 — Merge the PR + redeploy the Worker
 
@@ -183,29 +175,14 @@ cd /path/to/verbara-website
 npm run deploy
 ```
 
-Verify the deploy:
+The Worker bundles the ledger for its daily drift-detection cron, so the
+redeploy is what puts the new pair under that sweep.
 
-```sh
-curl https://verbara.io/api/developer-license/probe
-# Should respond 200 with the deploy timestamp post-merge.
-```
+Before deploying, confirm the PR added **both** entries (`api` and
+`realtime`, same `platform_version`, different digests). If only one is
+there, the pair was recorded incomplete — go back to Step 2.
 
-Then issue a fresh test license through the public form and confirm the
-returned `.lic` file contains **both** new digests in `AuthorizedImageDigests`:
-
-```sh
-# Decode the .lic JSON payload (it's base64-encoded JSON):
-jq -r '.payload' < developer.lic | base64 -d | jq '.AuthorizedImageDigests'
-# The claim is a flat array of bare digest strings (no image labels). Expect BOTH
-# of this release's digests to be present, most recent first:
-#   ["sha256:abcd...", "sha256:ef01...", "sha256:older...", ...]
-#      ^ api            ^ realtime
-```
-
-If only one of the two shows up, the pair was recorded incomplete — go back to
-Step 2 before deploying.
-
-## Step 4 — Smoke-test the new images with the fresh license
+## Step 4 — Smoke-test the new images with a current license
 
 ```sh
 for img in api realtime; do
@@ -219,25 +196,22 @@ for img in api realtime; do
     "ghcr.io/verbara/platform/${img}:vX.Y.Z"
 done
 
-# Run the api image with the fresh license + verify Pro features unlock
+# Run the api image with a current license + verify Pro features unlock
 docker run --rm \
   -e "VERBARA_LICENSE_PATH=/etc/verbara/developer.lic" \
   -v /path/to/developer.lic:/etc/verbara/developer.lic:ro \
   ghcr.io/verbara/platform/api:vX.Y.Z
 ```
 
-Confirm the OTel meter `Verbara.Sdk.Pro.Licensing.Guard` is NOT emitting
-`verbara.licensing.image_unauthorized` events (Layer C check passes
-because the new digest is in the license's allow-list). Repeat against the
-`realtime` image if the deployment pins it by digest
-(`realtime.image.digest` in `infra/k8s/helm/platform/values.yaml`).
+Confirm the Pro endpoints answer with the licence loaded (no 402) and the
+signatures verified for both images.
 
 ## Future automation (not in v2.3.x scope)
 
 The minimum-viable flow is the manual PR + merge above. Future automation
 is tracked separately:
 
-- Since **v2.22.0**, `release.yml`'s reminder step fires on both image-bound
+- Since **v2.22.0**, `release.yml`'s reminder step fires on both the api and the realtime
   matrix legs and writes a paste-ready JSON block per image into the run's
   Step Summary — the manual transcription is down to a copy/paste of two
   blocks off one page. The remaining automation would be to post the
@@ -249,12 +223,10 @@ is tracked separately:
   HEADs each `image_ref` in `current` to confirm the registry digest
   still matches the recorded `manifest_list_digest`. Note it can only detect
   drift in entries that EXIST — a missing `realtime` entry is invisible to it.
-  If the maintainer forgets to run this runbook, the cron emails
-  `security@verbara.io` on the next drift sweep — but the issuer Worker keeps
-  issuing licenses with stale digests until the runbook is run.
+  If the maintainer forgets to run this runbook, the new release's images
+  stay outside the sweep until the runbook is run.
 
-For a customer who upgrades past the rotation window (6 `current` entries =
-**3 releases**, since each release contributes an api+realtime pair) without
-re-fetching their license, see the Pro/ADR-0011 § "Issuer rotation cadence"
-discussion of the `/api/developer-license/refresh` endpoint (TBD; not
-implemented yet).
+A customer holding a licence issued before 2026-10-03 may have image digests
+in it; such a licence keeps being checked against the running api image, so
+that customer needs a current licence from Verbara to upgrade. Licences issued
+since carry no digests and need nothing on upgrade.

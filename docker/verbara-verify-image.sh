@@ -4,13 +4,12 @@
 # Verifies that an OCI image was signed by the Verbara cosign keypair before the
 # operator runs `docker compose up`. This is the docker-compose equivalent of the
 # Kyverno admission policy shipped in infra/k8s/helm/platform/templates/cosign-
-# admission-policy.yaml — Layer B of the Pro v2.3.x F+B+C defense stack
-# (Pro/ADR-0011).
+# admission-policy.yaml (Pro/ADR-0011).
 #
-# Layer C (the in-process digest check inside Verbara.Sdk.Pro.Licensing) catches
-# the same class of tampering at Pro startup. Running this script before
-# `docker compose up` closes the gap that Pro cannot — namely, detecting a
-# tampered image at pull time, before any code from it executes.
+# Licences issued since 2026-10-03 carry no image digests (verbara-meta/PDR-0003),
+# so image integrity rests on the cosign signature plus the digest pin. Running
+# this script before `docker compose up` detects an unsigned or tampered image
+# at pull time, before any code from it executes.
 #
 # Usage:
 #   ./verbara-verify-image.sh ghcr.io/verbara/platform/api:v2.0.1
@@ -20,9 +19,9 @@
 #   - docker buildx (ships with Docker Engine 20.10+ and Docker Desktop 4.0+)
 #
 # Exits non-zero on any verification failure. Stdout reports the resolved
-# manifest-list digest so the operator can cross-check against the
-# AuthorizedImageDigests claim of their license file (the same digest that the
-# Verbara website issuer Worker embeds — see docs/operations/
+# manifest-list digest so the operator can pin it (`image: ...@sha256:` and
+# IMAGE_DIGEST) and cross-check it against the release notes or the release
+# ledger verbara-website/data/authorized-digests.json (see docs/operations/
 # 2026-05-10-update-authorized-digests-after-release.md).
 
 set -e
@@ -77,6 +76,6 @@ echo ""
 echo "Signature valid. Safe to deploy."
 echo "Manifest-list digest: ${DIGEST}"
 echo ""
-echo "Cross-check: this digest should appear in your license's"
-echo "AuthorizedImageDigests claim. Decode with:"
-echo "  jq -r '.payload' < your.lic | base64 -d | jq '.AuthorizedImageDigests'"
+echo "Cross-check: this digest should match the one in the release notes"
+echo "(or in https://verbara.io/data/authorized-digests.json). Pin it in your"
+echo "compose file as image: ...@${DIGEST} and as IMAGE_DIGEST."

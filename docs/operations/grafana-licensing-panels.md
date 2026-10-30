@@ -16,7 +16,7 @@ Pro Licensing exposes three instruments through the `Verbara.Sdk.Pro.Licensing.G
 | Pro instrument | Prometheus metric | Type | Tags | Purpose |
 |---|---|---|---|---|
 | `license.guard.blocked` | `license_guard_blocked_total` | Counter | `feature`, `reason` | Each `LicenseGuard.CanExecute(...)` call that returns Allowed=false |
-| `license.image_unauthorized` | `license_image_unauthorized_total` | Counter | `running_digest` (truncated to 16 chars), `authorized_count` | Image-digest mismatch detected by `LicenseValidator.Validate` (Pro/ADR-0011 Layer C breach) |
+| `license.image_unauthorized` | `license_image_unauthorized_total` | Counter | `running_digest` (truncated to 16 chars), `authorized_count` | The loaded licence lists image digests and the running api image is not among them (`LicenseValidator.Validate`, Pro/ADR-0011). Only a licence issued before 2026-10-03 lists digests |
 | `license.guard.grace_remaining_seconds` | `license_guard_grace_remaining_seconds` | Observable Gauge | `feature` | Seconds remaining in the configured grace window per feature |
 
 The dashboard ALSO uses:
@@ -33,7 +33,7 @@ The dashboard ships with 9 panels organized in 4 visual bands:
 
 ### Top row — single-value health indicators (24h windows)
 
-1. **License image-unauthorized count (24h)** — non-zero = Pro/ADR-0011 Layer C breach detected (image digest mismatch). Stat panel; green at 0, red ≥ 1.
+1. **License image-unauthorized count (24h)** — non-zero = the loaded licence lists image digests and the running api image is not among them (Pro/ADR-0011). Only a licence issued before 2026-10-03 lists digests; licences issued since list none (verbara-meta/PDR-0003), so with a current licence this stays 0. Stat panel; green at 0, red ≥ 1.
 2. **License blocks (24h, total)** — counts ALL blocked `CanExecute` calls regardless of feature. Yellow ≥ 1, orange ≥ 100.
 3. **Platform-api replicas Up** — indirect health signal: if license validation crashes the host (Enforce mode default for v2.4.x without override), pods crashloop + this drops to 0.
 4. **Worker crash count (24h)** — Loki count of `WorkerCrash` log lines (ADR-0021 worker-resilience signal). Expected: 0.
@@ -111,7 +111,7 @@ kubectl create configmap verbara-licensing-dashboard \
 
 | Symptom | Possible cause | Where to look next |
 |---|---|---|
-| `image-unauthorized count` > 0 | An operator deployed an image whose manifest digest is NOT in `AuthorizedImageDigests`. Either license is stale (issued before current digest registered) or the wrong image was deployed. | Panel 8 (table) — find the truncated digest; reconcile against `verbara-website/data/authorized-digests.json` |
+| `image-unauthorized count` > 0 | The loaded licence lists image digests (issued before 2026-10-03) and the running api image is not among them: either the licence predates the image (an upgrade) or the wrong image was deployed. | Panel 8 (table) — find the truncated digest; check the image's cosign signature and compare its digest with the release notes or `verbara-website/data/authorized-digests.json`; for an upgrade, request a current licence |
 | `License blocks (24h, total)` very high + many `feature=NotLicensed` reasons | Customer hitting Pro endpoints without a valid license (could be the v2.5.0-pro behaviour we're validating, OR a misconfigured client polling) | Panel 5 — look at the feature×reason breakdown; if it's a single feature + low rate, probably exploratory client; if it's all features + high rate, license is genuinely missing |
 | `Grace remaining` curve drops to 0 | License expired AND grace exhausted; subsequent calls return Allowed=false (Pro features now respond HTTP 402 RFC 9457) | Panel 7 (logs) — check for `LicenseException: ... expired at ...` + `LicenseRevalidationService` re-validation attempts |
 | `replicas Up = 0` AND `License validation events` shows `LicenseException` at boot | Either: license file missing/corrupt; OR LicenseTrustAnchor DI race (pre-v2.3.1 bug, fixed); OR cluster lost license Secret mount | `kubectl get secret verbara-lab-license -n r55-platform` + `kubectl describe pod` + check pre-v2.3.1 in CHANGELOG |

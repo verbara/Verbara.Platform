@@ -1,7 +1,7 @@
 # Release dry-run: pre-flight safety net for Verbara.Platform releases.
 #
 # The real release (release.yml) fires on a pushed `v*` tag and is irreversible
-# (it pushes + cosign-signs public images whose digests bind customer licenses,
+# (it pushes + cosign-signs public images whose digests go into the release ledger,
 # ADR-0023/0024). This workflow runs the cheap pre-conditions FIRST, manually,
 # so you catch the mistakes that have actually broken releases before — missing
 # CHANGELOG entry, un-bumped PackageVersion, a tag that already exists — without

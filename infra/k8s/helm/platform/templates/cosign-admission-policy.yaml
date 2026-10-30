@@ -5,11 +5,13 @@
 {{- end -}}
 # Kyverno ClusterPolicy — requires every Pod admitted to the release namespace
 # whose image matches ghcr.io/verbara/platform/* to carry a valid cosign
-# signature from the Verbara cosign keypair (Pro v2.3.x Layer B, Pro/ADR-0011).
+# signature from the Verbara cosign keypair (Pro/ADR-0011).
 #
-# Layer C (in-process check inside Verbara.Sdk.Pro.Licensing) catches the same
-# class of tampering at runtime; this admission policy catches it AT POD
-# CREATION so a tampered image cannot even reach the kubelet pull stage.
+# An optional operator control, off by default: licences do not carry image
+# digests (verbara-meta/PDR-0003, amendment of 2026-10-03), so image integrity
+# rests on the cosign signature and the digest pin. This policy checks the
+# signature AT POD CREATION, so an unsigned or tampered image never reaches the
+# kubelet pull stage. Without it, verify with the cosign CLI before deploying.
 #
 # Tested against Kyverno 1.11+. Disable with `--set imageVerification.enabled=false`
 # if the cluster has no admission-policy controller available.

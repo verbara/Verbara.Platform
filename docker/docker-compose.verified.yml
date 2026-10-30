@@ -1,5 +1,5 @@
 # docker-compose.verified.yml — TEMPLATE for digest-pinned, cosign-verified Verbara
-# Platform deploys (Pro v2.3.x Layer B equivalent for docker-compose customers,
+# Platform deploys (the docker-compose equivalent of the Helm chart's cosign admission check,
 # Pro/ADR-0011).
 #
 # This file is intentionally a TEMPLATE — the digest below is a placeholder.
@@ -27,12 +27,14 @@
 #   docker-compose equivalent of the `imageRef@digest` reference Kyverno
 #   verifies in K8s deploys.
 #
-# Layer B + Layer C combination:
-#   - Layer B (this file + verbara-verify-image.sh): catches a tampered image
-#     at pull time, BEFORE any code from it executes.
-#   - Layer C (Verbara.Sdk.Pro.Licensing): catches a digest mismatch at Pro
-#     startup IF the image is somehow swapped between pull and run.
-#   Both reinforce each other; running only one leaves a defense gap.
+# Image integrity (Pro/ADR-0011):
+#   - The cosign signature (verify it with verbara-verify-image.sh before
+#     `up`) catches an unsigned or tampered image BEFORE any code from it
+#     executes.
+#   - The `@sha256:` pin in this file locks the bytes docker runs to the
+#     digest you verified.
+#   Licences issued since 2026-10-03 carry no image digests
+#   (verbara-meta/PDR-0003), so image integrity rests on these two.
 #
 # Reference Helm equivalent: infra/k8s/helm/platform/templates/cosign-admission-policy.yaml
 
@@ -43,12 +45,11 @@ services:
     restart: unless-stopped
     environment:
       ASPNETCORE_URLS: http://+:5000
-      # Layer C in-process image-binding check (Pro/ADR-0011, Pro v2.3.x).
-      # Pro's ContainerImageDigest.ReadFromEnvironment() reads IMAGE_DIGEST +
-      # compares against LicenseKey.AuthorizedImageDigests claims at startup.
-      # MUST match the @sha256 digest in the `image:` line above. (Pro can't
-      # self-discover the running image's digest from inside the container —
-      # operator-side env var is the canonical wiring.)
+      # The running image's digest, for Pro (Pro/ADR-0011). Pro compares it
+      # only with a licence that lists image digests — licences issued since
+      # 2026-10-03 list none (verbara-meta/PDR-0003). MUST match the @sha256
+      # digest in the `image:` line above: an image cannot read its own
+      # digest from inside the container, so the operator supplies it.
       IMAGE_DIGEST: sha256:REPLACE_WITH_MANIFEST_LIST_DIGEST
       # Mount your Verbara Pro license at /etc/verbara/license.lic and reference it
       # via VERBARA_LICENSE_PATH (or whatever env var your Pro version expects).

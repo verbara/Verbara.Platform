@@ -1,12 +1,12 @@
 # K8s Lab Licensing Setup — Reference Deployment Guide
 
 **Authored:** 2026-05-18 (post Platform v2.3.1 deploy)
-**Audience:** Maintainers deploying Verbara Platform to internal K8s labs OR customers running on-premise K8s with image-binding enforcement.
+**Audience:** Maintainers deploying Verbara Platform to internal K8s labs OR customers running on-premise K8s with digest-pinned, cosign-signed images.
 **Pro consumer pin:** v2.4.1-pro (with [LicenseTrustAnchor DI race fix v2.3.1](../../CHANGELOG.md#231-—-2026-05-18))
-**Image-binding axis:** Pro/ADR-0011 Layer C (in-process IMAGE_DIGEST check)
+**Image integrity:** cosign signature + digest pin (Pro/ADR-0011). Licences issued since 2026-10-03 carry no image digests (verbara-meta/PDR-0003, amendment of 2026-10-03)
 **Licensing mode:** Pro v2.4.0-pro canonical (`Licensing__FilePath`, no `EnforcementMode`)
 
-This guide documents the **end-to-end reproducible procedure** to deploy `ghcr.io/verbara/platform/api:vX.Y.Z` to a K8s cluster with a real signed Pro license + image-digest binding active. The procedure was validated on 2026-05-18 against the maintainer's Talos lab (1 CP + 3 workers, Cilium eBPF, CNPG Postgres, kube-prometheus-stack).
+This guide documents the **end-to-end reproducible procedure** to deploy `ghcr.io/verbara/platform/api:vX.Y.Z` to a K8s cluster with a real signed Pro license and a digest-pinned image. The procedure was validated on 2026-05-18 against the maintainer's Talos lab (1 CP + 3 workers, Cilium eBPF, CNPG Postgres, kube-prometheus-stack).
 
 For SMB single-host docker-compose deployment, see [`docs/manuales/smb/01-instalacion-docker.md`](../manuales/smb/01-instalacion-docker.md). For the licensing semantics rationale see [Pro ADR-0012](https://github.com/verbara/Verbara.Sdk.Pro/blob/main/docs/decisions/0012-eliminate-enforcement-mode-for-license-required-model.md).
 
@@ -38,7 +38,7 @@ The Verbara license trust anchor (`LicenseTrustAnchor.OfficialPublicKey`) is bak
 - Cloudflare Pages environment variable `VERBARA_LICENSE_SIGNING_KEY` (production developer-license issuer)
 - Maintainer's local machine (offline backup for lab + sales-issued licenses) — path **NOT** documented here; the maintainer manages this manually
 
-If you do not have access to the production signing key, request a Tier 0.5 Developer license via `https://verbara.io/developer-license` instead; the unattended Cloudflare Pages issuer auto-includes the latest 6 `AuthorizedImageDigests` from [`verbara-website/data/authorized-digests.json`](https://github.com/verbara/verbara-website/blob/main/data/authorized-digests.json).
+If you do not have access to the production signing key, request a Tier 0.5 Developer license via `https://verbara.io/developer-license` instead; it is issued unattended and, like every licence issued since 2026-10-03, carries no image digests. The digests to pin are in the release notes and the release ledger [`verbara-website/data/authorized-digests.json`](https://github.com/verbara/verbara-website/blob/main/data/authorized-digests.json).
 
 ---
 
@@ -68,8 +68,8 @@ echo "DIGEST=$DIGEST"
 If cluster nodes can reach `ghcr.io` directly, skip this step. The Talos lab cannot, so we mirror to the host KVM registry:
 
 ```bash
-# crane copy preserves the manifest digest byte-for-byte, so the AuthorizedImageDigests
-# claim in the license file matches the local registry pull without re-issuance.
+# crane copy preserves the manifest digest byte-for-byte, so the chart's digest pin
+# (api.image.digest) matches the local registry pull.
 crane copy ghcr.io/verbara/platform/api:$VERSION \
   192.168.122.1:5050/verbara-platform/api:$VERSION \
   --insecure
@@ -79,9 +79,11 @@ crane manifest 192.168.122.1:5050/verbara-platform/api:$VERSION --insecure | sha
 # Expected output: $DIGEST without the "sha256:" prefix, followed by "  -"
 ```
 
-### Step 3 — Issue a Pro license keyed to the image digest
+### Step 3 — Issue a Pro license
 
-For maintainer-issued licenses (any tier):
+For maintainer-issued licenses (any tier). Since 2026-10-03 licences are issued
+without image digests (verbara-meta/PDR-0003, amendment of 2026-10-03), so the licence
+does not depend on `$VERSION` / `$DIGEST`:
 
 ```bash
 cd /path/to/Verbara.Sdk.Pro
@@ -97,15 +99,12 @@ dotnet run --project tools/Verbara.Sdk.Pro.LicenseGenerator -c Release --no-buil
   --tier WhiteLabel \
   --max-agents 25 \
   --expires 2027-05-18 \
-  --authorized-digests $DIGEST \
   --private-key /path/to/your/private.pem \
   --output ./your-lab-$VERSION.lic
 
-# Quick sanity check (validates signature + image-digest binding against
-# LicenseTrustAnchor.OfficialPublicKey baked into Pro)
+# Quick sanity check (validates the licence signature)
 dotnet run --project tools/Verbara.Sdk.Pro.LicenseGenerator -c Release --no-build -- --validate \
-  --license ./your-lab-$VERSION.lic \
-  --image-digest $DIGEST
+  --license ./your-lab-$VERSION.lic
 # Expected: VALIDATION RESULT : Valid
 ```
 
@@ -215,7 +214,7 @@ kubectl logs $POD -n r55-platform --tail=400 | grep -c 'WorkerCrash'
 kubectl exec $POD -n r55-platform -- curl -s http://localhost:5000/health/ready | head -c 100
 # Expected: JSON beginning with {"status":"...
 
-# 6. IMAGE_DIGEST env matches license claim (proves Pro/ADR-0011 wired correctly)
+# 6. IMAGE_DIGEST env matches the pinned digest (proves the chart wired api.image.digest)
 kubectl exec $POD -n r55-platform -- sh -c 'echo "$IMAGE_DIGEST"'
 # Expected: $DIGEST (same as Step 1)
 
@@ -236,7 +235,7 @@ The end-to-end procedure exercises **every defense layer** in Verbara's open-cor
 |---|---|---|
 | **A — Apache 2.0 OSS gate** | Pro features wrapped in `LicenseGuard.CanExecute(LicenseFeature)` | Pro feature endpoints accessible when license valid; HTTP 402 RFC 9457 when not |
 | **B — Cosign signed images** | All v2.x images signed via Sigstore keyless OIDC in GitHub Actions | Image pulled by digest from `verbara-website/data/authorized-digests.json` |
-| **C — In-process IMAGE_DIGEST binding** | Pro/ADR-0011 — `LicenseValidator` rejects licenses whose `AuthorizedImageDigests` claim doesn't include the running container's manifest digest | License rejected at runtime if IMAGE_DIGEST mismatches |
+| **C — Digest pin** | `api.image.digest` makes the kubelet pull those exact bytes and is exported as `IMAGE_DIGEST` (Pro/ADR-0011). Licences issued since 2026-10-03 carry no image digests; a licence issued before then that lists digests is still checked against the running image | Step 8 check 6 |
 | **D — ECDSA license signature** | License signed by maintainer's private key, verified against `LicenseTrustAnchor.OfficialPublicKey` baked in Pro | Validated at boot + every 6h via `LicenseRevalidationService` |
 | **E — Worker resilience** | ADR-0021 + Pro v2.4.1-pro — every BackgroundService outer-try-catch + `BackgroundServiceExceptionBehavior.StopHost` wired | Any silent worker death surfaces as pod restart + Critical log |
 
@@ -295,7 +294,7 @@ PgBouncer entered backoff after repeated auth failures. Most common cause: conne
 
 ### Pod crashes with `LicenseException: UnauthorizedImage`
 
-The IMAGE_DIGEST env var injected by the chart does NOT match any digest in the license's `AuthorizedImageDigests` claim. Verify:
+The licence lists image digests and the IMAGE_DIGEST env var injected by the chart is not among them. Only a licence issued before 2026-10-03 lists digests; licences issued since carry none. Verify first that the pod runs the image you meant to deploy:
 
 ```bash
 kubectl exec $POD -n r55-platform -- sh -c 'echo $IMAGE_DIGEST'
@@ -305,7 +304,7 @@ crane manifest 192.168.122.1:5050/verbara-platform/api:$VERSION --insecure | sha
 
 If they don't match, the `crane copy` step did NOT preserve the manifest (rare — happens when `--platform` flag is omitted on a multi-arch source). Add `crane copy --platform linux/amd64 ...` to force.
 
-If they match but the license still rejects, the license was issued without the current digest in `--authorized-digests`. Re-issue with the correct digest, or use the verbara.io issuer (which always uses the latest 6 digests from the registry).
+If they match, the licence predates the image: request a current licence from Verbara (or, for a maintainer lab, issue one as in Step 3) and rotate the Secret as in Step 4.
 
 ### `presence-fanout: Degraded (heartbeat stale 45s > 30s)`
 
@@ -327,3 +326,4 @@ By-design behavior of Pattern B Rx-driven workers in v2.4.1-pro — the heartbea
 ## Change log
 
 - **2026-05-18**: Initial publication after Platform v2.3.1 lab deploy validation. Procedure validated end-to-end on Talos lab (1CP + 3 workers, Cilium eBPF). Authored by the maintainer post-deployment.
+- **2026-10-29**: Licences issued since 2026-10-03 carry no image digests (verbara-meta/PDR-0003, amendment of 2026-10-03). Step 3 issues and validates without them; the defense-layer table and the `UnauthorizedImage` troubleshooting entry say what the digest pin does instead.
