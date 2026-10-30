@@ -644,6 +644,55 @@ public sealed class LicenseGateTests
             .Should().Be(StatusCodes.Status402PaymentRequired);
     }
 
+    // ── MissingFeature → Expired over the real tracker and guard ───────────────
+    //
+    // OpenSpec change pro-2-23-0-pin-cascade. Since Verbara.Sdk.Pro 2.23.0-pro the guard records a
+    // carried bit used under MissingFeature, so the licence keeps the guard window a Valid one gets.
+
+    private static LicenseKey Tier1Key() =>
+        KeyWith(FeatureRegistry.GetCanonicalFeaturesForTier(LicenseTier.SelfHostStartup));
+
+    [Fact]
+    public async Task InvokeAsync_ShouldReturn200_WhenUsedMissingFeatureLicenceExpiresInsideTheGuardWindow()
+    {
+        var (tracker, guard, time) = RealLicenceStack();
+        tracker.Update(LicenseValidationResult.MissingFeature, Tier1Key());
+        (await StatusFor(tracker, guard, LicenseFeature.AdvancedTypification)).Should().Be(StatusCodes.Status200OK);
+
+        tracker.Update(LicenseValidationResult.Expired, Tier1Key());
+        time.Advance(TimeSpan.FromDays(1));
+
+        (await StatusFor(tracker, guard, LicenseFeature.AdvancedTypification)).Should().Be(StatusCodes.Status200OK);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldReturn402_WhenUsedMissingFeatureLicenceExpiresAfterTheGuardWindow()
+    {
+        var (tracker, guard, time) = RealLicenceStack();
+        tracker.Update(LicenseValidationResult.MissingFeature, Tier1Key());
+        (await StatusFor(tracker, guard, LicenseFeature.AdvancedTypification)).Should().Be(StatusCodes.Status200OK);
+
+        tracker.Update(LicenseValidationResult.Expired, Tier1Key());
+        time.Advance(new LicenseGuardOptions().GracePeriod + TimeSpan.FromHours(1));
+
+        (await StatusFor(tracker, guard, LicenseFeature.AdvancedTypification))
+            .Should().Be(StatusCodes.Status402PaymentRequired);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldReturn402_WhenMissingFeatureLicenceExpiresAndTheKeyNeverCarriedTheFeature()
+    {
+        var (tracker, guard, time) = RealLicenceStack();
+        Tier1Key().Features.HasFlag(LicenseFeature.Analytics).Should().BeFalse("the SelfHostStartup canonical set carries no Analytics");
+        tracker.Update(LicenseValidationResult.MissingFeature, Tier1Key());
+        (await StatusFor(tracker, guard, LicenseFeature.Analytics)).Should().Be(StatusCodes.Status402PaymentRequired);
+
+        tracker.Update(LicenseValidationResult.Expired, Tier1Key());
+        time.Advance(TimeSpan.FromDays(1));
+
+        (await StatusFor(tracker, guard, LicenseFeature.Analytics)).Should().Be(StatusCodes.Status402PaymentRequired);
+    }
+
     private const LicenseFeature TypificationPair = LicenseFeature.AdvancedTypification | LicenseFeature.TypificationAi;
 
     /// <summary>
