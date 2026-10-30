@@ -9,6 +9,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.35.0] - 2026-10-29
+
+Minor release. Platform moves to Verbara.Sdk.Pro `2.23.0-pro`: every licence validation path classifies a licence the
+same way, and a used `MissingFeature` licence that expires keeps its carried features for the guard's grace window.
+Also: licence and image texts say a licence is not tied to an image, the Helm chart defaults to `v2.34.1`, and three
+fixes from the licensed-agent metering follow-ups (impersonation end, offer/accept re-check, agent enumeration).
+
 ### Changed
 
 - **Verbara.Sdk.Pro 2.23.0-pro** (the 22 `Verbara.Sdk.Pro.*` pins; no other package changes version). A licence
@@ -17,7 +24,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   endpoint shows the new result; what the HTTP licence gate and autonomous typification open is unchanged. A
   `MissingFeature` licence that is used and then expires now keeps the features its key carries open for the same
   grace window as a valid licence that expires; before, they closed at expiry. Features the key does not carry stay
-  closed.
+  closed. (#507)
 
 ### Fixed
 
@@ -56,7 +63,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `authorized-digests.json` as the release ledger and cosign verification at admission as an optional operator
   control (Kyverno >= 1.11). The alert's meaning changes: it can fire only with a licence issued before 2026-10-03
   that lists digests. The Helm chart's default images move from `v2.6.0` / `v3.2.0-web` to `v2.34.1` (api and
-  realtime, pinned by manifest-list digest) and `v3.27.1-web`; chart `0.2.12`.
+  realtime, pinned by manifest-list digest) and `v3.27.1-web`; chart `0.2.12`. (#508)
 
 ## [2.34.1] - 2026-10-29
 
