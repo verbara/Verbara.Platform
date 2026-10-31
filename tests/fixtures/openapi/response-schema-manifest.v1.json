@@ -82,6 +82,9 @@
           "allowedChannels",
           "source"
         ],
+        "AvailableChannelDto": [
+          "channel"
+        ],
         "CalibrationStatusDto": [
           "samples",
           "accuracy",
@@ -911,6 +914,24 @@
           "hasNextPage",
           "hasPreviousPage"
         ],
+        "PagedResultOfTransferTargetAgentDto": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PagedResultOfTransferTargetQueueDto": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
         "ReasonHintDto": [
           "id",
           "scope",
@@ -944,6 +965,16 @@
           "triggerPhrase",
           "suggestionText",
           "whispered"
+        ],
+        "TransferTargetAgentDto": [
+          "id",
+          "displayName",
+          "state",
+          "canAcceptWork"
+        ],
+        "TransferTargetQueueDto": [
+          "id",
+          "name"
         ],
         "TypificationCorrectionResponse": [
           "conversationId",

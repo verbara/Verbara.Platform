@@ -86,6 +86,54 @@ public class WebhookDispatcherTests : IDisposable
             Arg.Any<WebhookDelivery>(), Arg.Any<CancellationToken>());
     }
 
+    // ─── "A System message SHALL NOT reach an outbound webhook" (H1) ─────────
+
+    [Theory]
+    [InlineData("Customer disputes the October invoice; please do not re-issue it.")] // a transfer note's text
+    [InlineData("Coaching")] // what the coaching event carries
+    public async Task OnEvent_ShouldNotCreateDelivery_WhenTheMessageIsASystemMessage(string text)
+    {
+        SubscribeToMessages();
+
+        _eventBus.Publish(new ConversationMessageEvent("t1", "c1", "m1", "System", text));
+
+        // Same gate as the no-subscription test: on the unguarded code this awaits the dispatch that
+        // writes the delivery, so a delivery cannot land after the assertion below and be missed.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await _dispatcher.WaitForDispatchAsync(timeout.Token);
+
+        await _deliveryStore.DidNotReceive().SaveAsync(
+            Arg.Any<WebhookDelivery>(), Arg.Any<CancellationToken>());
+        _dispatcher.DeliveryReader.TryPeek(out _).Should().BeFalse("nothing may be queued for delivery either");
+    }
+
+    [Theory]
+    [InlineData("Inbound")]
+    [InlineData("Outbound")]
+    public async Task OnEvent_ShouldCreateOneDeliveryCarryingTheText_WhenTheMessageIsNotASystemMessage(string sender)
+    {
+        SubscribeToMessages();
+
+        _eventBus.Publish(new ConversationMessageEvent("t1", "c1", "m1", sender, "WhatsApp"));
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await _dispatcher.WaitForDispatchAsync(timeout.Token);
+
+        await _deliveryStore.Received(1).SaveAsync(
+            Arg.Is<WebhookDelivery>(d => d != null && d.Payload.Contains("\"text\":\"WhatsApp\"", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    private void SubscribeToMessages()
+    {
+        var sub = new WebhookSubscription("s1", "t1", "Test", "https://example.com/hook",
+            "secret", ["conversation.message"], true,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+        _subStore.GetActiveByEventTypeAsync("t1", "conversation.message", Arg.Any<CancellationToken>())
+            .Returns([sub]);
+    }
+
     public void Dispose()
     {
         _dispatcher.Dispose();

@@ -351,6 +351,32 @@ public sealed class DefaultTypificationAiClassifierTests
     }
 
     [Fact]
+    public async Task ClassifyAsync_ShouldLeaveTheNoteOutAndKeepTheTurns_WhenAHistoryHoldsASystemMessage()
+    {
+        const string note = "Customer disputes the October invoice; please do not re-issue it.";
+        var capturing = new CapturingLlmProvider("""{"leafCode":"GINE","confidence":0.9}""");
+        var sut = Sut(capturing);
+        var schema = Schema();
+
+        var transcript = new[]
+        {
+            Message(MessageDirection.Inbound, new TextBlock("My invoice is wrong")),
+            Message(MessageDirection.System, new TextBlock(note)),
+            Message(MessageDirection.Outbound, new TextBlock("Let me check that for you")),
+        };
+
+        await sut.ClassifyAsync(TenantEntityId, schema, subtreeRoot: null, Conversation(), transcript, CancellationToken.None);
+
+        capturing.LastRequest.Should().NotBeNull();
+        var userContent = capturing.LastRequest!.Messages[1].Content;
+
+        userContent.Should().NotContain(note);
+        ExtractBetweenFences(userContent).Trim().Split('\n').Should().Equal(
+            "Customer: My invoice is wrong",
+            "Agent: Let me check that for you");
+    }
+
+    [Fact]
     public async Task ClassifyAsync_ShouldCollapseUnicodeLineSeparators_PreventingForgedLines()
     {
         var capturing = new CapturingLlmProvider("""{"leafCode":"SOPORTE","confidence":0.9}""");

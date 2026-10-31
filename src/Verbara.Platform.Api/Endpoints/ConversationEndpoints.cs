@@ -75,6 +75,76 @@ internal static class ConversationEndpoints
         // build a PermissionRequirement even though the permission id carries only one colon.
         group.MapPost("/{id}/typification-correction", CorrectTypification)
             .RequireAuthorization("Permission:typification:correct-autonomous");
+
+        // agent-console-contract-debt (C5): what the transfer dialogs list, for whoever may transfer. The same
+        // permission as POST /{id}/transfer, because the admin routes that used to feed them are AdminOnly.
+        var transferTargets = app.MapGroup("/transfer-targets")
+            .RequireAuthorization("Permission:contacts:conversation:transfer")
+            .RequireOperationalTenant();
+
+        transferTargets.MapGet("/queues", ListTransferTargetQueues);
+        transferTargets.MapGet("/agents", ListTransferTargetAgents);
+    }
+
+    private static async Task<Ok<PagedResult<TransferTargetQueueDto>>> ListTransferTargetQueues(
+        HttpContext context,
+        [FromServices] IQueueStore queues,
+        string? search,
+        int page = 1,
+        int pageSize = 100,
+        CancellationToken ct = default)
+    {
+        // The store filters on neither active nor name, so the whole set is read and paged here (design C5).
+        var matching = (await queues.ListAllAsync(GetTenantId(context), ct))
+            .Where(queue => queue.IsActive && MatchesTransferTargetSearch(queue.Name, search))
+            .OrderBy(queue => queue.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(queue => queue.QueueId.Value, StringComparer.Ordinal)
+            .Select(queue => new TransferTargetQueueDto(queue.QueueId.Value, queue.Name))
+            .ToList();
+
+        return TypedResults.Ok(TransferTargetPage(matching, page, pageSize));
+    }
+
+    private static async Task<Ok<PagedResult<TransferTargetAgentDto>>> ListTransferTargetAgents(
+        HttpContext context,
+        [FromServices] IAgentStore agents,
+        [FromServices] IAgentAccountStatusLookup accountStatus,
+        string? search,
+        int page = 1,
+        int pageSize = 100,
+        CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId(context);
+        var self = (await ConversationActor.ResolveAsync(context, tenantId, agents, ct)).Agent?.AgentId;
+        var candidates = (await agents.ListAllAsync(tenantId, ct))
+            .Where(agent => agent.AgentId != self && MatchesTransferTargetSearch(agent.DisplayName, search))
+            .ToList();
+
+        // One lookup for the whole set, and the rule a transfer applies to its target, so a listed agent is one the
+        // transfer accepts (ConversationActor.IsOwnableTargetAsync).
+        var ownable = await accountStatus.WhereUserActiveAsync(tenantId, candidates, ct);
+        var matching = ownable
+            .OrderBy(agent => agent.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(agent => agent.AgentId.Value, StringComparer.Ordinal)
+            .Select(agent => new TransferTargetAgentDto(agent.AgentId.Value, agent.DisplayName, agent.State, agent.CanAcceptWork))
+            .ToList();
+
+        return TypedResults.Ok(TransferTargetPage(matching, page, pageSize));
+    }
+
+    private static bool MatchesTransferTargetSearch(string name, string? search) =>
+        search is null || name.Contains(search, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Clamps the paging, never refuses it, and cuts the page out of the sorted set.</summary>
+    private static PagedResult<T> TransferTargetPage<T>(List<T> matching, int page, int pageSize)
+    {
+        var clampedPage = Math.Max(page, 1);
+        var clampedSize = Math.Clamp(pageSize, 1, 200);
+
+        // In long: a page near int.MaxValue would wrap to a negative skip, which answers the first page.
+        var skip = (clampedPage - 1L) * clampedSize;
+        IReadOnlyList<T> items = skip >= matching.Count ? [] : matching.Skip((int)skip).Take(clampedSize).ToList();
+        return new PagedResult<T>(items, matching.Count, clampedPage, clampedSize);
     }
 
     private static async Task<Ok<PagedResult<Conversation>>> ListConversations(
@@ -220,7 +290,8 @@ internal static class ConversationEndpoints
 
     // The route requires contacts:conversation:transfer. The owner, or a supervisor acting on a
     // conversation it does not own, moves it to an agent or a queue of the tenant; every transfer is
-    // audited, a supervisor's with by_supervisor.
+    // audited, a supervisor's with by_supervisor. A note is refused before anything moves and written after
+    // the move, which it can no longer fail; the audit entry says what happened to it, never what it says.
     private static async Task<Results<Ok<OwnershipResult>, NotFound, BadRequest<ErrorResponse>, JsonHttpResult<ErrorResponse>>> TransferConversation(
         string id,
         HttpContext context,
@@ -230,6 +301,9 @@ internal static class ConversationEndpoints
         [FromServices] IAgentAccountStatusLookup accountStatus,
         [FromServices] IQueueStore queues,
         [FromServices] IAuditService audit,
+        [FromServices] IMessageStore messages,
+        [FromServices] IClock clock,
+        [FromServices] PlatformEventBus eventBus,
         [FromBody] TransferRequest body,
         CancellationToken ct)
     {
@@ -245,6 +319,10 @@ internal static class ConversationEndpoints
         var bySupervisor = !actor.Owns(conversation);
         if (bySupervisor && !await ConversationActor.IsSupervisorAsync(context))
             return ConversationActor.Forbidden(ConversationActor.NotOwner);
+
+        var note = ConversationTransferNote.Normalize(body.Note);
+        if (note?.Length > ConversationTransferNote.MaxLength)
+            return TypedResults.BadRequest(new ErrorResponse(ConversationActor.TransferNoteTooLong));
 
         var metadata = new Dictionary<string, string>(StringComparer.Ordinal);
         ConversationActor.AddOwner(metadata, "from_owner", conversation.Owner);
@@ -273,6 +351,10 @@ internal static class ConversationEndpoints
 
         if (!result.Success)
             return ConversationActor.Conflict(result.FailureReason ?? "The conversation could not be transferred.");
+
+        metadata[ConversationTransferNote.AuditKey] = note is null
+            ? ConversationTransferNote.None
+            : await ConversationTransferNote.TryWriteAsync(context, messages, clock, eventBus, conversation, note);
 
         if (bySupervisor)
             metadata[ConversationAudit.BySupervisor] = CallerIdentity.ResolveUserIdOrSystem(context.User);
@@ -1328,7 +1410,29 @@ internal static class ConversationEndpoints
 }
 
 internal sealed record SendMessageRequest(string Text);
-internal sealed record TransferRequest(string? TargetQueueId, string? TargetAgentId);
+
+/// <summary>
+/// <c>POST /conversations/{id}/transfer</c>. Exactly one of <paramref name="TargetQueueId"/> and
+/// <paramref name="TargetAgentId"/> is set.
+/// </summary>
+/// <param name="TargetQueueId">The queue to move the conversation to.</param>
+/// <param name="TargetAgentId">The agent to move the conversation to.</param>
+/// <param name="Note">
+/// Optional handover note for the next owner. Trimmed by the server; omitted, null or blank means no note.
+/// </param>
+internal sealed record TransferRequest(string? TargetQueueId, string? TargetAgentId, string? Note = null);
+
+/// <summary>A queue an actor may transfer a conversation to. Admin data (SLA, overflow, wrap-up) stays out.</summary>
+/// <param name="Id">The queue id: <c>targetQueueId</c> of a digital transfer, <c>target</c> of a voice one.</param>
+/// <param name="Name">The queue's display name.</param>
+internal sealed record TransferTargetQueueDto(string Id, string Name);
+
+/// <summary>An agent an actor may transfer a conversation to. Admin data (user id, extension, capacity) stays out.</summary>
+/// <param name="Id">The agent id, never the user id: <c>targetAgentId</c> of a digital transfer, <c>target</c> of a voice one.</param>
+/// <param name="DisplayName">The agent's display name.</param>
+/// <param name="State">The agent's current state.</param>
+/// <param name="CanAcceptWork">Whether the agent's state is routable.</param>
+internal sealed record TransferTargetAgentDto(string Id, string DisplayName, AgentState State, bool CanAcceptWork);
 
 /// <summary>
 /// Runtime typification submission: the selected root→leaf node path, the captured

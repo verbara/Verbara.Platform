@@ -118,6 +118,37 @@ public sealed class ConversationImpersonationTests : IClassFixture<ConversationO
         _factory.Load(conversation.ConversationId)!.Owner.Should().Be(ConversationOwner.ForAgent(owner.AgentId));
     }
 
+    [Theory]
+    [InlineData("queues", false)]
+    [InlineData("agents", false)]
+    [InlineData("queues", true)]
+    [InlineData("agents", true)]
+    public async Task TransferTargets_ShouldReturn200_WhenTheSessionCarriesTheTransferPermission(string list, bool readOnly)
+    {
+        var admin = _factory.NewPlatformAdmin();
+        using var client = _factory.CreateBearerClient(
+            _factory.MintImpersonationToken(admin, [TransferPermission], readOnly));
+
+        var response = await client.GetAsync($"/api/v1/transfer-targets/{list}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData("queues")]
+    [InlineData("agents")]
+    public async Task TransferTargets_ShouldReturnABare403_WhenTheSessionLacksTheTransferPermission(string list)
+    {
+        var admin = _factory.NewPlatformAdmin();
+        using var client = _factory.CreateBearerClient(
+            _factory.MintImpersonationToken(admin, ["contacts:contact:view"], readOnly: false));
+
+        var response = await client.GetAsync($"/api/v1/transfer-targets/{list}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync()).Should().BeEmpty();
+    }
+
     private static string Route(Conversation conversation, string action) =>
         $"/api/v1/conversations/{conversation.ConversationId.Value}/{action}";
 }

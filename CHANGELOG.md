@@ -9,6 +9,47 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **A transfer can carry a note for whoever takes the conversation.** `POST /api/v1/conversations/{id}/transfer` accepts
+  an optional `note`, trimmed by the server; an omitted, null or blank `note` means no note, and a body without it
+  behaves as before. A `note` over 1000 characters after trimming answers 400 `transfer-note-too-long` before anything
+  moves, after `not-owner` and before the target checks. The other refusals and the 200 `OwnershipResult` do not change.
+  After the move, for a queue or an agent target, the note is stored as one `System` message of the conversation's own
+  channel, returned by both message histories, and published on `conversation.message` with sender `System` and the note
+  as `text`. It is not atomic with the move: a failed write leaves the 200 and the new owner in place and logs a Warning.
+  Note that the history still pages oldest first, so a note stored after 50 or more messages is outside the default page.
+- **The `conversation.transferred` audit entry gains the metadata key `note`**, with `none`, `written` or `failed`. It
+  never holds the note's text, and the existing keys do not change.
+- **`GET /api/v1/transfer-targets/queues` and `GET /api/v1/transfer-targets/agents` list what a transfer can target**, for
+  anyone holding `contacts:conversation:transfer`, the permission of `POST /api/v1/conversations/{id}/transfer`, in an
+  operational tenant. The queue list holds the active queues, with `id` and `name`. The agent list holds `id`,
+  `displayName`, `state` and `canAcceptWork` for the agents a transfer accepts: the caller's own profile and any agent whose
+  user is not `Active` are left out, and `Offline` agents stay in. Both take `search`, `page` and `pageSize` (default 100,
+  at most 200, clamped and never refused) and answer the usual paged envelope. `/admin/queues` and `/admin/agents` stay
+  `AdminOnly`.
+- **`GET /api/v1/channels/available` lists the channels an agent can start a conversation on**, for any authenticated
+  caller of an operational tenant, with no extra permission. It answers an array of `{"channel": ...}` holding each channel
+  the host has a connector for and the tenant has active, in `ChannelType` order; an empty array is a valid 200. It is what
+  the console offers and not a check on a start: `POST /api/v1/conversations` still decides `channel-not-available` on the
+  registry alone and reads no tenant configuration.
+
+### Changed
+
+- **A `System` message, a coaching note included, no longer reaches outbound `conversation.message` webhooks.** Such an
+  event carries internal text, so `WebhookDispatcher` creates no delivery for it. A subscriber loses the coaching event,
+  whose body was only the literal `Coaching`. Events with any other `sender` are delivered as before, and the console's
+  SSE stream still receives `System` events.
+- **A `System` message, a coaching note included, no longer reaches the AI transcript.** The typification classifier
+  used to send it as an `Agent:` line, so the note's text went to the model and read as something the agent said. An
+  `Inbound` message stays `Customer:` and an `Outbound` message stays `Agent:`.
+- **The security notifications link to `/profile/security`.** `security.password_changed`, `security.mfa_enabled` and
+  `security.mfa_disabled` carry the `actionUrl` `/profile/security` instead of `/admin/security`, for the recipients they
+  already have, `admin` and `system_admin`. This is not a fix for an Agent, who does not receive them. Their `title`,
+  `body`, audience and severity do not change. Existing notifications keep the old link, which keeps working. Deploy the
+  Platform.Web release that serves `/profile/security` first, the one after `v3.27.1-web` that carries Platform.Web #497:
+  on an older console the new link leads to no page.
+
 ## [2.36.0] - 2026-10-31
 
 Minor release. Platform moves to Verbara.Sdk `2.9.0` and Verbara.Sdk.Pro `2.24.0-pro`, and each queue's wrap-up is now

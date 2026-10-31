@@ -58,6 +58,9 @@ public sealed class TenantTypeGateTests :
         { "GET",  "/api/v1/conversations", null },
         { "GET",  "/api/v1/contacts/abc", null },
         { "GET",  "/api/v1/cases", null },
+        { "GET",  "/api/v1/transfer-targets/queues", null },
+        { "GET",  "/api/v1/transfer-targets/agents", null },
+        { "GET",  "/api/v1/channels/available", null },
         // Analytics + supervisor surfaces (SupervisorPlus)
         { "GET",  "/api/v1/analytics/dashboard", null },
         { "GET",  "/api/v1/operations/queue-metrics", null },
@@ -108,6 +111,35 @@ public sealed class TenantTypeGateTests :
         // for happy paths) — what matters here is that we DON'T see 409.
         response.StatusCode.Should().NotBe(HttpStatusCode.Conflict,
             because: $"Customer callers must reach the endpoint logic for {method} {path}");
+    }
+
+    // agent-console-contract-debt (H5): the picker routes answer the gate's 409, member for member as the fixture pins it.
+    [Theory]
+    [InlineData("/api/v1/transfer-targets/queues")]
+    [InlineData("/api/v1/transfer-targets/agents")]
+    public async Task TransferTargets_ShouldAnswerTheFixturesProblem_WhenTheTenantIsNotOperational(string route)
+    {
+        var file = Path.Join(AppContext.BaseDirectory, "Conversations", "Fixtures", "transfer-refusals.json");
+        var refusal = JsonNode.Parse(File.ReadAllText(file))!["transferTargets"]!["operationalTenant"]!;
+
+        foreach (var (caller, tenantType) in new[]
+        {
+            (_platformCaller, nameof(TenantType.Platform)),
+            (_partnerCaller, nameof(TenantType.Partner)),
+        })
+        {
+            var response = await caller.GetAsync(route);
+
+            ((int)response.StatusCode).Should().Be(refusal["status"]!.GetValue<int>());
+            var problem = (await ParseProblemAsync(response)).AsObject();
+            var expected = refusal["body"]!.AsObject();
+            problem.Select(member => member.Key).Should().Equal(expected.Select(member => member.Key));
+            foreach (var member in new[] { "type", "title", "expectedType" })
+                problem[member]!.GetValue<string>().Should().Be(expected[member]!.GetValue<string>());
+            problem["status"]!.GetValue<int>().Should().Be(expected["status"]!.GetValue<int>());
+            problem["tenantType"]!.GetValue<string>().Should().Be(tenantType);
+            problem["detail"]!.GetValue<string>().Should().Contain(tenantType);
+        }
     }
 
     // ─── NEUTRAL endpoints — gate does NOT apply ────────────────────────────

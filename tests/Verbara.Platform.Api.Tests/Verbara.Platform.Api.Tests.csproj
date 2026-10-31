@@ -61,6 +61,9 @@
     <!-- dialer-honours-dnc-callbacks-and-agent-dispositions: the campaign metrics and status shapes Platform.Web's monitor
          reads, and the disposition-code target shapes with addsToDnc, copied verbatim from the change's contract fixtures. -->
     <None Include="Dialer/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- agent-console-contract-debt: the transfer request, the transfer-target pickers, the available-channels list and the start,
+         copied verbatim from the change's cross-repo contract fixtures. -->
+    <None Include="Conversations/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
