@@ -9,6 +9,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.36.0] - 2026-10-31
+
+Minor release. Platform moves to Verbara.Sdk `2.9.0` and Verbara.Sdk.Pro `2.24.0-pro`, and each queue's wrap-up is now
+timed at the length configured on that queue. One API change needs attention before upgrading: the queue endpoints
+answer 400 to a `wrapUp.defaultWrapUpSeconds` outside `0` to `600`.
+
 ### Upgrading
 
 - **Each queue's wrap-up is timed at the length configured on that queue**, the `wrapUp.defaultWrapUpSeconds` Platform
