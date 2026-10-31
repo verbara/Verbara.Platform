@@ -79,19 +79,19 @@ internal static class TestTreeSource
         pending.Push(root);
         while (pending.TryPop(out var dir))
         {
-            foreach (var file in Directory.EnumerateFiles(dir, "*", options))
-            {
-                if (BuildInputExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
-                    yield return file;
-            }
+            foreach (var file in Directory.EnumerateFiles(dir, "*", options).Where(IsBuildInput))
+                yield return file;
 
-            foreach (var child in Directory.EnumerateDirectories(dir, "*", options))
-            {
-                if (!NonSourceDirectories.Contains(Path.GetFileName(child)) && new DirectoryInfo(child).LinkTarget is null)
-                    pending.Push(child);
-            }
+            foreach (var child in Directory.EnumerateDirectories(dir, "*", options).Where(IsWalkedDirectory))
+                pending.Push(child);
         }
     }
+
+    private static bool IsBuildInput(string file) =>
+        BuildInputExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsWalkedDirectory(string dir) =>
+        !NonSourceDirectories.Contains(Path.GetFileName(dir)) && new DirectoryInfo(dir).LinkTarget is null;
 
     /// <summary>
     /// Enumerates every real test source file under <see cref="TestsRoot"/>, excluding:

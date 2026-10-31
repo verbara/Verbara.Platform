@@ -189,7 +189,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogWrapUpRefreshFailed(ex);
         }

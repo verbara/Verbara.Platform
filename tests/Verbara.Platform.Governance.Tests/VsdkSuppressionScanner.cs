@@ -38,11 +38,8 @@ internal static partial class VsdkSuppressionScanner
             if (IsNoWarn(element.Name) && VsdkId().IsMatch(element.Value))
                 yield return new VsdkSuppression(file, LineOf(element), element.Value.Trim());
 
-            foreach (var attribute in element.Attributes())
-            {
-                if (IsNoWarn(attribute.Name) && VsdkId().IsMatch(attribute.Value))
-                    yield return new VsdkSuppression(file, LineOf(attribute), attribute.Value.Trim());
-            }
+            foreach (var attribute in element.Attributes().Where(a => IsNoWarn(a.Name) && VsdkId().IsMatch(a.Value)))
+                yield return new VsdkSuppression(file, LineOf(attribute), attribute.Value.Trim());
         }
     }
 

@@ -51,9 +51,8 @@ internal sealed class QueueWrapUpDurationRefresher
         var conflicting = new HashSet<string>(QueueWrapUpDurationProvider.KeyComparer);
 
         var tenants = await tenantStore.GetAllActiveAsync(ct).ConfigureAwait(false);
-        foreach (var tenant in tenants)
+        foreach (var tenantId in tenants.Select(tenant => new TenantId(tenant.TenantId)))
         {
-            var tenantId = new TenantId(tenant.TenantId);
             var queues = await queueStore.ListAllAsync(tenantId, ct).ConfigureAwait(false);
             foreach (var queue in queues)
             {
@@ -61,12 +60,9 @@ internal sealed class QueueWrapUpDurationRefresher
             }
         }
 
-        foreach (var key in conflicting)
+        foreach (var key in conflicting.Where(key => _warnedKeys.TryAdd(key, 0)))
         {
-            if (_warnedKeys.TryAdd(key, 0))
-            {
-                QueueWrapUpDurationRefresherLog.ConflictingKey(_logger, key);
-            }
+            QueueWrapUpDurationRefresherLog.ConflictingKey(_logger, key);
         }
 
         _provider.Replace(values, conflicting);

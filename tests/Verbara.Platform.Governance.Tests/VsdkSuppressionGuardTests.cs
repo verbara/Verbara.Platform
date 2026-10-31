@@ -33,7 +33,7 @@ public sealed class VsdkSuppressionGuardTests
 
         var files = TestTreeSource.EnumerateBuildInputs(root).ToList();
 
-        files.Should().Contain(Path.Combine(root, "Directory.Build.props"));
+        files.Should().Contain(Path.Join(root, "Directory.Build.props"));
         files.Count(f => f.EndsWith(".csproj", StringComparison.Ordinal)).Should().BeGreaterThan(MinimumProjectFiles);
         files.Count(f => f.EndsWith(".cs", StringComparison.Ordinal)).Should().BeGreaterThan(MinimumSourceFiles);
     }
@@ -48,22 +48,21 @@ public sealed class VsdkSuppressionGuardTests
             [
                 ".editorconfig",
                 ".globalconfig",
-                Path.Combine("src", ".editorconfig"),
-                Path.Combine("src", "App", "App.csproj"),
-                Path.Combine("src", "App", "Program.cs"),
-                Path.Combine("src", "Directory.Build.targets"),
+                Path.Join("src", ".editorconfig"),
+                Path.Join("src", "App", "App.csproj"),
+                Path.Join("src", "App", "Program.cs"),
+                Path.Join("src", "Directory.Build.targets"),
             ];
             string[] skipped =
             [
-                Path.Combine("src", "App", "bin", "Skipped.csproj"),
-                Path.Combine("src", "App", "obj", "Skipped.cs"),
-                Path.Combine(".worktrees", "other", "Skipped.csproj"),
-                Path.Combine("web", "node_modules", "Skipped.props"),
-                Path.Combine("src", "App", "notes.md"),
+                Path.Join("src", "App", "bin", "Skipped.csproj"),
+                Path.Join("src", "App", "obj", "Skipped.cs"),
+                Path.Join(".worktrees", "other", "Skipped.csproj"),
+                Path.Join("web", "node_modules", "Skipped.props"),
+                Path.Join("src", "App", "notes.md"),
             ];
-            foreach (var file in read.Concat(skipped))
+            foreach (var path in read.Concat(skipped).Select(file => Path.Join(root, file)))
             {
-                var path = Path.Combine(root, file);
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                 File.WriteAllText(path, string.Empty);
             }

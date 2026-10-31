@@ -76,7 +76,7 @@ public sealed class ManagementClusterEndpointTests : IClassFixture<PlatformAdmin
             .Should().NotContain(nodeId, "a refused id is never registered");
     }
 
-    private Task<HttpResponseMessage> PostNodeAsync(string? nodeId)
+    private async Task<HttpResponseMessage> PostNodeAsync(string? nodeId)
     {
         var body = new JsonObject
         {
@@ -86,8 +86,7 @@ public sealed class ManagementClusterEndpointTests : IClassFixture<PlatformAdmin
             ["amiUsername"] = "user",
             ["amiPassword"] = "secret",
         };
-        return _client.PostAsync(
-            "/api/management/cluster/nodes",
-            new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"));
+        using var content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+        return await _client.PostAsync("/api/management/cluster/nodes", content);
     }
 }

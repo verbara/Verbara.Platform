@@ -493,7 +493,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         AddCaller(session, channel);
         _sessions.GetById("s-link-gv6").Returns(session);
         _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-gv6", Arg.Any<CancellationToken>())
-            .Returns((Conversation?)null);
+            .Returns(default(Conversation?));
         var bridge = CreateBridge();
 
         var result = await bridge.ResolveTenantFromChannelAsync(session, channel);
