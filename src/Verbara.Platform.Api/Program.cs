@@ -105,7 +105,7 @@ builder.Services.Configure<HostOptions>(options =>
 // ─── Verbara SDK Connection (Multi-Server + Sessions via Cluster) ───────────
 
 builder.Services.AddVerbaraMultiServer();
-builder.Services.AddVerbaraSessionsMultiServer();
+builder.Services.AddVerbaraSessionsMultiServer(o => o.WrapUpDuration = TimeSpan.FromSeconds(WrapUpConfig.FallbackSeconds));
 
 // ─── Core Platform Services ──────────────────────────────────────────────────
 

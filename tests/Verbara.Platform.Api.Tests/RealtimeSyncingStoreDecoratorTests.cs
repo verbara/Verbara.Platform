@@ -23,6 +23,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
 {
     private const string Tenant = "t-dec";
     private const int DeferralEventId = 4130;
+    private const string WrapUpKey = "t-dec-q-support";
 
     // ─── Queue decorator ─────────────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
     {
         var inner = new InMemoryQueueStore();
         var sync = Substitute.For<IRealtimeSyncService>();
-        var sut = new RealtimeSyncingQueueStore(inner, sync, NullLogger<RealtimeSyncingQueueStore>.Instance);
+        var sut = new RealtimeSyncingQueueStore(inner, sync, NewWrapUpProvider(), NullLogger<RealtimeSyncingQueueStore>.Instance);
         var queue = MakeQueue();
 
         await sut.SaveAsync(queue, CancellationToken.None);
@@ -52,7 +53,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
             .Returns(_ => Faulted());
 #pragma warning restore CA2012
         var logger = new CapturingLogger<RealtimeSyncingQueueStore>();
-        var sut = new RealtimeSyncingQueueStore(inner, sync, logger);
+        var sut = new RealtimeSyncingQueueStore(inner, sync, NewWrapUpProvider(), logger);
         var queue = MakeQueue();
 
         var act = async () => await sut.SaveAsync(queue, CancellationToken.None);
@@ -63,11 +64,61 @@ public sealed class RealtimeSyncingStoreDecoratorTests
     }
 
     [Fact]
+    public async Task SaveAsync_ShouldUpdateTheProvider_WhenSaved()
+    {
+        var wrapUps = NewWrapUpProvider();
+        var sut = new RealtimeSyncingQueueStore(
+            new InMemoryQueueStore(), Substitute.For<IRealtimeSyncService>(), wrapUps, NullLogger<RealtimeSyncingQueueStore>.Instance);
+        var queue = MakeQueue();
+        wrapUps.Replace(new Dictionary<string, TimeSpan> { [WrapUpKey] = TimeSpan.FromSeconds(12) });
+        queue.WrapUp.DefaultWrapUpSeconds = 18;
+
+        await sut.SaveAsync(queue, CancellationToken.None);
+
+        wrapUps.GetWrapUpDuration("primary", WrapUpKey).Should().Be(TimeSpan.FromSeconds(18));
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldUpdateTheProvider_WhenRealtimeSyncThrows()
+    {
+        var sync = Substitute.For<IRealtimeSyncService>();
+#pragma warning disable CA2012 // ValueTask used in NSubstitute mock setup
+        sync.SyncQueueAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<RealtimeQueueOptions>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Faulted());
+#pragma warning restore CA2012
+        var wrapUps = NewWrapUpProvider();
+        var sut = new RealtimeSyncingQueueStore(
+            new InMemoryQueueStore(), sync, wrapUps, NullLogger<RealtimeSyncingQueueStore>.Instance);
+        var queue = MakeQueue();
+        wrapUps.Replace(new Dictionary<string, TimeSpan> { [WrapUpKey] = TimeSpan.FromSeconds(12) });
+        queue.WrapUp.DefaultWrapUpSeconds = 18;
+
+        await sut.SaveAsync(queue, CancellationToken.None);
+
+        wrapUps.GetWrapUpDuration("primary", WrapUpKey).Should().Be(
+            TimeSpan.FromSeconds(18), "the store write succeeded and the reconciler converges Asterisk later");
+    }
+
+    [Fact]
+    public async Task ListPageAfterAsync_ShouldDelegateToInner_WhenQueuesExist()
+    {
+        var inner = new InMemoryQueueStore();
+        var sut = new RealtimeSyncingQueueStore(
+            inner, Substitute.For<IRealtimeSyncService>(), NewWrapUpProvider(), NullLogger<RealtimeSyncingQueueStore>.Instance);
+        var queue = MakeQueue();
+        await inner.SaveAsync(queue, CancellationToken.None);
+
+        var page = await sut.ListPageAfterAsync(queue.TenantId, null, 10, CancellationToken.None);
+
+        page.Select(q => q.QueueId).Should().Equal(queue.QueueId);
+    }
+
+    [Fact]
     public async Task QueueDelete_ShouldRemoveViaSync_UsingResolvedName()
     {
         var inner = new InMemoryQueueStore();
         var sync = Substitute.For<IRealtimeSyncService>();
-        var sut = new RealtimeSyncingQueueStore(inner, sync, NullLogger<RealtimeSyncingQueueStore>.Instance);
+        var sut = new RealtimeSyncingQueueStore(inner, sync, NewWrapUpProvider(), NullLogger<RealtimeSyncingQueueStore>.Instance);
         var queue = MakeQueue();
         await inner.SaveAsync(queue, CancellationToken.None);
 
@@ -87,7 +138,7 @@ public sealed class RealtimeSyncingStoreDecoratorTests
             .Returns(_ => Faulted());
 #pragma warning restore CA2012
         var logger = new CapturingLogger<RealtimeSyncingQueueStore>();
-        var sut = new RealtimeSyncingQueueStore(inner, sync, logger);
+        var sut = new RealtimeSyncingQueueStore(inner, sync, NewWrapUpProvider(), logger);
         var queue = MakeQueue();
         await inner.SaveAsync(queue, CancellationToken.None);
 
@@ -393,6 +444,9 @@ public sealed class RealtimeSyncingStoreDecoratorTests
             membershipInner, queueInner, agentInner, sync, new AgentPauseCoordinator(), status ?? new FakeAgentAccountStatusLookup(), logger);
         return (sut, membershipInner, sync, queue, agent);
     }
+
+    private static QueueWrapUpDurationProvider NewWrapUpProvider()
+        => new(NullLogger<QueueWrapUpDurationProvider>.Instance);
 
     private static Queue MakeQueue() => new()
     {

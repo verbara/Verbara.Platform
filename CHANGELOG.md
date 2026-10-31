@@ -9,6 +9,47 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Upgrading
+
+- **Each queue's wrap-up is timed at the length configured on that queue**, the `wrapUp.defaultWrapUpSeconds` Platform
+  already writes to Asterisk, and on a licensed host it is recorded in the session event store as a `CallWrapUp` event.
+  A queue configured with `0` closes its wrap-up as it opens. A queue Platform does not know, such as one defined only
+  in Asterisk or one deleted from Platform, gets the fallback of `30` seconds, the default of a Platform queue, and one
+  Warning names it. Queues that share a name in any casing and differ in value get the same fallback, with one Warning.
+  A saved value applies to the next wrap-up, and an open wrap-up keeps the length it opened with. On another Api
+  instance, or with no realtime sync, a save applies after the next reconciliation tick. `forceWrapUp` does not affect
+  this timing. (#512)
+- **BREAKING: `POST /api/v1/admin/queues` and `PUT /api/v1/admin/queues/{id}` answer 400 to a
+  `wrapUp.defaultWrapUpSeconds` outside `0` to `600`**, and write nothing. The body is
+  `{"error":"wrapUp.defaultWrapUpSeconds must be between 0 and 600"}`, and the `PUT` now declares that 400 in the
+  OpenAPI document. 600 seconds is the session retention, past which a wrap-up's event can be lost. A body with no
+  `wrapUp` is unaffected. A value already stored outside the range is never clamped and keeps working until the queue
+  is next saved with it: such a save answers 400, so send a value in range. Until then a stored value above `600` is
+  timed as stored, with a Warning, and a stored negative value is rejected by the session engine, which logs it and
+  applies the fallback. (#512)
+- **A cluster node removed with `DELETE /api/v1/management/cluster/nodes/{nodeId}` while it holds calls keeps them.**
+  Those calls are kept and counted serverless until restart, and their endings are not recorded. Drain first. The route
+  still refuses a `Healthy` or `Draining` node, so this reaches a node that left a drain `Offline`, or one that is
+  `Unknown`, `Degraded` or `Unhealthy`. (#512)
+
+### Dependencies
+
+- **Verbara.Sdk `2.8.0` → `2.9.0` and Verbara.Sdk.Pro `2.23.0-pro` → `2.24.0-pro`**, the 7 `Verbara.Sdk.*` and 22
+  `Verbara.Sdk.Pro.*` pins (`Verbara.Sdk/ADR-0040`). The triple is **Sdk `2.9.0` × Pro `2.24.0-pro` × Platform (next
+  cut from `main`)**. No floor moved: every `project.assets.json` differs only in the Verbara packages. (#512)
+- **Behaviours consumed from Sdk 2.9.0**, each pinned by a test at Platform's call site (#512):
+  - **Sdk #443:** the session engine raises `CallWrapUpEvent` and applies `SessionOptions.WrapUpDuration`, which the
+    host now sets explicitly.
+  - **Sdk #449:** Platform's `IWrapUpDurationProvider` answers from memory, matching the Asterisk queue name as
+    received, ignoring case.
+  - **Sdk #464:** `CallStartedEvent` and `CallQueuedEvent` run under the call's lock, and the voice conversation
+    bridge's handler never waits for another thread on the same call.
+  - **Sdk #477:** a server pool refuses an empty, white-space or reserved id. `POST /api/v1/management/cluster/nodes`
+    now answers 400 to a blank id and to `status-refused`, before anything is registered or connected.
+  - **Sdk #463:** an action sent from a handler of a lost session's event goes out on the new session. The bridge's
+    tenant lookup stays fail-closed when that session answers with an error, and the supervisor-listen observer keeps
+    handling later events.
+
 ## [2.35.0] - 2026-10-29
 
 Minor release. Platform moves to Verbara.Sdk.Pro `2.23.0-pro`: every licence validation path classifies a licence the

@@ -6,6 +6,7 @@ using Verbara.Sdk.Pro.MultiTenant;
 using Verbara.Sdk.Pro.Realtime;
 using Verbara.Sdk.Pro.Realtime.Events;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -101,6 +102,9 @@ public sealed class RealtimeReconciliationServiceTests
         var sp = services.BuildServiceProvider();
         var sut = new RealtimeReconciliationService(
             sp, heartbeat, options, new AgentPauseCoordinator(),
+            QueueWrapUpRefresherRig.Build(
+                sp.GetRequiredService<ITenantStore>(), sp.GetRequiredService<IQueueStore>(),
+                new QueueWrapUpDurationProvider(NullLogger<QueueWrapUpDurationProvider>.Instance)),
             NullLogger<RealtimeReconciliationService>.Instance);
 
         var act = async () => await sut.ReconcileAsync(CancellationToken.None);
@@ -331,6 +335,172 @@ public sealed class RealtimeReconciliationServiceTests
             Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task ExecuteAsync_ShouldRefreshBeforeTheStagger_WhenStarted()
+    {
+        var rig = new RefreshRig();
+        await rig.SaveQueueAsync(12);
+
+        await rig.Worker.StartAsync(CancellationToken.None);
+        try
+        {
+            (await rig.ReachedAsync(pass: 1, RefreshRig.InsideTheStagger))
+                .Should().BeTrue("the first load must not wait for the 10 s stagger");
+            (await rig.AnswersAsync(12, RefreshRig.InsideTheStagger)).Should().BeTrue();
+        }
+        finally
+        {
+            await rig.Worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRefreshOnEachTick_WhenRealtimeSyncIsMissing()
+    {
+        var rig = new RefreshRig();
+        await rig.SaveQueueAsync(12);
+
+        await rig.Worker.StartAsync(CancellationToken.None);
+        try
+        {
+            (await rig.AnswersAsync(12, RefreshRig.InsideTheStagger)).Should().BeTrue();
+
+            await rig.SaveQueueAsync(18);
+
+            (await rig.ReachedAsync(pass: 2, RefreshRig.OverTheStaggerAndOneInterval))
+                .Should().BeTrue("a tick reloads the queues whether or not realtime sync is registered");
+            (await rig.AnswersAsync(18, RefreshRig.InsideTheStagger)).Should().BeTrue();
+        }
+        finally
+        {
+            await rig.Worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldKeepRunning_WhenARefreshThrows()
+    {
+        var rig = new RefreshRig { ThrowOnPass = 1 };
+        await rig.SaveQueueAsync(12);
+
+        await rig.Worker.StartAsync(CancellationToken.None);
+        try
+        {
+            (await rig.ReachedAsync(pass: 2, RefreshRig.OverTheStaggerAndOneInterval))
+                .Should().BeTrue("the pass after the one that threw must still run");
+            rig.Worker.ExecuteTask!.IsFaulted.Should().BeFalse();
+            (await rig.AnswersAsync(12, RefreshRig.InsideTheStagger)).Should().BeTrue();
+            rig.Log.FailedPasses.Should().Be(1, "a failed refresh logs one Warning and keeps the last values");
+        }
+        finally
+        {
+            await rig.Worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    // ── Refresh rig: a worker with no realtime sync, so every pass over the tenants is a wrap-up refresh ──
+
+    private sealed class RefreshRig
+    {
+        public static readonly TimeSpan InsideTheStagger = TimeSpan.FromSeconds(5);
+        public static readonly TimeSpan OverTheStaggerAndOneInterval = TimeSpan.FromSeconds(30);
+
+        private const string Key = TestTenantId + "-" + TestQueueName;
+
+        private readonly TaskCompletionSource[] _reached =
+            [.. Enumerable.Range(0, 2).Select(_ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously))];
+
+        private readonly Verbara.Platform.Storage.InMemory.InMemoryQueueStore _queues = new();
+        private readonly QueueWrapUpDurationProvider _provider = new(NullLogger<QueueWrapUpDurationProvider>.Instance);
+        private int _passes;
+
+        public RefreshRig()
+        {
+            var tenants = Substitute.For<ITenantStore>();
+            IReadOnlyList<Tenant> active = [new Tenant { TenantId = TestTenantId, Name = "Recon", Status = TenantStatus.Active }];
+#pragma warning disable CA2012 // ValueTask used in NSubstitute mock setup
+            tenants.GetAllActiveAsync(Arg.Any<CancellationToken>()).Returns(_ =>
+            {
+                var pass = Interlocked.Increment(ref _passes);
+                if (pass <= _reached.Length)
+                {
+                    _reached[pass - 1].TrySetResult();
+                }
+
+                return pass == ThrowOnPass
+                    ? throw new InvalidOperationException("the store went away")
+                    : new ValueTask<IReadOnlyList<Tenant>>(active);
+            });
+#pragma warning restore CA2012
+
+            var services = new ServiceCollection();
+            services.AddSingleton(tenants);
+            services.AddSingleton<IQueueStore>(_queues);
+            // IRealtimeSyncService deliberately NOT registered.
+            Worker = new RealtimeReconciliationService(
+                services.BuildServiceProvider(),
+                new ServiceHeartbeat(),
+                Options.Create(new RealtimeOptions { ReconcilerIntervalSeconds = 5 }),
+                new AgentPauseCoordinator(),
+                QueueWrapUpRefresherRig.Build(tenants, _queues, _provider),
+                Log);
+        }
+
+        public int ThrowOnPass { get; init; }
+
+        public WarningLog Log { get; } = new();
+
+        public RealtimeReconciliationService Worker { get; }
+
+        public Task SaveQueueAsync(int seconds)
+            => _queues.SaveAsync(QueueWrapUpRefresherRig.Queue(TestTenantId, "q-1", TestQueueName, seconds), CancellationToken.None);
+
+        /// <summary>True once the numbered pass has reached the store, false when the bound ran out first.</summary>
+        public async Task<bool> ReachedAsync(int pass, TimeSpan bound)
+        {
+            var reached = _reached[pass - 1].Task;
+            // fence-allow: GUARD-TIMEOUT — turns a pass that never comes into an assertion failure
+            return await Task.WhenAny(reached, Task.Delay(bound)) == reached;
+        }
+
+        public async Task<bool> AnswersAsync(int seconds, TimeSpan bound)
+        {
+            using var limit = new CancellationTokenSource(bound);
+            while (_provider.GetWrapUpDuration("primary", Key) != TimeSpan.FromSeconds(seconds))
+            {
+                if (limit.IsCancellationRequested)
+                {
+                    return false;
+                }
+
+                // fence-allow: LOOP-DRIVER — the pass exposes no completion signal; the loop ends on the answer or the bound
+                await Task.Delay(TimeSpan.FromMilliseconds(10), CancellationToken.None);
+            }
+
+            return true;
+        }
+    }
+
+    private sealed class WarningLog : ILogger<RealtimeReconciliationService>
+    {
+        private int _failedPasses;
+
+        public int FailedPasses => Volatile.Read(ref _failedPasses);
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning && exception is InvalidOperationException)
+            {
+                Interlocked.Increment(ref _failedPasses);
+            }
+        }
+    }
+
     // ── Test harness ──────────────────────────────────────────────────────
 
     private static Harness BuildHarness(out IRealtimeSyncService sync, IAgentStore? undecoratedAgentStore = null)
@@ -401,6 +571,8 @@ public sealed class RealtimeReconciliationServiceTests
                 new ServiceHeartbeat(),
                 Options.Create(new RealtimeOptions { ReconcilerIntervalSeconds = 60 }),
                 Coordinator,
+                QueueWrapUpRefresherRig.Build(
+                    _tenantStore, _queueStore, new QueueWrapUpDurationProvider(NullLogger<QueueWrapUpDurationProvider>.Instance)),
                 NullLogger<RealtimeReconciliationService>.Instance);
         }
 

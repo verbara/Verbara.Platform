@@ -18,6 +18,29 @@ internal static class TestTreeSource
         ".generated.cs",
     ];
 
+    private static readonly string[] BuildInputExtensions =
+    [
+        ".cs",
+        ".csproj",
+        ".props",
+        ".targets",
+        ".editorconfig",
+        ".globalconfig",
+    ];
+
+    // Build output and other checkouts; nothing in them configures this tree's build.
+    private static readonly string[] NonSourceDirectories =
+    [
+        "bin",
+        "obj",
+        "node_modules",
+        "TestResults",
+        "artifacts",
+        ".git",
+        ".worktrees",
+        ".claude",
+    ];
+
     /// <summary>
     /// Walks parent directories from <paramref name="callerPath"/> until it finds the repo root
     /// (the directory containing <c>Verbara.Platform.slnx</c>) and returns its <c>tests/</c> folder.
@@ -39,6 +62,36 @@ internal static class TestTreeSource
             $"Could not locate '{SolutionFile}' walking up from '{callerPath}'. " +
             "The governance guard cannot find the repo's tests/ tree.");
     }
+
+    /// <summary>The repo root: the parent of <see cref="TestsRoot"/>.</summary>
+    public static string RepoRoot() => Directory.GetParent(TestsRoot())!.FullName;
+
+    /// <summary>
+    /// Enumerates every file under <paramref name="root"/> that can configure the build: C# sources, MSBuild project
+    /// files and analyzer configs. Dotfiles are read on purpose, and the default <see cref="EnumerationOptions"/> would
+    /// skip them as hidden. Symlinked directories are not followed. A directory this user cannot read is skipped,
+    /// because MSBuild could not read it either.
+    /// </summary>
+    public static IEnumerable<string> EnumerateBuildInputs(string root)
+    {
+        var options = new EnumerationOptions { AttributesToSkip = 0, IgnoreInaccessible = true };
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.TryPop(out var dir))
+        {
+            foreach (var file in Directory.EnumerateFiles(dir, "*", options).Where(IsBuildInput))
+                yield return file;
+
+            foreach (var child in Directory.EnumerateDirectories(dir, "*", options).Where(IsWalkedDirectory))
+                pending.Push(child);
+        }
+    }
+
+    private static bool IsBuildInput(string file) =>
+        BuildInputExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsWalkedDirectory(string dir) =>
+        !NonSourceDirectories.Contains(Path.GetFileName(dir)) && new DirectoryInfo(dir).LinkTarget is null;
 
     /// <summary>
     /// Enumerates every real test source file under <see cref="TestsRoot"/>, excluding:

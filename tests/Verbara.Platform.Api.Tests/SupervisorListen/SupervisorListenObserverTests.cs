@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Verbara.Platform.Api.Services.SupervisorListen;
 using Verbara.Sdk;
 using Verbara.Sdk.Ami.Actions;
@@ -166,6 +167,47 @@ public sealed class SupervisorListenObserverTests : IAsyncDisposable
 
         await _ami.Received(1).SendActionAsync(Arg.Is<HangupAction>(a => a.Channel == LegChannel), Arg.Any<CancellationToken>());
         _h.Registry.PendingHangupCount.Should().Be(0);
+    }
+
+    // After a reconnect, a lost session's Newchannel still arrives and the hangup it triggers goes out on the new AMI
+    // session, where that channel is gone. HandleAsync is driven directly: OnNext would catch what these must not throw.
+    private async Task HangupOfALostLeg_ShouldNotStopTheObserver()
+    {
+        var call = _h.SeedVoiceCall();
+        await _h.SeedEndpointAsync();
+        var service = ServiceWithObserver();
+        var conversationId = call.ConversationId.Value;
+        var lost = (await service.StartAsync(H.Caller(), H.TenantId, H.Supervisor, conversationId, "endpoint", CancellationToken.None)).Listen!.ListenId;
+        await service.StopAsync(H.Caller(), H.TenantId, H.Supervisor, conversationId, CancellationToken.None);
+
+        await _observer.HandleAsync(Event("Newchannel", ("Uniqueid", lost), ("Channel", LegChannel)));
+
+        await _ami.Received(1).SendActionAsync(Arg.Is<HangupAction>(a => a.Channel == LegChannel), Arg.Any<CancellationToken>());
+
+        var later = (await service.StartAsync(H.Caller(), H.TenantId, H.Supervisor, conversationId, "endpoint", CancellationToken.None)).Listen!.ListenId;
+        await _observer.HandleAsync(Event("ChanSpyStart", ("SpyerUniqueid", later)));
+        _h.Registry.Get(later)!.State.Should().Be("listening");
+
+        await _observer.HandleAsync(Event("Hangup", ("Uniqueid", later)));
+        _h.Registry.Get(later).Should().BeNull();
+        await StoppedAudits(1, "call-ended", "system");
+    }
+
+    [Fact]
+    public async Task HandleAsync_ShouldKeepHandlingLaterEvents_WhenTheHangupThrows()
+    {
+        _ami.SendActionAsync(Arg.Any<ManagerAction>(), Arg.Any<CancellationToken>()).ThrowsAsync(new TimeoutException("No answer from AMI"));
+
+        await HangupOfALostLeg_ShouldNotStopTheObserver();
+    }
+
+    [Fact]
+    public async Task HandleAsync_ShouldKeepHandlingLaterEvents_WhenTheHangupIsAnsweredWithAnError()
+    {
+        _ami.SendActionAsync(Arg.Any<ManagerAction>(), Arg.Any<CancellationToken>())
+            .Returns(new ManagerResponse { Response = "Error", Message = "No such channel" });
+
+        await HangupOfALostLeg_ShouldNotStopTheObserver();
     }
 
     [Fact]

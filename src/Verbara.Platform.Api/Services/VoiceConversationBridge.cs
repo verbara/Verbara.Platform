@@ -164,6 +164,10 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     }
 
     // Synchronous, never-throwing OnNext: dispatches a fully-guarded async handler.
+    // This runs on the Sdk's thread with the call's lock held, and so does HandleEventAsync's synchronous prefix,
+    // up to its first real suspension. That prefix must never wait for another thread on the same call, and must
+    // never call back synchronously into the session engine: either one deadlocks the call. Today it is lock-free
+    // reads plus `await gate.WaitAsync()`; a blocking `gate.Wait()` there is the failure this rule exists to stop.
     internal void OnEvent(SessionDomainEvent evt) => _ = HandleEventAsync(evt);
 
     internal async Task HandleEventAsync(SessionDomainEvent evt)

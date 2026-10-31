@@ -17,6 +17,7 @@ using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Sessions;
 using Verbara.Sdk.Sessions.Manager;
 using FluentAssertions;
+using FluentAssertions.Execution;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Verbara.Platform.Api.Tests.Logging;
@@ -476,6 +477,33 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         var result = await bridge.ResolveTenantFromChannelAsync(session, "PJSIP/t-2-abc");
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveTenantFromChannelAsync_ShouldFailClosed_WhenTheNewSessionAnswersWithAnError()
+    {
+        // After a reconnect a read for a channel of the lost session goes out on the new AMI session, which answers
+        // with an error. The Value is set on purpose: the Response alone must close it. The stubs below let a wrongly
+        // resolved tenant reach the save, so the conversation assertion can fail.
+        const string channel = "PJSIP/t-2-abc";
+        AddPrimaryServer();
+        StubGetVar("Error", "acme");
+        StubContact();
+        var session = MakeSession("link-gv6", tenant: null);
+        AddCaller(session, channel);
+        _sessions.GetById("s-link-gv6").Returns(session);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-gv6", Arg.Any<CancellationToken>())
+            .Returns(default(Conversation?));
+        var bridge = CreateBridge();
+
+        var result = await bridge.ResolveTenantFromChannelAsync(session, channel);
+        await bridge.HandleEventAsync(new CallQueuedEvent("s-link-gv6", "primary", _clock.UtcNow, "acme-Support", 1));
+
+        using var scope = new AssertionScope();
+        result.Should().BeNull();
+        session.TenantId.Should().BeNull("an error answer stamps no tenant");
+        _conversations.ReceivedCalls().Where(c => c.GetMethodInfo().Name == nameof(IConversationStore.SaveAsync))
+            .Should().BeEmpty("an unresolved tenant creates no conversation");
     }
 
     [Fact]
@@ -1650,6 +1678,69 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         rows[EntityId.From(outcome.CorrelationId!)].State.Should().Be(ConversationState.WrapUp);
         duringCall.Should().Be(1, "the placed call is one unit of voice load, counted once");
         afterHangup.Should().Be(0, "the hangup releases the only unit the call held");
+    }
+
+    // ─── Delivery under the Sdk's call lock ─────────────────────────────────────────────────────
+    // The Sdk raises CallStarted and CallQueued with the call's lock held, so OnEvent must hand off and return. The
+    // pair below is the real one: CallQueued marks the Conversation with the campaign CallStarted stamped on the
+    // session, so the mark also proves the order.
+
+    [Fact]
+    public async Task OnEvent_ShouldReturnWithoutWaiting_WhenAnotherHandlerHoldsTheCallGate()
+    {
+        const string linkedId = "link-gate";
+        var bound = TimeSpan.FromSeconds(5);
+        StubLegVariables(campaignId: "11", dialedNumber: DialedNumber);
+        TrunkSession(linkedId, CampaignCallerId);
+        StubContactsFor(DialedNumber, CampaignCallerId, "anonymous");
+        var saved = TrackConversations(linkedId);
+        var bridge = CreateBridge();
+
+        // CallStarted's first read is left unanswered, which suspends its handler with the gate held.
+        var readReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readAnswer = new TaskCompletionSource<GetVarResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+#pragma warning disable CA2012 // ValueTask in NSubstitute setup
+        _ami.SendActionAsync<GetVarResponse>(
+                Arg.Is<ManagerAction>(a => a is GetVarAction && ((GetVarAction)a).Variable == "VERBARA_OUTBOUND_ID"),
+                Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                readReached.TrySetResult();
+                return new ValueTask<GetVarResponse>(readAnswer.Task);
+            });
+#pragma warning restore CA2012
+        var queuedHandled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var created = _eventBus.Events.Subscribe(e =>
+        {
+            if (e is ConversationStateChangedEvent)
+                queuedHandled.TrySetResult();
+        });
+
+        // Delivered off the test thread: a delivery that blocks must fail the bound, not hang the run.
+        Func<Task> deliverStarted = () => Task.Run(() =>
+            bridge.OnEvent(new CallStartedEvent($"s-{linkedId}", "primary", _clock.UtcNow, CallDirection.Inbound, null)));
+        Func<Task> deliverQueued = () => Task.Run(() =>
+            bridge.OnEvent(new CallQueuedEvent($"s-{linkedId}", "primary", _clock.UtcNow, "acme-Support", 1)));
+
+        try
+        {
+            await deliverStarted.Should().CompleteWithinAsync(bound, "the first handler suspends on its AMI read");
+            await readReached.Task.WaitAsync(bound);
+
+            await deliverQueued.Should().CompleteWithinAsync(bound,
+                "a delivery runs under the Sdk's call lock and must not wait for the handler holding the gate");
+            saved.Should().BeEmpty("the second event waits its turn behind the first handler's AMI read");
+        }
+        finally
+        {
+            // Answered on every path, so a failing run does not leave a delivery blocked behind the gate.
+            readAnswer.TrySetResult(new GetVarResponse { Response = "Error" });
+        }
+
+        await queuedHandled.Task.WaitAsync(bound);
+        saved.Should().ContainSingle("both events are handled, and the call queued once");
+        saved[0].Metadata.Should().ContainKey("campaignId").WhoseValue.Should().Be("11",
+            "CallStarted finished stamping the campaign before CallQueued read it");
     }
 
     private sealed class AcceptingOriginateExecutor : Verbara.Sdk.Pro.Dialer.Execution.OriginateExecutorBase
