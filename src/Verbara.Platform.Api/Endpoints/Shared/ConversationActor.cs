@@ -36,6 +36,9 @@ internal sealed class ConversationActor
     /// <summary>The target queue of a transfer is not a queue of the tenant.</summary>
     public const string TargetQueueNotFound = "target-queue-not-found";
 
+    /// <summary>The note of a transfer is longer than <see cref="ConversationTransferNote.MaxLength"/> after trimming.</summary>
+    public const string TransferNoteTooLong = "transfer-note-too-long";
+
     /// <summary>
     /// A close refused because typification is demanded: a published schema is bound to the conversation,
     /// so the client opens the wrap-up sheet and posts <c>/typify</c> (close-chat-without-typification-licence D5).

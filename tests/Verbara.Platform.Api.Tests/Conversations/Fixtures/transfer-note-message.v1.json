@@ -1,0 +1,50 @@
+{
+  "_comment": "The transfer note as it travels (C2, C4, C8). It is an instance of the EXISTING Message record (Verbara.Platform.Conversations/Message.cs, serialized by ApiJsonContext: camelCase, enums as PascalCase strings, EntityId/TenantId as strings, block discriminator `$type`), returned by GET /api/v1/conversations/{id}/messages (ConversationEndpoints.cs:114, IReadOnlyList<Message>) and by the supervisor history (SupervisorEndpoints.cs:174). What distinguishes it: direction is `System`, channel is the CONVERSATION's channel (never the hardcoded WebChat of SendCoachingNote, SupervisorEndpoints.cs:231-268), senderId is the transferring user's id, createdBy is `transfer:<userId>`, deliveryStatus is `Delivered`, and content has exactly one text block holding the trimmed note. The console renders direction System as the 'system' view-model (platform-message.ts:52); the SSE handler at conversation-store.ts:237 must map sender \"System\" the same way instead of 'customer' (C8). Never delivered to the customer: only SendCoreAsync reaches a connector, and WebChat has no customer-facing history route. Never labelled \"Agent: \" in the AI transcript: DefaultTypificationAiClassifier.cs:205 skips System rows (C4). A member that is null on the server is ABSENT from the JSON, not a literal null (WhenWritingNull at Program.cs:1454 and ApiJsonContext.cs:718, no override on Message; host design H11): `_omittedWhileNull` names the five a stored note never sets. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "history": {
+    "method": "GET",
+    "path": "/api/v1/conversations/4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a/messages",
+    "status": 200,
+    "_bodyIsAnArray": "the transfer note is one element, in createdAt order with the rest, oldest first, paged by limit (default 50) and offset (default 0) (host design H13)",
+    "element": {
+      "_omittedWhileNull": ["externalMessageId", "deliveredAt", "readAt", "updatedAt", "updatedBy"],
+      "messageId": "e9f8d7c6b5a44f3e2d1c0b9a8f7e6d5c",
+      "conversationId": "4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a",
+      "tenantId": "demo",
+      "direction": "System",
+      "channel": "WhatsApp",
+      "senderId": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+      "content": {
+        "blocks": [
+          {
+            "$type": "text",
+            "text": "Customer disputes the October invoice; the amount was already corrected once, please do not re-issue it.",
+            "type": "Text"
+          }
+        ]
+      },
+      "deliveryStatus": "Delivered",
+      "createdAt": "2026-10-30T15:04:05.123+00:00",
+      "createdBy": "transfer:0f1e2d3c4b5a69788796a5b4c3d2e1f0"
+    }
+  },
+  "sseEvent": {
+    "_comment": "ConversationMessageEvent (Verbara.Platform.Core/PlatformEventBus.cs:100) published right after the message is saved, serialized by SseEndpoints.WriteEventAsync as `event: conversation.message` + `data: <json>`. Tenant broadcast, like every inbound customer message today (WebhookInboundProcessor.cs:112). The console reads conversationId, messageId, sender, text and timestamp (conversation-store.ts:237); the PushEvent envelope members it ignores (eventType, metadata) are present and unchanged.",
+    "event": "conversation.message",
+    "data": {
+      "tenantId": "demo",
+      "conversationId": "4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a",
+      "messageId": "e9f8d7c6b5a44f3e2d1c0b9a8f7e6d5c",
+      "sender": "System",
+      "text": "Customer disputes the October invoice; the amount was already corrected once, please do not re-issue it.",
+      "type": "conversation.message",
+      "timestamp": "2026-10-30T15:04:05.130+00:00"
+    }
+  },
+  "invariants": {
+    "writtenOnlyAfter": "result.Success of TransferToQueueAsync / TransferToAgentAsync (ConversationEndpoints.cs:228-283); a refused transfer writes nothing",
+    "failedWrite": "the 200 OwnershipResult still answers (the move is a fact); Warning log; audit note = failed",
+    "customerNeverSeesIt": "a saved Message does not reach a connector; WebChatEndpoints.cs:44 is the only /sessions/{id}/messages route and it is a POST",
+    "aiTranscriptSkipsIt": "DefaultTypificationAiClassifier.cs:205 (fed by ConversationEndpoints.cs:570) excludes direction System",
+    "senderSeesItOnlyInHistory": "the Web removes the conversation from the sender's store on success (transfer-dialog.tsx:57); the receiver sees it in history when the page it reads holds the note (host design H13), or via the SSE event"
+  }
+}

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Threading.Channels;
 using Verbara.Platform.Api.Serialization;
+using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Webhooks;
 using Verbara.Sdk.Pro.Cluster.Leadership;
@@ -12,7 +13,8 @@ namespace Verbara.Platform.Api.Services;
 /// Enqueues new deliveries into a Channel for immediate processing by WebhookDeliveryService.
 /// An event marked <see cref="IPublishedOnEveryReplica"/> is dispatched only while this replica holds
 /// <see cref="CampaignMetricsLeaderResources.Webhooks"/>, so it yields one delivery per subscription
-/// whatever the replica count; every other event is dispatched on the replica that publishes it.
+/// whatever the replica count; every other event is dispatched on the replica that publishes it. A
+/// <see cref="ConversationMessageEvent"/> from <see cref="MessageDirection.System"/> is never dispatched.
 /// </summary>
 internal sealed partial class WebhookDispatcher : IDisposable
 {
@@ -68,8 +70,13 @@ internal sealed partial class WebhookDispatcher : IDisposable
     // Production semantics are unchanged; only the started Task is now recorded for tests.
     // An every-replica event is dropped before any work unless this replica holds its lease
     // (design D5): the other replicas published the same state, and the holder dispatches it.
+    // A System message is dropped first of all (H1): the event carries internal text, a transfer note's or a coaching
+    // event's, and a webhook receiver is outside the console. The SSE stream has its own subscription and still gets it.
     private void OnEvent(PlatformEvent evt)
     {
+        if (evt is ConversationMessageEvent { Sender: nameof(MessageDirection.System) })
+            return;
+
         if (evt is IPublishedOnEveryReplica && !_everyReplicaLeader.IsLeader)
             return;
 

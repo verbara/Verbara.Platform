@@ -1,0 +1,43 @@
+{
+  "_comment": "EXISTING route the new-conversation dialog posts to, UNCHANGED by this change; pinned because the dialog's `channel` now comes from GET /api/v1/channels/available and its refused-start E2E depends on these refusals, so this change newly depends on the shape (pinned matrix rule, host design; boundary matrix B-16). POST /api/v1/conversations (ConversationEndpoints.cs:68; group /conversations at :35: Authenticated + operational tenant), body CreateConversationRequest(string ContactId, string Channel, string? InitialMessage, string? TemplateName, string? TemplateLanguage) (ConversationEndpoints.cs:1396-1401; generated CreateConversationRequest, openapi.d.ts), camelCase through ApiJsonContext. Without `initialMessage` the deprecated queued path runs; the dialog always sends it, and sends `templateName` and `templateLanguage` only for a template (new-conversation-dialog.tsx:118-126). A success is 201 with the whole Conversation entity, for a new conversation and for the reuse of the caller's own open one alike. Refusals: ConversationStartRefusal(string Error, string? ConversationId, string? OwnerKind) (ConversationEndpoints.cs:1408), `error` being the machine code (ADR-0013); status per code at ConversationEndpoints.cs:1047 and :1103-1119 (400 for unknown-channel and contact-has-no-address, 502 for channel-send-failed, 500 for start-persist-failed, 409 for every other); codes at IOutboundConversationStarter.cs:40-68 and WhatsAppSessionWindow.cs:26. Null members are omitted on the wire (WhenWritingNull, Program.cs:1454), so only the two refusals that name an open conversation carry `conversationId` and `ownerKind` (OutboundConversationStarter.cs:91-102); `ownerKind` is a ConversationOwnerKind name, or None when queued unowned. The console reads them through startRefusalOf (conversation-refusals.ts:72-84) and maps every code at conversation-refusals.ts:93-141. not-an-agent (ConversationEndpoints.cs:1055) and the 404 for a missing contact are ErrorResponse bodies, not ConversationStartRefusal; the 404's prose is not a contract, and the console maps it by status (conversation-refusals.ts:154). Every child change's delta spec must cite these member names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "route": {
+    "method": "POST",
+    "path": "/api/v1/conversations",
+    "gate": "Authenticated + operational tenant (group)"
+  },
+  "request": {
+    "contactId": "c0ffee1234567890abcdef1234567890",
+    "channel": "WhatsApp",
+    "initialMessage": "Hello",
+    "templateName": "order_update",
+    "templateLanguage": "en_US"
+  },
+  "response": {
+    "status": 201,
+    "_bodyIsTheConversation": "the whole Conversation entity; only `conversationId` is pinned here, the other members are as before this change",
+    "body": {
+      "conversationId": "4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a"
+    }
+  },
+  "refusalBody": {
+    "error": "conversation-open-elsewhere",
+    "conversationId": "4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a",
+    "ownerKind": "Agent"
+  },
+  "ownerKindValues": ["Agent", "Queue", "Bot", "System", "None"],
+  "refusals": [
+    { "status": 400, "error": "unknown-channel" },
+    { "status": 400, "error": "contact-has-no-address" },
+    { "status": 409, "error": "channel-not-available" },
+    { "status": 409, "error": "conversation-open-elsewhere" },
+    { "status": 409, "error": "conversation-not-sendable" },
+    { "status": 409, "error": "whatsapp-template-required" },
+    { "status": 409, "error": "agent-at-capacity" },
+    { "status": 500, "error": "start-persist-failed" },
+    { "status": 502, "error": "channel-send-failed" }
+  ],
+  "otherRefusals": [
+    { "status": 403, "error": "not-an-agent" },
+    { "status": 404, "error": "Contact not found" }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "_comment": "NET-NEW wire shape (C5, C6): GET /api/v1/transfer-targets/agents, the agent-readable agent picker behind the digital and voice transfer dialogs (transfer-dialog.tsx:34, voice-transfer-dialog.tsx:46 read today's AdminOnly GET /admin/agents). Same group, gate and query as fixtures/transfer-target-queues.v1.json (`search` on displayName). Body: PagedResult<TransferTargetAgentDto> with the NEW sealed record TransferTargetAgentDto(string Id, string DisplayName, AgentState State, bool CanAcceptWork), generated as PagedResultOfTransferTargetAgentDto / TransferTargetAgentDto. `id` is the AGENT id (the value POST transfer takes as targetAgentId), never the user id. `state` is the EXISTING AgentState enum serialized PascalCase by UseStringEnumConverter: Offline | Available | Busy | Break | Lunch | Training | ACW | DND (openapi.d.ts:17559) — the Web compares 'Busy', never 'busy' (transfer-dialog.tsx:136 and voice-transfer-dialog.tsx:170 compare lowercase today and never match), and shows a LOCALIZED label for the state, never String(item.state). `canAcceptWork` is AgentStateMachine.IsRoutable(State). Server filters: the caller's own Agent profile is excluded; agents whose user is not Active are excluded in ONE IAgentAccountStatusLookup.WhereUserActiveAsync lookup per request (the same rule as ConversationActor.IsOwnableTargetAsync and ConversationSwitchboard.cs:267, so every listed agent is a transfer target that will not answer target-agent-not-found); Offline agents are LISTED (the switchboard accepts them) and the Web decides how to show them. Ordered by displayName; totalCount counts the agents AFTER the filters. NOT AdminAgentResponseDto (AdminEndpoints.cs:1187: userId, extension, pending reason, capacity are admin data). The Web gets a NEW hook with its own queryKey (never ['agents']: use-agents.ts:97 is shared). `id` is also the `target` of POST /api/v1/conversations/{id}/voice-transfer with `kind` `agent` (fixtures/voice-transfer.v1.json): one id for the digital targetAgentId and the voice target. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "route": {
+    "method": "GET",
+    "path": "/api/v1/transfer-targets/agents",
+    "gate": "Permission:contacts:conversation:transfer (group)",
+    "query": {
+      "search": "an",
+      "page": 1,
+      "pageSize": 100
+    },
+    "queryDefaults": {
+      "search": null,
+      "page": 1,
+      "pageSize": 100,
+      "pageSizeMax": 200
+    }
+  },
+  "status": 200,
+  "body": {
+    "items": [
+      {
+        "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "displayName": "Ana Pereira",
+        "state": "Available",
+        "canAcceptWork": true
+      },
+      {
+        "id": "b2c3d4e5f6a718293a4b5c6d7e8f90a1",
+        "displayName": "Andrés Rojas",
+        "state": "Busy",
+        "canAcceptWork": true
+      },
+      {
+        "id": "c3d4e5f6a7b8293a4b5c6d7e8f90a1b2",
+        "displayName": "Hannah Osei",
+        "state": "ACW",
+        "canAcceptWork": false
+      },
+      {
+        "id": "d4e5f6a7b8c9293a4b5c6d7e8f90a1b2",
+        "displayName": "Juan Castellanos",
+        "state": "Offline",
+        "canAcceptWork": false
+      }
+    ],
+    "totalCount": 4,
+    "page": 1,
+    "pageSize": 100,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "stateValues": ["Offline", "Available", "Busy", "Break", "Lunch", "Training", "ACW", "DND"],
+  "serverRules": {
+    "source": "IAgentStore.ListAllAsync (keyset pages of 1000, Verbara.Platform.Queues/IAgentStore.cs + AgentAccountStatusLookupExtensions.ListAllAsync), then exclude self, search, WhereUserActiveAsync (one lookup), order, page",
+    "excludesCaller": "the caller's own Agent profile (ConversationActor.ResolveAsync(...).Agent), when it has one",
+    "excludesInactiveUsers": "IAgentAccountStatusLookup.WhereUserActiveAsync, one call per request",
+    "offlineAgentsListed": true,
+    "order": "displayName, ordinal ignore case",
+    "membershipOrSkillFilter": "none (ADR-0026)"
+  },
+  "webRules": {
+    "busyComparison": "item.state === 'Busy' (generated AgentState), never 'busy'",
+    "stateLabel": "localized through the agent namespace, never String(item.state)",
+    "hook": "new file, own queryKey, imports @/core/api/generated (generated-types-adoption gate)"
+  }
+}

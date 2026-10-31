@@ -1,0 +1,60 @@
+{
+  "_comment": "Golden wire shape for POST /api/v1/conversations/{id}/transfer after agent-console-contract-debt (C1, C2). The EXISTING record TransferRequest(string? TargetQueueId, string? TargetAgentId) at ConversationEndpoints.cs:1331 gains ONE optional member, `note` (string|null). Exactly one of targetQueueId / targetAgentId is set, as today. `note` is trimmed server-side; an omitted, null or blank note means NO note and nothing else changes; a trimmed note longer than 1000 characters is refused 400 transfer-note-too-long (fixtures/transfer-refusals.json) BEFORE any move. The 200 body is the UNCHANGED OwnershipResult (Verbara.Platform.Switchboard/OwnershipResult.cs:5), already in the agent manifest group; the Web reads none of its fields (use-conversations.ts:169 customFetch<void>). On a success its `failureReason` is null and therefore ABSENT from the JSON, not a literal null (WhenWritingNull, host design H11): `_omittedWhileNull`. With a note, the handler writes the Direction=System message of fixtures/transfer-note-message.v1.json after result.Success and before the audit write; the audit entry conversation.transferred carries the key `note` with none | written | failed (C3), never the text. Gate: the endpoint's RequireAuthorization(\"Permission:contacts:conversation:transfer\") (ConversationEndpoints.cs:45-46) inside the /conversations group (Authenticated + operational tenant); the handler then requires the owner or a supervisor (by_supervisor audited). Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "route": {
+    "method": "POST",
+    "path": "/api/v1/conversations/4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a/transfer",
+    "gate": "Permission:contacts:conversation:transfer"
+  },
+  "noteRules": {
+    "maxLengthAfterTrim": 1000,
+    "trimmed": true,
+    "blankMeansAbsent": true,
+    "omittedIsAllowed": true,
+    "refusalWhenTooLong": "400 transfer-note-too-long (fixtures/transfer-refusals.json), decided before the move"
+  },
+  "requests": {
+    "toQueueWithNote": {
+      "targetQueueId": "7c2e4a6b8d0f4e1a9b3c5d7e9f1a2b3c",
+      "targetAgentId": null,
+      "note": "Customer disputes the October invoice; the amount was already corrected once, please do not re-issue it."
+    },
+    "toAgentWithNote": {
+      "targetQueueId": null,
+      "targetAgentId": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "note": "Prefers Portuguese. Case 4471 is open on the same order."
+    },
+    "toQueueWithoutNote": {
+      "targetQueueId": "7c2e4a6b8d0f4e1a9b3c5d7e9f1a2b3c",
+      "targetAgentId": null,
+      "note": null
+    },
+    "_omittedNoteIsAlsoValid": {
+      "targetAgentId": "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+    }
+  },
+  "response": {
+    "status": 200,
+    "_unchanged": "OwnershipResult, as today; shown for the queue target",
+    "body": {
+      "_omittedWhileNull": ["failureReason"],
+      "success": true,
+      "newOwner": {
+        "kind": "Queue",
+        "ownerId": "7c2e4a6b8d0f4e1a9b3c5d7e9f1a2b3c"
+      },
+      "newState": "Queued"
+    }
+  },
+  "sideEffects": {
+    "systemMessage": "ONE Message with direction System (fixtures/transfer-note-message.v1.json) when note is present; none otherwise",
+    "sseEvent": "conversation.message with sender \"System\" and text = the note (fixtures/transfer-note-message.v1.json § sseEvent)",
+    "audit": {
+      "action": "conversation.transferred",
+      "metadataKeysToday": ["from_owner_kind", "from_owner_id", "target_queue | target_agent", "by_supervisor (when applicable)"],
+      "metadataKeyAdded": {
+        "note": "none | written | failed"
+      },
+      "_rule": "no free text in audit metadata: the note may carry customer data"
+    }
+  }
+}

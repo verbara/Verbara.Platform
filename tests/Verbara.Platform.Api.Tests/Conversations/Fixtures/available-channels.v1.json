@@ -1,0 +1,32 @@
+{
+  "_comment": "NET-NEW wire shape (D3, C7): GET /api/v1/channels/available, the server-driven channel list for the console's '+' (new conversation) dialog, replacing the fixed CHANNELS array at new-conversation-dialog.tsx:26-33 (WhatsApp, Sms, WebChat, Email, Messenger, Telegram) that promises channels the host never registered. Group `/channels` is mapped inside ChannelConfigEndpoints.MapChannelConfigEndpoints with RequireAuthorization(\"Authenticated\") + RequireOperationalTenant(), the gate of POST /conversations. Body: AvailableChannelDto[] with the NEW sealed record AvailableChannelDto(ChannelType Channel); `channel` is the EXISTING ChannelType enum serialized PascalCase (the exact string CreateConversationRequest.channel takes). Rule: a channel is listed when it is in IChannelRegistry.AvailableChannels (registered outbound connector; the host registers exactly WebChat and WhatsApp, spec digital-channel-registry) AND the tenant has a TenantChannelConfig row for it with IsActive = true (ITenantChannelConfigStore.GetAsync; WebChatEndpoints.cs:100 already refuses a WebChat session without one). Ordered by ChannelType value ascending. An empty array is a valid 200. The Web takes the FIRST item as the default channel (today it hardcodes 'WhatsApp' at :57 and :86), shows a localized empty state and disables start when the array is empty, and keeps mapping the server's refusals (channel-not-available 409, unknown-channel 400, contact-has-no-address 400) exactly as conversation-refusals.ts:109-116 does today. POST /conversations keeps refusing channel-not-available on the registry alone (OutboundConversationStarter.cs:82-83); it does not read tenant config. E2E: new-conversation-start-refusals.spec.ts:139-143 provokes channel-not-available by picking the Sms option, which no longer exists; the rewrite intercepts GET /api/v1/channels/available (Playwright route) to answer the three-channel list of webRules.e2eRewrite — WhatsApp, WebChat, Sms — because the lab's real list holds WebChat alone (docker/demo/demo-reset.sh:231-232 activates WebChat only and nothing seeds a WhatsApp row) and the spec's other steps (:127,148) pick WhatsApp; every POST /api/v1/conversations stays real, so the Sms start answers 409 channel-not-available, asserted on data-error-code (host design H6; re-cut 2026-10-30, boundary matrix B-5). Schema registered in the admin-remainder manifest group (ChannelConfigEndpoints.cs is a candidate file there). A later connector registration (register-messenger-instagram-channels) appears here with no Web edit. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "route": {
+    "method": "GET",
+    "path": "/api/v1/channels/available",
+    "gate": "Authenticated + operational tenant (group)"
+  },
+  "status": 200,
+  "body": [
+    {
+      "channel": "WhatsApp"
+    },
+    {
+      "channel": "WebChat"
+    }
+  ],
+  "emptyBody": [],
+  "channelValues": ["Voice", "WhatsApp", "Sms", "WebChat", "Email", "Messenger", "Instagram", "Telegram", "Twitter", "Video", "Rcs"],
+  "serverRules": {
+    "registered": "IChannelRegistry.AvailableChannels (Verbara.Platform.Channels.Core/IChannelRegistry.cs:17)",
+    "tenantActive": "ITenantChannelConfigStore.GetAsync(tenant, channel) returns a row with IsActive = true (Verbara.Platform.Channels.Core/TenantChannelConfig.cs:9)",
+    "listed": "registered AND tenantActive",
+    "order": "ChannelType enum value ascending",
+    "voiceNeverListed": "Voice has no IChannelConnector; it is not a digital start channel"
+  },
+  "webRules": {
+    "defaultChannel": "body[0].channel, or none when empty",
+    "emptyState": "localized text, start disabled",
+    "refusalsUnchanged": "channel-not-available, unknown-channel, contact-has-no-address keep their mapping (conversation-refusals.ts:109-116)",
+    "e2eRewrite": "intercept GET /api/v1/channels/available to answer [{\"channel\":\"WhatsApp\"},{\"channel\":\"WebChat\"},{\"channel\":\"Sms\"}] (the lab's real list holds WebChat alone), keep every POST /api/v1/conversations real, pick Sms and submit; assert data-error-code = channel-not-available"
+  }
+}

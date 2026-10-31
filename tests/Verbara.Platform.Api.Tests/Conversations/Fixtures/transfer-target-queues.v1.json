@@ -1,0 +1,53 @@
+{
+  "_comment": "NET-NEW wire shape (C5, C6): GET /api/v1/transfer-targets/queues, the agent-readable queue picker behind the digital and voice transfer dialogs (transfer-dialog.tsx:33, voice-transfer-dialog.tsx:45 read today's AdminOnly GET /admin/queues and get a silent 403 -> []). Group `/transfer-targets` is mapped inside ConversationEndpoints.MapConversationEndpoints with RequireAuthorization(\"Permission:contacts:conversation:transfer\") + RequireOperationalTenant(). Query: `search` (optional; case-insensitive substring on name; absent = all), `page` (default 1), `pageSize` (default 100, clamped to 1..200). Body: the EXISTING generic PagedResult<T> (Verbara.Platform.Core/PagedResult.cs) of the NEW sealed record TransferTargetQueueDto(string Id, string Name), generated as PagedResultOfTransferTargetQueueDto / TransferTargetQueueDto in openapi.d.ts. Only queues with IsActive = true, ordered by name (ordinal, case-insensitive). totalCount counts the matching ACTIVE queues. NOT QueueDto (AdminEndpoints.cs:1300: SLA, overflow, wrap-up are admin data). The Web gets a NEW hook with its own queryKey (never ['queues']: use-queues.ts:15 is shared by ~30 admin files) that imports the generated types. `id` is also the `target` of POST /api/v1/conversations/{id}/voice-transfer with `kind` `queue` (fixtures/voice-transfer.v1.json): one id for the digital targetQueueId and the voice target. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "route": {
+    "method": "GET",
+    "path": "/api/v1/transfer-targets/queues",
+    "gate": "Permission:contacts:conversation:transfer (group)",
+    "query": {
+      "search": "bill",
+      "page": 1,
+      "pageSize": 100
+    },
+    "queryDefaults": {
+      "search": null,
+      "page": 1,
+      "pageSize": 100,
+      "pageSizeMax": 200
+    }
+  },
+  "status": 200,
+  "body": {
+    "items": [
+      {
+        "id": "7c2e4a6b8d0f4e1a9b3c5d7e9f1a2b3c",
+        "name": "Billing"
+      },
+      {
+        "id": "8d3f5b7c9e1a4f2b0c4d6e8f0a2b3c4d",
+        "name": "Billing - Escalations"
+      }
+    ],
+    "totalCount": 2,
+    "page": 1,
+    "pageSize": 100,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "emptyBody": {
+    "items": [],
+    "totalCount": 0,
+    "page": 1,
+    "pageSize": 100,
+    "totalPages": 0,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "serverRules": {
+    "source": "IQueueStore.ListAsync (Verbara.Platform.Queues/IQueueStore.cs:15) pages read to the end, then IsActive + search + order + page in the handler",
+    "activeOnly": true,
+    "order": "name, ordinal ignore case",
+    "membershipFilter": "none (ADR-0026: transfer bypasses queue membership)"
+  }
+}

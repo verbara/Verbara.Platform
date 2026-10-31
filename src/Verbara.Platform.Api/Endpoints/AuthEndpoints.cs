@@ -745,7 +745,7 @@ internal static class AuthEndpoints
             "security.password_changed",
             "Password changed",
             $"User {user.Email} changed their password.",
-            "/admin/security",
+            "/profile/security",
             ct);
 
         return Results.Ok(new MessageResponse("Password changed"));
@@ -995,7 +995,7 @@ internal static class AuthEndpoints
             "security.mfa_enabled",
             "Two-factor authentication enabled",
             $"User {user.Email} enabled MFA on their account.",
-            "/admin/security",
+            "/profile/security",
             ct);
 
         return Results.Ok(new MessageResponse("MFA enabled"));
@@ -1048,7 +1048,7 @@ internal static class AuthEndpoints
             "security.mfa_disabled",
             "Two-factor authentication disabled",
             $"User {user.Email} disabled MFA on their account.",
-            "/admin/security",
+            "/profile/security",
             ct);
 
         return Results.Ok(new MessageResponse("MFA disabled"));

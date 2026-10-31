@@ -203,6 +203,11 @@ namespace Verbara.Platform.Api.Serialization;
 // AOT (ADR-0022 Phase D): remaining ConversationEndpoints [FromBody] DTOs.
 [JsonSerializable(typeof(SendMessageRequest))]
 [JsonSerializable(typeof(TransferRequest))]
+// agent-console-contract-debt (C5, C6): the agent-readable transfer pickers.
+[JsonSerializable(typeof(TransferTargetQueueDto))]
+[JsonSerializable(typeof(PagedResult<TransferTargetQueueDto>))]
+[JsonSerializable(typeof(TransferTargetAgentDto))]
+[JsonSerializable(typeof(PagedResult<TransferTargetAgentDto>))]
 [JsonSerializable(typeof(DashboardDto))]
 [JsonSerializable(typeof(DashboardKpisDto))]
 [JsonSerializable(typeof(TrendPointDto))]
@@ -470,6 +475,8 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(ChannelTestResponse))]
 [JsonSerializable(typeof(ChannelConfigResponse))]  // whatsapp-works-for-real D15 — redacted {key, isSet} view; replaces TenantChannelConfig in responses
 [JsonSerializable(typeof(ChannelConfigResponse[]))]
+[JsonSerializable(typeof(AvailableChannelDto))]  // agent-console-contract-debt (C7)
+[JsonSerializable(typeof(AvailableChannelDto[]))]
 [JsonSerializable(typeof(ChannelCredentialStatus))]
 [JsonSerializable(typeof(ChannelChangeAudit))]  // ADR-0026 Phase A.2 — typed audit DTO replacing anonymous types in UpdateChannelConfig
 [JsonSerializable(typeof(IReadOnlyDictionary<string, bool>))]
