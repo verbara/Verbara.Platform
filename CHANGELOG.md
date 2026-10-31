@@ -18,7 +18,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Warning names it. Queues that share a name in any casing and differ in value get the same fallback, with one Warning.
   A saved value applies to the next wrap-up, and an open wrap-up keeps the length it opened with. On another Api
   instance, or with no realtime sync, a save applies after the next reconciliation tick. `forceWrapUp` does not affect
-  this timing.
+  this timing. (#512)
 - **BREAKING: `POST /api/v1/admin/queues` and `PUT /api/v1/admin/queues/{id}` answer 400 to a
   `wrapUp.defaultWrapUpSeconds` outside `0` to `600`**, and write nothing. The body is
   `{"error":"wrapUp.defaultWrapUpSeconds must be between 0 and 600"}`, and the `PUT` now declares that 400 in the
@@ -26,18 +26,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `wrapUp` is unaffected. A value already stored outside the range is never clamped and keeps working until the queue
   is next saved with it: such a save answers 400, so send a value in range. Until then a stored value above `600` is
   timed as stored, with a Warning, and a stored negative value is rejected by the session engine, which logs it and
-  applies the fallback.
+  applies the fallback. (#512)
 - **A cluster node removed with `DELETE /api/v1/management/cluster/nodes/{nodeId}` while it holds calls keeps them.**
   Those calls are kept and counted serverless until restart, and their endings are not recorded. Drain first. The route
   still refuses a `Healthy` or `Draining` node, so this reaches a node that left a drain `Offline`, or one that is
-  `Unknown`, `Degraded` or `Unhealthy`.
+  `Unknown`, `Degraded` or `Unhealthy`. (#512)
 
 ### Dependencies
 
 - **Verbara.Sdk `2.8.0` → `2.9.0` and Verbara.Sdk.Pro `2.23.0-pro` → `2.24.0-pro`**, the 7 `Verbara.Sdk.*` and 22
   `Verbara.Sdk.Pro.*` pins (`Verbara.Sdk/ADR-0040`). The triple is **Sdk `2.9.0` × Pro `2.24.0-pro` × Platform (next
-  cut from `main`)**. No floor moved: every `project.assets.json` differs only in the Verbara packages.
-- **Behaviours consumed from Sdk 2.9.0**, each pinned by a test at Platform's call site:
+  cut from `main`)**. No floor moved: every `project.assets.json` differs only in the Verbara packages. (#512)
+- **Behaviours consumed from Sdk 2.9.0**, each pinned by a test at Platform's call site (#512):
   - **Sdk #443:** the session engine raises `CallWrapUpEvent` and applies `SessionOptions.WrapUpDuration`, which the
     host now sets explicitly.
   - **Sdk #449:** Platform's `IWrapUpDurationProvider` answers from memory, matching the Asterisk queue name as
