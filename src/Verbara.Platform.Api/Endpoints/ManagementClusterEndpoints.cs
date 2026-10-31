@@ -14,6 +14,10 @@ internal static class ManagementClusterEndpoints
 {
     private const string ClusterNotRegistered = "Cluster not registered";
 
+    // The server pool keeps this id for its health data and refuses it, compared Ordinal, so another casing is a valid
+    // id. The Sdk exposes no constant for it.
+    private const string ReservedNodeId = "status-refused";
+
     public static void MapManagementClusterEndpoints(this IEndpointRouteBuilder app)
     {
         // No RequireLicenseFeature here: /management/* endpoints are the platform
@@ -99,6 +103,12 @@ internal static class ManagementClusterEndpoints
         [FromServices] IServiceProvider services,
         CancellationToken ct)
     {
+        // Ahead of the manager: it registers the node and opens its AMI connection before the pool would refuse the id.
+        if (string.IsNullOrWhiteSpace(body.NodeId))
+            return Results.BadRequest(new ErrorResponse("Node id must not be blank"));
+        if (string.Equals(body.NodeId, ReservedNodeId, StringComparison.Ordinal))
+            return Results.BadRequest(new ErrorResponse($"Node id '{ReservedNodeId}' is reserved"));
+
         var manager = services.GetService<ClusterManager>();
         if (manager is null)
             return Results.Problem(ClusterNotRegistered, statusCode: 503);
