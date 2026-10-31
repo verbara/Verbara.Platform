@@ -512,6 +512,10 @@ jobs:
       # "fixed", or lets the .NET generator ones back. Same job, same reason as the guards above.
       - name: Run CodeQL SARIF filter unit tests
         run: bash scripts/tests/test_filter_codeql_sarif.sh
+      # Graceful-stop check fake hosts: one per failure mode plus a clean run. The check itself runs on the real binary
+      # in `AOT Publish (Api)`; a check that cannot fail reads there exactly like a clean stop.
+      - name: Run graceful-stop check unit tests
+        run: bash scripts/tests/test_check_graceful_stop.sh
 
   # AOT-at-PR gate (verbara-meta/ADR-0012 gate #1): run the REAL Native AOT publish
   # of Verbara.Platform.Api on every PR and fail on any IL trim/AOT warning. Until now
