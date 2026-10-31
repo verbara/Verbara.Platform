@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
+using Verbara.Platform.Queues;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Verbara.Platform.Api.Tests;
@@ -72,6 +73,119 @@ public sealed class AdminEndpointTests : IClassFixture<AuthenticatedPlatformApiF
         var response = await _client.PutAsync("/api/admin/queues/no-such-queue", body);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // ─── Queues: the wrap-up range ─────────────────────────────────────────────
+
+    private const string WrapUpRangeErrorBody = """{"error":"wrapUp.defaultWrapUpSeconds must be between 0 and 600"}""";
+
+    [Fact]
+    public async Task CreateQueue_ShouldReturn400_WhenWrapUpIsNegative()
+    {
+        await AssertCreateRefusedAsync("Wrap-up create negative", -1);
+    }
+
+    [Fact]
+    public async Task CreateQueue_ShouldReturn400_WhenWrapUpIsAboveTheRange()
+    {
+        await AssertCreateRefusedAsync("Wrap-up create above", 601);
+    }
+
+    [Fact]
+    public async Task UpdateQueue_ShouldReturn400_WhenWrapUpIsNegative()
+    {
+        await AssertUpdateRefusedAsync("Wrap-up update negative", -1);
+    }
+
+    [Fact]
+    public async Task UpdateQueue_ShouldReturn400_WhenWrapUpIsAboveTheRange()
+    {
+        await AssertUpdateRefusedAsync("Wrap-up update above", 601);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(600)]
+    public async Task CreateQueue_ShouldSucceed_WhenWrapUpIsAtEitherLimit(int seconds)
+    {
+        var name = $"Wrap-up create limit {seconds}";
+
+        var response = await _client.PostAsync("/api/admin/queues", QueueBody(name, seconds));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var stored = await StoredQueueAsync(name);
+        stored.Should().NotBeNull();
+        stored!.WrapUp.DefaultWrapUpSeconds.Should().Be(seconds);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(600)]
+    public async Task UpdateQueue_ShouldSucceed_WhenWrapUpIsAtEitherLimit(int seconds)
+    {
+        var name = $"Wrap-up update limit {seconds}";
+        var queueId = await CreateQueueAsync(name);
+
+        var response = await _client.PutAsync($"/api/admin/queues/{queueId}", QueueBody(name, seconds));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var stored = await StoredQueueAsync(name);
+        stored.Should().NotBeNull();
+        stored!.WrapUp.DefaultWrapUpSeconds.Should().Be(seconds);
+    }
+
+    [Fact]
+    public async Task CreateQueue_ShouldDefaultTheWrapUpTo30_WhenTheBodyHasNoWrapUp()
+    {
+        var name = "Wrap-up absent";
+
+        var response = await _client.PostAsync("/api/admin/queues", JsonContent.Create(new { name }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var stored = await StoredQueueAsync(name);
+        stored.Should().NotBeNull();
+        stored!.WrapUp.DefaultWrapUpSeconds.Should().Be(30);
+    }
+
+    private async Task AssertCreateRefusedAsync(string name, int seconds)
+    {
+        var response = await _client.PostAsync("/api/admin/queues", QueueBody(name, seconds));
+
+        await AssertWrapUpRefusedAsync(response);
+        (await StoredQueueAsync(name)).Should().BeNull();
+    }
+
+    private async Task AssertUpdateRefusedAsync(string name, int seconds)
+    {
+        var queueId = await CreateQueueAsync(name);
+
+        var response = await _client.PutAsync(
+            $"/api/admin/queues/{queueId}", QueueBody($"{name} renamed", seconds));
+
+        await AssertWrapUpRefusedAsync(response);
+        (await StoredQueueAsync($"{name} renamed")).Should().BeNull();
+        var stored = await StoredQueueAsync(name);
+        stored.Should().NotBeNull();
+        stored!.WrapUp.DefaultWrapUpSeconds.Should().Be(WrapUpConfig.FallbackSeconds);
+        stored.UpdatedAt.Should().BeNull();
+    }
+
+    private static async Task AssertWrapUpRefusedAsync(HttpResponseMessage response)
+    {
+        var content = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, content);
+        JsonNode.DeepEquals(JsonNode.Parse(content), JsonNode.Parse(WrapUpRangeErrorBody))
+            .Should().BeTrue($"the body was {content}");
+    }
+
+    private static JsonContent QueueBody(string name, int wrapUpSeconds) =>
+        JsonContent.Create(new { name, wrapUp = new { defaultWrapUpSeconds = wrapUpSeconds } });
+
+    private async Task<Queue?> StoredQueueAsync(string name)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IQueueStore>().GetByNameAsync(
+            new TenantId(AuthenticatedPlatformApiFactory.TestTenantId), name, CancellationToken.None);
     }
 
     [Fact]

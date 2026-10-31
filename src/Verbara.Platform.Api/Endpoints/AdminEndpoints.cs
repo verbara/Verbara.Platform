@@ -419,6 +419,9 @@ internal static partial class AdminEndpoints
         IClock clock,
         CancellationToken ct)
     {
+        if (OutOfRangeWrapUp(body.WrapUp) is { } refused)
+            return refused;
+
         var tenantId = GetTenantId(context);
         var queue = new Queue
         {
@@ -471,7 +474,7 @@ internal static partial class AdminEndpoints
         return Results.Created($"/admin/queues/{queue.QueueId}", ToQueueDto(queue));
     }
 
-    private static async Task<Results<Ok<QueueDto>, NotFound>> UpdateQueue(
+    private static async Task<Results<Ok<QueueDto>, NotFound, BadRequest<ErrorResponse>>> UpdateQueue(
         string id,
         HttpContext context,
         [FromBody] UpdateQueueRequest body,
@@ -483,6 +486,9 @@ internal static partial class AdminEndpoints
         var queue = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (queue is null)
             return TypedResults.NotFound();
+
+        if (OutOfRangeWrapUp(body.WrapUp) is { } refused)
+            return refused;
 
         if (body.Name is not null) queue.Name = body.Name;
         if (body.IsActive.HasValue) queue.IsActive = body.IsActive.Value;
@@ -514,6 +520,15 @@ internal static partial class AdminEndpoints
         // ADR-0012 Ola-3 — sync rides IQueueStore.SaveAsync (RealtimeSyncingQueueStore decorator).
         return TypedResults.Ok(ToQueueDto(queue));
     }
+
+    /// <summary>
+    /// A present wrap-up must be within <c>[0, 600]</c> seconds: past 600, the session retention, the wrap-up's event
+    /// finds no session and is lost. A value already stored is never clamped; it is checked when a body sets it.
+    /// </summary>
+    private static BadRequest<ErrorResponse>? OutOfRangeWrapUp(WrapUpConfigDto? wrapUp) =>
+        wrapUp is { DefaultWrapUpSeconds: < 0 or > 600 }
+            ? TypedResults.BadRequest(new ErrorResponse("wrapUp.defaultWrapUpSeconds must be between 0 and 600"))
+            : null;
 
     private static async Task<IResult> DeleteQueue(
         string id,
