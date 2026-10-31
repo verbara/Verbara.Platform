@@ -1,0 +1,42 @@
+{
+  "_comment": "The one wire VALUE this change moves (C9): the deep link of the three security notifications created by AuthEndpoints.cs:748 (security.password_changed), :998 (security.mfa_enabled) and :1051 (security.mfa_disabled) through INotificationService.CreateAsync(tenant, type, title, body, actionUrl). Today each passes the literal \"/admin/security\"; after this change the value is \"/profile/security\": the Web route `profile/security` (beside router.tsx:1107, AuthGuard only) renders the password + MFA + sessions form moved from src/admin/profile/security-page.tsx to src/profile/security/, and /admin/security keeps rendering the same component (sidebar.tsx:533, security.spec.ts:7, sessions.spec.ts:5 keep passing). WHO FOLLOWS THE LINK, AND HOW (corrected 2026-10-30; host design H4, boundary matrix B-2): the recipients are admin and system_admin only (NotificationTypeRegistry.cs:38-48), so an Agent never receives these, and the earlier premise that the link sent an Agent to /unauthorized is REFUTED — what fixes the Agent's password is the route and the user menu; the value still moves because one canonical address is simpler and both routes render the same page. The link is followed from the notification drawer, which reads NotificationDto from GET /api/v1/notifications (fixtures/notification-list.v1.json: members `type` and `actionUrl`; notification-drawer.tsx:81 navigate(actionUrl)). On the `notification.created` stream the same record is NotificationEvent (Verbara.Platform.Core/PlatformEventBus.cs:287) with the type under the member name `notificationType`; use-sse.ts:316-322 navigates only on severity Critical, which none of the three is, so the stream never follows this link. The `type` key of each entry below is the list member; its value equals the stream's `notificationType`. Persisted rows keep the old value and keep working (the admin route stays): no migration. ChangePasswordRequest (AuthEndpoints.cs:1338) and POST /auth/change-password are unchanged and need no fixture. Every child change's delta spec must cite this value VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "actionUrl": {
+    "before": "/admin/security",
+    "after": "/profile/security"
+  },
+  "notifications": [
+    {
+      "site": "AuthEndpoints.cs:748",
+      "type": "security.password_changed",
+      "title": "Password changed",
+      "body": "User <email> changed their password.",
+      "actionUrl": "/profile/security"
+    },
+    {
+      "site": "AuthEndpoints.cs:998",
+      "type": "security.mfa_enabled",
+      "title": "Two-factor authentication enabled",
+      "body": "User <email> enabled MFA on their account.",
+      "actionUrl": "/profile/security"
+    },
+    {
+      "site": "AuthEndpoints.cs:1051",
+      "type": "security.mfa_disabled",
+      "title": "Two-factor authentication disabled",
+      "body": "User <email> disabled MFA on their account.",
+      "actionUrl": "/profile/security"
+    }
+  ],
+  "webRoutes": {
+    "added": "profile/security (index) -> SecurityPage, AuthGuard only, beside router.tsx:1107",
+    "kept": "/admin/security (router.tsx:764) -> the same SecurityPage",
+    "repointed": [
+      "src/shell/user-menu.tsx:109 navigate('/admin/security') -> '/profile/security'",
+      "src/profile/security/mfa/mfa-enroll-wizard.tsx:66 '/admin/profile/security' -> '/profile/security'",
+      "src/profile/security/recovery-codes/regenerate-page.tsx:101,161 '/admin/profile/security' -> '/profile/security'",
+      "tests/e2e/tests/profile/mfa-enroll-flow.spec.ts:67 '/admin/profile/security' -> '/profile/security'",
+      "src/pages/unauthorized.tsx:21 navigate('/') -> navigate(roleDefaultRoute(...)) so an Agent no longer loops / -> /admin -> /unauthorized"
+    ],
+    "closureRule": "the moved page imports only core/* (security-page.tsx:13-41), so src/admin stays out of the /agent closure (Web ADR-0014 budget)"
+  }
+}

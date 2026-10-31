@@ -175,7 +175,8 @@ public sealed partial class DefaultTypificationAiClassifier : ITypificationAiCla
     /// <summary>
     /// Assembles a role-prefixed plain-text transcript from the ordered messages,
     /// concatenating each message's <see cref="TextBlock"/> contents and skipping
-    /// non-text blocks. Capped (most-recent-wins) for window safety.
+    /// non-text blocks and <see cref="MessageDirection.System"/> messages. Capped
+    /// (most-recent-wins) for window safety.
     /// </summary>
     private static string BuildTranscriptText(IReadOnlyList<Message> transcript)
     {
@@ -188,6 +189,12 @@ public sealed partial class DefaultTypificationAiClassifier : ITypificationAiCla
         for (var i = start; i < transcript.Count; i++)
         {
             var message = transcript[i];
+
+            // A System row is internal, a transfer or coaching note: nobody in the conversation said it, so it is
+            // no turn to classify, and its text does not go to the tenant's model provider.
+            if (message.Direction == MessageDirection.System)
+                continue;
+
             var text = ExtractText(message.Content);
             if (string.IsNullOrWhiteSpace(text))
                 continue;

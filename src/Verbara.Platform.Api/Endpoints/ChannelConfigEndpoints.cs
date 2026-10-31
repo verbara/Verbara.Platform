@@ -17,6 +17,11 @@ internal static class ChannelConfigEndpoints
         group.MapGet("/{channel}", GetChannelConfig);
         group.MapPut("/{channel}", UpdateChannelConfig);
         group.MapPost("/{channel}/test", TestChannelConfig);
+
+        // agent-console-contract-debt (C7): the gate of POST /conversations, so anyone who may start can see what on.
+        var channels = app.MapGroup("/channels").RequireAuthorization("Authenticated").RequireOperationalTenant();
+
+        channels.MapGet("/available", ListAvailableChannels);
     }
 
     /// <summary><c>400</c> code: a key outside the channel's declared credential schema.</summary>
@@ -24,6 +29,27 @@ internal static class ChannelConfigEndpoints
 
     /// <summary><c>400</c> code: the route names no known channel.</summary>
     internal const string InvalidChannelCode = "invalid-channel";
+
+    // The channels the host has a connector for and the tenant has active, in ChannelType order. This is what the
+    // console offers, not a check on a start: POST /conversations decides on the registry alone.
+    private static async Task<Ok<AvailableChannelDto[]>> ListAvailableChannels(
+        HttpContext context,
+        [FromServices] IChannelRegistry registry,
+        [FromServices] ITenantChannelConfigStore store,
+        CancellationToken ct)
+    {
+        var tenantId = GetTenantId(context);
+        var available = new List<AvailableChannelDto>();
+
+        foreach (var channel in registry.AvailableChannels.OrderBy(channel => (int)channel))
+        {
+            var config = await store.GetAsync(tenantId, channel, ct);
+            if (config is { IsActive: true })
+                available.Add(new AvailableChannelDto(channel));
+        }
+
+        return TypedResults.Ok(available.ToArray());
+    }
 
     private static async Task<Ok<ChannelConfigResponse[]>> ListChannelConfigs(
         HttpContext context,
@@ -184,5 +210,9 @@ internal sealed record ChannelConfigResponse(
 /// <param name="Code">On failure: <c>channel-not-configured</c>, <c>not-testable</c>, <c>provider-rejected</c> or <c>provider-unreachable</c>.</param>
 /// <param name="VerifiedName">The provider's display name for the account (WhatsApp: the number's verified name).</param>
 internal sealed record ChannelTestResponse(bool Success, string Message, string? Code = null, string? VerifiedName = null);
+/// <summary>A channel a conversation can be started on.</summary>
+/// <param name="Channel">The channel, in the form <c>POST /conversations</c> takes as <c>channel</c>.</param>
+internal sealed record AvailableChannelDto(ChannelType Channel);
+
 // ADR-0026 Phase A.2 — typed replacement for anonymous-type AuditChanges payload.
 internal sealed record ChannelChangeAudit(string Channel, bool IsActive);

@@ -1,0 +1,90 @@
+{
+  "_comment": "Refusal bodies for the routes this change touches. Body convention: Platform ErrorResponse { error } read by the Web's conversationRefusals map (src/core/api/conversation-refusals.ts, ADR-0013: mapped by status + machine code, never server prose). POST /conversations/{id}/transfer REUSES its existing codes unchanged and adds ONE: transfer-note-too-long (400). The two existing prose 400/409 bodies (missing target, switchboard FailureReason) stay as they are: changing them is not this change. The picker routes refuse with the group gate's bare 403 (no body) or, for a tenant that is not operational, with the 409 TenantTypeMismatchProblem of RequireOperationalTenant (TenantTypeGateExtensions.cs:51-61, Platform/ADR-0027; transferTargets.operationalTenant below), and clamp paging instead of refusing it. GET /channels/available has no refusal body of its own: 401 unauthenticated, or that same 409 (availableChannels._rule). Every child change's delta spec must cite these codes VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "transfer": {
+    "route": "POST /api/v1/conversations/{id}/transfer",
+    "precedence": "missing-target (400 prose) -> conversation 404 -> not-owner (403) -> transfer-note-too-long (400) -> target-queue-not-found | target-agent-not-found (400) -> switchboard refusal (409 prose)",
+    "transferNoteTooLong": {
+      "status": 400,
+      "new": true,
+      "body": {
+        "error": "transfer-note-too-long"
+      },
+      "_note": "trimmed note longer than 1000 characters; decided before any move, so nothing is written"
+    },
+    "targetQueueNotFound": {
+      "status": 400,
+      "new": false,
+      "body": {
+        "error": "target-queue-not-found"
+      },
+      "_handle": "ConversationActor.TargetQueueNotFound (ConversationActor.cs:37); Web key errors.conversation.target_queue_not_found"
+    },
+    "targetAgentNotFound": {
+      "status": 400,
+      "new": false,
+      "body": {
+        "error": "target-agent-not-found"
+      },
+      "_handle": "ConversationActor.TargetAgentNotFound (ConversationActor.cs:34), also for an agent whose user is not Active; Web key errors.conversation.target_agent_not_found"
+    },
+    "notOwner": {
+      "status": 403,
+      "new": false,
+      "body": {
+        "error": "not-owner"
+      },
+      "_handle": "ConversationActor.NotOwner (ConversationActor.cs:28): the caller neither owns the conversation nor satisfies SupervisorPlus"
+    },
+    "missingTarget": {
+      "status": 400,
+      "new": false,
+      "body": {
+        "error": "Either targetQueueId or targetAgentId must be specified"
+      },
+      "_note": "existing prose body, unchanged by this change"
+    },
+    "conversationNotFound": {
+      "status": 404,
+      "new": false,
+      "body": null
+    },
+    "switchboardRefused": {
+      "status": 409,
+      "new": false,
+      "body": {
+        "error": "<OwnershipResult.FailureReason, prose>"
+      },
+      "_note": "ConversationActor.Conflict(result.FailureReason) as today; a note is NOT written on this path"
+    }
+  },
+  "transferTargets": {
+    "routes": [
+      "GET /api/v1/transfer-targets/queues",
+      "GET /api/v1/transfer-targets/agents"
+    ],
+    "forbidden": {
+      "status": 403,
+      "body": null,
+      "_note": "group RequireAuthorization(\"Permission:contacts:conversation:transfer\"); a caller without the permission gets the policy's bare 403 before the handler. An impersonation token passes only on a minted permission."
+    },
+    "operationalTenant": {
+      "status": 409,
+      "body": {
+        "type": "https://verbara.platform/errors/tenant-type-mismatch",
+        "title": "Operational endpoint not available on this tenant type",
+        "status": 409,
+        "detail": "<prose naming the caller's tenant type and the impersonation route>",
+        "tenantType": "<Platform | Partner>",
+        "expectedType": "Customer"
+      },
+      "_note": "group RequireOperationalTenant() (TenantTypeGateExtensions.cs:51-61, Platform/ADR-0027): the caller's tenant is not a Customer tenant. Same body as every operational group, /conversations and /channels included. The console never meets it (an Agent lives in a Customer tenant) and would map it by status, never by the prose."
+    },
+    "paging": {
+      "_rule": "no 400: page < 1 reads as 1; pageSize < 1 reads as 1; pageSize > 200 reads as 200"
+    }
+  },
+  "availableChannels": {
+    "route": "GET /api/v1/channels/available",
+    "_rule": "no refusal body of its own; 401 unauthenticated, 409 TenantTypeMismatchProblem from RequireOperationalTenant when the tenant is not operational. An empty tenant answers 200 with []"
+  }
+}

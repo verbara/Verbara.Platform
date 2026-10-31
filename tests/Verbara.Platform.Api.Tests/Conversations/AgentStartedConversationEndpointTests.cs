@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Channels.WhatsApp;
@@ -13,6 +14,7 @@ using Verbara.Platform.Identity;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Licensing;
 using Verbara.Platform.Storage.InMemory;
+using Verbara.Platform.Switchboard;
 
 namespace Verbara.Platform.Api.Tests.Conversations;
 
@@ -302,7 +304,146 @@ public sealed class AgentStartedConversationEndpointTests
         _factory.Graph.RequestsTo(address).Should().BeEmpty();
     }
 
+    // agent-console-contract-debt (D3, C7): what GET /channels/available lists is an offer, never a check on a start. The
+    // refusal the console reports for a channel the tenant never configured stays the provider's, and comes after the send.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateConversation_ShouldGetPastTheRegistryCheck_WhenARegisteredChannelIsNotListed(bool hasInactiveRow)
+    {
+        await using var factory = new AgentStartApiFactory();
+        var (user, _) = factory.NewAgent("starter");
+        if (hasInactiveRow)
+        {
+            await factory.Services.GetRequiredService<ITenantChannelConfigStore>().SaveAsync(
+                new TenantChannelConfig
+                {
+                    TenantId = ConversationOwnershipApiFactory.Tenant,
+                    Channel = ChannelType.WhatsApp,
+                    IsActive = false,
+                    Credentials = new Dictionary<string, string>(),
+                },
+                CancellationToken.None);
+        }
+        var (contactId, address) = await SeedContactAsync(factory, ChannelType.WhatsApp);
+        using var client = factory.ClientFor(user);
+
+        var listed = await client.GetAsync("/api/v1/channels/available");
+
+        listed.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await listed.Content.ReadAsStringAsync()).Should().NotContain("WhatsApp", "this start is on a channel the list leaves out");
+
+        var response = await client.PostAsJsonAsync("/api/v1/conversations", Body(contactId, initialMessage: "Hello!"));
+
+        await ShouldBeErrorAsync(response, HttpStatusCode.BadGateway, "channel-send-failed");
+        factory.Graph.RequestsTo(address).Should().BeEmpty("the connector has no credentials to send with");
+    }
+
+    [Fact]
+    public async Task CreateConversation_ShouldReturn409NotAvailable_WhenTheTenantActivatedAChannelTheHostDoesNotRegister()
+    {
+        var (user, _) = _factory.NewAgent("starter");
+        await _factory.Services.GetRequiredService<ITenantChannelConfigStore>().SaveAsync(
+            new TenantChannelConfig
+            {
+                TenantId = ConversationOwnershipApiFactory.Tenant,
+                Channel = ChannelType.Sms,
+                IsActive = true,
+                Credentials = new Dictionary<string, string>(),
+            },
+            CancellationToken.None);
+        var (contactId, _) = await SeedContactAsync(_factory, ChannelType.Sms);
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/conversations", new { contactId = contactId.Value, channel = "Sms", initialMessage = "Hello!" });
+
+        var status = StartFixture()["refusals"]!.AsArray()
+            .Single(refusal => refusal!["error"]!.GetValue<string>() == OutboundStartCodes.ChannelNotAvailable)!["status"]!;
+        ((int)response.StatusCode).Should().Be(status.GetValue<int>());
+        var body = await ShouldBeErrorAsync(response, response.StatusCode, OutboundStartCodes.ChannelNotAvailable);
+        JsonNode.Parse(body)!.AsObject().Select(member => member.Key).Should().Equal(
+            ["error"], "only the two refusals that name an open conversation add members");
+    }
+
+    [Fact]
+    public async Task CreateConversation_ShouldStartFromTheFixturesMembers_WhenItsRequestIsPosted()
+    {
+        var fixture = StartFixture();
+        var (user, _) = _factory.NewAgent("starter");
+        var (contactId, _) = await SeedWhatsAppContactAsync();
+        using var client = _factory.ClientFor(user);
+        var request = fixture["request"]!.DeepClone().AsObject();
+        request["contactId"] = contactId.Value;
+        using var content = new StringContent(request.ToJsonString(), Encoding.UTF8, "application/json");
+
+        var response = await client.PostAsync(fixture["route"]!["path"]!.GetValue<string>(), content);
+
+        var raw = await response.Content.ReadAsStringAsync();
+        ((int)response.StatusCode).Should().Be(fixture["response"]!["status"]!.GetValue<int>(), raw);
+        var conversationId = JsonNode.Parse(raw)!["conversationId"]!.GetValue<string>();
+        response.Headers.Location!.ToString().Should().EndWith(conversationId);
+        _factory.Load(EntityId.From(conversationId)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task CreateConversation_ShouldNameTheOpenConversationAsTheFixtureDoes_WhenOpenElsewhere()
+    {
+        var fixture = StartFixture();
+        var (user, _) = _factory.NewAgent("starter");
+        var (_, otherAgent) = _factory.NewAgent("other");
+        var (contactId, _) = await SeedWhatsAppContactAsync();
+        await SeedOpenConversationAsync(contactId, ConversationOwner.ForAgent(otherAgent.AgentId));
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.PostAsJsonAsync("/api/v1/conversations", Body(contactId, initialMessage: "Hello!"));
+
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        var expected = fixture["refusalBody"]!.AsObject();
+        body.Select(member => member.Key).Should().Equal(expected.Select(member => member.Key));
+        body["error"]!.GetValue<string>().Should().Be(expected["error"]!.GetValue<string>());
+        body["ownerKind"]!.GetValue<string>().Should().Be(expected["ownerKind"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void OutboundStartCodes_ShouldBeTheFixturesRefusals_WithUnknownChannelBesideThem()
+    {
+        var refusals = StartFixture()["refusals"]!.AsArray().Select(refusal => refusal!["error"]!.GetValue<string>());
+
+        refusals.Should().BeEquivalentTo(
+            "unknown-channel",
+            OutboundStartCodes.ContactHasNoAddress,
+            OutboundStartCodes.ChannelNotAvailable,
+            OutboundStartCodes.ConversationOpenElsewhere,
+            OutboundStartCodes.ConversationNotSendable,
+            OutboundStartCodes.WhatsAppTemplateRequired,
+            OutboundStartCodes.AgentAtCapacity,
+            OutboundStartCodes.StartPersistFailed,
+            OutboundStartCodes.ChannelSendFailed);
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    private static JsonObject StartFixture()
+    {
+        var file = Path.Join(AppContext.BaseDirectory, "Conversations", "Fixtures", "conversation-start.v1.json");
+        return JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+    }
+
+    private static async Task<(EntityId ContactId, string Address)> SeedContactAsync(
+        AgentStartApiFactory factory, ChannelType channel)
+    {
+        var contact = new Contact
+        {
+            ContactId = EntityId.From($"contact-{Guid.NewGuid():N}"),
+            TenantId = ConversationOwnershipApiFactory.Tenant,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        var address = $"1555{Random.Shared.Next(1_000_000, 9_999_999)}";
+        contact.AddAddress(new ChannelAddress(channel, address));
+        await factory.Services.GetRequiredService<IContactStore>().SaveAsync(contact, CancellationToken.None);
+        return (contact.ContactId, address);
+    }
 
     private static object Body(EntityId contactId, string? initialMessage) => initialMessage is null
         ? new { contactId = contactId.Value, channel = "WhatsApp" }

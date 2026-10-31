@@ -2,10 +2,13 @@ using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
+using Verbara.Platform.Api.Tests.Conversations;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Channels.WhatsApp;
 using Verbara.Platform.Core;
+using Verbara.Platform.Identity;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -15,17 +18,36 @@ namespace Verbara.Platform.Api.Tests;
 /// (omitted or blank keeps, value replaces, null removes); a WhatsApp key outside its canonical schema is
 /// refused; the audit record names changed keys only. Every test seeds the tenant's WhatsApp row itself,
 /// so the shared fixture's order does not matter.
+/// <para>
+/// agent-console-contract-debt (C7): <c>GET /channels/available</c> is what an agent can start on, on the host's real
+/// registry. Those tests run in a new Customer tenant each, because a channel configuration cannot be deleted.
+/// </para>
 /// </summary>
-public sealed class ChannelConfigEndpointsTests : IClassFixture<AuthenticatedPlatformApiFactory>
+public sealed class ChannelConfigEndpointsTests :
+    IClassFixture<AuthenticatedPlatformApiFactory>,
+    IClassFixture<ConversationOwnershipApiFactory>,
+    IClassFixture<PlatformTenantAuthenticatedApiFactory>,
+    IClassFixture<PartnerApiFactory>
 {
     private const string Route = "/api/v1/admin/channels/whatsapp";
+    private const string AvailableRoute = "/api/v1/channels/available";
 
     private readonly AuthenticatedPlatformApiFactory _factory;
+    private readonly ConversationOwnershipApiFactory _ownership;
+    private readonly PlatformTenantAuthenticatedApiFactory _platform;
+    private readonly PartnerApiFactory _partner;
     private readonly HttpClient _client;
 
-    public ChannelConfigEndpointsTests(AuthenticatedPlatformApiFactory factory)
+    public ChannelConfigEndpointsTests(
+        AuthenticatedPlatformApiFactory factory,
+        ConversationOwnershipApiFactory ownership,
+        PlatformTenantAuthenticatedApiFactory platform,
+        PartnerApiFactory partner)
     {
         _factory = factory;
+        _ownership = ownership;
+        _platform = platform;
+        _partner = partner;
         _client = factory.CreateAuthenticatedClient();
     }
 
@@ -207,7 +229,164 @@ public sealed class ChannelConfigEndpointsTests : IClassFixture<AuthenticatedPla
         stored.Credentials.Should().ContainKey(WhatsAppCredentialKeys.AppSecret);
     }
 
+    [Theory]
+    [InlineData(UserRole.Agent)]
+    [InlineData(UserRole.Supervisor)]
+    [InlineData(UserRole.Admin)]
+    public async Task ListAvailableChannels_ShouldAnswerTheFixturesBody_WhenWhatsAppAndWebChatAreActive(UserRole role)
+    {
+        var secret = $"app-secret-{Guid.NewGuid():N}";
+        var (client, tenant) = NewTenant(_ownership, role);
+        await SaveChannelAsync(_ownership, tenant, ChannelType.WebChat);
+        await SaveChannelAsync(_ownership, tenant, ChannelType.WhatsApp, credentials: new Dictionary<string, string>
+        {
+            [WhatsAppCredentialKeys.AppSecret] = secret,
+        });
+
+        var response = await client.GetAsync(AvailableRoute);
+
+        var raw = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, raw);
+        JsonNode.DeepEquals(JsonNode.Parse(raw), AvailableFixture()["body"]).Should().BeTrue(
+            $"the body is frozen, WhatsApp first, with no member beyond channel; it was {raw}");
+        raw.Should().NotContain(secret, "the list carries no configuration");
+    }
+
+    [Fact]
+    public async Task ListAvailableChannels_ShouldAnswerTheFixturesEmptyBody_WhenNothingIsActive()
+    {
+        var (client, _) = NewTenant(_ownership);
+
+        var response = await client.GetAsync(AvailableRoute);
+
+        var raw = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, raw);
+        JsonNode.DeepEquals(JsonNode.Parse(raw), AvailableFixture()["emptyBody"]).Should().BeTrue($"it was {raw}");
+    }
+
+    [Fact]
+    public async Task ListAvailableChannels_ShouldReturn401_WhenThereIsNoCredential()
+    {
+        // The tenant is named, so this 401 is the policy's and not the operational gate's own missing-tenant answer.
+        using var client = _ownership.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", ConversationOwnershipApiFactory.CustomerTenantId);
+
+        var response = await client.GetAsync(AvailableRoute);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task ListAvailableChannels_ShouldReturnTheGatesProblem_WhenTheTenantIsNotOperational()
+    {
+        foreach (var caller in new[] { _platform.CreateAuthenticatedClient(), _partner.CreatePartnerClient() })
+        {
+            var response = await caller.GetAsync(AvailableRoute);
+
+            var raw = await response.Content.ReadAsStringAsync();
+            response.StatusCode.Should().Be(HttpStatusCode.Conflict, raw);
+            JsonNode.Parse(raw)!["type"]!.GetValue<string>()
+                .Should().Be("https://verbara.platform/errors/tenant-type-mismatch");
+        }
+    }
+
+    [Fact]
+    public async Task ListAvailableChannels_ShouldLeaveWhatsAppOut_WhenItIsRegisteredButNotConfigured()
+    {
+        var (client, tenant) = NewTenant(_ownership);
+        await SaveChannelAsync(_ownership, tenant, ChannelType.WebChat);
+
+        (await ReadAvailableAsync(client)).Should().Equal("WebChat");
+    }
+
+    [Fact]
+    public async Task ListAvailableChannels_ShouldLeaveWhatsAppOut_WhenItsConfigurationIsInactive()
+    {
+        var (client, tenant) = NewTenant(_ownership);
+        await SaveChannelAsync(_ownership, tenant, ChannelType.WhatsApp, isActive: false);
+        await SaveChannelAsync(_ownership, tenant, ChannelType.WebChat);
+
+        (await ReadAvailableAsync(client)).Should().Equal("WebChat");
+    }
+
+    [Theory]
+    [InlineData(ChannelType.Sms)]
+    [InlineData(ChannelType.Voice)]
+    public async Task ListAvailableChannels_ShouldLeaveTheChannelOut_WhenItIsActiveButNotRegistered(ChannelType channel)
+    {
+        var (client, tenant) = NewTenant(_ownership);
+        await SaveChannelAsync(_ownership, tenant, channel);
+
+        (await ReadAvailableAsync(client)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListAvailableChannels_ShouldListAChannel_WhenTheHostStartsRegisteringIt()
+    {
+        await using var host = new LaterConnectorApiFactory();
+        var (client, tenant) = NewTenant(host);
+        await SaveChannelAsync(host, tenant, ChannelType.WebChat);
+        await SaveChannelAsync(host, tenant, ChannelType.Sms);
+        await SaveChannelAsync(host, tenant, ChannelType.WhatsApp);
+
+        (await ReadAvailableAsync(client)).Should().Equal("WhatsApp", "Sms", "WebChat");
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    private static JsonObject AvailableFixture()
+    {
+        var file = Path.Join(AppContext.BaseDirectory, "Conversations", "Fixtures", "available-channels.v1.json");
+        return JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+    }
+
+    /// <summary>A new Customer tenant with no channel configuration, and a client of a user of it with no Agent profile.</summary>
+    private static (HttpClient Client, TenantId Tenant) NewTenant(
+        ConversationOwnershipApiFactory host, UserRole role = UserRole.Agent)
+    {
+        var tenant = $"channels-{Guid.NewGuid():N}";
+        AuthenticatedPlatformApiFactory.SeedTestCustomerTenant(host.Services, tenant);
+        var user = host.SaveUser($"reader-{Guid.NewGuid():N}", tenant, role, UserStatus.Active);
+        return (host.ClientFor(user), new TenantId(tenant));
+    }
+
+    private static Task SaveChannelAsync(
+        ConversationOwnershipApiFactory host,
+        TenantId tenant,
+        ChannelType channel,
+        bool isActive = true,
+        IReadOnlyDictionary<string, string>? credentials = null) =>
+        host.Services.GetRequiredService<ITenantChannelConfigStore>().SaveAsync(
+            new TenantChannelConfig
+            {
+                TenantId = tenant,
+                Channel = channel,
+                IsActive = isActive,
+                Credentials = credentials ?? new Dictionary<string, string>(),
+            },
+            CancellationToken.None);
+
+    private static async Task<string[]> ReadAvailableAsync(HttpClient client)
+    {
+        var response = await client.GetAsync(AvailableRoute);
+        var raw = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, raw);
+        return JsonNode.Parse(raw)!.AsArray().Select(item => item!["channel"]!.GetValue<string>()).ToArray();
+    }
+
+    /// <summary>A host with one more connector than the code registers today: what a later channel module adds to DI.</summary>
+    private sealed class LaterConnectorApiFactory : ConversationOwnershipApiFactory
+    {
+        /// <inheritdoc />
+        protected override void ConfigureTestServices(IServiceCollection services)
+        {
+            base.ConfigureTestServices(services);
+
+            var connector = Substitute.For<IChannelConnector>();
+            connector.Channel.Returns(ChannelType.Sms);
+            services.AddSingleton(connector);
+        }
+    }
 
     private sealed record Secrets(string AccessToken, string PhoneNumberId, string AppSecret, string VerifyToken, string? WabaId)
     {
