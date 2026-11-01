@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Serialization;
 using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
@@ -1141,11 +1142,14 @@ internal static class AuthEndpoints
                 t.IpAddress,
                 t.CreatedAt,
                 t.ExpiresAt,
-                IsCurrentSession: t.TokenId == currentTokenId))
+                IsCurrentSession: t.TokenId == currentTokenId,
+                LastActivityAt: t.LastActivityAt == default ? t.CreatedAt : t.LastActivityAt))
             .ToArray();
 
         return Results.Ok(dtos);
     }
+
+    private const string SessionIsCurrent = "session-is-current";
 
     internal static async Task<IResult> RevokeOwnSession(
         string tokenId,
@@ -1157,13 +1161,19 @@ internal static class AuthEndpoints
         if (tenantId is null || userId is null)
             return Results.Unauthorized();
 
+        // Precedence (fixtures/own-session-revoke.v1.json): 401 -> session-is-current (400) -> 404 -> 204.
+        // The session the refresh_token cookie names is ended by sign-out, never revoked here.
+        var currentTokenId = await TryGetCurrentTokenIdAsync(context, refreshTokenStore, ct);
+        if (tokenId == currentTokenId)
+            return Results.BadRequest(new ErrorResponse(SessionIsCurrent));
+
         var tokens = await refreshTokenStore.GetActiveByUserAsync(tenantId, userId, ct);
         var target = tokens.FirstOrDefault(t => t.TokenId == tokenId);
         if (target is null)
             return Results.NotFound();
 
         await refreshTokenStore.RevokeAsync(tokenId, DateTimeOffset.UtcNow, null, ct);
-        return Results.Ok();
+        return Results.NoContent();
     }
 
     internal static async Task<IResult> RevokeOtherSessions(
@@ -1437,13 +1447,16 @@ internal sealed record PasswordResetMfaRequiredResponse(bool MfaRequired, string
 
 internal sealed record AuthEventDetail(string? Email = null, string? Reason = null);
 
+// userAgent / ipAddress stay on the wire as null (fixtures/own-sessions.v1.json, C5): both serializers default to
+// WhenWritingNull, which would drop them for a session with no known device.
 internal sealed record UserSessionDto(
     string TokenId,
-    string? UserAgent,
-    string? IpAddress,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? UserAgent,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? IpAddress,
     DateTimeOffset CreatedAt,
     DateTimeOffset ExpiresAt,
-    bool IsCurrentSession);
+    bool IsCurrentSession,
+    DateTimeOffset LastActivityAt);
 
 // Sub C T2.3a: sanitized password policy DTO. MUST NOT include OIDC secrets,
 // lockout config, session timeouts, MFA policy, or any other TenantAuthConfig

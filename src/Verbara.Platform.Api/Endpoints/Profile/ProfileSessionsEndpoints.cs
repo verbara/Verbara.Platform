@@ -18,6 +18,12 @@ namespace Verbara.Platform.Api.Endpoints.Profile;
 /// to the legacy auth surface (which also serves login/refresh/logout). The
 /// <c>POST /:id/revoke</c> shape (vs <c>DELETE</c>) matches the PA.2 spec and
 /// makes the audit-tracked write idiom obvious from the URL.
+/// <para>
+/// DEPRECATED (profile-sessions-use-the-auth-route): use <c>GET /api/v1/auth/sessions</c> and
+/// <c>DELETE /api/v1/auth/sessions/{tokenId}</c> instead. The browser never sends the <c>refresh_token</c> cookie
+/// here (its path is <c>/api/v1/auth</c>), so this group cannot mark the current session. Removal planned in
+/// v2.40.0; until then its behavior is unchanged.
+/// </para>
 /// </remarks>
 internal static class ProfileSessionsEndpoints
 {
