@@ -7,6 +7,7 @@ using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Branding;
 using Verbara.Platform.Core.Email;
@@ -1155,6 +1156,8 @@ internal static class AuthEndpoints
         string tokenId,
         HttpContext context,
         [FromServices] IRefreshTokenStore refreshTokenStore,
+        [FromServices] IAuditService audit,
+        AuthEventService authEvents,
         CancellationToken ct)
     {
         var (tenantId, userId) = GetAuthClaims(context);
@@ -1173,6 +1176,29 @@ internal static class AuthEndpoints
             return Results.NotFound();
 
         await refreshTokenStore.RevokeAsync(tokenId, DateTimeOffset.UtcNow, null, ct);
+
+        // Same records as the deprecated profile twin: the console's revocations moved here from it.
+        var ipAddress = GetIpAddress(context);
+        await audit.RecordAsync(
+            new TenantId(tenantId),
+            category: "auth",
+            action: "user.session.revoked",
+            severity: "info",
+            actorId: userId,
+            actorType: "user",
+            targetId: tokenId,
+            targetType: "refresh_token",
+            metadata: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["actor_tenant_id"] = tenantId,
+                ["ip"] = ipAddress ?? "unknown",
+                ["endpoint"] = context.Request.Path.Value ?? "",
+            },
+            ct: ct);
+        await authEvents.LogAsync(tenantId, userId, AuthEventTypes.SessionRevoked,
+            ipAddress, GetUserAgent(context),
+            new Dictionary<string, string> { ["session_id"] = tokenId }, ct);
+
         return Results.NoContent();
     }
 
@@ -1196,7 +1222,7 @@ internal static class AuthEndpoints
             await refreshTokenStore.RevokeAsync(token.TokenId, now, null, ct);
         }
 
-        return Results.Ok();
+        return Results.NoContent();
     }
 
     private static async Task<string?> TryGetCurrentTokenIdAsync(
