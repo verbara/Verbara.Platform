@@ -9,6 +9,30 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`GET /api/v1/auth/sessions` rows carry `lastActivityAt`**, never null. Each token refresh creates a new row, so today
+  it equals that row's `createdAt`: both are the time of the last refresh, not of the last request.
+- **`DELETE /api/v1/auth/sessions/{tokenId}` records each revocation**, with the audit entry `user.session.revoked` and the
+  auth event `session_revoked` that the profile route writes, so revoking from the console stays on the record.
+
+### Changed
+
+- **`DELETE /api/v1/auth/sessions/{tokenId}` refuses the session the `refresh_token` cookie names** with 400
+  `{"error":"session-is-current"}` and revokes nothing; sign-out ends the current session. The order is 401, then
+  `session-is-current`, then 404. A request with no cookie (an API client) has no current session and is unaffected.
+- **A successful `DELETE /api/v1/auth/sessions/{tokenId}` and `POST /api/v1/auth/sessions/revoke-others` answer 204
+  instead of an empty 200.** The console's client parses every success except 204, so the `/profile/security` sessions
+  card reported each successful revoke as a failure.
+- **`GET /api/v1/auth/sessions` writes `userAgent` and `ipAddress` as `null` instead of omitting them**, so every row has
+  the same seven keys.
+
+### Deprecated
+
+- **`GET /api/v1/profile/security/sessions` and `POST /api/v1/profile/security/sessions/{tokenId}/revoke`**: use
+  `GET /api/v1/auth/sessions` and `DELETE /api/v1/auth/sessions/{tokenId}`, which receive the `refresh_token` cookie and
+  so mark and protect the current session. Their behavior is unchanged; removal planned in **v2.40.0**.
+
 ## [2.37.0] - 2026-11-01
 
 Minor release. A graceful stop now exits 0: Platform moves to Verbara.Sdk.Pro `2.24.1-pro`, and CI and the Post-release smoke

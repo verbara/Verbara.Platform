@@ -13,11 +13,17 @@ namespace Verbara.Platform.Api.Endpoints.Profile;
 /// sessions page at <c>/profile/security/sessions</c> (R5.2 PA.2).
 /// </summary>
 /// <remarks>
-/// Behaviourally equivalent to <c>/auth/sessions*</c>; this group exists so the
+/// This group exists so the
 /// dedicated wizard route can hit a stable, profile-scoped URL without coupling
 /// to the legacy auth surface (which also serves login/refresh/logout). The
 /// <c>POST /:id/revoke</c> shape (vs <c>DELETE</c>) matches the PA.2 spec and
 /// makes the audit-tracked write idiom obvious from the URL.
+/// <para>
+/// DEPRECATED (profile-sessions-use-the-auth-route): use <c>GET /api/v1/auth/sessions</c> and
+/// <c>DELETE /api/v1/auth/sessions/{tokenId}</c> instead. The browser never sends the <c>refresh_token</c> cookie
+/// here (its path is <c>/api/v1/auth</c>), so this group cannot mark the current session. Removal planned in
+/// v2.40.0; until then its behavior is unchanged.
+/// </para>
 /// </remarks>
 internal static class ProfileSessionsEndpoints
 {
@@ -137,9 +143,8 @@ internal static class ProfileSessionsEndpoints
 }
 
 /// <summary>
-/// Profile-scoped active-session DTO (R5.2 PA.2). Mirrors the legacy
-/// <c>UserSessionDto</c> but ships the additional <c>LastActivity</c> +
-/// <c>Location</c> fields the new sessions page renders.
+/// Profile-scoped active-session DTO (R5.2 PA.2). Mirrors <c>UserSessionDto</c>
+/// under its own field names, plus <c>Location</c>.
 /// </summary>
 internal sealed record ProfileUserSessionDto(
     string SessionId,

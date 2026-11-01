@@ -4,6 +4,7 @@ using Verbara.Platform.Api.Endpoints;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Notifications;
 using Verbara.Platform.Identity;
@@ -290,11 +291,7 @@ public sealed class AuthEndpointsTests
         refreshTokenStore.GetActiveByUserAsync("tenant1", "user1", Arg.Any<CancellationToken>())
             .Returns(new List<RefreshToken>());
 
-        var result = await AuthEndpoints.RevokeOwnSession(
-            "t1",
-            BuildHttpContext(),
-            refreshTokenStore,
-            CancellationToken.None);
+        var result = await AuthEndpoints.RevokeOwnSession("t1", BuildHttpContext(), refreshTokenStore, Substitute.For<IAuditService>(), new AuthEventService(Substitute.For<IAuthEventStore>()), CancellationToken.None);
 
         result.Should().BeOfType<NotFound>();
         await refreshTokenStore.DidNotReceiveWithAnyArgs().RevokeAsync(default!, default, default, default);
@@ -313,13 +310,9 @@ public sealed class AuthEndpointsTests
         refreshTokenStore.GetActiveByUserAsync("tenant1", "user1", Arg.Any<CancellationToken>())
             .Returns(new List<RefreshToken> { ownToken });
 
-        var result = await AuthEndpoints.RevokeOwnSession(
-            "t1",
-            BuildHttpContext(),
-            refreshTokenStore,
-            CancellationToken.None);
+        var result = await AuthEndpoints.RevokeOwnSession("t1", BuildHttpContext(), refreshTokenStore, Substitute.For<IAuditService>(), new AuthEventService(Substitute.For<IAuthEventStore>()), CancellationToken.None);
 
-        result.Should().BeOfType<Ok>();
+        result.Should().BeOfType<NoContent>();
         await refreshTokenStore.Received(1).RevokeAsync("t1", Arg.Any<DateTimeOffset>(), null, Arg.Any<CancellationToken>());
     }
 
@@ -351,10 +344,232 @@ public sealed class AuthEndpointsTests
             refreshTokenStore,
             CancellationToken.None);
 
-        result.Should().BeOfType<Ok>();
+        result.Should().BeOfType<NoContent>();
         await refreshTokenStore.DidNotReceive().RevokeAsync("current", Arg.Any<DateTimeOffset>(), null, Arg.Any<CancellationToken>());
         await refreshTokenStore.Received(1).RevokeAsync("other-1", Arg.Any<DateTimeOffset>(), null, Arg.Any<CancellationToken>());
         await refreshTokenStore.Received(1).RevokeAsync("other-2", Arg.Any<DateTimeOffset>(), null, Arg.Any<CancellationToken>());
+    }
+
+    // ─── profile-sessions-use-the-auth-route: lastActivityAt + fixture shape ──
+
+    private const string CurrentSessionId = "3f9a1c2e-7b4d-4e8a-9c1f-2a6b8d0e4f11";
+    private const string OtherSessionId = "8c2d4e6f-1a3b-4c5d-8e9f-0a1b2c3d4e5f";
+    private const string CurrentSessionCookie = "current-session-raw-refresh-token";
+
+    private static readonly string[] s_ownSessionFixtureFields =
+        ["tokenId", "userAgent", "ipAddress", "createdAt", "expiresAt", "isCurrentSession", "lastActivityAt"];
+
+    // The two rows of fixtures/own-sessions.v1.json: the first with a stored last activity and a known
+    // device, the second with no user agent, no IP address and no stored last activity.
+    private static List<RefreshToken> BuildFixtureSessions() =>
+    [
+        new()
+        {
+            TokenId = CurrentSessionId, UserId = TestUserId, TenantId = TestTenantId,
+            TokenHash = RefreshTokenService.HashToken(CurrentSessionCookie),
+            UserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36",
+            IpAddress = "203.0.113.24",
+            CreatedAt = DateTimeOffset.Parse("2026-11-01T08:12:00+00:00", System.Globalization.CultureInfo.InvariantCulture),
+            ExpiresAt = DateTimeOffset.Parse("2026-11-08T08:12:00+00:00", System.Globalization.CultureInfo.InvariantCulture),
+            LastActivityAt = DateTimeOffset.Parse("2026-11-01T10:40:00+00:00", System.Globalization.CultureInfo.InvariantCulture),
+        },
+        new()
+        {
+            TokenId = OtherSessionId, UserId = TestUserId, TenantId = TestTenantId,
+            TokenHash = "hash-other",
+            CreatedAt = DateTimeOffset.Parse("2026-10-30T19:05:00+00:00", System.Globalization.CultureInfo.InvariantCulture),
+            ExpiresAt = DateTimeOffset.Parse("2026-11-06T19:05:00+00:00", System.Globalization.CultureInfo.InvariantCulture),
+        },
+    ];
+
+    private static IRefreshTokenStore BuildFixtureSessionStore(List<RefreshToken> tokens)
+    {
+        var refreshTokenStore = Substitute.For<IRefreshTokenStore>();
+        refreshTokenStore.GetActiveByUserAsync(TestTenantId, TestUserId, Arg.Any<CancellationToken>())
+            .Returns(tokens);
+        refreshTokenStore.GetByHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<RefreshToken?>(null));
+        refreshTokenStore.GetByHashAsync(tokens[0].TokenHash, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<RefreshToken?>(tokens[0]));
+        return refreshTokenStore;
+    }
+
+    [Fact]
+    public async Task GetOwnSessions_ShouldReturnLastActivityAt_WhenStored()
+    {
+        var tokens = BuildFixtureSessions();
+        var refreshTokenStore = BuildFixtureSessionStore(tokens);
+
+        var result = await AuthEndpoints.GetOwnSessions(BuildHttpContext(), refreshTokenStore, CancellationToken.None);
+
+        var dtos = result.Should().BeOfType<Ok<UserSessionDto[]>>().Subject.Value!;
+        dtos.Single(d => d.TokenId == CurrentSessionId).LastActivityAt
+            .Should().Be(DateTimeOffset.Parse("2026-11-01T10:40:00+00:00", System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task GetOwnSessions_ShouldFallBackToCreatedAt_WhenLastActivityAtIsDefault()
+    {
+        var tokens = BuildFixtureSessions();
+        tokens[1].LastActivityAt.Should().Be(default(DateTimeOffset), "the fixture's second row never stored a last activity");
+        var refreshTokenStore = BuildFixtureSessionStore(tokens);
+
+        var result = await AuthEndpoints.GetOwnSessions(BuildHttpContext(), refreshTokenStore, CancellationToken.None);
+
+        var dtos = result.Should().BeOfType<Ok<UserSessionDto[]>>().Subject.Value!;
+        dtos.Single(d => d.TokenId == OtherSessionId).LastActivityAt
+            .Should().Be(DateTimeOffset.Parse("2026-10-30T19:05:00+00:00", System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task GetOwnSessions_ShouldWriteNullUserAgentAndIpAddress_WhenUnknown()
+    {
+        var tokens = BuildFixtureSessions();
+        var refreshTokenStore = BuildFixtureSessionStore(tokens);
+        var ctx = BuildHttpContext();
+        ctx.Request.Headers.Cookie = $"refresh_token={CurrentSessionCookie}";
+
+        var result = await AuthEndpoints.GetOwnSessions(ctx, refreshTokenStore, CancellationToken.None);
+
+        var dtos = result.Should().BeOfType<Ok<UserSessionDto[]>>().Subject.Value!;
+        var json = JsonSerializer.Serialize(dtos, ApiJsonContext.Default.UserSessionDtoArray);
+        using var doc = JsonDocument.Parse(json);
+        var rows = doc.RootElement.EnumerateArray().ToArray();
+        rows.Should().HaveCount(2);
+        foreach (var row in rows)
+        {
+            row.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(s_ownSessionFixtureFields);
+        }
+
+        var current = rows.Single(r => r.GetProperty("tokenId").GetString() == CurrentSessionId);
+        current.GetProperty("isCurrentSession").GetBoolean().Should().BeTrue();
+        current.GetProperty("userAgent").GetString().Should().Be(tokens[0].UserAgent);
+        current.GetProperty("ipAddress").GetString().Should().Be("203.0.113.24");
+
+        var other = rows.Single(r => r.GetProperty("tokenId").GetString() == OtherSessionId);
+        other.GetProperty("isCurrentSession").GetBoolean().Should().BeFalse();
+        other.GetProperty("userAgent").ValueKind.Should().Be(JsonValueKind.Null);
+        other.GetProperty("ipAddress").ValueKind.Should().Be(JsonValueKind.Null);
+        other.GetProperty("lastActivityAt").GetDateTimeOffset()
+            .Should().Be(DateTimeOffset.Parse("2026-10-30T19:05:00+00:00", System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task GetOwnSessions_ShouldMarkNoRowCurrent_WhenNoRefreshCookie()
+    {
+        var tokens = BuildFixtureSessions();
+        var refreshTokenStore = BuildFixtureSessionStore(tokens);
+
+        var result = await AuthEndpoints.GetOwnSessions(BuildHttpContext(), refreshTokenStore, CancellationToken.None);
+
+        var dtos = result.Should().BeOfType<Ok<UserSessionDto[]>>().Subject.Value!;
+        dtos.Should().HaveCount(2);
+        dtos.Should().OnlyContain(d => !d.IsCurrentSession);
+        dtos.Select(d => d.LastActivityAt).Should().NotContain(default(DateTimeOffset));
+    }
+
+    // ─── profile-sessions-use-the-auth-route: session-is-current guard + 204 ──
+
+    [Fact]
+    public async Task RevokeOwnSession_ShouldReturn400SessionIsCurrent_WhenTokenIsTheCookieSession()
+    {
+        var refreshTokenStore = BuildFixtureSessionStore(BuildFixtureSessions());
+        var ctx = BuildHttpContext();
+        ctx.Request.Headers.Cookie = $"refresh_token={CurrentSessionCookie}";
+
+        var result = await AuthEndpoints.RevokeOwnSession(CurrentSessionId, ctx, refreshTokenStore, Substitute.For<IAuditService>(), new AuthEventService(Substitute.For<IAuthEventStore>()), CancellationToken.None);
+
+        var badRequest = result.Should().BeOfType<BadRequest<ErrorResponse>>().Subject;
+        badRequest.Value!.Error.Should().Be("session-is-current");
+        JsonSerializer.Serialize(badRequest.Value, ApiJsonContext.Default.ErrorResponse)
+            .Should().Be("""{"error":"session-is-current"}""");
+        await refreshTokenStore.DidNotReceiveWithAnyArgs().RevokeAsync(default!, default, default, default);
+    }
+
+    [Fact]
+    public async Task RevokeOwnSession_ShouldReturn401_WhenUnauthenticatedEvenIfCookieNamesTheSession()
+    {
+        var refreshTokenStore = BuildFixtureSessionStore(BuildFixtureSessions());
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Headers.Cookie = $"refresh_token={CurrentSessionCookie}";
+
+        var result = await AuthEndpoints.RevokeOwnSession(CurrentSessionId, ctx, refreshTokenStore, Substitute.For<IAuditService>(), new AuthEventService(Substitute.For<IAuthEventStore>()), CancellationToken.None);
+
+        result.Should().BeOfType<UnauthorizedHttpResult>();
+        await refreshTokenStore.DidNotReceiveWithAnyArgs().RevokeAsync(default!, default, default, default);
+    }
+
+    [Fact]
+    public async Task RevokeOwnSession_ShouldReturn204_WhenAnotherOwnSessionIsRevoked()
+    {
+        var refreshTokenStore = BuildFixtureSessionStore(BuildFixtureSessions());
+        var ctx = BuildHttpContext();
+        ctx.Request.Headers.Cookie = $"refresh_token={CurrentSessionCookie}";
+
+        var result = await AuthEndpoints.RevokeOwnSession(OtherSessionId, ctx, refreshTokenStore, Substitute.For<IAuditService>(), new AuthEventService(Substitute.For<IAuthEventStore>()), CancellationToken.None);
+
+        result.Should().BeOfType<NoContent>();
+        await refreshTokenStore.Received(1).RevokeAsync(OtherSessionId, Arg.Any<DateTimeOffset>(), null, Arg.Any<CancellationToken>());
+        await refreshTokenStore.DidNotReceive().RevokeAsync(CurrentSessionId, Arg.Any<DateTimeOffset>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RevokeOwnSession_ShouldReturn400_WhenTheCookieSessionIsNoLongerActive()
+    {
+        // Precedence: session-is-current comes before 404, so a cookie naming a session that has left
+        // the active list is still refused as the current session (own-session-revoke.v1.json).
+        var tokens = BuildFixtureSessions();
+        var refreshTokenStore = BuildFixtureSessionStore(tokens);
+        refreshTokenStore.GetActiveByUserAsync(TestTenantId, TestUserId, Arg.Any<CancellationToken>())
+            .Returns(new List<RefreshToken>());
+        var ctx = BuildHttpContext();
+        ctx.Request.Headers.Cookie = $"refresh_token={CurrentSessionCookie}";
+
+        var result = await AuthEndpoints.RevokeOwnSession(CurrentSessionId, ctx, refreshTokenStore, Substitute.For<IAuditService>(), new AuthEventService(Substitute.For<IAuthEventStore>()), CancellationToken.None);
+
+        result.Should().BeOfType<BadRequest<ErrorResponse>>().Subject.Value!.Error.Should().Be("session-is-current");
+    }
+
+    [Fact]
+    public async Task RevokeOwnSession_ShouldRecordAuditAndAuthEvent_WhenASessionIsRevoked()
+    {
+        var refreshTokenStore = BuildFixtureSessionStore(BuildFixtureSessions());
+        var audit = Substitute.For<IAuditService>();
+        var authEventStore = Substitute.For<IAuthEventStore>();
+        var ctx = BuildHttpContext();
+        ctx.Request.Headers.Cookie = $"refresh_token={CurrentSessionCookie}";
+
+        await AuthEndpoints.RevokeOwnSession(OtherSessionId, ctx, refreshTokenStore, audit, new AuthEventService(authEventStore), CancellationToken.None);
+
+        await audit.Received(1).RecordAsync(
+            Arg.Any<TenantId>(),
+            category: "auth",
+            action: "user.session.revoked",
+            severity: "info",
+            actorId: TestUserId,
+            actorType: "user",
+            targetId: OtherSessionId,
+            targetType: "refresh_token",
+            metadata: Arg.Any<IReadOnlyDictionary<string, string>?>(),
+            ct: Arg.Any<CancellationToken>());
+        await authEventStore.Received(1).SaveAsync(
+            Arg.Is<AuthEvent>(e => e.EventType == AuthEventTypes.SessionRevoked && e.UserId == TestUserId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RevokeOwnSession_ShouldRecordNothing_WhenRefused()
+    {
+        var refreshTokenStore = BuildFixtureSessionStore(BuildFixtureSessions());
+        var audit = Substitute.For<IAuditService>();
+        var authEventStore = Substitute.For<IAuthEventStore>();
+        var ctx = BuildHttpContext();
+        ctx.Request.Headers.Cookie = $"refresh_token={CurrentSessionCookie}";
+
+        await AuthEndpoints.RevokeOwnSession(CurrentSessionId, ctx, refreshTokenStore, audit, new AuthEventService(authEventStore), CancellationToken.None);
+
+        audit.ReceivedCalls().Should().BeEmpty();
+        authEventStore.ReceivedCalls().Should().BeEmpty();
     }
 
     [Fact]
