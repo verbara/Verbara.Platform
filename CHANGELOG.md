@@ -12,26 +12,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **`GET /api/v1/auth/sessions` rows carry `lastActivityAt`**, never null. Each token refresh creates a new row, so today
-  it equals that row's `createdAt`: both are the time of the last refresh, not of the last request.
+  it equals that row's `createdAt`: both are the time of the last refresh, not of the last request. (#520)
 - **`DELETE /api/v1/auth/sessions/{tokenId}` records each revocation**, with the audit entry `user.session.revoked` and the
-  auth event `session_revoked` that the profile route writes, so revoking from the console stays on the record.
+  auth event `session_revoked` that the profile route writes, so revoking from the console stays on the record. (#520)
 
 ### Changed
 
 - **`DELETE /api/v1/auth/sessions/{tokenId}` refuses the session the `refresh_token` cookie names** with 400
   `{"error":"session-is-current"}` and revokes nothing; sign-out ends the current session. The order is 401, then
-  `session-is-current`, then 404. A request with no cookie (an API client) has no current session and is unaffected.
+  `session-is-current`, then 404. A request with no cookie (an API client) has no current session and is unaffected. (#520)
 - **A successful `DELETE /api/v1/auth/sessions/{tokenId}` and `POST /api/v1/auth/sessions/revoke-others` answer 204
   instead of an empty 200.** The console's client parses every success except 204, so the `/profile/security` sessions
-  card reported each successful revoke as a failure.
+  card reported each successful revoke as a failure. (#520)
 - **`GET /api/v1/auth/sessions` writes `userAgent` and `ipAddress` as `null` instead of omitting them**, so every row has
-  the same seven keys.
+  the same seven keys. (#520)
 
 ### Deprecated
 
 - **`GET /api/v1/profile/security/sessions` and `POST /api/v1/profile/security/sessions/{tokenId}/revoke`**: use
   `GET /api/v1/auth/sessions` and `DELETE /api/v1/auth/sessions/{tokenId}`, which receive the `refresh_token` cookie and
-  so mark and protect the current session. Their behavior is unchanged; removal planned in **v2.40.0**.
+  so mark and protect the current session. Their behavior is unchanged; removal planned in **v2.40.0**. (#520)
 
 ## [2.37.0] - 2026-11-01
 
