@@ -12,7 +12,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [2.37.0] - 2026-11-01
 
 Minor release. A graceful stop now exits 0: Platform moves to Verbara.Sdk.Pro `2.24.1-pro`, and CI and the Post-release smoke
-fail if a stop stops being clean. Agents gain a note on transfers and the lists of transfer targets and available channels.
+fail if a stop stops being clean (#516). Agents gain a note on transfers and the lists of transfer targets and available
+channels (#515).
 Two changes need attention before upgrading: on a licensed host `/health/voice` reads `Degraded` with HTTP 200 once past the
 startup grace, and a `System` message no longer reaches outbound `conversation.message` webhooks.
 
