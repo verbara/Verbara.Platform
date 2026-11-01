@@ -307,6 +307,24 @@ public sealed class ReadinessScopeTests
             "body: {0}", body);
     }
 
+    [Theory]
+    [InlineData("analytics-aggregator")]
+    [InlineData("eventstore-subscriber")]
+    public async Task HealthReady_ShouldIgnoreTheVoicePlaneEngineCheck_WhenItIsDegraded(string checkName)
+    {
+        // The two engine checks that read Degraded once past their grace. Degraded answers 200 on either plane,
+        // so the status alone cannot tell an ignored check from a counted one: the entry does.
+        await using var factory = new ReadinessFactory(ReadyStub(
+            checkName, () => HealthCheckResult.Degraded($"{checkName}: past its startup grace")));
+
+        var (status, body) = await GetReadyAsync(factory);
+
+        status.Should().Be(HttpStatusCode.OK, "body: {0}", body);
+        using var doc = JsonDocument.Parse(body);
+        Checks(doc).TryGetProperty(checkName, out _).Should().BeFalse(
+            "a voice-plane check does not reach /health/ready, whatever it reads; body: {0}", body);
+    }
+
     // ─── /health/voice, the `asterisk` entry (task 2.2, design D2; spec requirement 4) ───────────────────────
 
     [Fact]
