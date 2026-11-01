@@ -12,6 +12,8 @@
 #                              their admin users, persisted to Postgres.
 #   POST /api/v1/auth/login   re-reads the just-created user from Postgres
 #                              and mints a JWT.
+#   docker compose stop       stops the api container and reads its exit
+#                              code: only 0 passes.
 #
 # This is the cheapest journey in docker/demo/demo-reset.sh that proves the
 # released api image actually boots, talks to Postgres, and serves a
@@ -44,7 +46,8 @@
 #
 # Exit codes:
 #   0  smoke journey passed
-#   1  journey failed (released images boot but the functional check failed)
+#   1  journey failed (released images boot but the functional check failed,
+#      or the api did not exit 0 on a graceful stop)
 #   2  environment/setup error (missing tool, digest resolution failed, etc.)
 #   3  readiness timed out (diagnostic-only outer bound — see WAIT_* below)
 #
@@ -77,7 +80,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     -h|--help)
-      sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -89,6 +92,8 @@ done
 
 log()  { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$1"; }
 fail() { printf '\n=== SMOKE FAILED: %s ===\n' "$1" >&2; }
+
+STOP_TIMEOUT_SECONDS=60
 
 COMPOSE=(docker compose -p "$PROJECT_NAME" -f "$COMPOSE_BASE" -f "$COMPOSE_OVERRIDE" --env-file "$ENV_FILE")
 
@@ -340,5 +345,24 @@ if [ -z "$ACCESS_TOKEN" ]; then
 fi
 
 log "Login OK (JWT issued for the just-created Postgres-persisted user)."
+
+# ─── 5. Graceful stop — the container's exit code, the only automatic check on PID 1 ───
+# Docker's default 10 s would read a slow stop as 137, so the bound is the chart's own
+# terminationGracePeriodSeconds. Only 0 passes: 137 is a stop past the bound, anything else a stop
+# that did not end clean. The trap's teardown runs afterwards, unchanged.
+API_CONTAINER="$("${COMPOSE[@]}" ps -q platform-api)"
+if [ -z "$API_CONTAINER" ]; then
+  fail "no platform-api container left to stop"
+  exit 1
+fi
+log "Stopping platform-api (bound ${STOP_TIMEOUT_SECONDS}s)..."
+"${COMPOSE[@]}" stop --timeout "$STOP_TIMEOUT_SECONDS" platform-api >/dev/null 2>&1 || true
+API_EXIT_CODE="$(docker inspect -f '{{.State.ExitCode}}' "$API_CONTAINER")"
+if [ "$API_EXIT_CODE" != "0" ]; then
+  fail "platform-api exited with ${API_EXIT_CODE} on a graceful stop (expected 0)"
+  "${COMPOSE[@]}" logs --tail=40 platform-api >&2 || true
+  exit 1
+fi
+log "Stop OK (platform-api exit code 0)."
 log "=== SMOKE PASSED: released image boots, serves traffic, and round-trips Postgres ==="
 exit 0

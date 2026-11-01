@@ -512,6 +512,10 @@ jobs:
       # "fixed", or lets the .NET generator ones back. Same job, same reason as the guards above.
       - name: Run CodeQL SARIF filter unit tests
         run: bash scripts/tests/test_filter_codeql_sarif.sh
+      # Graceful-stop check fake hosts: one per failure mode plus a clean run. The check itself runs on the real binary
+      # in `AOT Publish (Api)`; a check that cannot fail reads there exactly like a clean stop.
+      - name: Run graceful-stop check unit tests
+        run: bash scripts/tests/test_check_graceful_stop.sh
 
   # AOT-at-PR gate (verbara-meta/ADR-0012 gate #1): run the REAL Native AOT publish
   # of Verbara.Platform.Api on every PR and fail on any IL trim/AOT warning. Until now
@@ -531,6 +535,22 @@ jobs:
     # the R-011 apply took well under this. Generous ceiling so a slow runner does not
     # false-fail without masking a genuine hang.
     timeout-minutes: 30
+    # The stop check below needs a host that reaches the cluster transport, and Postgres
+    # alone gets it there: no Asterisk, no licence. Same image as build-and-test.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: platform_ci
+          POSTGRES_PASSWORD: platform_ci
+          POSTGRES_DB: platform_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -578,6 +598,23 @@ jobs:
             exit 1
           fi
           echo "AOT publish clean — zero IL trim/AOT warnings."
+
+      - name: Graceful stop of the published binary
+        # The real AOT binary, published one step earlier, boots against Postgres, takes a
+        # SIGTERM and must exit 0 with one cluster stop on the Postgres transport. Criteria:
+        # scripts/check-graceful-stop.sh, which scripts/tests/test_check_graceful_stop.sh proves
+        # in coverage-scripts. It runs from the publish directory, so the host reads the
+        # appsettings.json it ships with. That file sets an AMI hostname, and Production refuses
+        # to boot on a hostname with no credentials, so the env clears it: this host has no Asterisk.
+        working-directory: src/Verbara.Platform.Api/bin/Release/net10.0/linux-x64/publish
+        env:
+          ASPNETCORE_ENVIRONMENT: Production
+          ASPNETCORE_URLS: http://127.0.0.1:8099
+          ConnectionStrings__Postgres: "Host=127.0.0.1;Port=5432;Database=platform_ci;Username=platform_ci;Password=platform_ci"
+          Services__ServiceKey: ci-graceful-stop-key
+          CORS_ORIGINS: http://localhost
+          Asterisk__Ami__Hostname: ""
+        run: bash "$GITHUB_WORKSPACE/scripts/check-graceful-stop.sh" ./Verbara.Platform.Api http://127.0.0.1:8099 60
 
   # Endpoint invariant gates (verbara-meta/ADR-0012 Ola 2 — gates #6 + #9). Two
   # deterministic checks with no model in the loop, both freeze-current/ratchet:

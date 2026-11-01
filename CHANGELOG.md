@@ -47,8 +47,33 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `security.mfa_disabled` carry the `actionUrl` `/profile/security` instead of `/admin/security`, for the recipients they
   already have, `admin` and `system_admin`. This is not a fix for an Agent, who does not receive them. Their `title`,
   `body`, audience and severity do not change. Existing notifications keep the old link, which keeps working. Deploy the
-  Platform.Web release that serves `/profile/security` first, the one after `v3.27.1-web` that carries Platform.Web #497:
-  on an older console the new link leads to no page.
+  Platform.Web release that serves `/profile/security` first, `v3.28.0-web`: on an older console the new link leads to no
+  page.
+
+### Upgrading
+
+- **`/health/voice` reads `Degraded` with HTTP 200 on a licensed host once past the startup grace, also after calls.**
+  `analytics-aggregator` and `eventstore-subscriber` used to report `Healthy`, inside their startup grace, for as long as
+  they had seen no event. Both now count the grace from the engine's own start. `analytics-aggregator` stays `Degraded`
+  until it receives live events, which it does not today, so answered calls do not clear it. `eventstore-subscriber` reads
+  `Degraded` until its first event and `Healthy` while events arrive, and turns `Unhealthy`, with `/health/voice` 503, at the
+  last event plus 30 s, as it did before; the last event of a call is `CallWrapUp`. `/health/ready` does not change, so no
+  probe changes result. Voice routes do not read these checks, so their 503 `voice-unavailable` does not move. Revisit any
+  alert that expects `/health/voice` to read `Healthy`. (#N)
+
+### Dependencies
+
+- **Verbara.Sdk.Pro `2.24.0-pro` → `2.24.1-pro`**, the 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk stays `2.9.0`. The triple is
+  **Sdk `2.9.0` × Pro `2.24.1-pro` × Platform (next cut from `main`)**. Five floors move `10.0.13` → `10.0.14`, each reported
+  by the restore as `NU1109`: `Microsoft.Extensions.Logging.Abstractions`, `DependencyInjection.Abstractions`,
+  `DependencyInjection`, `Hosting.Abstractions` and `Options`. `Microsoft.Extensions.Hosting` and `Http` stay at `10.0.13`.
+  `System.IO.Hashing` has no pin here and resolves to `10.0.14` through the graph, as do six more `Microsoft.Extensions.*`
+  packages. In every `project.assets.json` no package appeared, dropped, resolved lower or crossed a major. (#N)
+- **Behaviour consumed from Pro 2.24.1-pro: a graceful stop exits 0.** A SIGTERM to the Api used to run the cluster stop
+  three times and end on an unhandled `ObjectDisposedException`, with exit 134 on a bare process and 139 in a container. It
+  now stops once and exits 0, and a host that owns nodes publishes one departure instead of three. No Platform source
+  changes for it. `AOT Publish (Api)` now boots the published binary against Postgres and fails unless a SIGTERM ends it
+  clean, and the Post-release smoke fails unless the API container exits 0 on a stop. (#N)
 
 ## [2.36.0] - 2026-10-31
 
