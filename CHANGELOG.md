@@ -9,6 +9,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.37.0] - 2026-11-01
+
+Minor release. A graceful stop now exits 0: Platform moves to Verbara.Sdk.Pro `2.24.1-pro`, and CI and the Post-release smoke
+fail if a stop stops being clean. Agents gain a note on transfers and the lists of transfer targets and available channels.
+Two changes need attention before upgrading: on a licensed host `/health/voice` reads `Degraded` with HTTP 200 once past the
+startup grace, and a `System` message no longer reaches outbound `conversation.message` webhooks.
+
 ### Added
 
 - **A transfer can carry a note for whoever takes the conversation.** `POST /api/v1/conversations/{id}/transfer` accepts
@@ -59,21 +66,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Degraded` until its first event and `Healthy` while events arrive, and turns `Unhealthy`, with `/health/voice` 503, at the
   last event plus 30 s, as it did before; the last event of a call is `CallWrapUp`. `/health/ready` does not change, so no
   probe changes result. Voice routes do not read these checks, so their 503 `voice-unavailable` does not move. Revisit any
-  alert that expects `/health/voice` to read `Healthy`. (#N)
+  alert that expects `/health/voice` to read `Healthy`. (#516)
 
 ### Dependencies
 
 - **Verbara.Sdk.Pro `2.24.0-pro` → `2.24.1-pro`**, the 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk stays `2.9.0`. The triple is
-  **Sdk `2.9.0` × Pro `2.24.1-pro` × Platform (next cut from `main`)**. Five floors move `10.0.13` → `10.0.14`, each reported
+  **Sdk `2.9.0` × Pro `2.24.1-pro` × Platform `2.37.0`**. Five floors move `10.0.13` → `10.0.14`, each reported
   by the restore as `NU1109`: `Microsoft.Extensions.Logging.Abstractions`, `DependencyInjection.Abstractions`,
   `DependencyInjection`, `Hosting.Abstractions` and `Options`. `Microsoft.Extensions.Hosting` and `Http` stay at `10.0.13`.
   `System.IO.Hashing` has no pin here and resolves to `10.0.14` through the graph, as do six more `Microsoft.Extensions.*`
-  packages. In every `project.assets.json` no package appeared, dropped, resolved lower or crossed a major. (#N)
+  packages. In every `project.assets.json` no package appeared, dropped, resolved lower or crossed a major. (#516)
 - **Behaviour consumed from Pro 2.24.1-pro: a graceful stop exits 0.** A SIGTERM to the Api used to run the cluster stop
   three times and end on an unhandled `ObjectDisposedException`, with exit 134 on a bare process and 139 in a container. It
   now stops once and exits 0, and a host that owns nodes publishes one departure instead of three. No Platform source
   changes for it. `AOT Publish (Api)` now boots the published binary against Postgres and fails unless a SIGTERM ends it
-  clean, and the Post-release smoke fails unless the API container exits 0 on a stop. (#N)
+  clean, and the Post-release smoke fails unless the API container exits 0 on a stop. (#516)
 
 ## [2.36.0] - 2026-10-31
 
