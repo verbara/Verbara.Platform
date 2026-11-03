@@ -178,7 +178,9 @@ public sealed class TenantAuthConfigEncryptionFixture : IAsyncLifetime
             max_sms_default INT NOT NULL DEFAULT 3,
             max_total_default INT NOT NULL DEFAULT 5,
             ip_allowlist_enabled BOOLEAN NOT NULL DEFAULT false,
-            updated_at TIMESTAMPTZ
+            updated_at TIMESTAMPTZ,
+            -- migration 026 (conversations-close-after-inactivity D11): the nullable per-tenant window override.
+            inactivity_close_after_hours INTEGER NULL
         );
         """;
 }
