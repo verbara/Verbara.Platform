@@ -136,4 +136,23 @@ public class ContactTests
 
         contact.FullName.Should().Be(expected);
     }
+
+    [Fact]
+    public void FindAddress_ShouldSkipWhatsAppBsuid_WhenPhoneIsAlsoKnown()
+    {
+        var contact = new Contact { ContactId = EntityId.From("c-wa"), TenantId = new TenantId("t1"), CreatedAt = DateTimeOffset.UtcNow };
+        contact.AddAddress(new ChannelAddress(ChannelType.WhatsApp, "US.13491208655302741918"));
+        contact.AddAddress(new ChannelAddress(ChannelType.WhatsApp, "15550000002"));
+
+        contact.FindAddress(ChannelType.WhatsApp)!.Address.Should().Be("15550000002");
+    }
+
+    [Fact]
+    public void FindAddress_ShouldReturnNull_WhenWhatsAppContactHasOnlyBsuid()
+    {
+        var contact = new Contact { ContactId = EntityId.From("c-wa"), TenantId = new TenantId("t1"), CreatedAt = DateTimeOffset.UtcNow };
+        contact.AddAddress(new ChannelAddress(ChannelType.WhatsApp, "US.13491208655302741918"));
+
+        contact.FindAddress(ChannelType.WhatsApp).Should().BeNull("the Cloud API cannot send to a BSUID yet");
+    }
 }

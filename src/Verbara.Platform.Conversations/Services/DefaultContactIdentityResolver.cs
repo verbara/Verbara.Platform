@@ -13,19 +13,57 @@ public sealed class DefaultContactIdentityResolver : IContactIdentityResolver
         _clock = clock;
     }
 
-    public async Task<Contact> ResolveAsync(TenantId tenantId, ChannelAddress address, CancellationToken ct)
-    {
-        var existing = await _contactStore.FindByAddressAsync(tenantId, address, ct).ConfigureAwait(false);
-        if (existing is not null)
-            return existing;
+    public Task<Contact> ResolveAsync(TenantId tenantId, ChannelAddress address, CancellationToken ct) =>
+        ResolveAsync(tenantId, new ContactIdentity(address, [], null), ct);
 
-        var contact = new Contact
+    /// <summary>
+    /// Finds the contact by <see cref="ContactIdentity.Address"/>, then by each alternate address in order; a found
+    /// contact gains every address of the identity it lacked, and the display name when it has no name. When none
+    /// matches, one contact is created holding all of them. The contact is written only when something changed.
+    /// </summary>
+    public async Task<Contact> ResolveAsync(TenantId tenantId, ContactIdentity identity, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ChannelAddress[] addresses = [identity.Address, .. identity.AlternateAddresses];
+
+        Contact? existing = null;
+        ChannelAddress? matched = null;
+        foreach (var address in addresses)
+        {
+            existing = await _contactStore.FindByAddressAsync(tenantId, address, ct).ConfigureAwait(false);
+            if (existing is not null)
+            {
+                matched = address;
+                break;
+            }
+        }
+
+        var contact = existing ?? new Contact
         {
             ContactId = EntityId.New(),
             TenantId = tenantId,
             CreatedAt = _clock.UtcNow,
         };
-        contact.AddAddress(address);
+
+        var changed = existing is null;
+        // The address the store matched is the contact's by definition; only the others can be new.
+        foreach (var address in addresses.Where(a => a != matched && !contact.Addresses.Contains(a)))
+        {
+            contact.AddAddress(address);
+            changed = true;
+        }
+
+        if (contact.FirstName is null && contact.LastName is null && !string.IsNullOrWhiteSpace(identity.DisplayName))
+        {
+            contact.FirstName = identity.DisplayName.Trim();
+            changed = true;
+        }
+
+        if (!changed)
+            return contact;
+
+        if (existing is not null)
+            contact.UpdatedAt = _clock.UtcNow;
 
         await _contactStore.SaveAsync(contact, ct).ConfigureAwait(false);
         return contact;

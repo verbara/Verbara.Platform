@@ -3,8 +3,23 @@ using Verbara.Platform.Conversations;
 
 namespace Verbara.Platform.Channels.Core;
 
+/// <summary>One customer message a provider webhook carried.</summary>
+/// <param name="From">The sender's primary identity: the address the contact is looked up by first.</param>
+/// <param name="Content">The message blocks.</param>
+/// <param name="ExternalMessageId">The provider's message id (deduplication key).</param>
+/// <param name="Timestamp">When the provider says the message was sent.</param>
 public sealed record InboundMessage(
     ChannelAddress From,
     MessageEnvelope Content,
     string ExternalMessageId,
-    DateTimeOffset Timestamp);
+    DateTimeOffset Timestamp)
+{
+    /// <summary>
+    /// Other addresses of the same sender carried by the delivery, looked up after <see cref="From"/> and stored on
+    /// the contact when missing — e.g. the WhatsApp phone number when <see cref="From"/> is the business-scoped user id.
+    /// </summary>
+    public IReadOnlyList<ChannelAddress> AlternateAddresses { get; init; } = [];
+
+    /// <summary>The sender's display name as the provider reports it (WhatsApp <c>contacts[].profile.name</c>), if any.</summary>
+    public string? ProfileName { get; init; }
+}

@@ -38,8 +38,13 @@ public sealed class Contact : ITenantScoped, IAuditable
     public void RemoveAddress(ChannelAddress address) =>
         _addresses.Remove(address);
 
+    /// <summary>
+    /// The address a message to this contact on <paramref name="channel"/> is sent to. A WhatsApp
+    /// business-scoped user id is an identity, not a destination (the Cloud API cannot send to it yet), so it is
+    /// never returned: a contact known only by one has no WhatsApp address to send to.
+    /// </summary>
     public ChannelAddress? FindAddress(ChannelType channel) =>
-        _addresses.Find(a => a.Channel == channel);
+        _addresses.Find(a => a.Channel == channel && !a.IsWhatsAppBusinessScopedUserId());
 
     public void SetCustomField(string key, string value) =>
         _customFields[key] = value;

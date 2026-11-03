@@ -65,6 +65,10 @@ internal sealed class MetaContact
 
     [JsonPropertyName("wa_id")]
     public string? WaId { get; set; }
+
+    /// <summary>The sender's business-scoped user id (BSUID); <c>wa_id</c> may then be omitted.</summary>
+    [JsonPropertyName("user_id")]
+    public string? UserId { get; set; }
 }
 
 internal sealed class MetaProfile
@@ -75,8 +79,13 @@ internal sealed class MetaProfile
 
 internal sealed class MetaInboundMessage
 {
+    /// <summary>The sender's phone number (<c>wa_id</c>); omitted when Meta may not share it.</summary>
     [JsonPropertyName("from")]
     public string? From { get; set; }
+
+    /// <summary>The sender's business-scoped user id (BSUID).</summary>
+    [JsonPropertyName("from_user_id")]
+    public string? FromUserId { get; set; }
 
     [JsonPropertyName("id")]
     public string? Id { get; set; }

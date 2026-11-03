@@ -427,4 +427,105 @@ public class WhatsAppWebhookHandlerTests
 
         result.Type.Should().Be(WebhookResultType.Ignored);
     }
+
+    // ── Business-scoped user id (BSUID) ───────────────────────────────────────
+    // Meta: https://developers.facebook.com/documentation/business-messaging/whatsapp/business-scoped-user-ids/
+    // messages[].from and contacts[].wa_id may be omitted; messages[].from_user_id and contacts[].user_id carry the BSUID.
+
+    private static string BsuidPayload(string? from, string? fromUserId, string? waId, string? userId, string? name)
+    {
+        static string Field(string key, string? value) => value is null ? "" : $"\"{key}\": \"{value}\", ";
+        var profile = name is null ? "" : $"\"profile\": {{ \"name\": \"{name}\" }}, ";
+        return $$"""
+            {
+              "object": "whatsapp_business_account",
+              "entry": [{
+                "id": "WABAID",
+                "changes": [{
+                  "value": {
+                    "messaging_product": "whatsapp",
+                    "metadata": { "display_phone_number": "15550000001", "phone_number_id": "123456789" },
+                    "contacts": [{ {{profile}}{{Field("wa_id", waId)}}{{Field("user_id", userId)}}"x": 0 }],
+                    "messages": [{
+                      {{Field("from", from)}}{{Field("from_user_id", fromUserId)}}
+                      "id": "wamid.bsuid1",
+                      "timestamp": "1700000000",
+                      "type": "text",
+                      "text": { "body": "hola" }
+                    }]
+                  },
+                  "field": "messages"
+                }]
+              }]
+            }
+            """;
+    }
+
+    [Fact]
+    public async Task HandleAsync_ShouldReturnMessageFromBsuid_WhenPayloadHasFromUserIdAndNoFrom()
+    {
+        var handler = CreateHandler();
+        var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes(
+            BsuidPayload(from: null, fromUserId: "US.13491208655302741918", waId: null, userId: "US.13491208655302741918", name: "Sheena")));
+
+        var result = await handler.HandleAsync(body, SignedHeaders(body), TenantA, CancellationToken.None);
+
+        result.Type.Should().Be(WebhookResultType.NewMessage, "a message carrying only a BSUID must not be dropped");
+        var message = result.Messages.Should().ContainSingle().Subject;
+        message.From.Should().Be(new ChannelAddress(ChannelType.WhatsApp, "US.13491208655302741918"));
+    }
+
+    [Fact]
+    public async Task HandleAsync_ShouldKeyOnBsuidWithPhoneAsAlternate_WhenPayloadCarriesBoth()
+    {
+        var handler = CreateHandler();
+        var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes(
+            BsuidPayload(from: "15550000002", fromUserId: "US.13491208655302741918", waId: "15550000002", userId: "US.13491208655302741918", name: "Sheena")));
+
+        var result = await handler.HandleAsync(body, SignedHeaders(body), TenantA, CancellationToken.None);
+
+        var message = result.Messages.Should().ContainSingle().Subject;
+        message.From.Address.Should().Be("US.13491208655302741918");
+        message.AlternateAddresses.Should().Equal(new ChannelAddress(ChannelType.WhatsApp, "15550000002"));
+        message.ProfileName.Should().Be("Sheena");
+    }
+
+    [Fact]
+    public async Task HandleAsync_ShouldCarryProfileName_WhenPayloadIsPhoneOnly()
+    {
+        var handler = CreateHandler();
+        var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes(
+            BsuidPayload(from: "15550000002", fromUserId: null, waId: "15550000002", userId: null, name: "Alice")));
+
+        var result = await handler.HandleAsync(body, SignedHeaders(body), TenantA, CancellationToken.None);
+
+        var message = result.Messages.Should().ContainSingle().Subject;
+        message.From.Should().Be(new ChannelAddress(ChannelType.WhatsApp, "15550000002"));
+        message.AlternateAddresses.Should().BeEmpty();
+        message.ProfileName.Should().Be("Alice");
+    }
+
+    [Fact]
+    public async Task HandleAsync_ShouldNotBorrowAnotherSendersName_WhenContactEntryDoesNotMatch()
+    {
+        var handler = CreateHandler();
+        var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes(
+            BsuidPayload(from: "15550000002", fromUserId: null, waId: "15559999999", userId: null, name: "Someone else")));
+
+        var result = await handler.HandleAsync(body, SignedHeaders(body), TenantA, CancellationToken.None);
+
+        result.Messages.Should().ContainSingle().Which.ProfileName.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task HandleAsync_ShouldDropMessage_WhenSenderHasNeitherPhoneNorBsuid()
+    {
+        var handler = CreateHandler();
+        var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes(
+            BsuidPayload(from: null, fromUserId: null, waId: null, userId: null, name: "Nobody")));
+
+        var result = await handler.HandleAsync(body, SignedHeaders(body), TenantA, CancellationToken.None);
+
+        result.Messages.Should().BeEmpty();
+    }
 }
