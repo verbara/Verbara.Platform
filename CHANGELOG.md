@@ -36,7 +36,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `inactivity-backlog` or `customer-returned`, and each close logs one Information line with the tenant, the channel,
   the reason and the idle-age bucket. Migration `026` adds the column `conversations.last_message_at`, backfilled for
   open conversations. The unused options `AutoCloseResolvedAfterHours` and `AutoCloseResolvedHours` are removed;
-  nothing bound or read them.
+  nothing bound or read them. (#533)
 
 ### Changed
 
@@ -80,17 +80,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   resolved conversation, where no agent saw it. Now it closes that conversation, with `metadata._closedReason` =
   `customer-returned`, the audit entry `conversation.closed` by `verbara:system:customer-returned` and one
   `conversation.state_changed` delivery, and opens a new conversation that routes like any first message, on
-  WhatsApp and WebChat. The closed conversation keeps its agent. No CSAT survey is sent for that close.
+  WhatsApp and WebChat. The closed conversation keeps its agent. No CSAT survey is sent for that close. (#533)
 - **A message that arrives while its conversation is being closed or purged is no longer written into it.** Every
   inbound message now claims its conversation before it is stored: if the inactivity close or the retention purge
   got there first, the message opens a new, routed conversation instead of landing in a closed or deleted one. An
   agent or bot reply, and an agent-started message that reuses an open conversation, claims it before the provider
   send; if the conversation closed in the meantime the send is refused with the existing errors (400 on a reply,
   `conversation-not-sendable` on a start) and nothing is sent or stored. A wrap-up close between the claim and the
-  store is not covered yet.
+  store is not covered yet. (#533)
 - **The queue timeout counts from when the conversation entered the queue**, at routing, transfer or failover
   re-queue, instead of from its creation. An old conversation that the failover put back in a queue was abandoned
-  seconds later. A conversation queued before the upgrade keeps counting from its creation.
+  seconds later. A conversation queued before the upgrade keeps counting from its creation. (#533)
 
 ### Upgrading
 
@@ -99,7 +99,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   idle for less than the window plus one hour), with one `conversation.state_changed` webhook delivery and one audit
   entry each. Run the dry-run counts of the upgrade note
   first. `Conversations:InactivityCloseEnabled=false` stages it, and with more than one Api replica keep it off until
-  every replica runs the new version. See [Upgrading to 2.38.0](docs/operations/upgrade-2.38.0.md).
+  every replica runs the new version. See [Upgrading to 2.38.0](docs/operations/upgrade-2.38.0.md). (#533)
 
 ## [2.37.0] - 2026-11-01
 
