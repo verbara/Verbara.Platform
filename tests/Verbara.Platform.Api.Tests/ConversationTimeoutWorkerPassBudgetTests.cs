@@ -29,18 +29,23 @@ public sealed partial class ConversationTimeoutWorkerTests
             .WithTimeout(TimeSpan.FromMilliseconds(200))
             .Build();
         h.ReconcileDelay = TimeSpan.FromMilliseconds(600);
+        var bothClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var closes = 0;
+        using var subscription = h.EventBus.Events.Subscribe(e =>
+        {
+            if (e is ConversationStateChangedEvent { NewState: nameof(ConversationState.Closed) }
+                && Interlocked.Increment(ref closes) == 2)
+            {
+                bothClosed.TrySetResult();
+            }
+        });
         var worker = h.CreateWorker();
 
         await worker.StartAsync(CancellationToken.None);
         try
         {
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-            while (DateTime.UtcNow < deadline
-                   && ((await h.GetAsync(first)).State != ConversationState.Closed
-                       || (await h.GetAsync(second)).State != ConversationState.Closed))
-            {
-                await Task.Delay(50);
-            }
+            // The two closes are the causal signal; the bound only stops a red run from hanging.
+            await bothClosed.Task.WaitAsync(TimeSpan.FromSeconds(10)).ContinueWith(_ => { }, TaskScheduler.Default);
         }
         finally
         {

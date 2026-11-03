@@ -505,7 +505,7 @@ public sealed partial class ConversationTimeoutWorkerTests
             if (BeforeReconcile is { } hook)
                 await hook(tenant);
             if (ReconcileDelay > TimeSpan.Zero)
-                await Task.Delay(ReconcileDelay, ct);
+                await Task.Delay(ReconcileDelay, ct); // fence-allow: SIMULATED-WORK — a slow reconcile statement that honours the worker's token, to exercise the tick budget
             return await Inner.ReconcileLastMessageAtAsync(tenant, ct);
         }
 
