@@ -45,6 +45,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   change as made by the system, and never restores a contact that was deleted in the meantime. (#528)
 - **An outbound message whose contact has no address to send to on the conversation's channel is now marked Failed**
   instead of staying Pending forever. On WhatsApp this includes a contact known only by its user id. (#528)
+- **The conversation retention purge no longer deletes open conversations.** It deleted every conversation created
+  before the tenant's retention window, so a conversation still queued, with an agent or waiting for the customer was
+  deleted with its messages once it was old enough. Now a closed, abandoned, merged or spam conversation is deleted
+  once it closed before the window, so one opened long ago but closed last week is kept for the full window. A
+  resolved conversation, which is never closed on its own, is deleted once it has had no change and no new message for
+  the whole window (counted from its close instead, when one is recorded), so a customer reply to a resolved
+  conversation keeps it.
+  A conversation in any other state is never deleted. Messages of a deleted conversation are still removed in the
+  same pass. (#527)
 
 ## [2.37.0] - 2026-11-01
 
