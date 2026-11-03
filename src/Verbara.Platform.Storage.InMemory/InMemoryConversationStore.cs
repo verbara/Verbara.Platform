@@ -280,4 +280,109 @@ internal sealed class InMemoryConversationStore : IConversationStore
             .ToList();
         return Task.FromResult(result);
     }
+
+    // ── conversations-close-after-inactivity (design D3, D4, D7, D8, D9, D12) ─────────────────────────────
+    // Each conditional write mirrors its Postgres UPDATE under the stored entity's lock, as TryCommitWrapUpAsync does.
+    // State is assigned directly, never through Conversation.TransitionTo (the table has no agent-held → Closed edge).
+
+    public Task<IReadOnlyList<Conversation>> ListInactiveAsync(
+        TenantId tenantId, IReadOnlyCollection<ConversationState> states, DateTimeOffset cutoff, int limit, CancellationToken ct)
+    {
+        IReadOnlyList<Conversation> result = _items.Values
+            .Where(c => c.TenantId == tenantId && states.Contains(c.State) && c.Channel != ChannelType.Voice
+                && c.LastMessageAt < cutoff)
+            .OrderBy(c => c.LastMessageAt)
+            .Take(limit)
+            .ToList();
+        return Task.FromResult(result);
+    }
+
+    public Task<InactivityCloseOutcome?> TryCloseInactiveAsync(TenantId tenantId, InactivityCloseRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!ConversationStateMachine.CanCloseForInactivity(request.ReadState)
+            || !_items.TryGetValue((tenantId, request.ConversationId), out var conv))
+        {
+            return Task.FromResult<InactivityCloseOutcome?>(null);
+        }
+
+        lock (conv)
+        {
+            if (conv.State != request.ReadState
+                || conv.Channel == ChannelType.Voice
+                || conv.Owner?.Kind != request.ReadOwner?.Kind
+                || conv.Owner?.OwnerId != request.ReadOwner?.OwnerId
+                || conv.LastMessageAt is not { } clock
+                || clock >= request.Cutoff)
+            {
+                return Task.FromResult<InactivityCloseOutcome?>(null);
+            }
+
+            var reason = clock < request.BacklogCutoff
+                ? ConversationCloseReasons.InactivityBacklog
+                : ConversationCloseReasons.Inactivity;
+            conv.State = ConversationState.Closed;
+            conv.ClosedAt ??= request.Now;
+            conv.UpdatedAt = request.Now;
+            conv.SetMetadata(ConversationCloseReasons.MetadataKey, reason);
+            return Task.FromResult<InactivityCloseOutcome?>(new InactivityCloseOutcome(reason, clock));
+        }
+    }
+
+    public Task<bool> TryClaimForInboundAsync(TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct)
+    {
+        if (!_items.TryGetValue((tenantId, conversationId), out var conv))
+            return Task.FromResult(false);
+
+        lock (conv)
+        {
+            if (ConversationStateMachine.IsTerminal(conv.State) || conv.State == ConversationState.Resolved)
+                return Task.FromResult(false);
+
+            AdvanceClock(conv, now);
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<bool> TryCloseResolvedForReplyAsync(TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct)
+    {
+        if (!_items.TryGetValue((tenantId, conversationId), out var conv))
+            return Task.FromResult(false);
+
+        lock (conv)
+        {
+            if (conv.State != ConversationState.Resolved)
+                return Task.FromResult(false);
+
+            conv.State = ConversationState.Closed;
+            conv.ClosedAt = now;
+            conv.UpdatedAt = now;
+            conv.SetMetadata(ConversationCloseReasons.MetadataKey, ConversationCloseReasons.CustomerReturned);
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<bool> TryClaimForSendAsync(
+        TenantId tenantId, EntityId conversationId, DateTimeOffset now, bool advanceClock, CancellationToken ct)
+    {
+        if (!_items.TryGetValue((tenantId, conversationId), out var conv))
+            return Task.FromResult(false);
+
+        lock (conv)
+        {
+            if (!ConversationStateMachine.IsFailoverWork(conv.State))
+                return Task.FromResult(false);
+
+            if (advanceClock)
+                AdvanceClock(conv, now);
+            return Task.FromResult(true);
+        }
+    }
+
+    // GREATEST(COALESCE(last_message_at, '-infinity'), @Now): the clock never moves back.
+    private static void AdvanceClock(Conversation conv, DateTimeOffset now)
+    {
+        if (conv.LastMessageAt is not { } clock || clock < now)
+            conv.LastMessageAt = now;
+    }
 }

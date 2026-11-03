@@ -150,4 +150,49 @@ public interface IConversationStore
     /// stuck-work view so a human can re-arm the rescue or close the call.
     /// </summary>
     Task<IReadOnlyList<Conversation>> ListCallbackStuckAsync(TenantId tenantId, CancellationToken ct);
+
+    // ── conversations-close-after-inactivity (design D3, D4, D7, D8, D9, D12) ─────────────────────────────
+
+    /// <summary>
+    /// The tenant's idle digital conversations: <paramref name="states"/> only, never voice, with a clock
+    /// (<see cref="Conversation.LastMessageAt"/>) strictly older than <paramref name="cutoff"/>, oldest clock first, at
+    /// most <paramref name="limit"/>. A range on <c>idx_conversations_state_last_message</c> (no fallback on the clock).
+    /// </summary>
+    Task<IReadOnlyList<Conversation>> ListInactiveAsync(
+        TenantId tenantId, IReadOnlyCollection<ConversationState> states, DateTimeOffset cutoff, int limit, CancellationToken ct);
+
+    /// <summary>
+    /// The conditional inactivity close (design D4): one write that moves the row to <c>Closed</c> (stamping
+    /// <c>closed_at</c> when unset and <c>updated_at</c>, and recording the reason in <c>_closedReason</c>, keeping the
+    /// owner) <b>only if</b> its state is still <see cref="InactivityCloseRequest.ReadState"/>, its owner still
+    /// <see cref="InactivityCloseRequest.ReadOwner"/> and its clock still older than the cutoff. The reason is decided
+    /// in the write: <c>inactivity-backlog</c> when the clock is older than the backlog cutoff, else <c>inactivity</c>
+    /// (D12). Returns the outcome when this caller won, <see langword="null"/> when it lost, and also, writing nothing,
+    /// when the read state fails <see cref="ConversationStateMachine.CanCloseForInactivity"/> (D3). Never goes through
+    /// <see cref="Conversation.TransitionTo"/>: the transition table has no agent-held <c>→ Closed</c> edge.
+    /// </summary>
+    Task<InactivityCloseOutcome?> TryCloseInactiveAsync(TenantId tenantId, InactivityCloseRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// The inbound claim (design D7): advances the clock to <paramref name="now"/> (the platform's clock, never the
+    /// provider's), monotonically, on a row that is neither terminal nor <c>Resolved</c>. Returns
+    /// <see langword="false"/> when no such row matched (closed, purged, deleted or <c>Resolved</c> since the read):
+    /// the caller resolves again. Does not touch <c>updated_at</c>.
+    /// </summary>
+    Task<bool> TryClaimForInboundAsync(TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// The return close (design D8): <c>Resolved → Closed</c> with <c>closed_at</c> = <paramref name="now"/> and
+    /// <c>_closedReason</c> = <c>customer-returned</c>, the owner kept, only if the row is still <c>Resolved</c>.
+    /// Returns whether this caller won it.
+    /// </summary>
+    Task<bool> TryCloseResolvedForReplyAsync(TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// The send claim (design D9): matches only an <c>Active</c>, <c>OnHold</c> or <c>Consulting</c> row, and advances
+    /// its clock to <paramref name="now"/> (monotonically) only when <paramref name="advanceClock"/> is set (a message
+    /// stored <c>Pending</c> for a connector; a refused send never advances it). Returns whether the row matched.
+    /// </summary>
+    Task<bool> TryClaimForSendAsync(
+        TenantId tenantId, EntityId conversationId, DateTimeOffset now, bool advanceClock, CancellationToken ct);
 }

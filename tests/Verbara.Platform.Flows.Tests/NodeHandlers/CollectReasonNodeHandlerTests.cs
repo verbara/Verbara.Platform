@@ -404,5 +404,22 @@ public sealed class CollectReasonNodeHandlerTests
 
         public Task<IReadOnlyList<Conversation>> ListCallbackStuckAsync(TenantId tenantId, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<Conversation>>([]);
+
+        public Task<IReadOnlyList<Conversation>> ListInactiveAsync(
+            TenantId tenantId, IReadOnlyCollection<ConversationState> states, DateTimeOffset cutoff, int limit, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<Conversation>>([]);
+
+        public Task<InactivityCloseOutcome?> TryCloseInactiveAsync(TenantId tenantId, InactivityCloseRequest request, CancellationToken ct) =>
+            Task.FromResult<InactivityCloseOutcome?>(null);
+
+        public Task<bool> TryClaimForInboundAsync(TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct) =>
+            Task.FromResult(false);
+
+        public Task<bool> TryCloseResolvedForReplyAsync(TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct) =>
+            Task.FromResult(false);
+
+        public Task<bool> TryClaimForSendAsync(
+            TenantId tenantId, EntityId conversationId, DateTimeOffset now, bool advanceClock, CancellationToken ct) =>
+            Task.FromResult(false);
     }
 }
