@@ -371,7 +371,19 @@ internal sealed class HookedMessageStore(IMessageStore inner) : IMessageStore
     public Task UpdateDeliveryStatusAsync(TenantId tenantId, EntityId messageId, MessageDeliveryStatus status, DateTimeOffset? timestamp, CancellationToken ct) => inner.UpdateDeliveryStatusAsync(tenantId, messageId, status, timestamp, ct);
     public Task<Message?> FindByExternalIdAsync(TenantId tenantId, string externalMessageId, CancellationToken ct) => inner.FindByExternalIdAsync(tenantId, externalMessageId, ct);
     public Task MarkSentAsync(TenantId tenantId, EntityId messageId, string? externalMessageId, CancellationToken ct) => inner.MarkSentAsync(tenantId, messageId, externalMessageId, ct);
-    public Task<Message?> FindLastInboundAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct) => inner.FindLastInboundAsync(tenantId, conversationId, ct);
+    /// <summary>
+    /// Runs before <c>FindLastInboundAsync</c> (the WhatsApp window read, which a send makes after its state check and
+    /// before it stores anything): task 2.4's point for the inactivity close to commit inside a send.
+    /// </summary>
+    public Func<EntityId, Task>? BeforeFindLastInbound { get; set; }
+
+    public async Task<Message?> FindLastInboundAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
+    {
+        if (BeforeFindLastInbound is { } hook)
+            await hook(conversationId);
+        return await inner.FindLastInboundAsync(tenantId, conversationId, ct);
+    }
+
     public Task<IReadOnlyList<Message>> GetByConversationIdsAsync(TenantId tenantId, IReadOnlyList<EntityId> conversationIds, CancellationToken ct) => inner.GetByConversationIdsAsync(tenantId, conversationIds, ct);
     public Task<int> DeleteByConversationIdsAsync(TenantId tenantId, IReadOnlyList<EntityId> conversationIds, CancellationToken ct) => inner.DeleteByConversationIdsAsync(tenantId, conversationIds, ct);
     public Task<int> DeleteOrphanedAsync(TenantId tenantId, CancellationToken ct) => inner.DeleteOrphanedAsync(tenantId, ct);
