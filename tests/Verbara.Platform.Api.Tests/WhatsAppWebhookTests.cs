@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Verbara.Platform.Channels.Core;
+using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 
@@ -145,6 +146,33 @@ public sealed class WhatsAppWebhookTests : IClassFixture<PlatformApiFactory>
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await CountRowsAsync(tenant)).Should().Be((1, 1, 2));
+    }
+
+    // whatsapp-accepts-business-scoped-user-ids: one customer, three deliveries — phone only, phone + BSUID, BSUID only.
+    [Fact]
+    public async Task PostWebhook_ShouldKeepOneContactWithPhoneBsuidAndName_WhenSenderMovesToBsuid()
+    {
+        const string bsuid = "US.13491208655302741918";
+        var tenant = NewTenant();
+        await ConfigureTenantAsync(tenant);
+        var bsuidMessage = (string id, bool withPhone) => $$"""
+            { {{(withPhone ? "\"from\": \"15550000002\", " : "")}}"from_user_id": "{{bsuid}}", "id": "{{id}}", "timestamp": "1700000000", "type": "text", "text": { "body": "hola" } }
+            """;
+
+        (await PostAsync(tenant, Payload(PhoneNumberId, TextMessage("wamid.b1", "uno")), AppSecret)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await PostAsync(tenant, Payload(PhoneNumberId, bsuidMessage("wamid.b2", true)), AppSecret)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await PostAsync(tenant, Payload(PhoneNumberId, bsuidMessage("wamid.b3", false)), AppSecret)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        (await CountRowsAsync(tenant)).Should().Be((1, 1, 3), "the BSUID resolves to the contact first seen by phone");
+        var contacts = _factory.Services.GetRequiredService<IContactStore>();
+        var contact = await contacts.FindByAddressAsync(tenant, new ChannelAddress(ChannelType.WhatsApp, bsuid), CancellationToken.None);
+        contact.Should().NotBeNull();
+        contact!.Addresses.Should().BeEquivalentTo([
+            new ChannelAddress(ChannelType.WhatsApp, "15550000002"),
+            new ChannelAddress(ChannelType.WhatsApp, bsuid),
+        ]);
+        contact.FirstName.Should().Be("Alice", "contacts[].profile.name reaches a contact that had no name");
+        contact.FindAddress(ChannelType.WhatsApp)!.Address.Should().Be("15550000002", "outbound stays on the phone");
     }
 
     [Fact]

@@ -12,6 +12,9 @@
     <!-- licensed-agent-metering-follow-ups L16: the same widened-window decorator on both stores. -->
     <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\DeleteAfterFirstPageAgentStore.cs" Link="Stores\DeleteAfterFirstPageAgentStore.cs" />
     <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\DeleteAfterFirstPageQueueStore.cs" Link="Stores\DeleteAfterFirstPageQueueStore.cs" />
+    <!-- whatsapp-accepts-business-scoped-user-ids: the resolver write-back contract on both stores. -->
+    <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\InterleaveAfterLookupContactStore.cs" Link="Stores\InterleaveAfterLookupContactStore.cs" />
+    <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\ContactResolverWriteBackContract.cs" Link="Stores\ContactResolverWriteBackContract.cs" />
   </ItemGroup>
 
   <ItemGroup>

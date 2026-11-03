@@ -138,6 +138,54 @@ internal sealed class PostgresContactStore : IContactStore
             ct);
     }
 
+    public async Task<Contact?> AddIdentityAsync(
+        TenantId tenantId,
+        EntityId contactId,
+        IReadOnlyList<ChannelAddress> addresses,
+        string? firstNameIfUnnamed,
+        DateTimeOffset updatedAt,
+        string updatedBy,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(addresses);
+        var addressesJson = JsonSerializer.Serialize(addresses, PostgresJson.Ctx.IReadOnlyListChannelAddress);
+        // The ordinal of each new address's channel, by position: a stored address may carry the ordinal form (rows
+        // written before 2.13.0, see FindByAddressAsync), and must still count as already present.
+        var ordinals = addresses
+            .Select(a => ((int)a.Channel).ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .ToArray();
+
+        // An UPDATE, never an upsert: a contact erased since the caller read it matches no row and stays erased.
+        var rows = await _dataSource.QueryListAsync(
+            "UPDATE contacts SET " +
+            "  addresses = contacts.addresses || COALESCE((" +
+            "    SELECT jsonb_agg(n.value ORDER BY n.idx) " +
+            "    FROM jsonb_array_elements(@Addresses::jsonb) WITH ORDINALITY AS n(value, idx) " +
+            "    WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements(contacts.addresses) AS e " +
+            "                      WHERE e->>'address' = n.value->>'address' " +
+            "                        AND e->>'channel' IN (n.value->>'channel', (@Ordinals)[n.idx]))" +
+            "  ), '[]'::jsonb), " +
+            "  first_name = CASE WHEN contacts.first_name IS NULL AND contacts.last_name IS NULL " +
+            "                    THEN COALESCE(@FirstName, contacts.first_name) ELSE contacts.first_name END, " +
+            "  updated_at = @UpdatedAt, updated_by = @UpdatedBy " +
+            "WHERE tenant_id = @TenantId AND contact_id = @ContactId " +
+            "RETURNING contact_id, tenant_id, first_name, last_name, company, segment, preferred_channel, " +
+            "preferred_language, timezone, do_not_contact, addresses, custom_fields, channel_consent, " +
+            "created_at, updated_at, created_by, updated_by",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("ContactId", NpgsqlDbType.Text) { Value = contactId.Value });
+                p.Add(new NpgsqlParameter("Addresses", addressesJson));
+                p.Add(new NpgsqlParameter("Ordinals", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = ordinals });
+                p.Add(new NpgsqlParameter("FirstName", NpgsqlDbType.Text) { Value = (object?)firstNameIfUnnamed ?? DBNull.Value });
+                p.Add(new NpgsqlParameter("UpdatedAt", NpgsqlDbType.TimestampTz) { Value = updatedAt.ToUniversalTime() });
+                p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = updatedBy });
+            },
+            ContactRow.Map, ct);
+        return rows.Count == 0 ? null : rows[0].ToContact();
+    }
+
     public async Task DeleteAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
         await _dataSource.ExecuteAsync(

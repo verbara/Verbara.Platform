@@ -300,7 +300,28 @@ public sealed class DefaultConversationServiceTests : IDisposable
             EntityId.From("system"), ConversationOwnerKind.System, CancellationToken.None);
 
         await _connector.DidNotReceive().SendAsync(Arg.Any<OutboundMessage>(), Arg.Any<CancellationToken>());
-        result.DeliveryStatus.Should().Be(MessageDeliveryStatus.Pending);
+        result.DeliveryStatus.Should().Be(MessageDeliveryStatus.Failed, "a message with nowhere to go never goes out");
+        await _messageStore.Received(1).UpdateDeliveryStatusAsync(
+            _tenantId, result.MessageId, MessageDeliveryStatus.Failed, null, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldMarkReplyFailed_WhenContactIsKnownOnlyByBusinessScopedUserId()
+    {
+        var conversation = BuildConversation(owner: ConversationOwner.ForAgent(_agentId));
+        _conversationStore.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        _contactStore.GetByIdAsync(_tenantId, _contactId, Arg.Any<CancellationToken>())
+            .Returns(BuildContact(new ChannelAddress(ChannelType.WhatsApp, "US.13491208655302741918")));
+
+        var outcome = await CreateSut().TrySendMessageAsync(
+            _conversationId, _tenantId, _envelope, _agentId, ConversationOwnerKind.Agent, null, CancellationToken.None);
+
+        await _connector.DidNotReceive().SendAsync(Arg.Any<OutboundMessage>(), Arg.Any<CancellationToken>());
+        outcome.Message!.DeliveryStatus.Should().Be(MessageDeliveryStatus.Failed,
+            "the agent must see that a reply to a BSUID-only contact did not go out");
+        await _messageStore.Received(1).UpdateDeliveryStatusAsync(
+            _tenantId, outcome.Message.MessageId, MessageDeliveryStatus.Failed, null, Arg.Any<CancellationToken>());
     }
 
     [Fact]
