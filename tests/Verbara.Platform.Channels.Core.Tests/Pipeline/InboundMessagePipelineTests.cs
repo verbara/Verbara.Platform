@@ -17,6 +17,7 @@ public class InboundMessagePipelineTests
     private readonly IContactIdentityResolver _contactResolver;
     private readonly IConversationStore _conversationStore;
     private readonly IConversationLifecycleService _lifecycleService;
+    private readonly IClock _clock;
     private readonly InboundMessagePipeline _pipeline;
 
     public InboundMessagePipelineTests()
@@ -27,12 +28,19 @@ public class InboundMessagePipelineTests
         _lifecycleService = Substitute.For<IConversationLifecycleService>();
         _messageStore.InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>())
             .Returns(ci => ci.Arg<Message>());
+        // conversations-close-after-inactivity D7: the inbound claim on an open conversation wins unless a test says so.
+        _conversationStore.TryClaimForInboundAsync(
+                Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+        _clock = Substitute.For<IClock>();
+        _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
 
         _pipeline = new InboundMessagePipeline(
             _messageStore,
             _contactResolver,
             _conversationStore,
-            _lifecycleService);
+            _lifecycleService,
+            _clock);
     }
 
     private static InboundMessage MakeMessage(string externalId = "ext-1") =>
@@ -395,7 +403,7 @@ public class InboundMessagePipelineTests
             Contact = contact,
         };
 
-        var step = new ConversationResolutionStep(_conversationStore, _lifecycleService);
+        var step = new ConversationResolutionStep(_conversationStore, _lifecycleService, _clock);
         var result = await step.ExecuteAsync(context, CancellationToken.None);
 
         result.IsNewConversation.Should().BeTrue();
@@ -420,7 +428,7 @@ public class InboundMessagePipelineTests
             Contact = contact,
         };
 
-        var step = new ConversationResolutionStep(_conversationStore, _lifecycleService);
+        var step = new ConversationResolutionStep(_conversationStore, _lifecycleService, _clock);
         var result = await step.ExecuteAsync(context, CancellationToken.None);
 
         result.IsNewConversation.Should().BeFalse();
@@ -568,5 +576,93 @@ public class InboundMessagePipelineTests
         var result = await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
 
         result.IsDuplicate.Should().BeFalse();
+    }
+
+    // ── conversations-close-after-inactivity task 2.3 (design D7, D8; audit round 4 F1) ─────────────────────────
+
+    [Fact]
+    public async Task ConversationResolutionStep_ShouldOpenANewConversation_WhenEveryClaimLoses()
+    {
+        var contact = MakeContact();
+        var existing = MakeConversation(contact.ContactId);
+        var created = MakeConversation(contact.ContactId);
+        _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>()).Returns(existing);
+        _conversationStore.TryClaimForInboundAsync(TenantId, existing.ConversationId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(false);
+        _lifecycleService.CreateAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>()).Returns(created);
+        var context = new PipelineContext { InboundMessage = MakeMessage(), TenantId = TenantId, Channel = Channel, Contact = contact };
+
+        var result = await new ConversationResolutionStep(_conversationStore, _lifecycleService, _clock).ExecuteAsync(context, CancellationToken.None);
+
+        result.Conversation.Should().BeSameAs(created, "a message never lands in a row whose claim it could not win");
+        result.IsNewConversation.Should().BeTrue();
+        await _conversationStore.Received(ConversationResolutionStep.MaxResolveAttempts).TryClaimForInboundAsync(
+            TenantId, existing.ConversationId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ConversationResolutionStep_ShouldCloseOnlyOneResolvedRow_WhenTheContactHasTwo()
+    {
+        var contact = MakeContact();
+        var first = MakeConversation(contact.ContactId);
+        first.State = ConversationState.Resolved;
+        var second = MakeConversation(contact.ContactId);
+        second.State = ConversationState.Resolved;
+        var created = MakeConversation(contact.ContactId);
+        _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>()).Returns(first, second);
+        _conversationStore.TryCloseResolvedForReplyAsync(TenantId, Arg.Any<EntityId>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+        _lifecycleService.CreateAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>()).Returns(created);
+        var context = new PipelineContext { InboundMessage = MakeMessage(), TenantId = TenantId, Channel = Channel, Contact = contact };
+
+        var result = await new ConversationResolutionStep(_conversationStore, _lifecycleService, _clock).ExecuteAsync(context, CancellationToken.None);
+
+        result.ClosedOnReturnId.Should().Be(first.ConversationId, "one delivery owns at most one return close");
+        result.Conversation.Should().BeSameAs(created);
+        await _conversationStore.Received(1).TryCloseResolvedForReplyAsync(
+            TenantId, Arg.Any<EntityId>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ShouldWrapTheFailureWithTheClosedId_WhenTheInsertThrowsAfterAWonReturnClose()
+    {
+        var inbound = MakeMessage("f1-ext");
+        var contact = MakeContact();
+        var resolved = MakeConversation(contact.ContactId);
+        resolved.State = ConversationState.Resolved;
+        var created = MakeConversation(contact.ContactId);
+        _messageStore.FindByExternalIdAsync(TenantId, "f1-ext", Arg.Any<CancellationToken>()).ReturnsNull();
+        _contactResolver.ResolveAsync(TenantId, Arg.Any<ContactIdentity>(), Arg.Any<CancellationToken>()).Returns(contact);
+        _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
+            .Returns(resolved, [null]);
+        _conversationStore.TryCloseResolvedForReplyAsync(TenantId, resolved.ConversationId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+        _lifecycleService.CreateAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>()).Returns(created);
+        var failure = new InvalidOperationException("database unavailable");
+        _messageStore.InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>()).Returns<Message>(_ => throw failure);
+
+        var act = () => _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
+
+        var thrown = (await act.Should().ThrowExactlyAsync<InboundReturnClosedException>()).Which;
+        thrown.ClosedOnReturnId.Should().Be(resolved.ConversationId);
+        thrown.TenantId.Should().Be(TenantId);
+        thrown.InnerException.Should().BeSameAs(failure);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ShouldPropagateTheFailureUnwrapped_WhenNoReturnCloseWasWon()
+    {
+        var inbound = MakeMessage("plain-fail");
+        var contact = MakeContact();
+        _messageStore.FindByExternalIdAsync(TenantId, "plain-fail", Arg.Any<CancellationToken>()).ReturnsNull();
+        _contactResolver.ResolveAsync(TenantId, Arg.Any<ContactIdentity>(), Arg.Any<CancellationToken>()).Returns(contact);
+        _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
+            .Returns(MakeConversation(contact.ContactId));
+        _messageStore.InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>())
+            .Returns<Message>(_ => throw new InvalidOperationException("database unavailable"));
+
+        var act = () => _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
+
+        await act.Should().ThrowExactlyAsync<InvalidOperationException>();
     }
 }

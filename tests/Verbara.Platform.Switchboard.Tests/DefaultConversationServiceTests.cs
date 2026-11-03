@@ -37,6 +37,8 @@ public sealed class DefaultConversationServiceTests : IDisposable
             .Returns(new SendResult(true, "ext-123", null, null));
         _whatsAppWindow.DecideAsync(default, default, default, default)
             .ReturnsForAnyArgs(new WhatsAppWindowDecision(WhatsAppSendMode.FreeForm, _now.AddMinutes(-5)));
+        // The send claim (D9) matches by default: these tests pin the send itself, not the race with a close.
+        _conversationStore.TryClaimForSendAsync(default, default, default, default, default).ReturnsForAnyArgs(true);
     }
 
     public void Dispose() => _eventBus.Dispose();

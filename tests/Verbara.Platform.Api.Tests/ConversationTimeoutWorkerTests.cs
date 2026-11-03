@@ -9,7 +9,7 @@ using NSubstitute;
 
 namespace Verbara.Platform.Api.Tests;
 
-public sealed class ConversationTimeoutWorkerTests : IDisposable
+public sealed partial class ConversationTimeoutWorkerTests : IDisposable
 {
     private const string TestTenantId = "t001";
 

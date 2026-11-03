@@ -1038,4 +1038,67 @@ public sealed class ConversationSwitchboardTests : IDisposable
         stateEvent.OldState.Should().Be("Offered");
         stateEvent.NewState.Should().Be("Queued");
     }
+
+    // ─── Queue clock (conversations-close-after-inactivity task 2.5, design D10) ──────────────────────
+    // The save that puts a conversation in a queue stamps metadata "_queuedAt" (round-trip "O", UTC); the
+    // queue sweep counts from it. An expired or rejected offer keeps it, so the wait is not restarted.
+
+    private const string QueuedAtKey = "_queuedAt";
+
+    private string NowStamp => _now.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+
+    [Fact]
+    public async Task AssignToQueueAsync_ShouldStampTheQueueEntryTime_WhenTheConversationEntersTheQueue()
+    {
+        var conversation = BuildConversation(ConversationState.Queued);
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>()).Returns(conversation);
+        Conversation? saved = null;
+        await _store.SaveAsync(Arg.Do<Conversation>(c => saved = c), Arg.Any<CancellationToken>());
+
+        var result = await CreateSut().AssignToQueueAsync(_conversationId, _tenantId, _queueId, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        saved.Should().NotBeNull();
+        saved!.Metadata.Should().ContainKey(QueuedAtKey).WhoseValue.Should().Be(NowStamp);
+    }
+
+    [Fact]
+    public async Task TransferToQueueAsync_ShouldStampTheQueueEntryTime_WhenAnAgentTransfersToAQueue()
+    {
+        var conversation = BuildConversation(ConversationState.Active, ConversationOwner.ForAgent(_agentId));
+        conversation.SetMetadata(QueuedAtKey, _now.AddDays(-3).ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>()).Returns(conversation);
+
+        var result = await CreateSut().TransferToQueueAsync(_conversationId, _tenantId, _queueId, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        conversation.Metadata.Should().ContainKey(QueuedAtKey).WhoseValue.Should().Be(NowStamp);
+    }
+
+    [Fact]
+    public async Task RequeueToFrontAsync_ShouldStampTheQueueEntryTime_WhenTheFailoverRequeues()
+    {
+        var conversation = BuildConversation(ConversationState.OnHold, ConversationOwner.ForAgent(_agentId));
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>()).Returns(conversation);
+
+        var result = await CreateSut().RequeueToFrontAsync(_conversationId, _tenantId, _queueId, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.NewState.Should().Be(ConversationState.Queued);
+        conversation.Metadata.Should().ContainKey(QueuedAtKey).WhoseValue.Should().Be(NowStamp);
+    }
+
+    [Fact]
+    public async Task RejectAsync_ShouldKeepTheQueueEntryTime_WhenTheOfferIsRejected()
+    {
+        var entered = _now.AddSeconds(-290).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        var conversation = BuildConversation(ConversationState.Offered, ConversationOwner.ForQueue(_queueId));
+        conversation.SetMetadata(QueuedAtKey, entered);
+        _store.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>()).Returns(conversation);
+
+        var result = await CreateSut().RejectAsync(_conversationId, _tenantId, _agentId, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        conversation.Metadata.Should().ContainKey(QueuedAtKey).WhoseValue.Should().Be(entered);
+    }
 }

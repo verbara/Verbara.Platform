@@ -30,7 +30,8 @@ public sealed class InboundMessagePipelineRaceTests
             services.GetRequiredService<IMessageStore>(),
             new FixedContactResolver(Tenant),
             conversationStore,
-            lifecycle);
+            lifecycle,
+            new SystemClock());
         var inbound = new InboundMessage(
             From: new ChannelAddress(ChannelType.WhatsApp, "+573001112233"),
             Content: new MessageEnvelope([new TextBlock("hola")]),

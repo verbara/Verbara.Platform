@@ -188,6 +188,12 @@ services:
       # Licensed-agent day cut (IANA zone id). Fixed in the database at the first
       # start of v2.27.0 or later; changing it afterwards stops the daily close.
       Licensing__Metering__DayZone: ${LICENSE_DAY_ZONE:-UTC}
+      # Inactivity close: an open digital conversation with no message for 72 h closes by itself
+      # (docs/operations/upgrade-2.38.0.md). false switches it off; the batch size and the sweep
+      # interval pace the first wave after an upgrade. See .env.reference-smb.example.
+      Conversations__InactivityCloseEnabled: ${INACTIVITY_CLOSE_ENABLED:-true}
+      Conversations__InactivityCloseBatchSize: ${INACTIVITY_CLOSE_BATCH_SIZE:-100}
+      Conversations__InactivityCloseSweepIntervalSeconds: ${INACTIVITY_CLOSE_SWEEP_INTERVAL_SECONDS:-60}
       # CORS — allow only the front-end origin you ship to customers.
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,https://localhost}
       # Public address of the console (nginx-gateway, as users open it). Password-reset

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Verbara.Platform.Core;
 
 namespace Verbara.Platform.Conversations;
@@ -34,6 +35,17 @@ public sealed class Conversation : ITenantScoped, IAuditable
     /// failover re-queue sets -1 to jump to the front.
     /// </summary>
     public int QueuePriority { get; set; }
+
+    /// <summary>
+    /// conversations-close-after-inactivity (design D2): the time of the last customer-facing activity, the clock of
+    /// the inactivity close. Written by the stores' claim statements only (an inbound message, an agent or bot send),
+    /// with the platform's clock and monotonically. A new conversation starts it at <see cref="CreatedAt"/>, or at the
+    /// value set here when it is born with a message; the whole-row save never writes it afterwards, so a stale copy
+    /// cannot roll it back. Nullable on the entity only: the store never stores null. Off the wire (no API or Web
+    /// change).
+    /// </summary>
+    [JsonIgnore]
+    public DateTimeOffset? LastMessageAt { get; set; }
 
     private readonly Dictionary<string, string> _metadata = new();
     public IReadOnlyDictionary<string, string> Metadata => _metadata;

@@ -15,9 +15,9 @@ namespace Verbara.Platform.Api.Services;
 /// session open, and the inbound pipeline only persists messages — it never routes/assigns —
 /// so <c>QueueDistributionWorker</c> (which skips owner-less conversations) never offers them
 /// to an agent. This bridge closes that gap. It routes the session's first inbound message and any
-/// message that opened a new conversation (the session's conversation ended, so the pipeline created a
-/// fresh owner-less one, mirroring the webhook path's <c>IsNewConversation</c> trigger); other messages
-/// are no-ops.
+/// message whose conversation still needs routing (<see cref="WebhookInboundProcessor.NeedsRouting"/>: the
+/// session's conversation ended, so the pipeline created a fresh owner-less one, or reused one still queued
+/// and owner-less); other messages are no-ops.
 /// </summary>
 internal sealed partial class WebChatInboundRouter
 {
@@ -27,6 +27,7 @@ internal sealed partial class WebChatInboundRouter
     private readonly IContactStore _contactStore;
     private readonly PlatformEventBus _eventBus;
     private readonly WebChatSessionManager _sessionManager;
+    private readonly CustomerReturnAnnouncer _returnAnnouncer;
     private readonly ILogger<WebChatInboundRouter> _logger;
 
     public WebChatInboundRouter(
@@ -36,6 +37,7 @@ internal sealed partial class WebChatInboundRouter
         IContactStore contactStore,
         PlatformEventBus eventBus,
         WebChatSessionManager sessionManager,
+        CustomerReturnAnnouncer returnAnnouncer,
         ILogger<WebChatInboundRouter> logger)
     {
         _router = router;
@@ -44,15 +46,32 @@ internal sealed partial class WebChatInboundRouter
         _contactStore = contactStore;
         _eventBus = eventBus;
         _sessionManager = sessionManager;
+        _returnAnnouncer = returnAnnouncer;
         _logger = logger;
     }
 
     /// <summary>
-    /// Routes and assigns the conversation to a queue on the session's first inbound message, or when
-    /// the message opened a new conversation. Other calls return immediately (the session is marked
-    /// routed atomically, first-wins). Publishes the same SSE events as the webhook path so the agent
-    /// UI updates live.
+    /// Stores one visitor message through <paramref name="pipeline"/>. A failure after the delivery won a return close
+    /// announces that close before the original failure propagates (audit round 4, F1; see
+    /// <see cref="CustomerReturnAnnouncer.ProcessAsync"/>).
     /// </summary>
+    public Task<PipelineResult> ProcessInboundAsync(
+        IInboundMessagePipeline pipeline, InboundMessage inbound, TenantId tenantId, CancellationToken ct) =>
+        _returnAnnouncer.ProcessAsync(pipeline, inbound, tenantId, ChannelType.WebChat, ct);
+
+    /// <summary>
+    /// Routes and assigns the conversation to a queue on the session's first inbound message, or when the conversation
+    /// the message was stored in still needs routing (<see cref="WebhookInboundProcessor.NeedsRouting"/>: it is new, or
+    /// <c>Queued</c> with no owner). Other calls only keep the session on the visitor's conversation. Publishes the same
+    /// SSE events as the webhook path so the agent UI updates live.
+    /// </summary>
+    /// <remarks>
+    /// conversations-close-after-inactivity (design D8): a return close the delivery won
+    /// (<see cref="PipelineResult.ClosedOnReturnId"/>) is announced first, also on a duplicate result (the lost-insert
+    /// branch). A duplicate result then routes and re-points nothing and does not consume the session's first-message
+    /// mark: routing and the session belong to the insert winner, which may have reused the replacement conversation the
+    /// close winner opened (<c>IsNewConversation: false</c> on a <c>Queued</c> owner-less row).
+    /// </remarks>
     public async Task RouteFirstInboundAsync(
         string sessionId,
         TenantId tenantId,
@@ -60,19 +79,30 @@ internal sealed partial class WebChatInboundRouter
         MessageEnvelope? content,
         CancellationToken ct)
     {
-        // Route the session's first message, and any message that opened a new conversation (the session's
-        // conversation ended, so the pipeline created a fresh owner-less one for the same contact).
-        var firstOfSession = _sessionManager.TryMarkRouted(sessionId);
-        if (!firstOfSession && !pipelineResult.IsNewConversation)
-        {
+        ArgumentNullException.ThrowIfNull(pipelineResult);
+
+        if (pipelineResult.ClosedOnReturnId is { } closedOnReturn)
+            await _returnAnnouncer.AnnounceAsync(tenantId, closedOnReturn).ConfigureAwait(false);
+
+        if (pipelineResult.IsDuplicate)
             return;
+
+        // Typing indicators and later lookups follow the conversation the visitor is now in.
+        if (await _sessionManager.GetSessionAsync(sessionId).ConfigureAwait(false) is { } session
+            && session.ConversationId != pipelineResult.ConversationId)
+        {
+            session.ConversationId = pipelineResult.ConversationId;
         }
 
-        if (pipelineResult.IsNewConversation
-            && await _sessionManager.GetSessionAsync(sessionId).ConfigureAwait(false) is { } session)
+        // Route the session's first message, and any message whose conversation still needs routing: one the message
+        // opened (the session's conversation ended), or one still queued and owner-less (a replacement another
+        // delivery opened, or an earlier routing that found no queue) — the predicate the webhook path uses.
+        var firstOfSession = _sessionManager.TryMarkRouted(sessionId);
+        var conversation = await _conversationStore.GetByIdAsync(tenantId, pipelineResult.ConversationId, ct).ConfigureAwait(false);
+        if (!firstOfSession
+            && (conversation is null || !WebhookInboundProcessor.NeedsRouting(pipelineResult, conversation)))
         {
-            // Typing indicators and later lookups follow the conversation the visitor is now in.
-            session.ConversationId = pipelineResult.ConversationId;
+            return;
         }
 
         _eventBus.Publish(new ConversationStateChangedEvent(
@@ -81,7 +111,6 @@ internal sealed partial class WebChatInboundRouter
             tenantId.Value, pipelineResult.ConversationId.Value,
             pipelineResult.MessageId.Value, "Inbound", ChannelType.WebChat.ToString()));
 
-        var conversation = await _conversationStore.GetByIdAsync(tenantId, pipelineResult.ConversationId, ct).ConfigureAwait(false);
         var contact = await _contactStore.GetByIdAsync(tenantId, pipelineResult.ContactId, ct).ConfigureAwait(false);
         if (conversation is null || contact is null)
         {

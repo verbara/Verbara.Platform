@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using Verbara.Platform.Api.Health;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Verbara.Platform.Identity;
 using Verbara.Platform.Switchboard;
 using Verbara.Platform.Typification;
 using Verbara.Platform.Typification.Ai;
@@ -19,6 +21,12 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     /// AI-actor identifier stamped on autonomous dispositions and their audit records (ADR-0034).
     /// </summary>
     internal const string AutonomousActorId = "verbara:ai:autonomous-worker";
+
+    /// <summary>
+    /// System-actor identifier on the <c>conversation.closed</c> audit entry of an inactivity close
+    /// (conversations-close-after-inactivity D6).
+    /// </summary>
+    internal const string InactivityCloseActorId = "verbara:system:inactivity-close";
     /// <summary>
     /// Keyed-service name for the per-tick <see cref="ResiliencePolicy"/> that wraps each
     /// timeout-processing pass. Circuit-open skips the current tick; the next timer tick
@@ -46,6 +54,22 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     private readonly AutonomousDispositionMetrics? _autonomousMetrics;
     private readonly ITenantAutonomousDispositionStore? _gateStore;
 
+    private readonly ConversationOptions _conversationOptions;
+    private readonly ITenantAuthConfigStore? _tenantAuthConfigStore;
+
+    // D13: the system-close counter; only a won close increments it. Optional so existing ctor usages keep compiling.
+    private readonly ConversationCloseMetrics? _closeMetrics;
+
+    // D11: the per-tenant override warnings are logged once per tenant per process (the worker is a singleton).
+    private readonly HashSet<string> _invalidWindowWarned = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _belowWhatsAppWarned = new(StringComparer.Ordinal);
+
+    // D2: the tenants whose clocks this process has reconciled (once per tenant per process, before the first list).
+    private readonly HashSet<string> _clockReconciled = new(StringComparer.Ordinal);
+
+    // When this replica last started an inactivity pass (D4: at most one per InactivityCloseSweepIntervalSeconds).
+    private DateTimeOffset? _lastInactivityPassAt;
+
     public ConversationTimeoutWorker(
         IConversationStore conversationStore,
         ITenantStore tenantStore,
@@ -61,7 +85,10 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         ITypificationSubmissionStore? submissionStore = null,
         IAuditService? auditService = null,
         AutonomousDispositionMetrics? autonomousMetrics = null,
-        ITenantAutonomousDispositionStore? gateStore = null)
+        ITenantAutonomousDispositionStore? gateStore = null,
+        IOptions<ConversationOptions>? conversationOptions = null,
+        ITenantAuthConfigStore? tenantAuthConfigStore = null,
+        ConversationCloseMetrics? closeMetrics = null)
     {
         _conversationStore = conversationStore;
         _tenantStore = tenantStore;
@@ -78,6 +105,9 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         _auditService = auditService;
         _autonomousMetrics = autonomousMetrics;
         _gateStore = gateStore;
+        _conversationOptions = conversationOptions?.Value ?? new ConversationOptions();
+        _tenantAuthConfigStore = tenantAuthConfigStore;
+        _closeMetrics = closeMetrics;
     }
 
     /// <summary>
@@ -109,7 +139,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
                         ResiliencePolicyKey,
                         async innerCt =>
                         {
-                            await ProcessTimeoutsAsync(innerCt);
+                            await ProcessTimeoutsAsync(innerCt, stoppingToken);
                             return 0;
                         },
                         stoppingToken);
@@ -140,7 +170,17 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         }
     }
 
-    internal async Task ProcessTimeoutsAsync(CancellationToken ct)
+    internal Task ProcessTimeoutsAsync(CancellationToken ct) => ProcessTimeoutsAsync(ct, ct);
+
+    /// <summary>
+    /// One tick: every tenant's offer, queue and wrap-up timeouts under <paramref name="ct"/> (the resilience policy's
+    /// per-attempt budget), then, when it is due, the inactivity pass under <paramref name="inactivityCt"/> (the host's
+    /// stopping token). The pass is not cut by the attempt budget: its once-per-process clock reconcile and a backlog
+    /// wave of closes can outlast it, and a cancelled pass would leave every later tenant unswept (review round 1).
+    /// Each of its statements stays bounded by the connection's command timeout, and a fault in it is logged per tenant.
+    /// The pass's interval starts only once the timeouts succeeded, so a retry of a failed attempt still runs it.
+    /// </summary>
+    internal async Task ProcessTimeoutsAsync(CancellationToken ct, CancellationToken inactivityCt)
     {
         var tenants = await _tenantStore.GetAllActiveAsync(ct);
         var now = _clock.UtcNow;
@@ -152,6 +192,241 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             await ProcessOfferTimeoutsAsync(tid, tenant.TenantId, now, ct);
             await ProcessQueueTimeoutsAsync(tid, tenant.TenantId, now, ct);
             await ProcessWrapUpTimeoutsAsync(tid, tenant.TenantId, now, ct);
+        }
+
+        if (!TryStartInactivityPass(now))
+            return;
+
+        foreach (var tenant in tenants)
+            await ProcessInactivityClosesAsync(new TenantId(tenant.TenantId), now, inactivityCt);
+    }
+
+    /// <summary>
+    /// conversations-close-after-inactivity (D4): the inactivity pass rides the timeout tick but runs at most once per
+    /// <see cref="ConversationOptions.InactivityCloseSweepIntervalSeconds"/> on this replica, and never with the switch
+    /// off. Returns whether this tick runs it (and, if so, starts the interval).
+    /// </summary>
+    private bool TryStartInactivityPass(DateTimeOffset now)
+    {
+        if (!_conversationOptions.InactivityCloseEnabled)
+            return false;
+
+        if (_lastInactivityPassAt is { } last
+            && now - last < TimeSpan.FromSeconds(_conversationOptions.InactivityCloseSweepIntervalSeconds))
+        {
+            return false;
+        }
+
+        _lastInactivityPassAt = now;
+        return true;
+    }
+
+    /// <summary>
+    /// The D12 grace: a clock older than <c>window + grace</c> at the close records <c>inactivity-backlog</c>.
+    /// <c>max(1 h, 2 × sweep interval)</c>, a constant of the code, not an option.
+    /// </summary>
+    private TimeSpan InactivityBacklogGrace()
+    {
+        var twoIntervals = TimeSpan.FromSeconds(2L * _conversationOptions.InactivityCloseSweepIntervalSeconds);
+        return twoIntervals > TimeSpan.FromHours(1) ? twoIntervals : TimeSpan.FromHours(1);
+    }
+
+    /// <summary>
+    /// conversations-close-after-inactivity (D3, D4, D6): closes the tenant's idle digital conversations. Lists at most
+    /// <see cref="ConversationOptions.InactivityCloseBatchSize"/> rows in the five in-scope states whose clock is older
+    /// than the window, oldest first, then closes each through the switchboard's conditional close on the state, owner
+    /// and clock READ here — so a message, transfer or close committed since, or another replica's won close, makes it
+    /// a no-op. Only a won close is audited (the switchboard already released and announced it). A failure is logged
+    /// and never stops the other tenants' timeouts; a close that committed stays closed.
+    /// </summary>
+    private async Task ProcessInactivityClosesAsync(TenantId tid, DateTimeOffset now, CancellationToken ct)
+    {
+        if (await InactivityWindowAsync(tid, now, ct) is not { } window)
+            return;
+
+        if (!await EnsureClockReconciledAsync(tid, ct))
+            return;
+
+        var cutoff = now - window;
+        var backlogCutoff = cutoff - InactivityBacklogGrace();
+
+        IReadOnlyList<Conversation> idle;
+        try
+        {
+            idle = await _conversationStore.ListInactiveAsync(
+                tid, ConversationStateMachine.InactivityCloseStates, cutoff, _conversationOptions.InactivityCloseBatchSize, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogInactivityListFailed(tid.Value, ex);
+            return;
+        }
+
+        // Capture what was read before any close runs: each close is decided on these values, never on a re-read.
+        var reads = idle
+            .Select(c => (Request: new InactivityCloseRequest(c.ConversationId, c.State, c.Owner, cutoff, backlogCutoff, now), c.Channel))
+            .ToList();
+
+        foreach (var (request, channel) in reads)
+        {
+            InactivityCloseOutcome? outcome;
+            try
+            {
+                outcome = await _switchboard.CloseForInactivityAsync(tid, request, channel, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogInactivityCloseFailed(request.ConversationId.Value, ex);
+                continue;
+            }
+
+            if (outcome is null)
+                continue; // lost: a message, a move or another replica got there first — nothing to record
+
+            await AuditInactivityCloseAsync(tid, request, outcome);
+            RecordInactivityClose(tid, request, channel, outcome);
+        }
+    }
+
+    /// <summary>
+    /// D2: reconciles the tenant's clocks from its stored activity messages once per process, before that tenant's first
+    /// <c>ListInactiveAsync</c>, so messages an older binary stored without advancing the clock (a rollback, then a
+    /// re-upgrade) keep their conversations open. Not a <c>Host.StartAsync</c> step: it runs in the pass, which runs only
+    /// with the switch on, so a start that turns the switch on reconciles. Logs its duration and the rows it advanced
+    /// (the Unknowns input). Returns <see langword="false"/> when it failed: the tenant is not swept this pass (no tenant
+    /// is swept on an unreconciled clock) and the next pass retries.
+    /// </summary>
+    private async Task<bool> EnsureClockReconciledAsync(TenantId tid, CancellationToken ct)
+    {
+        if (_clockReconciled.Contains(tid.Value))
+            return true;
+
+        var started = Stopwatch.GetTimestamp();
+        int advanced;
+        try
+        {
+            advanced = await _conversationStore.ReconcileLastMessageAtAsync(tid, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogInactivityReconcileFailed(tid.Value, ex);
+            return false;
+        }
+
+        var durationMs = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        _clockReconciled.Add(tid.Value);
+        LogInactivityReconciled(tid.Value, advanced, durationMs);
+        return true;
+    }
+
+    /// <summary>
+    /// D13: a won inactivity close adds one to <c>conversations.system_closed{reason}</c> and writes one Information
+    /// line with the tenant, the channel, the reason and the idle-age bucket at the close. Never throws: the close is
+    /// committed, and a metrics fault must not skip the rest of the batch.
+    /// </summary>
+    private void RecordInactivityClose(TenantId tid, InactivityCloseRequest request, ChannelType channel, InactivityCloseOutcome outcome)
+    {
+        try
+        {
+            _closeMetrics?.RecordClosed(outcome.Reason);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogInactivityCountFailed(request.ConversationId.Value, ex);
+        }
+
+        var bucket = IdleAgeBucket(request.Now - outcome.LastMessageAt);
+        LogInactivityClosed(request.ConversationId.Value, tid.Value, channel, outcome.Reason, bucket);
+    }
+
+    /// <summary>
+    /// D13: the idle-age bucket of a close, the first measurement of how long conversations sit idle: <c>&lt;72h</c>
+    /// (reachable only with a window below 72 h), <c>72-96h</c>, <c>96-168h</c> or <c>&gt;168h</c>.
+    /// </summary>
+    internal static string IdleAgeBucket(TimeSpan idle) => idle.TotalHours switch
+    {
+        < 72 => "<72h",
+        < 96 => "72-96h",
+        <= 168 => "96-168h",
+        _ => ">168h",
+    };
+
+    /// <summary>
+    /// D11: the tenant's effective window. Read once per tenant per pass through <see cref="ITenantAuthConfigStore"/>
+    /// (the cached store in the host, so a SQL change lands within the cache TTL plus one sweep interval plus one tick).
+    /// No row, a null column or no store means the host window; a stored value below 1 h is ignored for the host window
+    /// with a warning naming the tenant, and one below 24 h applies with the WhatsApp warning, each once per tenant per
+    /// process. Returns <see langword="null"/> when this tenant is not swept this pass: its config could not be read
+    /// (closing by the host window could close what a longer tenant window keeps open; the next pass retries), or the
+    /// window reaches back past the calendar's start, so nothing can be idle that long.
+    /// </summary>
+    private async Task<TimeSpan?> InactivityWindowAsync(TenantId tid, DateTimeOffset now, CancellationToken ct)
+    {
+        var hours = _conversationOptions.InactivityCloseAfterHours;
+        if (_tenantAuthConfigStore is not null)
+        {
+            int? stored;
+            try
+            {
+                stored = (await _tenantAuthConfigStore.GetAsync(tid.Value, ct))?.InactivityCloseAfterHours;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogInactivityWindowReadFailed(tid.Value, ex);
+                return null;
+            }
+
+            if (stored is { } tenantHours)
+            {
+                if (tenantHours < ConversationOptionsSetup.MinAfterHours)
+                {
+                    if (_invalidWindowWarned.Add(tid.Value))
+                        LogInactivityWindowInvalid(tid.Value, tenantHours, hours);
+                }
+                else
+                {
+                    hours = tenantHours;
+                    if (tenantHours < ConversationOptionsSetup.WhatsAppWindowHours && _belowWhatsAppWarned.Add(tid.Value))
+                        LogInactivityWindowBelowWhatsApp(tid.Value, tenantHours, ConversationOptionsSetup.WhatsAppWindowHours);
+                }
+            }
+        }
+
+        var reach = now - DateTimeOffset.MinValue - InactivityBacklogGrace();
+        return hours < reach.TotalHours ? TimeSpan.FromHours(hours) : null;
+    }
+
+    /// <summary>
+    /// D6: one <c>conversation.closed</c> entry per won close, the action the close endpoint writes, with the system
+    /// actor and the reason the conditional close recorded. Written with <see cref="CancellationToken.None"/> (the close
+    /// is committed); a failed write is logged and does not undo the close.
+    /// </summary>
+    private async Task AuditInactivityCloseAsync(TenantId tid, InactivityCloseRequest request, InactivityCloseOutcome outcome)
+    {
+        if (_auditService is null)
+            return;
+
+        try
+        {
+            await _auditService.RecordAsync(
+                tid,
+                category: "conversations",
+                action: "conversation.closed",
+                severity: "info",
+                actorId: InactivityCloseActorId,
+                actorType: "system",
+                targetId: request.ConversationId.Value,
+                targetType: "Conversation",
+                metadata: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["reason"] = outcome.Reason,
+                    ["previous_state"] = request.ReadState.ToString(),
+                },
+                ct: CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogInactivityAuditFailed(request.ConversationId.Value, ex);
         }
     }
 
@@ -191,7 +466,9 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
 
         foreach (var conv in queued)
         {
-            if ((now - conv.CreatedAt).TotalSeconds <= _options.DefaultQueueTimeoutSeconds)
+            // D10: count from when the conversation last entered the queue (`_queuedAt`), falling back on its
+            // creation for a row queued before the key existed. An expired offer keeps the key.
+            if ((now - ConversationQueueClock.EnteredQueueAt(conv)).TotalSeconds <= _options.DefaultQueueTimeoutSeconds)
                 continue;
 
             conv.TransitionTo(ConversationState.Abandoned, now);
@@ -528,6 +805,51 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Autonomous commit decision for conversation {ConversationId} had a null suggestion — skipping (policy invariant violated)")]
     private partial void LogAutonomousCommitNullSuggestion(string conversationId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Inactivity pass could not list the idle conversations of tenant {TenantId}; retried on the next pass")]
+    private partial void LogInactivityListFailed(string tenantId, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Inactivity close of conversation {ConversationId} failed; retried on the next pass")]
+    private partial void LogInactivityCloseFailed(string conversationId, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Inactivity close of conversation {ConversationId} committed but its audit entry could not be written")]
+    private partial void LogInactivityAuditFailed(string conversationId, Exception ex);
+
+    [LoggerMessage(EventId = 7601, Level = LogLevel.Warning,
+        Message = "Tenant {TenantId} stores an inactivity window of {StoredHours} h, below the 1 h minimum: ignored, the " +
+                  "host window of {HostHours} h applies to its conversations.")]
+    private partial void LogInactivityWindowInvalid(string tenantId, int storedHours, int hostHours);
+
+    [LoggerMessage(EventId = 7602, Level = LogLevel.Warning,
+        Message = "Tenant {TenantId} stores an inactivity window of {Hours} h, below WhatsApp's {WindowHours} h " +
+                  "customer-service window: its WhatsApp conversations will be closed while Meta still lets the agent " +
+                  "reply, so a returning customer's message opens a new conversation in the same WhatsApp thread.")]
+    private partial void LogInactivityWindowBelowWhatsApp(string tenantId, int hours, int windowHours);
+
+    [LoggerMessage(EventId = 7603, Level = LogLevel.Warning,
+        Message = "Inactivity pass could not read the inactivity window of tenant {TenantId}; its conversations are " +
+                  "not swept this pass and are retried on the next one")]
+    private partial void LogInactivityWindowReadFailed(string tenantId, Exception ex);
+
+    [LoggerMessage(EventId = 7604, Level = LogLevel.Information,
+        Message = "Inactivity close of conversation {ConversationId} (tenant {TenantId}, channel {Channel}, reason {Reason}, idle {IdleBucket})")]
+    private partial void LogInactivityClosed(string conversationId, string tenantId, ChannelType channel, string reason, string idleBucket);
+
+    [LoggerMessage(EventId = 7605, Level = LogLevel.Warning,
+        Message = "Inactivity close of conversation {ConversationId} committed but it could not be counted")]
+    private partial void LogInactivityCountFailed(string conversationId, Exception ex);
+
+    [LoggerMessage(EventId = 7606, Level = LogLevel.Information,
+        Message = "Inactivity clock reconcile for tenant {TenantId} advanced {RowsAdvanced} rows in {DurationMs} ms")]
+    private partial void LogInactivityReconciled(string tenantId, int rowsAdvanced, long durationMs);
+
+    [LoggerMessage(EventId = 7607, Level = LogLevel.Warning,
+        Message = "Inactivity clock reconcile failed for tenant {TenantId}; its conversations are not swept this pass and " +
+                  "the reconcile is retried on the next one")]
+    private partial void LogInactivityReconcileFailed(string tenantId, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Conversation timeout cycle failed")]
     private partial void LogTimeoutCycleError(Exception ex);

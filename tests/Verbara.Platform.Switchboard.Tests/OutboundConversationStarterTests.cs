@@ -43,6 +43,8 @@ public sealed class OutboundConversationStarterTests : IDisposable
             .Returns(true);
         _conversations.FindLastInboundAtAsync(_tenantId, _contactId, ChannelType.WhatsApp, Arg.Any<CancellationToken>())
             .Returns(_now.AddHours(-1));
+        // The send claim of a reuse (D9) matches by default: these tests pin the start, not the race with a close.
+        _conversations.TryClaimForSendAsync(default, default, default, default, default).ReturnsForAnyArgs(true);
 
         var contact = new Contact { ContactId = _contactId, TenantId = _tenantId, CreatedAt = _now };
         contact.AddAddress(new ChannelAddress(ChannelType.WhatsApp, Address));

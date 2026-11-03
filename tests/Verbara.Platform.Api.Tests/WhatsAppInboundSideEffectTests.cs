@@ -363,5 +363,9 @@ public sealed class WhatsAppInboundSideEffectTests : IClassFixture<PlatformApiFa
         public Task<OwnershipResult> WrapUpAsync(
             TenantId tenantId, EntityId conversationId, EntityId expectedOwnerAgentId, CancellationToken ct) =>
             inner.WrapUpAsync(tenantId, conversationId, expectedOwnerAgentId, ct);
+
+        public Task<InactivityCloseOutcome?> CloseForInactivityAsync(
+            TenantId tenantId, InactivityCloseRequest request, ChannelType channel, CancellationToken ct) =>
+            inner.CloseForInactivityAsync(tenantId, request, channel, ct);
     }
 }

@@ -70,9 +70,12 @@ public sealed class WebChatInboundRoutingTests
         var sessionId = sessionManager.ConnectAsync(
             Tenant, ConvId, visitorAddress, clock).GetAwaiter().GetResult();
 
-        var sut = new WebChatInboundRouter(router, switchboard, store, contactStore, eventBus, sessionManager, NullLogger<WebChatInboundRouter>.Instance);
+        var sut = new WebChatInboundRouter(router, switchboard, store, contactStore, eventBus, sessionManager, Announcer(eventBus), NullLogger<WebChatInboundRouter>.Instance);
         return (sut, store, sessionId, switchboard, eventBus);
     }
+
+    private static CustomerReturnAnnouncer Announcer(PlatformEventBus bus) =>
+        new(bus, Substitute.For<Verbara.Platform.Audit.IAuditService>(), new ConversationCloseMetrics(), NullLogger<CustomerReturnAnnouncer>.Instance);
 
     private static PipelineResult FirstMessageResult() =>
         new(ConvId, ContactId, EntityId.From("msg-1"), IsNewConversation: false);
@@ -177,8 +180,12 @@ public sealed class WebChatInboundRoutingTests
         router.RouteAsync(default!, default).ReturnsForAnyArgs(new RouteResult(QueueId, default, null, null));
         var switchboard = Substitute.For<IConversationSwitchboard>();
         var convStore = Substitute.For<IConversationStore>();
-        convStore.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>())
-            .Returns(new Conversation { ConversationId = ConvId, TenantId = Tenant, ContactId = ContactId, Channel = ChannelType.WebChat, State = ConversationState.Queued, CreatedAt = DateTimeOffset.UtcNow });
+        var queued = new Conversation { ConversationId = ConvId, TenantId = Tenant, ContactId = ContactId, Channel = ChannelType.WebChat, State = ConversationState.Queued, CreatedAt = DateTimeOffset.UtcNow };
+        convStore.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).Returns(queued);
+        // The assignment gives the conversation its queue owner, as the real switchboard does; a routed conversation
+        // is never routed again (conversations-close-after-inactivity D8: the router re-checks NeedsRouting).
+        switchboard.When(s => s.AssignToQueueAsync(ConvId, Tenant, QueueId, Arg.Any<CancellationToken>()))
+            .Do(_ => queued.Owner = ConversationOwner.ForQueue(QueueId));
         var contactStore = Substitute.For<IContactStore>();
         contactStore.GetByIdAsync(Tenant, ContactId, Arg.Any<CancellationToken>())
             .Returns(new Contact { ContactId = ContactId, TenantId = Tenant, CreatedAt = DateTimeOffset.UtcNow });
@@ -186,7 +193,8 @@ public sealed class WebChatInboundRoutingTests
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         var sessionManager = new WebChatSessionManager(Options.Create(new WebChatOptions()));
         var sessionId = await sessionManager.ConnectAsync(Tenant, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-y"), clock);
-        var sut = new WebChatInboundRouter(router, switchboard, convStore, contactStore, new PlatformEventBus(), sessionManager, NullLogger<WebChatInboundRouter>.Instance);
+        var bus = new PlatformEventBus();
+        var sut = new WebChatInboundRouter(router, switchboard, convStore, contactStore, bus, sessionManager, Announcer(bus), NullLogger<WebChatInboundRouter>.Instance);
 
         await sut.RouteFirstInboundAsync(sessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
         await sut.RouteFirstInboundAsync(sessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
@@ -212,7 +220,8 @@ public sealed class WebChatInboundRoutingTests
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         var sessionManager = new WebChatSessionManager(Options.Create(new WebChatOptions()));
         var sessionId = await sessionManager.ConnectAsync(Tenant, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-z"), clock);
-        var sut = new WebChatInboundRouter(router, switchboard, convStore, contactStore, new PlatformEventBus(), sessionManager, NullLogger<WebChatInboundRouter>.Instance);
+        var bus = new PlatformEventBus();
+        var sut = new WebChatInboundRouter(router, switchboard, convStore, contactStore, bus, sessionManager, Announcer(bus), NullLogger<WebChatInboundRouter>.Instance);
 
         var act = () => sut.RouteFirstInboundAsync(sessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
 
