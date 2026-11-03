@@ -206,7 +206,7 @@ public class ContactIdentityResolverTests
         _contactStore.FindByAddressAsync(Tenant, Bsuid, Arg.Any<CancellationToken>()).ReturnsNull();
         _contactStore.FindByAddressAsync(Tenant, Phone, Arg.Any<CancellationToken>()).Returns(stale);
         _contactStore.AddIdentityAsync(default, default!, default!, default, default, default!, default)
-            .ReturnsForAnyArgs((Contact?)null);
+            .ReturnsNullForAnyArgs();
 
         var result = await _sut.ResolveAsync(Tenant, new ContactIdentity(Bsuid, [Phone], "Sheena"), CancellationToken.None);
 
