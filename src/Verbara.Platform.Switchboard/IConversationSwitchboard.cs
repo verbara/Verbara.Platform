@@ -1,3 +1,4 @@
+using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues.Licensing;
 
@@ -58,4 +59,25 @@ public interface IConversationSwitchboard
     /// </returns>
     Task<OwnershipResult> WrapUpAsync(
         TenantId tenantId, EntityId conversationId, EntityId expectedOwnerAgentId, CancellationToken ct);
+
+    /// <summary>
+    /// conversations-close-after-inactivity (design D3, D4, D5) — closes one idle digital conversation the inactivity
+    /// pass read. The close is the store's conditional update (<c>IConversationStore.TryCloseInactiveAsync</c>) on the
+    /// state, owner and clock in <paramref name="request"/>, the values the pass read, so a message, transfer or close
+    /// that committed since makes it match nothing. It checks
+    /// <see cref="ConversationStateMachine.CanCloseForInactivity"/> on the read state and refuses a voice conversation
+    /// without writing; it never goes through <c>Conversation.TransitionTo</c> or the lifecycle service's close.
+    /// Only the winner releases the read owner's capacity unit — when the read state was <c>Active</c>, <c>OnHold</c>
+    /// or <c>Consulting</c> and the owner an agent; <c>WaitingForCustomer</c> and <c>Resolved</c> hold none — with
+    /// <see cref="CancellationToken.None"/>, a failed release logged and the close kept (D5), and publishes
+    /// <c>ConversationStateChangedEvent(read state → Closed)</c> once. The audit entry, the close counter and the close
+    /// log are the caller's (D6, D13), written from the returned outcome.
+    /// </summary>
+    /// <param name="tenantId">The conversation's tenant.</param>
+    /// <param name="request">What the pass read for the conversation, and its window's cut-offs.</param>
+    /// <param name="channel">The conversation's channel as read (voice is never closed here).</param>
+    /// <param name="ct">Cancels the conditional update; never the release after a won close.</param>
+    /// <returns>The reason and clock of a won close; <see langword="null"/> when nothing was closed or released.</returns>
+    Task<InactivityCloseOutcome?> CloseForInactivityAsync(
+        TenantId tenantId, InactivityCloseRequest request, ChannelType channel, CancellationToken ct);
 }

@@ -174,6 +174,20 @@ spec:
             - name: Asterisk__Ari__NodeApplication
               value: {{ .Values.api.asterisk.ari.nodeApplication }}
             {{- end }}
+            # The inactivity close switches (upgrade-2.38.0.md). Tested against the empty string, never a
+            # bare `if`/`with`: those treat `false` as unset and would never emit the off switch.
+            {{- if ne (toString .Values.api.conversations.inactivityClose.enabled) "" }}
+            - name: Conversations__InactivityCloseEnabled
+              value: {{ .Values.api.conversations.inactivityClose.enabled | toString | quote }}
+            {{- end }}
+            {{- if ne (toString .Values.api.conversations.inactivityClose.batchSize) "" }}
+            - name: Conversations__InactivityCloseBatchSize
+              value: {{ .Values.api.conversations.inactivityClose.batchSize | toString | quote }}
+            {{- end }}
+            {{- if ne (toString .Values.api.conversations.inactivityClose.sweepIntervalSeconds) "" }}
+            - name: Conversations__InactivityCloseSweepIntervalSeconds
+              value: {{ .Values.api.conversations.inactivityClose.sweepIntervalSeconds | toString | quote }}
+            {{- end }}
             {{- if .Values.api.licensing.enforcementMode }}
             # Licensing__EnforcementMode is DEPRECATED in Pro v2.4.0-pro (removal in
             # v2.5.0-pro). Only injected when explicitly set in values.yaml —

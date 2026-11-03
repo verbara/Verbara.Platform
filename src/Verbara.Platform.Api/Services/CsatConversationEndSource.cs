@@ -108,6 +108,11 @@ internal sealed partial class CsatConversationEndSource : BackgroundService, ICs
         catch (OperationCanceledException) { /* shutdown */ }
     }
 
+    private static bool IsSystemCloseReason(string reason) =>
+        reason is ConversationCloseReasons.Inactivity
+            or ConversationCloseReasons.InactivityBacklog
+            or ConversationCloseReasons.CustomerReturned;
+
     private void HandleClosedSafely(ConversationStateChangedEvent evt, CancellationToken ct)
     {
         // Fire-and-forget: the Rx subscription is synchronous, but signal resolution is async.
@@ -153,6 +158,15 @@ internal sealed partial class CsatConversationEndSource : BackgroundService, ICs
             var isDigitalClosed = !isVoice && string.Equals(evt.NewState, nameof(ConversationState.Closed), StringComparison.Ordinal);
             if (!isVoiceWrapUp && !isDigitalClosed)
                 return;
+
+            // conversations-close-after-inactivity (D6): a system close (inactivity, inactivity-backlog,
+            // customer-returned) is silent toward the customer ("sin aviso") and is not a served interaction, so it
+            // never solicits CSAT, whatever the owner or the queue's CSAT configuration.
+            if (conversation.Metadata.TryGetValue(ConversationCloseReasons.MetadataKey, out var closedReason)
+                && IsSystemCloseReason(closedReason))
+            {
+                return;
+            }
 
             // Queue-config snapshot (Enabled / PreferredChannel / SamplingRatePercent).
             string queueName = string.Empty;

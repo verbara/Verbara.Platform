@@ -77,4 +77,56 @@ public class ConversationStateMachineTests
 
         act.Should().NotThrow();
     }
+
+    // conversations-close-after-inactivity task 1.3 (design D3): the inactivity close has its own, explicitly named
+    // check; the shared transition table gets no new edge, so the generic closes keep refusing an agent-held row.
+
+    public static TheoryData<ConversationState> AllStates()
+    {
+        var data = new TheoryData<ConversationState>();
+        foreach (var state in Enum.GetValues<ConversationState>())
+            data.Add(state);
+        return data;
+    }
+
+    // Every ConversationState value is enumerated, so a state added later fails here until it is classified.
+    [Theory]
+    [MemberData(nameof(AllStates))]
+    public void CanCloseForInactivity_ShouldBeTrueForExactlyTheFiveInScopeStates_WhenAskedForEveryState(ConversationState state)
+    {
+        var expected = state switch
+        {
+            ConversationState.Active or ConversationState.OnHold or ConversationState.Consulting
+                or ConversationState.WaitingForCustomer or ConversationState.Resolved => true,
+            ConversationState.Queued or ConversationState.Offered or ConversationState.WrapUp
+                or ConversationState.Snoozed or ConversationState.Escalated or ConversationState.Closed
+                or ConversationState.Abandoned or ConversationState.Merged or ConversationState.Spam => false,
+            _ => throw new InvalidOperationException(
+                $"ConversationState.{state} is not classified for the inactivity close (design D3); classify it here."),
+        };
+
+        ConversationStateMachine.CanCloseForInactivity(state).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(ConversationState.Active)]
+    [InlineData(ConversationState.OnHold)]
+    [InlineData(ConversationState.Consulting)]
+    public void EnsureTransition_ShouldStillRefuseClosed_WhenTheRowIsAgentHeld(ConversationState from)
+    {
+        ConversationStateMachine.CanTransition(from, ConversationState.Closed).Should().BeFalse(
+            "the table gets no new edge: the generic closes keep refusing an agent-held conversation (D3)");
+        var act = () => ConversationStateMachine.EnsureTransition(from, ConversationState.Closed);
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Theory]
+    [InlineData(ConversationState.WaitingForCustomer, true)]
+    [InlineData(ConversationState.Resolved, true)]
+    [InlineData(ConversationState.Snoozed, false)]
+    [InlineData(ConversationState.Escalated, false)]
+    public void CanTransition_ShouldKeepTheExistingCloseEdges_WhenTheInactivityCheckIsAdded(ConversationState from, bool allowed)
+    {
+        ConversationStateMachine.CanTransition(from, ConversationState.Closed).Should().Be(allowed);
+    }
 }

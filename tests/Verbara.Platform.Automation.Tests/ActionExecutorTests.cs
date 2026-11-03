@@ -108,6 +108,42 @@ public class ActionExecutorTests
             Arg.Any<EntityId>(), ConversationOwnerKind.System, Arg.Any<CancellationToken>());
     }
 
+    // conversations-close-after-inactivity task 1.3 (design D3): with the REAL DefaultConversationLifecycleService
+    // over the in-memory store (not the mock above), the CloseConversation action on an Active row gets the outcome
+    // main gives — EnsureTransition throws InvalidOperationException (Active -> Closed is not an edge) — and the row
+    // stays Active. An added edge would let the action close an agent-held row with no release, event or audit.
+    [Fact]
+    public async Task ExecuteAsync_ShouldThrowAndLeaveTheRowActive_WhenCloseConversationRunsOnAnActiveRowWithTheRealLifecycle()
+    {
+        var store = new Verbara.Platform.Storage.InMemory.InMemoryConversationStore();
+        var conversation = new Conversation
+        {
+            ConversationId = ConvId,
+            TenantId = Tenant,
+            ContactId = EntityId.From("contact-001"),
+            Channel = ChannelType.WebChat,
+            State = ConversationState.Active,
+            Owner = ConversationOwner.ForAgent(EntityId.From("agent-001")),
+            CreatedAt = Now.AddHours(-1),
+        };
+        await store.SaveAsync(conversation, CancellationToken.None);
+        var sut = new DefaultActionExecutor(
+            _switchboard, _conversationService, new DefaultConversationLifecycleService(store, _clock),
+            _timerStore, _httpClientFactory, _clock, NullLogger<DefaultActionExecutor>.Instance);
+        var action = new AutomationAction
+        {
+            Type = AutomationActionType.CloseConversation,
+            Config = new Dictionary<string, string>(),
+        };
+
+        var act = () => sut.ExecuteAsync(action, BuildEvent(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Active → Closed*");
+        var after = await store.GetByIdAsync(Tenant, ConvId, CancellationToken.None);
+        after!.State.Should().Be(ConversationState.Active);
+        after.ClosedAt.Should().BeNull();
+    }
+
     // --- CloseConversation ---
 
     [Fact]

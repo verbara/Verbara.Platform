@@ -29,12 +29,28 @@
     <IsAotCompatible>false</IsAotCompatible>
   </PropertyGroup>
 
+  <!-- conversations-close-after-inactivity task 2.9: the claim-cost negative control (ClaimCostControlStore.cs).
+       Read from the environment (MSBuild exposes it as a property) because BenchmarkDotNet rebuilds this project
+       in a child build that never sees a -p on the command line. -->
+  <PropertyGroup Condition="'$(CLAIM_COST_CONTROL)' == 'true'">
+    <DefineConstants>$(DefineConstants);CLAIM_COST_CONTROL</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" />
     <PackageReference Include="BCrypt.Net-Next" />
     <PackageReference Include="Isopoh.Cryptography.Argon2" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
     <PackageReference Include="Microsoft.IdentityModel.Tokens" />
+  </ItemGroup>
+
+  <!-- ConversationClaimCostBench (conversations-close-after-inactivity task 2.9): the real stores and services. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Verbara.Platform.Core\Verbara.Platform.Core.csproj" />
+    <ProjectReference Include="..\..\src\Verbara.Platform.Conversations\Verbara.Platform.Conversations.csproj" />
+    <ProjectReference Include="..\..\src\Verbara.Platform.Channels.Core\Verbara.Platform.Channels.Core.csproj" />
+    <ProjectReference Include="..\..\src\Verbara.Platform.Switchboard\Verbara.Platform.Switchboard.csproj" />
+    <ProjectReference Include="..\..\src\Verbara.Platform.Storage.Postgres\Verbara.Platform.Storage.Postgres.csproj" />
   </ItemGroup>
 
 </Project>

@@ -102,6 +102,20 @@ internal sealed partial class DefaultConversationService : IConversationService
                 return MessageSendOutcome.Refused(refusalCode);
         }
 
+        // The send claim (conversations-close-after-inactivity, design D9): the row must still be sendable right before
+        // the message is stored, so an inactivity close that committed after ValidateState refuses the send with
+        // ValidateState's own exception (the send endpoint's 400) and nothing is stored or sent. The clock moves only
+        // for a message stored Pending for a connector; a refused send is not activity (D2). A failure after this
+        // point (provider error, no address) keeps the clock it advanced.
+        var now = _clock.UtcNow;
+        if (!await _conversationStore.TryClaimForSendAsync(
+                tenantId, conversationId, now, advanceClock: refusalCode is null, ct).ConfigureAwait(false))
+        {
+            var current = await _conversationStore.GetByIdAsync(tenantId, conversationId, ct).ConfigureAwait(false);
+            throw new InvalidOperationException(
+                $"Cannot send message in conversation state '{(current is null ? "Deleted" : current.State.ToString())}'.");
+        }
+
         var message = new Message
         {
             MessageId = EntityId.New(),
@@ -112,7 +126,7 @@ internal sealed partial class DefaultConversationService : IConversationService
             SenderId = senderId.Value,
             Content = envelope,
             DeliveryStatus = refusalCode is null ? MessageDeliveryStatus.Pending : MessageDeliveryStatus.Failed,
-            CreatedAt = _clock.UtcNow,
+            CreatedAt = now,
         };
 
         await _messageStore.SaveAsync(message, ct).ConfigureAwait(false);

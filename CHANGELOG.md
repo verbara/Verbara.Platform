@@ -15,6 +15,28 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it equals that row's `createdAt`: both are the time of the last refresh, not of the last request. (#520)
 - **`DELETE /api/v1/auth/sessions/{tokenId}` records each revocation**, with the audit entry `user.session.revoked` and the
   auth event `session_revoked` that the profile route writes, so revoking from the console stays on the record. (#520)
+- **An open digital conversation with no message for 72 hours now closes by itself.** A non-voice conversation in
+  `Active`, `OnHold`, `Consulting`, `WaitingForCustomer` or `Resolved` whose last customer-facing message, from either
+  side, is older than the window goes straight to `Closed`, without `WrapUp`, and frees its agent's capacity unit.
+  Internal notes and sends refused before the provider (stored `Failed`) do not count as messages. The close is
+  silent: the customer gets no message and no CSAT survey. It is on by default and runs on every Api replica, each
+  conversation closed once. The close records `metadata._closedReason` = `inactivity`, or `inactivity-backlog` for a
+  conversation that was already idle for more than the window plus one hour when the sweep reached it (the first
+  wave after an upgrade or after the switch was off), and writes the audit entry `conversation.closed` with the actor
+  `verbara:system:inactivity-close`. Webhook subscribers of `conversation.state_changed` receive one `→ Closed`
+  delivery per closed conversation. Four keys of the `Conversations` section configure it:
+  `InactivityCloseEnabled` (default `true`), `InactivityCloseAfterHours` (default `72`, minimum `1`),
+  `InactivityCloseSweepIntervalSeconds` (default `60`, `5` to `3600`) and `InactivityCloseBatchSize` (the most
+  conversations one tenant closes in one pass, default `100`, `1` to `1000`); a value out of range fails the start
+  with a message naming the key. A window below 24 hours is allowed but logs a warning at start: it closes WhatsApp
+  conversations inside Meta's 24-hour customer-service window, so a returning customer's thread is split. A tenant
+  can override the window with the nullable column `tenant_auth_config.inactivity_close_after_hours` (null keeps the
+  host value); no endpoint sets it yet. The meter `verbara.platform.conversations` exports the counter
+  `conversations.system_closed` (Prometheus `conversations_system_closed_total`), tagged `reason` = `inactivity`,
+  `inactivity-backlog` or `customer-returned`, and each close logs one Information line with the tenant, the channel,
+  the reason and the idle-age bucket. Migration `026` adds the column `conversations.last_message_at`, backfilled for
+  open conversations. The unused options `AutoCloseResolvedAfterHours` and `AutoCloseResolvedHours` are removed;
+  nothing bound or read them.
 
 ### Changed
 
@@ -54,6 +76,30 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   conversation keeps it.
   A conversation in any other state is never deleted. Messages of a deleted conversation are still removed in the
   same pass. (#527)
+- **A customer message to a `Resolved` conversation is no longer lost in it.** The message used to be appended to the
+  resolved conversation, where no agent saw it. Now it closes that conversation, with `metadata._closedReason` =
+  `customer-returned`, the audit entry `conversation.closed` by `verbara:system:customer-returned` and one
+  `conversation.state_changed` delivery, and opens a new conversation that routes like any first message, on
+  WhatsApp and WebChat. The closed conversation keeps its agent. No CSAT survey is sent for that close.
+- **A message that arrives while its conversation is being closed or purged is no longer written into it.** Every
+  inbound message now claims its conversation before it is stored: if the inactivity close or the retention purge
+  got there first, the message opens a new, routed conversation instead of landing in a closed or deleted one. An
+  agent or bot reply, and an agent-started message that reuses an open conversation, claims it before the provider
+  send; if the conversation closed in the meantime the send is refused with the existing errors (400 on a reply,
+  `conversation-not-sendable` on a start) and nothing is sent or stored. A wrap-up close between the claim and the
+  store is not covered yet.
+- **The queue timeout counts from when the conversation entered the queue**, at routing, transfer or failover
+  re-queue, instead of from its creation. An old conversation that the failover put back in a queue was abandoned
+  seconds later. A conversation queued before the upgrade keeps counting from its creation.
+
+### Upgrading
+
+- **The first start closes every open digital conversation idle past the window**, in batches of
+  `Conversations:InactivityCloseBatchSize` per tenant and per pass, marked `inactivity-backlog` (or `inactivity` when
+  idle for less than the window plus one hour), with one `conversation.state_changed` webhook delivery and one audit
+  entry each. Run the dry-run counts of the upgrade note
+  first. `Conversations:InactivityCloseEnabled=false` stages it, and with more than one Api replica keep it off until
+  every replica runs the new version. See [Upgrading to 2.38.0](docs/operations/upgrade-2.38.0.md).
 
 ## [2.37.0] - 2026-11-01
 

@@ -9,6 +9,8 @@
     <InternalsVisibleTo Include="Verbara.Platform.Identity.Tests" />
     <InternalsVisibleTo Include="Verbara.Platform.Api.Tests" />
     <InternalsVisibleTo Include="Verbara.Platform.Billing.Tests" />
+    <!-- conversations-close-after-inactivity 1.3: the automation close runs the real lifecycle over this store. -->
+    <InternalsVisibleTo Include="Verbara.Platform.Automation.Tests" />
     <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
   </ItemGroup>
 

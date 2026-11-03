@@ -112,6 +112,20 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
                 return Refuse(request, OutboundStartCodes.WhatsAppTemplateRequired);
         }
 
+        // The send claim of a reuse (conversations-close-after-inactivity, design D9): after every refusal and before
+        // the provider send, which cannot be undone. It confirms the row is still sendable and advances its clock; an
+        // inactivity close that committed after the IsSendable check above refuses the start as that check does, and
+        // nothing is sent or stored. A send that then fails keeps the clock advanced (harmless: one more window).
+        if (open is not null
+            && !await _conversations.TryClaimForSendAsync(tenantId, open.ConversationId, _clock.UtcNow, advanceClock: true, ct)
+                .ConfigureAwait(false))
+        {
+            LogRefused(_logger, tenantId.Value, request.ContactId.Value, channel,
+                OutboundStartCodes.ConversationNotSendable);
+            return OutboundStartOutcome.NamingOpen(
+                OutboundStartCodes.ConversationNotSendable, open.ConversationId, ConversationOwnerKind.Agent);
+        }
+
         // A new conversation takes one unit of the agent's capacity before the send, atomically; it is given back
         // if the start does not end with a stored conversation. A reuse adds no load.
         var reserved = false;
@@ -241,6 +255,8 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
         Owner = ConversationOwner.ForAgent(request.AgentId),
         CreatedAt = now,
         UpdatedAt = now,
+        // Born with its first message: the store's INSERT keeps it (COALESCE(@LastMessageAt, @CreatedAt), design D2).
+        LastMessageAt = now,
         CreatedBy = request.ActorUserId,
         UpdatedBy = request.ActorUserId,
     };
