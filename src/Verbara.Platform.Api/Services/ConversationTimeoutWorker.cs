@@ -19,6 +19,12 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     /// AI-actor identifier stamped on autonomous dispositions and their audit records (ADR-0034).
     /// </summary>
     internal const string AutonomousActorId = "verbara:ai:autonomous-worker";
+
+    /// <summary>
+    /// System-actor identifier on the <c>conversation.closed</c> audit entry of an inactivity close
+    /// (conversations-close-after-inactivity D6).
+    /// </summary>
+    internal const string InactivityCloseActorId = "verbara:system:inactivity-close";
     /// <summary>
     /// Keyed-service name for the per-tick <see cref="ResiliencePolicy"/> that wraps each
     /// timeout-processing pass. Circuit-open skips the current tick; the next timer tick
@@ -46,6 +52,11 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     private readonly AutonomousDispositionMetrics? _autonomousMetrics;
     private readonly ITenantAutonomousDispositionStore? _gateStore;
 
+    private readonly ConversationOptions _conversationOptions;
+
+    // When this replica last started an inactivity pass (D4: at most one per InactivityCloseSweepIntervalSeconds).
+    private DateTimeOffset? _lastInactivityPassAt;
+
     public ConversationTimeoutWorker(
         IConversationStore conversationStore,
         ITenantStore tenantStore,
@@ -61,7 +72,8 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         ITypificationSubmissionStore? submissionStore = null,
         IAuditService? auditService = null,
         AutonomousDispositionMetrics? autonomousMetrics = null,
-        ITenantAutonomousDispositionStore? gateStore = null)
+        ITenantAutonomousDispositionStore? gateStore = null,
+        IOptions<ConversationOptions>? conversationOptions = null)
     {
         _conversationStore = conversationStore;
         _tenantStore = tenantStore;
@@ -78,6 +90,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         _auditService = auditService;
         _autonomousMetrics = autonomousMetrics;
         _gateStore = gateStore;
+        _conversationOptions = conversationOptions?.Value ?? new ConversationOptions();
     }
 
     /// <summary>
@@ -144,6 +157,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     {
         var tenants = await _tenantStore.GetAllActiveAsync(ct);
         var now = _clock.UtcNow;
+        var inactivityPassDue = TryStartInactivityPass(now);
 
         foreach (var tenant in tenants)
         {
@@ -152,6 +166,123 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             await ProcessOfferTimeoutsAsync(tid, tenant.TenantId, now, ct);
             await ProcessQueueTimeoutsAsync(tid, tenant.TenantId, now, ct);
             await ProcessWrapUpTimeoutsAsync(tid, tenant.TenantId, now, ct);
+
+            if (inactivityPassDue)
+                await ProcessInactivityClosesAsync(tid, now, ct);
+        }
+    }
+
+    /// <summary>
+    /// conversations-close-after-inactivity (D4): the inactivity pass rides the timeout tick but runs at most once per
+    /// <see cref="ConversationOptions.InactivityCloseSweepIntervalSeconds"/> on this replica, and never with the switch
+    /// off. Returns whether this tick runs it (and, if so, starts the interval).
+    /// </summary>
+    private bool TryStartInactivityPass(DateTimeOffset now)
+    {
+        if (!_conversationOptions.InactivityCloseEnabled)
+            return false;
+
+        if (_lastInactivityPassAt is { } last
+            && now - last < TimeSpan.FromSeconds(_conversationOptions.InactivityCloseSweepIntervalSeconds))
+        {
+            return false;
+        }
+
+        _lastInactivityPassAt = now;
+        return true;
+    }
+
+    /// <summary>
+    /// The D12 grace: a clock older than <c>window + grace</c> at the close records <c>inactivity-backlog</c>.
+    /// <c>max(1 h, 2 × sweep interval)</c>, a constant of the code, not an option.
+    /// </summary>
+    private TimeSpan InactivityBacklogGrace()
+    {
+        var twoIntervals = TimeSpan.FromSeconds(2L * _conversationOptions.InactivityCloseSweepIntervalSeconds);
+        return twoIntervals > TimeSpan.FromHours(1) ? twoIntervals : TimeSpan.FromHours(1);
+    }
+
+    /// <summary>
+    /// conversations-close-after-inactivity (D3, D4, D6): closes the tenant's idle digital conversations. Lists at most
+    /// <see cref="ConversationOptions.InactivityCloseBatchSize"/> rows in the five in-scope states whose clock is older
+    /// than the window, oldest first, then closes each through the switchboard's conditional close on the state, owner
+    /// and clock READ here — so a message, transfer or close committed since, or another replica's won close, makes it
+    /// a no-op. Only a won close is audited (the switchboard already released and announced it). A failure is logged
+    /// and never stops the other tenants' timeouts; a close that committed stays closed.
+    /// </summary>
+    private async Task ProcessInactivityClosesAsync(TenantId tid, DateTimeOffset now, CancellationToken ct)
+    {
+        var cutoff = now - TimeSpan.FromHours(_conversationOptions.InactivityCloseAfterHours);
+        var backlogCutoff = cutoff - InactivityBacklogGrace();
+
+        IReadOnlyList<Conversation> idle;
+        try
+        {
+            idle = await _conversationStore.ListInactiveAsync(
+                tid, ConversationStateMachine.InactivityCloseStates, cutoff, _conversationOptions.InactivityCloseBatchSize, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogInactivityListFailed(tid.Value, ex);
+            return;
+        }
+
+        // Capture what was read before any close runs: each close is decided on these values, never on a re-read.
+        var reads = idle
+            .Select(c => (Request: new InactivityCloseRequest(c.ConversationId, c.State, c.Owner, cutoff, backlogCutoff, now), c.Channel))
+            .ToList();
+
+        foreach (var (request, channel) in reads)
+        {
+            InactivityCloseOutcome? outcome;
+            try
+            {
+                outcome = await _switchboard.CloseForInactivityAsync(tid, request, channel, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogInactivityCloseFailed(request.ConversationId.Value, ex);
+                continue;
+            }
+
+            if (outcome is null)
+                continue; // lost: a message, a move or another replica got there first — nothing to record
+
+            await AuditInactivityCloseAsync(tid, request, outcome);
+        }
+    }
+
+    /// <summary>
+    /// D6: one <c>conversation.closed</c> entry per won close, the action the close endpoint writes, with the system
+    /// actor and the reason the conditional close recorded. Written with <see cref="CancellationToken.None"/> (the close
+    /// is committed); a failed write is logged and does not undo the close.
+    /// </summary>
+    private async Task AuditInactivityCloseAsync(TenantId tid, InactivityCloseRequest request, InactivityCloseOutcome outcome)
+    {
+        if (_auditService is null)
+            return;
+
+        try
+        {
+            await _auditService.RecordAsync(
+                tid,
+                category: "conversations",
+                action: "conversation.closed",
+                severity: "info",
+                actorId: InactivityCloseActorId,
+                actorType: "system",
+                targetId: request.ConversationId.Value,
+                targetType: "Conversation",
+                metadata: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["reason"] = outcome.Reason,
+                    ["previous_state"] = request.ReadState.ToString(),
+                },
+                ct: CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogInactivityAuditFailed(request.ConversationId.Value, ex);
         }
     }
 
@@ -528,6 +659,18 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Autonomous commit decision for conversation {ConversationId} had a null suggestion — skipping (policy invariant violated)")]
     private partial void LogAutonomousCommitNullSuggestion(string conversationId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Inactivity pass could not list the idle conversations of tenant {TenantId}; retried on the next pass")]
+    private partial void LogInactivityListFailed(string tenantId, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Inactivity close of conversation {ConversationId} failed; retried on the next pass")]
+    private partial void LogInactivityCloseFailed(string conversationId, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Inactivity close of conversation {ConversationId} committed but its audit entry could not be written")]
+    private partial void LogInactivityAuditFailed(string conversationId, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Conversation timeout cycle failed")]
     private partial void LogTimeoutCycleError(Exception ex);
