@@ -132,6 +132,35 @@ public sealed class PostgresConversationRetentionPurgeTests : IClassFixture<Mess
             .Should().NotBeNull("the purge is tenant-scoped");
     }
 
+    // Review round 3: a customer reply to a Resolved conversation is appended as a message without touching the
+    // conversation row, so updated_at stays old; a message of that tenant at or after the cutoff keeps it.
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldKeepResolvedAndItsMessages_WhenIdleRowButMessagedAfterCutoff()
+    {
+        var ds = await _fixture.CreateDatabaseAsync();
+        var conversations = new PostgresConversationStore(ds);
+        var messages = new PostgresMessageStore(ds);
+        var replied = await SaveAsync(conversations, ConversationState.Resolved, Now.AddDays(-200), closedAt: null,
+            updatedAt: Now.AddDays(-120));
+        await AddMessageAsync(messages, replied, Now.AddDays(-150));
+        await AddMessageAsync(messages, replied, Now.AddDays(-5));
+        var idle = await SaveAsync(conversations, ConversationState.Resolved, Now.AddDays(-200), closedAt: null,
+            updatedAt: Now.AddDays(-120));
+        await AddMessageAsync(messages, idle, Now.AddDays(-150));
+        // Same conversation id, other tenant, recent: must not shield this tenant's idle row.
+        await AddMessageAsync(messages, idle, Now.AddDays(-5), OtherTenant);
+
+        var deleted = await conversations.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+        var orphans = await messages.DeleteOrphanedAsync(Tenant, CancellationToken.None);
+
+        deleted.Should().Be(1, "only the Resolved conversation with no message inside the window is purged");
+        orphans.Should().Be(1, "the purged conversation's old message goes with it");
+        (await conversations.GetByIdAsync(Tenant, replied, CancellationToken.None))
+            .Should().NotBeNull("a message inside the window is recent activity, though the row itself is old");
+        (await CountMessagesAsync(ds, replied)).Should().Be(2);
+        (await conversations.GetByIdAsync(Tenant, idle, CancellationToken.None)).Should().BeNull();
+    }
+
     private static async Task<EntityId> SaveAsync(
         PostgresConversationStore store, ConversationState state, DateTimeOffset createdAt, DateTimeOffset? closedAt,
         TenantId? tenant = null, DateTimeOffset? updatedAt = null, bool stampUpdatedAt = true)
@@ -151,17 +180,18 @@ public sealed class PostgresConversationRetentionPurgeTests : IClassFixture<Mess
         return conversation.ConversationId;
     }
 
-    private static Task AddMessageAsync(PostgresMessageStore store, EntityId conversationId) =>
+    private static Task AddMessageAsync(
+        PostgresMessageStore store, EntityId conversationId, DateTimeOffset? createdAt = null, TenantId? tenant = null) =>
         store.SaveAsync(new Message
         {
             MessageId = EntityId.New(),
             ConversationId = conversationId,
-            TenantId = Tenant,
+            TenantId = tenant ?? Tenant,
             Direction = MessageDirection.Inbound,
             Channel = ChannelType.WhatsApp,
             Content = new MessageEnvelope([new TextBlock("hola")]),
             DeliveryStatus = MessageDeliveryStatus.Delivered,
-            CreatedAt = Now.AddDays(-200),
+            CreatedAt = createdAt ?? Now.AddDays(-200),
         }, CancellationToken.None);
 
     private static async Task<long> CountMessagesAsync(NpgsqlDataSource ds, EntityId conversationId)

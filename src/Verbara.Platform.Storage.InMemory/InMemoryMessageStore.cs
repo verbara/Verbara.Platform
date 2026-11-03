@@ -116,6 +116,10 @@ internal sealed class InMemoryMessageStore : IMessageStore
         }
     }
 
+    /// <summary>Whether the conversation has any message created at or after <paramref name="since"/>.</summary>
+    internal bool HasMessageSince(TenantId tenantId, EntityId conversationId, DateTimeOffset since) =>
+        _items.Values.Any(m => m.TenantId == tenantId && m.ConversationId == conversationId && m.CreatedAt >= since);
+
     /// <summary>The creation time of the most recent inbound message in any of <paramref name="conversationIds"/>.</summary>
     internal DateTimeOffset? LastInboundAt(TenantId tenantId, IReadOnlySet<EntityId> conversationIds) =>
         _items.Values

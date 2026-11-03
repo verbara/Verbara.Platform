@@ -165,6 +165,40 @@ public sealed class GdprStoreExtensionTests
         deleted.Should().Be(0, "a live conversation is never purged, however idle");
     }
 
+    // Review round 3: a customer reply to a Resolved conversation is appended as a message without touching the
+    // conversation row, so its last change stays old. A message inside the window is activity too.
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldKeepConversation_WhenResolvedIdleButMessagedAfterCutoff()
+    {
+        var messages = new InMemoryMessageStore();
+        var store = new InMemoryConversationStore(messages);
+        var replied = MakeResolved(createdAt: PurgeNow.AddDays(-200), updatedAt: PurgeNow.AddDays(-120));
+        await store.SaveAsync(replied, CancellationToken.None);
+        await messages.SaveAsync(MakeMessage(replied.ConversationId, PurgeNow.AddDays(-5)), CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(0, "a message inside the window is recent activity, though the row itself is old");
+        (await store.GetByIdAsync(Tenant, replied.ConversationId, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldDeleteConversation_WhenResolvedIdleAndMessagedOnlyBeforeCutoff()
+    {
+        var messages = new InMemoryMessageStore();
+        var store = new InMemoryConversationStore(messages);
+        var idle = MakeResolved(createdAt: PurgeNow.AddDays(-200), updatedAt: PurgeNow.AddDays(-120));
+        var otherTenantRecent = MakeMessage(idle.ConversationId, PurgeNow.AddDays(-5), new TenantId("tenant-2"));
+        await store.SaveAsync(idle, CancellationToken.None);
+        await messages.SaveAsync(MakeMessage(idle.ConversationId, PurgeNow.AddDays(-150)), CancellationToken.None);
+        await messages.SaveAsync(otherTenantRecent, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(1, "only messages of the same tenant from inside the window keep a Resolved conversation");
+    }
+
     // ─── MessageStore ──────────────────────────────────────────────────────────
 
     [Fact]
@@ -274,16 +308,16 @@ public sealed class GdprStoreExtensionTests
         ClosedAt = closedAt,
     };
 
-    private static Message MakeMessage(EntityId conversationId) => new()
+    private static Message MakeMessage(EntityId conversationId, DateTimeOffset? createdAt = null, TenantId? tenant = null) => new()
     {
         MessageId = EntityId.New(),
         ConversationId = conversationId,
-        TenantId = Tenant,
+        TenantId = tenant ?? Tenant,
         Direction = MessageDirection.Inbound,
         Channel = ChannelType.WebChat,
         Content = new MessageEnvelope([new TextBlock("test")]),
         DeliveryStatus = MessageDeliveryStatus.Sent,
-        CreatedAt = DateTimeOffset.UtcNow,
+        CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
     };
 
     private static AuthEvent MakeAuthEvent(string userId, DateTimeOffset? createdAt = null) => new()

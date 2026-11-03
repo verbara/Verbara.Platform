@@ -61,8 +61,9 @@ public interface IConversationStore
     /// Retention purge: deletes the tenant's conversations in a terminal state (Closed, Abandoned, Merged, Spam —
     /// <see cref="ConversationStateMachine.IsTerminal"/>) whose <see cref="Conversation.ClosedAt"/> is before
     /// <paramref name="cutoff"/>, plus the <see cref="ConversationState.Resolved"/> ones idle since before it — last
-    /// change (<see cref="Conversation.UpdatedAt"/>, else <see cref="Conversation.CreatedAt"/>), since nothing closes a
-    /// Resolved conversation on its own — and returns the count deleted. A live conversation (any other state) is
+    /// change (<see cref="Conversation.UpdatedAt"/>, else <see cref="Conversation.CreatedAt"/>), with no message at or
+    /// after the cutoff either, since nothing closes a Resolved conversation on its own and a customer reply is stored as
+    /// a message without touching the conversation — and returns the count deleted. A live conversation (any other state) is
     /// never deleted, however old. Messages are not touched here — the caller removes the orphans after.
     /// </summary>
     Task<int> DeleteClosedBeforeAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct);

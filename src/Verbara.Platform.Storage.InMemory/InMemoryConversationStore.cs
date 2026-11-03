@@ -133,14 +133,18 @@ internal sealed class InMemoryConversationStore : IConversationStore
     }
 
     // Mirrors the Postgres purge filter: a terminal row counts from its close; a Resolved row (never closed on its
-    // own) from its last change, else its creation; any other state is live and never past retention.
-    private static bool IsPastRetention(Conversation conversation, DateTimeOffset cutoff)
+    // own) from its last change, else its creation, and only with no message at or after the cutoff (a customer
+    // reply lands in the message store, not on the row); any other state is live and never past retention. A store
+    // built without a message store holds no messages, so the message condition holds trivially there.
+    private bool IsPastRetention(Conversation conversation, DateTimeOffset cutoff)
     {
         if (ConversationStateMachine.IsTerminal(conversation.State))
             return conversation.ClosedAt < cutoff;
 
-        return conversation.State == ConversationState.Resolved
-            && (conversation.UpdatedAt ?? conversation.CreatedAt) < cutoff;
+        if (conversation.State != ConversationState.Resolved || (conversation.UpdatedAt ?? conversation.CreatedAt) >= cutoff)
+            return false;
+
+        return _messages?.HasMessageSince(conversation.TenantId, conversation.ConversationId, cutoff) != true;
     }
 
     public Task<int> DeleteClosedBeforeAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
