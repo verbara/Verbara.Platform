@@ -8,6 +8,11 @@ internal sealed class InMemoryContactStore : IContactStore
 {
     private readonly ConcurrentDictionary<(TenantId, EntityId), Contact> _items = new();
 
+    // Serialises every write (SaveAsync, AddIdentityAsync, DeleteAsync), so AddIdentityAsync's lookup and its change
+    // are one step: a delete or a replacing save lands wholly before or wholly after it, never in between. Reads stay
+    // lock-free.
+    private readonly Lock _writeGate = new();
+
     public Task<Contact?> GetByIdAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
         _items.TryGetValue((tenantId, contactId), out var item);
@@ -41,7 +46,8 @@ internal sealed class InMemoryContactStore : IContactStore
 
     public Task SaveAsync(Contact contact, CancellationToken ct)
     {
-        _items[(contact.TenantId, contact.ContactId)] = contact;
+        lock (_writeGate)
+            _items[(contact.TenantId, contact.ContactId)] = contact;
         return Task.CompletedTask;
     }
 
@@ -56,25 +62,25 @@ internal sealed class InMemoryContactStore : IContactStore
     {
         ArgumentNullException.ThrowIfNull(addresses);
         // Never inserts: a contact deleted since the caller read it stays deleted.
-        if (!_items.TryGetValue((tenantId, contactId), out var contact))
-            return Task.FromResult<Contact?>(null);
-
-        lock (contact)
+        lock (_writeGate)
         {
+            if (!_items.TryGetValue((tenantId, contactId), out var contact))
+                return Task.FromResult<Contact?>(null);
+
             foreach (var address in addresses)
                 contact.AddAddress(address);
             if (contact.FirstName is null && contact.LastName is null && firstNameIfUnnamed is not null)
                 contact.FirstName = firstNameIfUnnamed;
             contact.UpdatedAt = updatedAt;
             contact.UpdatedBy = updatedBy;
+            return Task.FromResult<Contact?>(contact);
         }
-
-        return Task.FromResult<Contact?>(contact);
     }
 
     public Task DeleteAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
-        _items.TryRemove((tenantId, contactId), out _);
+        lock (_writeGate)
+            _items.TryRemove((tenantId, contactId), out _);
         return Task.CompletedTask;
     }
 }
