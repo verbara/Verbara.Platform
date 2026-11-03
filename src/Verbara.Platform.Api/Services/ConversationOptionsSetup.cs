@@ -46,9 +46,18 @@ internal static class ConversationOptionsSetup
     }
 
     /// <summary>
-    /// Registers the binding, the range validation run at startup, and the startup warning. Called by
-    /// <c>Program.cs</c> after <c>AddPlatformConversations</c>.
+    /// The Api half of the inactivity close that <c>Program.cs</c> registers after <c>AddPlatformConversations</c>:
+    /// the options binding (D1) and the system-close counter (D13, exported by <c>Program.cs</c>'s
+    /// <c>AddMeter(ConversationCloseMetrics.MeterName)</c>).
     /// </summary>
+    public static IServiceCollection AddConversationInactivityClose(this IServiceCollection services)
+    {
+        services.AddConversationOptionsBinding();
+        services.AddSingleton<ConversationCloseMetrics>();
+        return services;
+    }
+
+    /// <summary>Registers the binding, the range validation run at startup, and the startup warning.</summary>
     public static IServiceCollection AddConversationOptionsBinding(this IServiceCollection services)
     {
         services.AddOptions<ConversationOptions>()

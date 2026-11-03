@@ -172,12 +172,7 @@ builder.Services.AddSingleton<
     Verbara.Platform.Api.Auth.IApiKeyLastUsedStamper,
     Verbara.Platform.Api.Auth.ApiKeyLastUsedStamper>();
 builder.Services.AddPlatformCore();
-builder.Services.AddPlatformConversations();
-// conversations-close-after-inactivity (design D1): the Conversations:InactivityClose* options, bound by explicit
-// TryParse (AOT-safe); an out-of-range value fails startup naming the key, a window below 24 h warns once.
-builder.Services.AddConversationOptionsBinding();
-// conversations-close-after-inactivity (design D13): the system-close counter, exported by the AddMeter line below.
-builder.Services.AddSingleton<Verbara.Platform.Api.Services.ConversationCloseMetrics>();
+builder.Services.AddPlatformConversations().AddConversationInactivityClose(); // options (D1) + close counter (D13)
 builder.Services.AddPlatformChannels();
 builder.Services.AddPlatformQueues();
 builder.Services.AddInboundRouting();
@@ -426,8 +421,7 @@ builder.Services.AddVerbaraOpenTelemetry(b => b
     .AddMeter(Verbara.Platform.Api.Services.RealtimeReconciliationService.MeterName)
     .AddMeter(Verbara.Platform.Api.Services.RecoveryCodeFamilyMetrics.MeterName) // mfa.recovery_codes.{users,redeemed}
     .AddMeter(Verbara.Platform.Api.Services.StasisInboundConsumer.MeterName) // voice.stasis.app_replaced (ADR-0044)
-    .AddMeter(Verbara.Platform.Api.Services.DialerDispositionMetrics.MeterName) // dialer.disposition_dispatch.* (D16)
-    .AddMeter(Verbara.Platform.Api.Services.ConversationCloseMetrics.MeterName) // conversations.system_closed{reason} (conversations-close-after-inactivity D13)
+    .AddMeter(Verbara.Platform.Api.Services.DialerDispositionMetrics.MeterName).AddMeter(Verbara.Platform.Api.Services.ConversationCloseMetrics.MeterName) // dialer.disposition_dispatch.* (D16); conversations.system_closed (inactivity close D13)
     .AddDigitalChannelMeters() // channels.delivery_status.unknown_id, whatsapp.webhook.rejected
     .AddCapacityMeters() // Npgsql pool + operation instruments, auth.write.* (measure-api-multi-replica-baseline D1)
     .WithPrometheusExporter());
