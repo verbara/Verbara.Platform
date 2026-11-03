@@ -23,6 +23,7 @@ public sealed class CsatConversationEndSourceTests
 
     [Theory]
     [InlineData(ConversationCloseReasons.Inactivity)]
+    [InlineData(ConversationCloseReasons.InactivityBacklog)]
     [InlineData(ConversationCloseReasons.CustomerReturned)]
     public async Task HandleClosedAsync_ShouldPushNoSignal_WhenTheCloseIsASystemClose(string reason)
     {

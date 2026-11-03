@@ -56,6 +56,9 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     private readonly ConversationOptions _conversationOptions;
     private readonly ITenantAuthConfigStore? _tenantAuthConfigStore;
 
+    // D13: the system-close counter; only a won close increments it. Optional so existing ctor usages keep compiling.
+    private readonly ConversationCloseMetrics? _closeMetrics;
+
     // D11: the per-tenant override warnings are logged once per tenant per process (the worker is a singleton).
     private readonly HashSet<string> _invalidWindowWarned = new(StringComparer.Ordinal);
     private readonly HashSet<string> _belowWhatsAppWarned = new(StringComparer.Ordinal);
@@ -80,7 +83,8 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         AutonomousDispositionMetrics? autonomousMetrics = null,
         ITenantAutonomousDispositionStore? gateStore = null,
         IOptions<ConversationOptions>? conversationOptions = null,
-        ITenantAuthConfigStore? tenantAuthConfigStore = null)
+        ITenantAuthConfigStore? tenantAuthConfigStore = null,
+        ConversationCloseMetrics? closeMetrics = null)
     {
         _conversationStore = conversationStore;
         _tenantStore = tenantStore;
@@ -99,6 +103,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         _gateStore = gateStore;
         _conversationOptions = conversationOptions?.Value ?? new ConversationOptions();
         _tenantAuthConfigStore = tenantAuthConfigStore;
+        _closeMetrics = closeMetrics;
     }
 
     /// <summary>
@@ -260,8 +265,41 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
                 continue; // lost: a message, a move or another replica got there first — nothing to record
 
             await AuditInactivityCloseAsync(tid, request, outcome);
+            RecordInactivityClose(tid, request, channel, outcome);
         }
     }
+
+    /// <summary>
+    /// D13: a won inactivity close adds one to <c>conversations.system_closed{reason}</c> and writes one Information
+    /// line with the tenant, the channel, the reason and the idle-age bucket at the close. Never throws: the close is
+    /// committed, and a metrics fault must not skip the rest of the batch.
+    /// </summary>
+    private void RecordInactivityClose(TenantId tid, InactivityCloseRequest request, ChannelType channel, InactivityCloseOutcome outcome)
+    {
+        try
+        {
+            _closeMetrics?.RecordClosed(outcome.Reason);
+        }
+        catch (Exception ex)
+        {
+            LogInactivityCountFailed(request.ConversationId.Value, ex);
+        }
+
+        var bucket = IdleAgeBucket(request.Now - outcome.LastMessageAt);
+        LogInactivityClosed(request.ConversationId.Value, tid.Value, channel, outcome.Reason, bucket);
+    }
+
+    /// <summary>
+    /// D13: the idle-age bucket of a close, the first measurement of how long conversations sit idle: <c>&lt;72h</c>
+    /// (reachable only with a window below 72 h), <c>72-96h</c>, <c>96-168h</c> or <c>&gt;168h</c>.
+    /// </summary>
+    internal static string IdleAgeBucket(TimeSpan idle) => idle.TotalHours switch
+    {
+        < 72 => "<72h",
+        < 96 => "72-96h",
+        <= 168 => "96-168h",
+        _ => ">168h",
+    };
 
     /// <summary>
     /// D11: the tenant's effective window. Read once per tenant per pass through <see cref="ITenantAuthConfigStore"/>
@@ -745,6 +783,14 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         Message = "Inactivity pass could not read the inactivity window of tenant {TenantId}; its conversations are " +
                   "not swept this pass and are retried on the next one")]
     private partial void LogInactivityWindowReadFailed(string tenantId, Exception ex);
+
+    [LoggerMessage(EventId = 7604, Level = LogLevel.Information,
+        Message = "Inactivity close of conversation {ConversationId} (tenant {TenantId}, channel {Channel}, reason {Reason}, idle {IdleBucket})")]
+    private partial void LogInactivityClosed(string conversationId, string tenantId, ChannelType channel, string reason, string idleBucket);
+
+    [LoggerMessage(EventId = 7605, Level = LogLevel.Warning,
+        Message = "Inactivity close of conversation {ConversationId} committed but it could not be counted")]
+    private partial void LogInactivityCountFailed(string conversationId, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Conversation timeout cycle failed")]
     private partial void LogTimeoutCycleError(Exception ex);

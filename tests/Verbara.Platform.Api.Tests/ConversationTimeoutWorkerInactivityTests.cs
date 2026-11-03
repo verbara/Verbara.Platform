@@ -11,6 +11,8 @@ using Verbara.Sdk.Pro.MultiTenant;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
+using Verbara.Platform.Api.Tests.Conversations;
+using System.Diagnostics.Metrics;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -277,12 +279,16 @@ public sealed partial class ConversationTimeoutWorkerTests
         Assert.Equal(2, result.Releases);
     }
 
-    internal sealed record TwoWorkerResult(ConversationState FinalState, int CloseAttempts, int Events, int Audits, int Releases);
+    internal sealed record TwoWorkerResult(
+        ConversationState FinalState, int CloseAttempts, int Events, int Audits, int Releases,
+        IReadOnlyDictionary<string, long> Counted, IReadOnlyList<string> CloseLogs);
 
-    internal static async Task<TwoWorkerResult> RunTwoWorkersAsync(bool unconditionalClose)
+    internal static async Task<TwoWorkerResult> RunTwoWorkersAsync(bool unconditionalClose, TimeSpan? idle = null)
     {
         using var h = new InactivityHarness { UnconditionalClose = unconditionalClose };
-        var conv = await h.SeedAsync(ConversationState.Active, idle: TimeSpan.FromHours(80));
+        var logger = new CapturingLogger<ConversationTimeoutWorker>();
+        h.Logger = logger;
+        var conv = await h.SeedAsync(ConversationState.Active, idle: idle ?? TimeSpan.FromHours(80));
 
         // The injected delay point: each worker is held after ListInactiveAsync returns and before
         // TryCloseInactiveAsync, released only when both have listed.
@@ -303,7 +309,8 @@ public sealed partial class ConversationTimeoutWorkerTests
 
         var releases = h.Capacity.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IAgentCapacityService.ReleaseAsync));
         return new TwoWorkerResult(
-            (await h.GetAsync(conv)).State, h.CloseAttempts, h.ClosedEvents.Count, h.ClosedAuditCount, releases);
+            (await h.GetAsync(conv)).State, h.CloseAttempts, h.ClosedEvents.Count, h.ClosedAuditCount, releases,
+            h.CountedByReason, CloseLogsOf(logger));
     }
 
     /// <summary>The in-memory store, switchboard, event bus and options one inactivity test needs.</summary>
@@ -311,6 +318,8 @@ public sealed partial class ConversationTimeoutWorkerTests
     {
         private readonly List<ConversationStateChangedEvent> _closed = [];
         private readonly IDisposable _subscription;
+        private readonly MeterListener _listener = new();
+        private readonly Dictionary<string, long> _counted = new(StringComparer.Ordinal);
         private int _listInactiveCalls;
         private int _closeAttempts;
 
@@ -342,6 +351,34 @@ public sealed partial class ConversationTimeoutWorkerTests
                 if (e is ConversationStateChangedEvent { NewState: nameof(ConversationState.Closed) } sc)
                     lock (_closed) _closed.Add(sc);
             });
+
+            // D13: the close counter of this harness only (other tests' meters share the name).
+            _listener.InstrumentPublished = (instrument, listener) =>
+            {
+                if (ReferenceEquals(instrument, Metrics.SystemClosed))
+                    listener.EnableMeasurementEvents(instrument);
+            };
+            _listener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
+            {
+                foreach (var tag in tags)
+                {
+                    if (tag is { Key: "reason", Value: string reason })
+                    {
+                        lock (_counted)
+                            _counted[reason] = _counted.GetValueOrDefault(reason) + value;
+                    }
+                }
+            });
+            _listener.Start();
+        }
+
+        /// <summary>The close counter the worker increments after a won close (D13).</summary>
+        public ConversationCloseMetrics Metrics { get; } = new();
+
+        /// <summary>What the close counter received, by its <c>reason</c> tag.</summary>
+        public IReadOnlyDictionary<string, long> CountedByReason
+        {
+            get { lock (_counted) return new Dictionary<string, long>(_counted, StringComparer.Ordinal); }
         }
 
         public TenantId Tenant { get; } = new(TestTenantId);
@@ -398,7 +435,8 @@ public sealed partial class ConversationTimeoutWorkerTests
             Logger,
             auditService: Audit,
             conversationOptions: Microsoft.Extensions.Options.Options.Create(Options),
-            tenantAuthConfigStore: TenantAuthConfig);
+            tenantAuthConfigStore: TenantAuthConfig,
+            closeMetrics: Metrics);
 
         public async Task<Conversation> SeedAsync(
             ConversationState state, TimeSpan idle, ChannelType channel = ChannelType.WebChat, bool withClock = true,
@@ -462,17 +500,23 @@ public sealed partial class ConversationTimeoutWorkerTests
             if (row is null)
                 return null;
             var clock = row.LastMessageAt ?? row.CreatedAt;
+            // The reason is decided as the statement does (D12); only the state/owner/clock condition is dropped.
+            var reason = clock < request.BacklogCutoff
+                ? ConversationCloseReasons.InactivityBacklog
+                : ConversationCloseReasons.Inactivity;
             row.State = ConversationState.Closed;
             row.ClosedAt = request.Now;
             row.UpdatedAt = request.Now;
-            row.SetMetadata(ConversationCloseReasons.MetadataKey, ConversationCloseReasons.Inactivity);
+            row.SetMetadata(ConversationCloseReasons.MetadataKey, reason);
             await Inner.SaveAsync(row, ct);
-            return new InactivityCloseOutcome(ConversationCloseReasons.Inactivity, clock);
+            return new InactivityCloseOutcome(reason, clock);
         }
 
         public void Dispose()
         {
             _subscription.Dispose();
+            _listener.Dispose();
+            Metrics.Dispose();
             EventBus.Dispose();
         }
     }
