@@ -55,6 +55,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   A conversation in any other state is never deleted. Messages of a deleted conversation are still removed in the
   same pass. (#527)
 
+### Dependencies
+
+- **Verbara.Sdk.Pro `2.24.1-pro` → `2.25.0-pro`**, the 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk stays `2.9.0`. The triple is
+  **Sdk `2.9.0` × Pro `2.25.0-pro` × Platform** (next release). Pro raises the `StackExchange.Redis` floor to `3.4.29`, which
+  this repo already pins (#526). `Microsoft.Extensions.Diagnostics.HealthChecks` has no pin here and resolves `10.0.13` →
+  `10.0.14` through the graph. Across the 70 `project.assets.json`, nothing else changes version, and no package appears,
+  drops or crosses a major.
+- **Behaviour consumed from Pro 2.25.0-pro: a cluster takeover between Api replicas is clean** (Pro/ADR-0023). With two
+  replicas that both reach Asterisk, the owner's stop used to make the peer's takeover fail with "already exists in the
+  pool" and leave one more AMI session per stop. Now the peer adopts the connection it already holds and takes over once.
+  With a replica that does not configure the node, that replica no longer takes it over: the node stays `Unhealthy` on the
+  stopped replica until it returns. Measured on this repo's `v2.37.0` image with only these pins moved: verbara-lab cell
+  `pro-301`, 6 of 6 runs before reproduce the defect, 6 of 6 after pass. No Platform source changes for it.
+- **What the cluster endpoints answer now** (read in the code, not covered by a test against a real `ClusterManager`):
+  `POST /api/v1/management/cluster/nodes` answers **400** when the node's failover lock stays busy past
+  `FailoverOptions.ReconnectionTimeout`, and **202** instead of 201 for a node a live peer owns. A node with no replica
+  left that configures it keeps its gone owner, so `GET`, `PUT` and `DELETE` on it answer 404 on every live replica.
+  Tracked in #530.
+
 ## [2.37.0] - 2026-11-01
 
 Minor release. A graceful stop now exits 0: Platform moves to Verbara.Sdk.Pro `2.24.1-pro`, and CI and the Post-release smoke
