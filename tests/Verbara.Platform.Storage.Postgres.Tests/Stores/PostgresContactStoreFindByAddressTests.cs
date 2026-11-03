@@ -259,4 +259,38 @@ public class PostgresContactStoreFindByAddressTests : IClassFixture<ContactStore
         cmd.Parameters.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = _tenant.Value });
         ((long)(await cmd.ExecuteScalarAsync())!).Should().Be(2);
     }
+
+    // ── whatsapp-accepts-business-scoped-user-ids: AddIdentityAsync ────────────
+
+    [Fact]
+    public async Task AddIdentityAsync_ShouldAppendOnlyMissingAddresses_WhenStoredAddressHasOrdinalChannel()
+    {
+        var contactId = await InsertOrdinalRowAsync(_tenant, """[{"channel":1,"address":"15550000002"}]""");
+        var phone = new ChannelAddress(ChannelType.WhatsApp, "15550000002");
+        var bsuid = new ChannelAddress(ChannelType.WhatsApp, "US.13491208655302741918");
+        var at = new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+
+        var result = await _sut.AddIdentityAsync(_tenant, contactId, [phone, bsuid], "Alice", at, "system", CancellationToken.None);
+
+        result!.Addresses.Should().BeEquivalentTo([phone, bsuid], "the ordinal-form phone counts as present");
+        result.FirstName.Should().Be("Alice");
+        result.UpdatedAt.Should().Be(at);
+        result.UpdatedBy.Should().Be("system");
+        (await _sut.GetByIdAsync(_tenant, contactId, CancellationToken.None))!.Addresses.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task AddIdentityAsync_ShouldReturnNullAndInsertNothing_WhenContactDoesNotExist()
+    {
+        var result = await _sut.AddIdentityAsync(
+            _tenant, EntityId.New(), [new ChannelAddress(ChannelType.WhatsApp, "15550000002")], "Alice",
+            DateTimeOffset.UtcNow, "system", CancellationToken.None);
+
+        result.Should().BeNull();
+        await using var conn = await _fixture.DataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM contacts WHERE tenant_id = @TenantId";
+        cmd.Parameters.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = _tenant.Value });
+        ((long)(await cmd.ExecuteScalarAsync())!).Should().Be(0);
+    }
 }

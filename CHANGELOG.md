@@ -33,6 +33,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `GET /api/v1/auth/sessions` and `DELETE /api/v1/auth/sessions/{tokenId}`, which receive the `refresh_token` cookie and
   so mark and protect the current session. Their behavior is unchanged; removal planned in **v2.40.0**. (#520)
 
+### Fixed
+
+- **WhatsApp messages from customers who use a WhatsApp username are no longer lost.** Meta now identifies these
+  senders by a business-scoped user id and may leave out their phone number; such messages used to be dropped. They
+  now reach the inbox, the customer stays one contact whether they write by phone, by user id or both, and both are
+  kept on the contact. Replies still go to the phone number. A contact known only by the user id cannot receive any
+  WhatsApp message yet — no reply and no conversation start — until sending to user ids is supported.
+- **A WhatsApp contact without a name now takes the customer's WhatsApp profile name.** A name already on the contact
+  is kept. Adding a WhatsApp address or this name to an existing contact changes only those fields, records the
+  change as made by the system, and never restores a contact that was deleted in the meantime.
+- **An outbound message whose contact has no address to send to on the conversation's channel is now marked Failed**
+  instead of staying Pending forever. On WhatsApp this includes a contact known only by its user id.
+
 ## [2.37.0] - 2026-11-01
 
 Minor release. A graceful stop now exits 0: Platform moves to Verbara.Sdk.Pro `2.24.1-pro`, and CI and the Post-release smoke

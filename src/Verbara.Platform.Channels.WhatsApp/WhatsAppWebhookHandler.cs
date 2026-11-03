@@ -168,7 +168,10 @@ public sealed class WhatsAppWebhookHandler : IWebhookHandler, IWebhookSubscripti
                 }
 
                 statuses.AddRange((value.Statuses ?? []).Select(ParseStatusUpdate).OfType<DeliveryStatusUpdate>());
-                messages.AddRange((value.Messages ?? []).Select(ParseInboundMessage).OfType<InboundMessage>());
+                var contacts = value.Contacts ?? [];
+                messages.AddRange((value.Messages ?? [])
+                    .Select(m => ParseInboundMessage(m, contacts))
+                    .OfType<InboundMessage>());
             }
         }
 
@@ -199,9 +202,16 @@ public sealed class WhatsAppWebhookHandler : IWebhookHandler, IWebhookSubscripti
         return new DeliveryStatusUpdate(status.Id, deliveryStatus, timestamp);
     }
 
-    private static InboundMessage? ParseInboundMessage(MetaInboundMessage msg)
+    /// <summary>
+    /// Maps one Meta message. The sender is its business-scoped user id (<c>from_user_id</c>) when present, with the
+    /// phone number (<c>from</c>) as an alternate address; a message carrying only one of the two is accepted.
+    /// The profile name comes from the <c>contacts[]</c> entry of the same sender.
+    /// </summary>
+    private static InboundMessage? ParseInboundMessage(MetaInboundMessage msg, MetaContact[] contacts)
     {
-        if (msg.From is null || msg.Id is null || msg.Type is null)
+        var phone = string.IsNullOrWhiteSpace(msg.From) ? null : msg.From;
+        var userId = string.IsNullOrWhiteSpace(msg.FromUserId) ? null : msg.FromUserId;
+        if ((phone is null && userId is null) || msg.Id is null || msg.Type is null)
             return null;
 
         MessageBlock? block = msg.Type switch
@@ -252,11 +262,33 @@ public sealed class WhatsAppWebhookHandler : IWebhookHandler, IWebhookSubscripti
         if (block is null)
             return null;
 
-        var from = new ChannelAddress(ChannelType.WhatsApp, msg.From);
+        var from = new ChannelAddress(ChannelType.WhatsApp, userId ?? phone!);
         var envelope = new MessageEnvelope([block]);
         var timestamp = ParseTimestamp(msg.Timestamp);
 
-        return new InboundMessage(from, envelope, msg.Id, timestamp);
+        return new InboundMessage(from, envelope, msg.Id, timestamp)
+        {
+            AlternateAddresses = userId is not null && phone is not null
+                ? [new ChannelAddress(ChannelType.WhatsApp, phone)]
+                : [],
+            ProfileName = FindSender(contacts, userId, phone)?.Profile?.Name,
+        };
+    }
+
+    /// <summary>
+    /// The <c>contacts[]</c> entry of the message's sender: matched by business-scoped user id, then by phone; a
+    /// lone entry with neither id is taken as the sender's, since Meta sends one entry per sender.
+    /// </summary>
+    private static MetaContact? FindSender(MetaContact[] contacts, string? userId, string? phone)
+    {
+        foreach (var contact in contacts)
+        {
+            if ((userId is not null && string.Equals(contact.UserId, userId, StringComparison.Ordinal))
+                || (phone is not null && string.Equals(contact.WaId, phone, StringComparison.Ordinal)))
+                return contact;
+        }
+
+        return contacts is [{ UserId: null, WaId: null } only] ? only : null;
     }
 
     private static DateTimeOffset ParseTimestamp(string? unixSeconds)

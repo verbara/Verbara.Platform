@@ -74,7 +74,7 @@ public class InboundMessagePipelineTests
 
         _messageStore.FindByExternalIdAsync(TenantId, inbound.ExternalMessageId, Arg.Any<CancellationToken>())
             .Returns((Message?)null);
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>())
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>())
             .Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
             .Returns((Conversation?)null);
@@ -97,7 +97,7 @@ public class InboundMessagePipelineTests
 
         _messageStore.FindByExternalIdAsync(default, default!, default)
             .ReturnsForAnyArgs((Message?)null);
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>())
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>())
             .Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
             .Returns(conversation);
@@ -117,7 +117,7 @@ public class InboundMessagePipelineTests
 
         _messageStore.FindByExternalIdAsync(TenantId, inbound.ExternalMessageId, Arg.Any<CancellationToken>())
             .Returns((Message?)null);
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>())
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>())
             .Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
             .Returns(existingConversation);
@@ -139,7 +139,7 @@ public class InboundMessagePipelineTests
 
         _messageStore.FindByExternalIdAsync(TenantId, inbound.ExternalMessageId, Arg.Any<CancellationToken>())
             .Returns((Message?)null);
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>())
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>())
             .Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
             .Returns((Conversation?)null);
@@ -179,7 +179,7 @@ public class InboundMessagePipelineTests
 
         _messageStore.FindByExternalIdAsync(TenantId, "dup-ext-1", Arg.Any<CancellationToken>())
             .Returns(existingMessage);
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>())
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>())
             .Returns(contact);
 
         var result = await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
@@ -211,7 +211,7 @@ public class InboundMessagePipelineTests
 
         _messageStore.FindByExternalIdAsync(TenantId, inbound.ExternalMessageId, Arg.Any<CancellationToken>())
             .Returns((Message?)null);
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>())
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>())
             .Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
             .Returns(conversation);
@@ -237,7 +237,7 @@ public class InboundMessagePipelineTests
 
         _messageStore.FindByExternalIdAsync(TenantId, inbound.ExternalMessageId, Arg.Any<CancellationToken>())
             .Returns((Message?)null);
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>())
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>())
             .Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
             .Returns((Conversation?)null);
@@ -258,7 +258,7 @@ public class InboundMessagePipelineTests
 
         _messageStore.FindByExternalIdAsync(TenantId, inbound.ExternalMessageId, Arg.Any<CancellationToken>())
             .Returns((Message?)null);
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>())
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>())
             .Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
             .Returns(conversation);
@@ -334,7 +334,7 @@ public class InboundMessagePipelineTests
         var inbound = MakeMessage();
         var contact = MakeContact("resolved-id");
 
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>())
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>())
             .Returns(contact);
 
         var context = new PipelineContext
@@ -349,6 +349,30 @@ public class InboundMessagePipelineTests
 
         result.Contact.Should().BeSameAs(contact);
         result.Contact!.ContactId.Should().Be(EntityId.From("resolved-id"));
+    }
+
+    [Fact]
+    public async Task ContactResolutionStep_ShouldPassAlternateAddressesAndProfileName_WhenInboundCarriesThem()
+    {
+        var phone = new ChannelAddress(ChannelType.WhatsApp, "15550000002");
+        var inbound = MakeMessage() with
+        {
+            From = new ChannelAddress(ChannelType.WhatsApp, "US.13491208655302741918"),
+            AlternateAddresses = [phone],
+            ProfileName = "Sheena",
+        };
+        var contact = MakeContact("bsuid-contact");
+        _contactResolver.ResolveAsync(
+                TenantId,
+                Arg.Is<ContactIdentity>(i =>
+                    i.Address == inbound.From && i.AlternateAddresses.SequenceEqual(new[] { phone }) && i.DisplayName == "Sheena"),
+                Arg.Any<CancellationToken>())
+            .Returns(contact);
+        var context = new PipelineContext { InboundMessage = inbound, TenantId = TenantId, Channel = Channel };
+
+        var result = await new ContactResolutionStep(_contactResolver).ExecuteAsync(context, CancellationToken.None);
+
+        result.Contact.Should().BeSameAs(contact);
     }
 
     [Fact]
@@ -456,7 +480,7 @@ public class InboundMessagePipelineTests
         };
         _messageStore.FindByExternalIdAsync(TenantId, "race-ext", Arg.Any<CancellationToken>()).ReturnsNull();
         _messageStore.InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>()).Returns(winner);
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>()).Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
             .Returns(conversation);
 
@@ -490,7 +514,7 @@ public class InboundMessagePipelineTests
         };
         _messageStore.FindByExternalIdAsync(TenantId, "race-new", Arg.Any<CancellationToken>()).ReturnsNull();
         _messageStore.InsertInboundIfAbsentAsync(Arg.Any<Message>(), Arg.Any<CancellationToken>()).Returns(winner);
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>()).Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
             .ReturnsNull();
         _lifecycleService.CreateAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>()).Returns(opened);
@@ -521,7 +545,7 @@ public class InboundMessagePipelineTests
             CreatedAt = DateTimeOffset.UtcNow,
         };
         _messageStore.FindByExternalIdAsync(TenantId, "replayed-ext", Arg.Any<CancellationToken>()).Returns(stored);
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>()).Returns(contact);
 
         var result = await _pipeline.ProcessAsync(inbound, TenantId, Channel, CancellationToken.None);
 
@@ -537,7 +561,7 @@ public class InboundMessagePipelineTests
         var inbound = MakeMessage("fresh-ext");
         var contact = MakeContact();
         _messageStore.FindByExternalIdAsync(TenantId, "fresh-ext", Arg.Any<CancellationToken>()).ReturnsNull();
-        _contactResolver.ResolveAsync(TenantId, inbound.From, Arg.Any<CancellationToken>()).Returns(contact);
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == inbound.From), Arg.Any<CancellationToken>()).Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
             .Returns(MakeConversation(contact.ContactId));
 

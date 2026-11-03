@@ -13,9 +13,10 @@ public sealed class ContactResolutionStep : IPipelineStep
 
     public async Task<PipelineContext> ExecuteAsync(PipelineContext context, CancellationToken ct)
     {
+        var inbound = context.InboundMessage;
         context.Contact = await _resolver.ResolveAsync(
             context.TenantId,
-            context.InboundMessage.From,
+            new ContactIdentity(inbound.From, inbound.AlternateAddresses, inbound.ProfileName),
             ct);
 
         return context;
