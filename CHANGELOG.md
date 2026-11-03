@@ -39,12 +39,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   senders by a business-scoped user id and may leave out their phone number; such messages used to be dropped. They
   now reach the inbox, the customer stays one contact whether they write by phone, by user id or both, and both are
   kept on the contact. Replies still go to the phone number. A contact known only by the user id cannot receive any
-  WhatsApp message yet — no reply and no conversation start — until sending to user ids is supported.
+  WhatsApp message yet — no reply and no conversation start — until sending to user ids is supported. (#528)
 - **A WhatsApp contact without a name now takes the customer's WhatsApp profile name.** A name already on the contact
   is kept. Adding a WhatsApp address or this name to an existing contact changes only those fields, records the
-  change as made by the system, and never restores a contact that was deleted in the meantime.
+  change as made by the system, and never restores a contact that was deleted in the meantime. (#528)
 - **An outbound message whose contact has no address to send to on the conversation's channel is now marked Failed**
-  instead of staying Pending forever. On WhatsApp this includes a contact known only by its user id.
+  instead of staying Pending forever. On WhatsApp this includes a contact known only by its user id. (#528)
 
 ## [2.37.0] - 2026-11-01
 
