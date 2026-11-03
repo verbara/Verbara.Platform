@@ -179,14 +179,11 @@ internal sealed class CustomerReturnHarness : IDisposable
 
     public async Task<IReadOnlyList<Conversation>> ConversationsHoldingAsync(string externalId)
     {
-        var holding = new List<Conversation>();
+        var checkedConversations = new List<(Conversation Conversation, bool Holds)>();
         foreach (var conversation in await ConversationsAsync())
-        {
-            if ((await MessagesOfAsync(conversation.ConversationId)).Any(m => m.ExternalMessageId == externalId))
-                holding.Add(conversation);
-        }
+            checkedConversations.Add((conversation, (await MessagesOfAsync(conversation.ConversationId)).Any(m => m.ExternalMessageId == externalId)));
 
-        return holding;
+        return checkedConversations.Where(c => c.Holds).Select(c => c.Conversation).ToList();
     }
 
     public void Dispose()

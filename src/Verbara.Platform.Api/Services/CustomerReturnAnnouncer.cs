@@ -55,7 +55,7 @@ internal sealed partial class CustomerReturnAnnouncer
                 tenantId.Value, closedConversationId.Value,
                 nameof(ConversationState.Resolved), nameof(ConversationState.Closed)));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogPublishFailed(ex, tenantId.Value, closedConversationId.Value);
         }
@@ -64,7 +64,7 @@ internal sealed partial class CustomerReturnAnnouncer
         {
             _metrics.RecordClosed(ConversationCloseReasons.CustomerReturned);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogCountFailed(ex, tenantId.Value, closedConversationId.Value);
         }
@@ -88,7 +88,7 @@ internal sealed partial class CustomerReturnAnnouncer
                 },
                 ct: CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogAuditFailed(ex, tenantId.Value, closedConversationId.Value);
         }

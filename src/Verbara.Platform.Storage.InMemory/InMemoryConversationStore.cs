@@ -379,6 +379,7 @@ internal sealed class InMemoryConversationStore : IConversationStore
         }
     }
 
+    /// <summary>Advances each open, non-voice conversation's clock of the tenant to its newest stored activity message.</summary>
     /// <remarks>
     /// Mirrors the Postgres statement: the newest activity message per conversation (the message store's
     /// <see cref="InMemoryMessageStore.NewestActivityByConversation"/>), applied under each row's lock to the
@@ -392,11 +393,11 @@ internal sealed class InMemoryConversationStore : IConversationStore
 
         var newest = _messages.NewestActivityByConversation(tenantId);
         var advanced = 0;
-        foreach (var conv in _items.Values.Where(c => c.TenantId == tenantId && c.Channel != ChannelType.Voice))
+        var candidates = _items.Values
+            .Where(c => c.TenantId == tenantId && c.Channel != ChannelType.Voice && newest.ContainsKey(c.ConversationId));
+        foreach (var conv in candidates)
         {
-            if (!newest.TryGetValue(conv.ConversationId, out var at))
-                continue;
-
+            var at = newest[conv.ConversationId];
             lock (conv)
             {
                 if (ConversationStateMachine.IsTerminal(conv.State) || conv.LastMessageAt is { } clock && clock >= at)

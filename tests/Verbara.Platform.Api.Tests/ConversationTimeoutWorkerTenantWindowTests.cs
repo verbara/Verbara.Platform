@@ -9,6 +9,7 @@ using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
+using NSubstitute.ReturnsExtensions;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -130,7 +131,7 @@ public sealed partial class ConversationTimeoutWorkerTests
         h.Logger = logger;
         var failing = Substitute.For<ITenantAuthConfigStore>();
         failing.GetAsync(TestTenantId, Arg.Any<CancellationToken>()).ThrowsAsync(new InvalidOperationException("db down"));
-        failing.GetAsync(OtherTenantId, Arg.Any<CancellationToken>()).Returns((TenantAuthConfig?)null);
+        failing.GetAsync(OtherTenantId, Arg.Any<CancellationToken>()).ReturnsNull();
         h.TenantAuthConfig = failing;
         var unread = await h.SeedAsync(ConversationState.Active, idle: TimeSpan.FromHours(200));
         var other = await h.SeedAsync(ConversationState.Active, idle: TimeSpan.FromHours(200), tenant: new TenantId(OtherTenantId));

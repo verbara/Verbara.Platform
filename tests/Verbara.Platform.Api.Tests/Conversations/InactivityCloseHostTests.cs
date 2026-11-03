@@ -156,7 +156,8 @@ public sealed class InactivityCloseHostTests : IDisposable
         using var client = _factory.CreateClient();
 
         // 1. A customer message opens X through the webhook; it routes to the queue and the agent accepts it.
-        (await PostWhatsAppAsync(client, "wamid.idle1", "hola")).StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var first = await PostWhatsAppAsync(client, "wamid.idle1", "hola"))
+            first.StatusCode.Should().Be(HttpStatusCode.OK);
         var x = (await ConversationsAsync(services)).Should().ContainSingle().Subject;
         x.Owner.Should().Be(ConversationOwner.ForQueue(queue.QueueId));
         await AcceptAsync(services, x.ConversationId, queue.QueueId, agent.AgentId);
@@ -173,7 +174,8 @@ public sealed class InactivityCloseHostTests : IDisposable
         counter.Count(ConversationCloseReasons.Inactivity).Should().Be(1);
 
         // 5. The customer writes again: a new conversation, routed to the queue.
-        (await PostWhatsAppAsync(client, "wamid.idle2", "sigo aquí")).StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var second = await PostWhatsAppAsync(client, "wamid.idle2", "sigo aquí"))
+            second.StatusCode.Should().Be(HttpStatusCode.OK);
         var next = (await ConversationsAsync(services)).Should().ContainSingle(c => c.ConversationId != x.ConversationId).Subject;
         next.State.Should().Be(ConversationState.Queued);
         next.Owner.Should().Be(ConversationOwner.ForQueue(queue.QueueId));
@@ -255,7 +257,7 @@ public sealed class InactivityCloseHostTests : IDisposable
         accept.Success.Should().BeTrue(accept.FailureReason);
     }
 
-    private Task<HttpResponseMessage> PostWhatsAppAsync(HttpClient client, string messageId, string text)
+    private async Task<HttpResponseMessage> PostWhatsAppAsync(HttpClient client, string messageId, string text)
     {
         var timestamp = _factory.Clock.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
         var body = Encoding.UTF8.GetBytes($$"""
@@ -274,11 +276,11 @@ public sealed class InactivityCloseHostTests : IDisposable
               }]
             }
             """);
-        var content = new ByteArrayContent(body);
+        using var content = new ByteArrayContent(body);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
         var hash = HMACSHA256.HashData(Encoding.UTF8.GetBytes(AppSecret), body);
         content.Headers.Add("X-Hub-Signature-256", "sha256=" + Convert.ToHexString(hash).ToLowerInvariant());
-        return client.PostAsync($"/api/v1/webhooks/{Tenant.Value}/whatsapp", content);
+        return await client.PostAsync($"/api/v1/webhooks/{Tenant.Value}/whatsapp", content);
     }
 
     // The host composes the worker as a hosted service, which the test host strips; build the same singleton graph.

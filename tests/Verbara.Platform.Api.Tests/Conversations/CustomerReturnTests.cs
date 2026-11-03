@@ -513,7 +513,7 @@ public sealed class CustomerReturnTests
 
         await act.Should().NotThrowAsync("the messages are stored; an announcement fault must not make the provider retry");
         h.AssignmentsOf(next.ConversationId).Should().Be(1, "the next message's side effects still run");
-        h.AnnouncerLogger.Entries.Concat(h.ProcessorLogger.Entries.Select(e => e))
+        h.AnnouncerLogger.Entries.Concat(h.ProcessorLogger.Entries)
             .Should().Contain(e => e.Level >= Microsoft.Extensions.Logging.LogLevel.Warning && ReferenceEquals(e.Exception, fault),
                 "the fault is logged like any other side-effect failure");
         h.ReturnAuditCount.Should().Be(1, "a failed publish does not skip the audit entry");

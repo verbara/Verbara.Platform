@@ -634,7 +634,7 @@ public class InboundMessagePipelineTests
         _messageStore.FindByExternalIdAsync(TenantId, "f1-ext", Arg.Any<CancellationToken>()).ReturnsNull();
         _contactResolver.ResolveAsync(TenantId, Arg.Any<ContactIdentity>(), Arg.Any<CancellationToken>()).Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>())
-            .Returns(resolved, (Conversation?)null);
+            .Returns(resolved, [null]);
         _conversationStore.TryCloseResolvedForReplyAsync(TenantId, resolved.ConversationId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(true);
         _lifecycleService.CreateAsync(TenantId, contact.ContactId, Channel, Arg.Any<CancellationToken>()).Returns(created);

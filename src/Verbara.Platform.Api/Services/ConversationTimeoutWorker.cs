@@ -318,7 +318,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         {
             _closeMetrics?.RecordClosed(outcome.Reason);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogInactivityCountFailed(request.ConversationId.Value, ex);
         }
