@@ -173,6 +173,9 @@ builder.Services.AddSingleton<
     Verbara.Platform.Api.Auth.ApiKeyLastUsedStamper>();
 builder.Services.AddPlatformCore();
 builder.Services.AddPlatformConversations();
+// conversations-close-after-inactivity (design D1): the Conversations:InactivityClose* options, bound by explicit
+// TryParse (AOT-safe); an out-of-range value fails startup naming the key, a window below 24 h warns once.
+builder.Services.AddConversationOptionsBinding();
 builder.Services.AddPlatformChannels();
 builder.Services.AddPlatformQueues();
 builder.Services.AddInboundRouting();
