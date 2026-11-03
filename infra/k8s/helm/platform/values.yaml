@@ -122,6 +122,18 @@ api:
       enabled: true
       name: verbara-lab-license
       key: license.lic
+  conversations:
+    # The inactivity close (docs/operations/upgrade-2.38.0.md). Each value is emitted as its
+    # Conversations__* env var only when set; empty keeps the Api's default (enabled, 100, 60).
+    # With more than one replica, set enabled: false for an upgrade and turn it on once every
+    # pod runs the new binary.
+    inactivityClose:
+      # Conversations__InactivityCloseEnabled: "true" / "false" (false switches the close off).
+      enabled: ""
+      # Conversations__InactivityCloseBatchSize: 1-1000, the most closes per tenant per pass.
+      batchSize: ""
+      # Conversations__InactivityCloseSweepIntervalSeconds: 5-3600.
+      sweepIntervalSeconds: ""
   prometheus:
     # Defaults to true: ships the platform-api ServiceMonitor so Prometheus
     # Operator (kube-prometheus-stack) scrapes /metrics on every install.
