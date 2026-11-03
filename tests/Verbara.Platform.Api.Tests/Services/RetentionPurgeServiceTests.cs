@@ -54,6 +54,30 @@ public sealed class RetentionPurgeServiceTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task RunRetentionPurgeAsync_ShouldPurgeResolvedConversation_WhenIdleSinceBeforeCutoff()
+    {
+        var conversations = new InMemoryConversationStore();
+        var idle = Make(ConversationState.Resolved, closedAt: null);
+        idle.UpdatedAt = Now.AddDays(-120);
+        var recent = Make(ConversationState.Resolved, closedAt: null);
+        recent.UpdatedAt = Now.AddDays(-10);
+        await conversations.SaveAsync(idle, CancellationToken.None);
+        await conversations.SaveAsync(recent, CancellationToken.None);
+        var purgeLog = Substitute.For<IPurgeLogStore>();
+        var sut = NewService(conversations, Substitute.For<IMessageStore>(), purgeLog);
+
+        await sut.RunRetentionPurgeAsync(CancellationToken.None);
+
+        (await conversations.GetByIdAsync(Tenant, idle.ConversationId, CancellationToken.None))
+            .Should().BeNull("nothing closes a Resolved conversation on its own; idle past the window it is purged");
+        (await conversations.GetByIdAsync(Tenant, recent.ConversationId, CancellationToken.None))
+            .Should().NotBeNull("it changed 10 days ago under a 90-day policy");
+        await purgeLog.Received(1).SaveAsync(
+            Arg.Is<PurgeEntry>(e => e.TenantId == TenantKey && e.EntitiesDeleted["conversations"] == 1),
+            Arg.Any<CancellationToken>());
+    }
+
     private static RetentionPurgeService NewService(
         IConversationStore conversations, IMessageStore messages, IPurgeLogStore purgeLog)
     {

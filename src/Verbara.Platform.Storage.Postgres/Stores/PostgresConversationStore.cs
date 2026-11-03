@@ -339,11 +339,15 @@ internal sealed class PostgresConversationStore : IConversationStore
 
     public async Task<int> DeleteClosedBeforeAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
     {
-        // Only a terminal row is purged, counted from its close. Every terminal write stamps closed_at; a row
-        // without one compares as NULL and is kept rather than guessed at.
+        // A terminal row is purged counted from its close. Every terminal write stamps closed_at; a row without one
+        // compares as NULL and is kept rather than guessed at. A Resolved row is never closed automatically, so it
+        // is purged once idle for the whole window: its last change (updated_at), or created_at when updated_at is
+        // NULL — the clock the previous purge used, so this never deletes a row it would have kept. Any other state
+        // is live and never purged.
         return await _dataSource.ExecuteAsync(
-            "DELETE FROM conversations WHERE tenant_id = @TenantId AND state = ANY(@TerminalStates) " +
-            "AND closed_at < @Cutoff",
+            "DELETE FROM conversations WHERE tenant_id = @TenantId AND (" +
+            "(state = ANY(@TerminalStates) AND closed_at < @Cutoff) OR " +
+            "(state = @ResolvedState AND COALESCE(updated_at, created_at) < @Cutoff))",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
@@ -351,6 +355,7 @@ internal sealed class PostgresConversationStore : IConversationStore
                 {
                     Value = s_terminalStateValues,
                 });
+                p.Add(new NpgsqlParameter("ResolvedState", NpgsqlDbType.Integer) { Value = (int)ConversationState.Resolved });
                 p.Add(new NpgsqlParameter("Cutoff", NpgsqlDbType.TimestampTz) { Value = cutoff });
             },
             ct);

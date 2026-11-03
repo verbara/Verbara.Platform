@@ -87,9 +87,54 @@ public sealed class PostgresConversationRetentionPurgeTests : IClassFixture<Mess
             .Should().NotBeNull("the purge is tenant-scoped");
     }
 
+    // Review round 2: Resolved never becomes Closed on its own, so it is purged on last activity (updated_at,
+    // falling back to created_at when NULL); every live state stays however idle.
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldPurgeIdleResolvedAndKeepRecentResolvedAndLive_WhenPastCutoff()
+    {
+        var ds = await _fixture.CreateDatabaseAsync();
+        var conversations = new PostgresConversationStore(ds);
+        var messages = new PostgresMessageStore(ds);
+        var idle = await SaveAsync(conversations, ConversationState.Resolved, Now.AddDays(-200), closedAt: null,
+            updatedAt: Now.AddDays(-120));
+        await AddMessageAsync(messages, idle);
+        var legacy = await SaveAsync(conversations, ConversationState.Resolved, Now.AddDays(-200), closedAt: null,
+            updatedAt: null, stampUpdatedAt: false);
+        var recent = await SaveAsync(conversations, ConversationState.Resolved, Now.AddDays(-200), closedAt: null,
+            updatedAt: Now.AddDays(-10));
+        await AddMessageAsync(messages, recent);
+        var live = new List<EntityId>();
+        foreach (var state in new[]
+                 {
+                     ConversationState.Queued, ConversationState.Active, ConversationState.WrapUp,
+                     ConversationState.WaitingForCustomer, ConversationState.Snoozed, ConversationState.Escalated,
+                 })
+        {
+            live.Add(await SaveAsync(conversations, state, Now.AddDays(-200), closedAt: null, updatedAt: Now.AddDays(-120)));
+        }
+
+        var otherTenant = await SaveAsync(conversations, ConversationState.Resolved, Now.AddDays(-200), closedAt: null,
+            tenant: OtherTenant, updatedAt: Now.AddDays(-120));
+
+        var deleted = await conversations.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+        var orphans = await messages.DeleteOrphanedAsync(Tenant, CancellationToken.None);
+
+        deleted.Should().Be(2, "the idle Resolved row and the one with no updated_at (created long ago) are purged");
+        orphans.Should().Be(1, "the idle Resolved conversation's message goes with it");
+        (await conversations.GetByIdAsync(Tenant, idle, CancellationToken.None)).Should().BeNull();
+        (await conversations.GetByIdAsync(Tenant, legacy, CancellationToken.None)).Should().BeNull();
+        (await conversations.GetByIdAsync(Tenant, recent, CancellationToken.None)).Should().NotBeNull();
+        (await CountMessagesAsync(ds, recent)).Should().Be(1);
+        foreach (var id in live)
+            (await conversations.GetByIdAsync(Tenant, id, CancellationToken.None))
+                .Should().NotBeNull("a live conversation is never purged, however idle");
+        (await conversations.GetByIdAsync(OtherTenant, otherTenant, CancellationToken.None))
+            .Should().NotBeNull("the purge is tenant-scoped");
+    }
+
     private static async Task<EntityId> SaveAsync(
         PostgresConversationStore store, ConversationState state, DateTimeOffset createdAt, DateTimeOffset? closedAt,
-        TenantId? tenant = null)
+        TenantId? tenant = null, DateTimeOffset? updatedAt = null, bool stampUpdatedAt = true)
     {
         var conversation = new Conversation
         {
@@ -100,7 +145,7 @@ public sealed class PostgresConversationRetentionPurgeTests : IClassFixture<Mess
             State = state,
             CreatedAt = createdAt,
             ClosedAt = closedAt,
-            UpdatedAt = closedAt ?? createdAt,
+            UpdatedAt = stampUpdatedAt ? updatedAt ?? closedAt ?? createdAt : null,
         };
         await store.SaveAsync(conversation, CancellationToken.None);
         return conversation.ConversationId;
