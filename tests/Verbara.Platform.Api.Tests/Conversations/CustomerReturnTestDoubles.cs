@@ -228,6 +228,12 @@ internal sealed class HookedConversationStore(IConversationStore inner) : IConve
 {
     private int _returnCloseWins;
 
+    // The in-memory store hands every caller the same Conversation instance, so the unconditional close below (the
+    // control's lost-update stand-in) must not mutate it from two deliveries at once: its metadata Dictionary is not
+    // thread-safe (PR #533 CI, 667238f8: "Operations that change non-concurrent collections must have exclusive
+    // access" in ProcessAsync_ShouldDoubleClose_WhenTheReturnCloseIsUnconditional_Control). Both deliveries still win.
+    private readonly Lock _unconditionalCloseLock = new();
+
     /// <summary>Runs after <c>FindActiveByContactAsync</c> read a row (or none), before the caller sees it.</summary>
     public Func<Conversation?, Task>? AfterFindActive { get; set; }
 
@@ -274,9 +280,13 @@ internal sealed class HookedConversationStore(IConversationStore inner) : IConve
             won = row is not null;
             if (row is not null)
             {
-                row.State = ConversationState.Closed;
-                row.ClosedAt = now;
-                row.SetMetadata(ConversationCloseReasons.MetadataKey, ConversationCloseReasons.CustomerReturned);
+                lock (_unconditionalCloseLock)
+                {
+                    row.State = ConversationState.Closed;
+                    row.ClosedAt = now;
+                    row.SetMetadata(ConversationCloseReasons.MetadataKey, ConversationCloseReasons.CustomerReturned);
+                }
+
                 await inner.SaveAsync(row, ct);
             }
         }
