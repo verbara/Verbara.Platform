@@ -69,11 +69,21 @@ public sealed class WebChatCustomerReturnEndpointTests : IDisposable
         var frame = JsonSerializer.Serialize(new WebChatClientMessage("message", "volví"), WebChatJsonContext.Default.WebChatClientMessage);
         await socket.SendAsync(Encoding.UTF8.GetBytes(frame), WebSocketMessageType.Text, true, timeout.Token);
 
-        var store = _factory.Services.GetRequiredService<IConversationStore>();
+        // The socket's read loop commits the close first, then announces it (event, counter, audit), then opens the
+        // new conversation and stores the message: wait for the last of these, not for the close alone, or a loaded
+        // run asserts before the announcer's audit write.
+        var messages = _factory.Services.GetRequiredService<IMessageStore>();
+        var sessions = _factory.Services.GetRequiredService<WebChatSessionManager>();
         var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
-        while ((await store.GetByIdAsync(Tenant, resolvedId, CancellationToken.None))!.State != ConversationState.Closed
-               && DateTimeOffset.UtcNow < deadline)
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var current = (await sessions.GetSessionAsync(sessionId))!.ConversationId;
+            if (current != resolvedId
+                && ClosedAuditCount(resolvedId) == 1
+                && (await messages.GetConversationMessagesAsync(Tenant, current, 100, 0, CancellationToken.None)).Count > 0)
+                break;
             await Task.Delay(20); // fence-allow: LOOP-DRIVER — poll pacing until the socket's read loop has processed the frame
+        }
 
         await AssertReturnedOnceAsync(sessionId, resolvedId, closedEvents);
     }
@@ -109,6 +119,14 @@ public sealed class WebChatCustomerReturnEndpointTests : IDisposable
 
     private readonly List<IDisposable> _subscriptions = [];
 
+    private int ClosedAuditCount(EntityId resolvedId) =>
+        _factory.Audit.ReceivedCalls().Count(c =>
+            c.GetMethodInfo().Name == nameof(IAuditService.RecordAsync)
+            && c.GetArguments() is { Length: > 5 } args
+            && args[2] is "conversation.closed"
+            && args[4] is CustomerReturnAnnouncer.ActorId
+            && args[6] is string target && target == resolvedId.Value);
+
     private async Task AssertReturnedOnceAsync(string sessionId, EntityId resolvedId, List<ConversationStateChangedEvent> closedEvents)
     {
         var store = _factory.Services.GetRequiredService<IConversationStore>();
@@ -121,13 +139,7 @@ public sealed class WebChatCustomerReturnEndpointTests : IDisposable
             closedEvents.Should().ContainSingle().Which.OldState.Should().Be(nameof(ConversationState.Resolved));
         }
 
-        _factory.Audit.ReceivedCalls().Count(c =>
-                c.GetMethodInfo().Name == nameof(IAuditService.RecordAsync)
-                && c.GetArguments() is { Length: > 5 } args
-                && args[2] is "conversation.closed"
-                && args[4] is CustomerReturnAnnouncer.ActorId
-                && args[6] is string target && target == resolvedId.Value)
-            .Should().Be(1);
+        ClosedAuditCount(resolvedId).Should().Be(1);
 
         var messages = _factory.Services.GetRequiredService<IMessageStore>();
         (await messages.GetConversationMessagesAsync(Tenant, resolvedId, 100, 0, CancellationToken.None))
