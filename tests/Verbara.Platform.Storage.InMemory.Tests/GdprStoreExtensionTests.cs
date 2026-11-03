@@ -46,18 +46,57 @@ public sealed class GdprStoreExtensionTests
         remaining.Should().BeEmpty();
     }
 
+    // retention-purges-closed-conversations-only: the retention clock is the close, and only a
+    // terminal conversation (Closed, Abandoned, Merged, Spam) is ever purged.
+
+    private static readonly DateTimeOffset PurgeNow = new(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Cutoff = PurgeNow.AddDays(-90);
+
     [Fact]
-    public async Task DeleteOlderThanAsync_ShouldDeleteOldConversations()
+    public async Task DeleteClosedBeforeAsync_ShouldKeepConversation_WhenOpenAndCreatedBeforeCutoff()
     {
         var store = new InMemoryConversationStore();
-        var old = MakeConversation(Contact1, createdAt: DateTimeOffset.UtcNow.AddDays(-90));
-        var recent = MakeConversation(Contact1, createdAt: DateTimeOffset.UtcNow);
-        await store.SaveAsync(old, CancellationToken.None);
-        await store.SaveAsync(recent, CancellationToken.None);
+        var open = MakeConversation(Contact1, createdAt: PurgeNow.AddDays(-200));
+        await store.SaveAsync(open, CancellationToken.None);
 
-        var deleted = await store.DeleteOlderThanAsync(Tenant, DateTimeOffset.UtcNow.AddDays(-30), CancellationToken.None);
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(0, "an open conversation is never purged, however old");
+        (await store.GetByIdAsync(Tenant, open.ConversationId, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldKeepConversation_WhenCreatedBeforeCutoffButClosedAfter()
+    {
+        var store = new InMemoryConversationStore();
+        var closedRecently = MakeClosed(ConversationState.Closed, createdAt: PurgeNow.AddDays(-200), closedAt: PurgeNow.AddDays(-10));
+        await store.SaveAsync(closedRecently, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(0, "the retention window counts from the close, not the creation");
+        (await store.GetByIdAsync(Tenant, closedRecently.ConversationId, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Theory]
+    [InlineData(ConversationState.Closed)]
+    [InlineData(ConversationState.Abandoned)]
+    [InlineData(ConversationState.Merged)]
+    [InlineData(ConversationState.Spam)]
+    public async Task DeleteClosedBeforeAsync_ShouldDeleteConversation_WhenTerminalAndClosedBeforeCutoff(ConversationState state)
+    {
+        var store = new InMemoryConversationStore();
+        var old = MakeClosed(state, createdAt: PurgeNow.AddDays(-200), closedAt: PurgeNow.AddDays(-120));
+        var otherTenant = MakeClosed(state, createdAt: PurgeNow.AddDays(-200), closedAt: PurgeNow.AddDays(-120), tenant: new TenantId("tenant-2"));
+        await store.SaveAsync(old, CancellationToken.None);
+        await store.SaveAsync(otherTenant, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
 
         deleted.Should().Be(1);
+        (await store.GetByIdAsync(Tenant, old.ConversationId, CancellationToken.None)).Should().BeNull();
+        (await store.GetByIdAsync(otherTenant.TenantId, otherTenant.ConversationId, CancellationToken.None))
+            .Should().NotBeNull("the purge is tenant-scoped");
     }
 
     // ─── MessageStore ──────────────────────────────────────────────────────────
@@ -143,6 +182,18 @@ public sealed class GdprStoreExtensionTests
         Channel = ChannelType.WebChat,
         State = ConversationState.Active,
         CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
+    };
+
+    private static Conversation MakeClosed(
+        ConversationState state, DateTimeOffset createdAt, DateTimeOffset closedAt, TenantId? tenant = null) => new()
+    {
+        ConversationId = EntityId.New(),
+        TenantId = tenant ?? Tenant,
+        ContactId = Contact1,
+        Channel = ChannelType.WebChat,
+        State = state,
+        CreatedAt = createdAt,
+        ClosedAt = closedAt,
     };
 
     private static Message MakeMessage(EntityId conversationId) => new()

@@ -76,7 +76,7 @@ public sealed class LicenseAgentRetentionPurgeTests : IClassFixture<AgentIdentit
         var now = Start.AddDays(60);
         var tid = new TenantId("c1");
         await new PostgresAuditStore(h.Ds).DeleteOlderThanAsync(tid, now.AddDays(-30), CancellationToken.None);
-        await new PostgresConversationStore(h.Ds).DeleteOlderThanAsync(tid, now.AddDays(-30), CancellationToken.None);
+        await new PostgresConversationStore(h.Ds).DeleteClosedBeforeAsync(tid, now.AddDays(-30), CancellationToken.None);
         await new PostgresAuthEventStore(h.Ds).DeleteOlderThanAsync("c1", now.AddDays(-30), CancellationToken.None);
         await new PostgresUsageRecordStore(h.Ds).DeleteOlderThanAsync(tid, now.AddDays(-30), CancellationToken.None);
         (await h.Purge.PurgeAsync(TimeZoneInfo.Utc, now, CancellationToken.None)).Should().Be(0);

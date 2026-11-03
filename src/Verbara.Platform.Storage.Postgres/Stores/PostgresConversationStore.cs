@@ -9,6 +9,12 @@ namespace Verbara.Platform.Storage.Postgres.Stores;
 
 internal sealed class PostgresConversationStore : IConversationStore
 {
+    // Bound as integer[] for the retention purge; derived from the state machine so the two cannot drift.
+    private static readonly int[] s_terminalStateValues = Enum.GetValues<ConversationState>()
+        .Where(ConversationStateMachine.IsTerminal)
+        .Select(state => (int)state)
+        .ToArray();
+
     private readonly NpgsqlDataSource _dataSource;
 
     public PostgresConversationStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
@@ -331,14 +337,21 @@ internal sealed class PostgresConversationStore : IConversationStore
         return deleted > 0;
     }
 
-    public async Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
+    public async Task<int> DeleteClosedBeforeAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
     {
+        // Only a terminal row is purged, counted from its close. Every terminal write stamps closed_at; a row
+        // without one compares as NULL and is kept rather than guessed at.
         return await _dataSource.ExecuteAsync(
-            "DELETE FROM conversations WHERE tenant_id = @TenantId AND created_at < @Cutoff",
+            "DELETE FROM conversations WHERE tenant_id = @TenantId AND state = ANY(@TerminalStates) " +
+            "AND closed_at < @Cutoff",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", tenantId.Value));
-                p.Add(new NpgsqlParameter("Cutoff", cutoff));
+                p.Add(new NpgsqlParameter("TerminalStates", NpgsqlDbType.Array | NpgsqlDbType.Integer)
+                {
+                    Value = s_terminalStateValues,
+                });
+                p.Add(new NpgsqlParameter("Cutoff", NpgsqlDbType.TimestampTz) { Value = cutoff });
             },
             ct);
     }

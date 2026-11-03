@@ -33,6 +33,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `GET /api/v1/auth/sessions` and `DELETE /api/v1/auth/sessions/{tokenId}`, which receive the `refresh_token` cookie and
   so mark and protect the current session. Their behavior is unchanged; removal planned in **v2.40.0**. (#520)
 
+### Fixed
+
+- **The conversation retention purge no longer deletes open conversations.** It deleted every conversation created
+  before the tenant's retention window, so a conversation still queued, with an agent or waiting for the customer was
+  deleted with its messages once it was old enough. Now only a closed, abandoned, merged or spam conversation is
+  deleted, and the window counts from when it closed: one opened long ago but closed last week is kept for the full
+  window. Messages of a deleted conversation are still removed in the same pass.
+
 ## [2.37.0] - 2026-11-01
 
 Minor release. A graceful stop now exits 0: Platform moves to Verbara.Sdk.Pro `2.24.1-pro`, and CI and the Post-release smoke

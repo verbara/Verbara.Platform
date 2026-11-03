@@ -132,10 +132,12 @@ internal sealed class InMemoryConversationStore : IConversationStore
             tenantId, conversationId, () => _items.TryRemove((tenantId, conversationId), out _)));
     }
 
-    public Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
+    public Task<int> DeleteClosedBeforeAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
     {
         var toDelete = _items
-            .Where(kv => kv.Key.Item1 == tenantId && kv.Value.CreatedAt < cutoff)
+            .Where(kv => kv.Key.Item1 == tenantId
+                && ConversationStateMachine.IsTerminal(kv.Value.State)
+                && kv.Value.ClosedAt < cutoff)
             .Select(kv => kv.Key)
             .ToList();
 
