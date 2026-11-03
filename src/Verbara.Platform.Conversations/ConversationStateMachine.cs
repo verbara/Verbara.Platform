@@ -41,7 +41,7 @@ public static class ConversationStateMachine
         (ConversationState.Snoozed, ConversationState.Queued),
 
         // From Resolved
-        (ConversationState.Resolved, ConversationState.Active),  // customer replies
+        (ConversationState.Resolved, ConversationState.Active),  // no caller; see D8 (conversations-close-after-inactivity)
         (ConversationState.Resolved, ConversationState.Closed),
 
         // From Escalated
@@ -71,6 +71,28 @@ public static class ConversationStateMachine
         [ConversationState.Active, ConversationState.OnHold, ConversationState.Consulting];
 
     public static bool IsFailoverWork(ConversationState state) => FailoverWorkStates.Contains(state);
+
+    /// <summary>
+    /// conversations-close-after-inactivity (design D3): the states the inactivity close may close directly —
+    /// agent-held (<c>Active</c>, <c>OnHold</c>, <c>Consulting</c>) and parked (<c>WaitingForCustomer</c>,
+    /// <c>Resolved</c>). A separate set, not an edge of the transition table: <see cref="CanTransition"/> still refuses
+    /// <c>Active/OnHold/Consulting → Closed</c>, so the generic closes (supervisor force-close, automation, the bot's
+    /// <c>EndConversation</c>) keep refusing an agent-held conversation. Read only by the inactivity close (the
+    /// switchboard and the stores' conditional close), never by <see cref="Conversation.TransitionTo"/>.
+    /// </summary>
+    public static readonly IReadOnlyList<ConversationState> InactivityCloseStates =
+    [
+        ConversationState.Active,
+        ConversationState.OnHold,
+        ConversationState.Consulting,
+        ConversationState.WaitingForCustomer,
+        ConversationState.Resolved,
+    ];
+
+    private static readonly HashSet<ConversationState> s_inactivityCloseStates = [.. InactivityCloseStates];
+
+    /// <summary>Whether the inactivity close may close a conversation read in <paramref name="from"/> (design D3).</summary>
+    public static bool CanCloseForInactivity(ConversationState from) => s_inactivityCloseStates.Contains(from);
 
     public static bool CanTransition(ConversationState from, ConversationState to) =>
         s_validTransitions.Contains((from, to));

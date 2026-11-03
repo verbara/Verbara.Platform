@@ -139,6 +139,40 @@ public sealed class WebhookInboundProcessorTests : IDisposable
         await _lifecycle.Received(1).CloseAsync(Tenant, conversation.ConversationId, Arg.Any<CancellationToken>());
     }
 
+    // conversations-close-after-inactivity task 1.3 (design D3): the bot's EndConversation over the REAL
+    // DefaultConversationLifecycleService on a Bot-owned Active row gets the outcome main gives — the lifecycle's
+    // EnsureTransition throws (Active -> Closed is not an edge), the per-message catch contains it, ProcessAsync
+    // returns — and the row stays Active with no -> Closed event. An added edge would close it unannounced.
+    [Fact]
+    public async Task ProcessAsync_ShouldLeaveTheRowActiveWithNoClosedEvent_WhenBotEndsAnActiveConversationWithTheRealLifecycle()
+    {
+        var conversation = await SeedBotOwnedAsync();
+        conversation.State = ConversationState.Active;
+        await _conversations.SaveAsync(conversation, CancellationToken.None);
+        _bot.ProcessMessageAsync(conversation.ConversationId, Tenant, Arg.Any<MessageEnvelope>(), Arg.Any<CancellationToken>())
+            .Returns(new BotResponse(BotResponseAction.EndConversation, null, null, null, null));
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var closed = new List<ConversationStateChangedEvent>();
+        using var subscription = _eventBus.Events.Subscribe(e =>
+        {
+            if (e is ConversationStateChangedEvent { NewState: "Closed" } changed)
+                closed.Add(changed);
+        });
+        var sut = new WebhookInboundProcessor(_pipeline, _router, _switchboard, _conversationService, _conversations,
+            _contacts, _bot, new DefaultConversationLifecycleService(_conversations, clock), _statuses, _eventBus,
+            NullLogger<WebhookInboundProcessor>.Instance);
+
+        var act = () => sut.ProcessAsync(
+            Tenant, ChannelType.WhatsApp, Delivery(Inbound("wamid.end-active", conversation)), CancellationToken.None);
+
+        await act.Should().NotThrowAsync("the dispatch failure is contained to the message, as on main");
+        var after = await _conversations.GetByIdAsync(Tenant, conversation.ConversationId, CancellationToken.None);
+        after!.State.Should().Be(ConversationState.Active);
+        after.ClosedAt.Should().BeNull();
+        closed.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task ProcessAsync_ShouldContinueWithNextMessage_WhenBotThrowsForOne()
     {
