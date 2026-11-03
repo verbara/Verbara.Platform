@@ -53,4 +53,33 @@ public sealed class InMemoryContactStoreTests
         var result = await store.GetByIdAsync(Tenant, contact.ContactId, CancellationToken.None);
         result.Should().BeNull();
     }
+
+    [Fact]
+    public async Task AddIdentityAsync_ShouldReturnNullAndInsertNothing_WhenContactDoesNotExist()
+    {
+        var store = new InMemoryContactStore();
+        var id = EntityId.New();
+
+        var result = await store.AddIdentityAsync(
+            Tenant, id, [new ChannelAddress(ChannelType.WhatsApp, "15550000002")], "Alice",
+            DateTimeOffset.UtcNow, "system", CancellationToken.None);
+
+        result.Should().BeNull();
+        (await store.GetByIdAsync(Tenant, id, CancellationToken.None)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AddIdentityAsync_ShouldKeepName_WhenContactAlreadyHasOne()
+    {
+        var store = new InMemoryContactStore();
+        var contact = MakeContact(Tenant);
+        contact.LastName = "Doe";
+        await store.SaveAsync(contact, CancellationToken.None);
+
+        var result = await store.AddIdentityAsync(
+            Tenant, contact.ContactId, [], "Alice", DateTimeOffset.UtcNow, "system", CancellationToken.None);
+
+        result!.FirstName.Should().BeNull();
+        result.LastName.Should().Be("Doe");
+    }
 }

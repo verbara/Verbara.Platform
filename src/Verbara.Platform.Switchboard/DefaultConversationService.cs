@@ -135,7 +135,13 @@ internal sealed partial class DefaultConversationService : IConversationService
 
         if (address is null)
         {
-            LogNoAddress(_logger, conversation.ConversationId.Value, conversation.Channel.ToString());
+            // Nowhere to send it (on WhatsApp also a contact known only by a business-scoped user id, which the
+            // Cloud API cannot send to yet): the message fails through the same write a provider refusal takes, so
+            // the sender sees it did not go out instead of a Pending that never resolves.
+            await _messageStore.UpdateDeliveryStatusAsync(
+                tenantId, message.MessageId, MessageDeliveryStatus.Failed, null, ct).ConfigureAwait(false);
+            message.DeliveryStatus = MessageDeliveryStatus.Failed;
+            LogNoAddress(_logger, conversation.ConversationId.Value, conversation.Channel.ToString(), message.MessageId.Value);
             return;
         }
 
@@ -211,6 +217,6 @@ internal sealed partial class DefaultConversationService : IConversationService
     [LoggerMessage(Level = LogLevel.Information, Message = "Send refused for conversation {ConversationId}: {RefusalCode}; nothing reached the provider.")]
     private static partial void LogSendRefused(ILogger logger, string conversationId, string refusalCode);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "No channel address found for conversation {ConversationId} on channel {Channel}; message persisted but not delivered.")]
-    private static partial void LogNoAddress(ILogger logger, string conversationId, string channel);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "No sendable {Channel} address on the contact of conversation {ConversationId} (none stored, or on WhatsApp only a business-scoped user id); message {MessageId} marked Failed, nothing reached the provider.")]
+    private static partial void LogNoAddress(ILogger logger, string conversationId, string channel, string messageId);
 }

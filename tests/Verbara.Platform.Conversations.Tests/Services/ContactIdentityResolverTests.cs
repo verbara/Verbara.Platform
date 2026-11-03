@@ -117,12 +117,17 @@ public class ContactIdentityResolverTests
         _contactStore.FindByAddressAsync(Tenant, Bsuid, Arg.Any<CancellationToken>()).ReturnsNull();
         _contactStore.FindByAddressAsync(Tenant, Phone, Arg.Any<CancellationToken>()).Returns(phoneOnly);
 
+        var stored = ContactWith(Phone, Bsuid);
+        _contactStore.AddIdentityAsync(Tenant, phoneOnly.ContactId, Arg.Any<IReadOnlyList<ChannelAddress>>(), null, Now,
+            DefaultContactIdentityResolver.SystemActorId, Arg.Any<CancellationToken>()).Returns(stored);
+
         var result = await _sut.ResolveAsync(Tenant, new ContactIdentity(Bsuid, [Phone], null), CancellationToken.None);
 
-        result.Should().BeSameAs(phoneOnly);
-        result.Addresses.Should().BeEquivalentTo([Phone, Bsuid]);
-        result.UpdatedAt.Should().Be(Now);
-        await _contactStore.Received(1).SaveAsync(phoneOnly, Arg.Any<CancellationToken>());
+        result.Should().BeSameAs(stored, "the contact as stored after the targeted write");
+        await _contactStore.Received(1).AddIdentityAsync(Tenant, phoneOnly.ContactId,
+            Arg.Is<IReadOnlyList<ChannelAddress>>(a => a.SequenceEqual(new[] { Bsuid })), null, Now,
+            DefaultContactIdentityResolver.SystemActorId, Arg.Any<CancellationToken>());
+        await _contactStore.DidNotReceive().SaveAsync(Arg.Any<Contact>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -131,11 +136,17 @@ public class ContactIdentityResolverTests
         var bsuidOnly = ContactWith(Bsuid);
         _contactStore.FindByAddressAsync(Tenant, Bsuid, Arg.Any<CancellationToken>()).Returns(bsuidOnly);
 
+        _contactStore.AddIdentityAsync(default, default!, default!, default, default, default!, default)
+            .ReturnsForAnyArgs(ContactWith(Bsuid, Phone));
+
         var result = await _sut.ResolveAsync(Tenant, new ContactIdentity(Bsuid, [Phone], null), CancellationToken.None);
 
         result.Addresses.Should().BeEquivalentTo([Bsuid, Phone]);
         result.FindAddress(ChannelType.WhatsApp).Should().Be(Phone, "outbound stays on the phone");
-        await _contactStore.Received(1).SaveAsync(bsuidOnly, Arg.Any<CancellationToken>());
+        await _contactStore.Received(1).AddIdentityAsync(Tenant, bsuidOnly.ContactId,
+            Arg.Is<IReadOnlyList<ChannelAddress>>(a => a.SequenceEqual(new[] { Phone })), null, Now,
+            DefaultContactIdentityResolver.SystemActorId, Arg.Any<CancellationToken>());
+        await _contactStore.DidNotReceive().SaveAsync(Arg.Any<Contact>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -158,10 +169,18 @@ public class ContactIdentityResolverTests
         var unnamed = ContactWith(Phone);
         _contactStore.FindByAddressAsync(Tenant, Phone, Arg.Any<CancellationToken>()).Returns(unnamed);
 
+        var named = ContactWith(Phone);
+        named.FirstName = "Alice";
+        _contactStore.AddIdentityAsync(default, default!, default!, default, default, default!, default)
+            .ReturnsForAnyArgs(named);
+
         var result = await _sut.ResolveAsync(Tenant, new ContactIdentity(Phone, [], "  Alice  "), CancellationToken.None);
 
         result.FirstName.Should().Be("Alice");
-        await _contactStore.Received(1).SaveAsync(unnamed, Arg.Any<CancellationToken>());
+        await _contactStore.Received(1).AddIdentityAsync(Tenant, unnamed.ContactId,
+            Arg.Is<IReadOnlyList<ChannelAddress>>(a => a.Count == 0), "Alice", Now,
+            DefaultContactIdentityResolver.SystemActorId, Arg.Any<CancellationToken>());
+        await _contactStore.DidNotReceive().SaveAsync(Arg.Any<Contact>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -175,5 +194,27 @@ public class ContactIdentityResolverTests
 
         result.FirstName.Should().BeNull("a name an agent or import set is never overwritten");
         await _contactStore.DidNotReceive().SaveAsync(Arg.Any<Contact>(), Arg.Any<CancellationToken>());
+        await _contactStore.DidNotReceiveWithAnyArgs()
+            .AddIdentityAsync(default, default!, default!, default, default, default!, default);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldCreateFreshContactFromIdentityOnly_WhenFoundContactIsGoneAtWrite()
+    {
+        var stale = ContactWith(Phone);
+        stale.Company = "Acme";
+        _contactStore.FindByAddressAsync(Tenant, Bsuid, Arg.Any<CancellationToken>()).ReturnsNull();
+        _contactStore.FindByAddressAsync(Tenant, Phone, Arg.Any<CancellationToken>()).Returns(stale);
+        _contactStore.AddIdentityAsync(default, default!, default!, default, default, default!, default)
+            .ReturnsForAnyArgs((Contact?)null);
+
+        var result = await _sut.ResolveAsync(Tenant, new ContactIdentity(Bsuid, [Phone], "Sheena"), CancellationToken.None);
+
+        result.ContactId.Should().NotBe(stale.ContactId);
+        result.Company.Should().BeNull("nothing of the erased contact is carried over");
+        result.Addresses.Should().BeEquivalentTo([Bsuid, Phone]);
+        result.FirstName.Should().Be("Sheena");
+        await _contactStore.Received(1).SaveAsync(result, Arg.Any<CancellationToken>());
+        await _contactStore.DidNotReceive().SaveAsync(stale, Arg.Any<CancellationToken>());
     }
 }
