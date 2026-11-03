@@ -150,4 +150,43 @@ public sealed class InMemoryTenantAuthConfigStoreTests
         config.MaxSmsDefault.Should().Be(4);
         config.MaxTotalDefault.Should().Be(12);
     }
+
+    // conversations-close-after-inactivity task 1.4 (design D11): the per-tenant inactivity window override is read
+    // by GetAsync and never written by the whole-row SaveAsync; a test seeds it the way an operator's SQL sets it.
+
+    [Fact]
+    public async Task GetAsync_ShouldReadTheSeededOverride_WhenSeeded()
+    {
+        var store = new InMemoryTenantAuthConfigStore();
+        await store.SaveAsync(new TenantAuthConfig { TenantId = "tenant-1" }, CancellationToken.None);
+        store.SeedInactivityCloseAfterHours("tenant-1", 48);
+
+        (await store.GetAsync("tenant-1", CancellationToken.None))!.InactivityCloseAfterHours.Should().Be(48);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldNotWriteTheOverride_WhenANewRowCarriesOne()
+    {
+        var store = new InMemoryTenantAuthConfigStore();
+
+        await store.SaveAsync(new TenantAuthConfig { TenantId = "tenant-1", InactivityCloseAfterHours = 24 }, CancellationToken.None);
+
+        (await store.GetAsync("tenant-1", CancellationToken.None))!.InactivityCloseAfterHours.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldKeepTheStoredOverride_WhenTheSavedEntityCarriesAnother()
+    {
+        var store = new InMemoryTenantAuthConfigStore();
+        await store.SaveAsync(new TenantAuthConfig { TenantId = "tenant-1" }, CancellationToken.None);
+        store.SeedInactivityCloseAfterHours("tenant-1", 48);
+
+        await store.SaveAsync(
+            new TenantAuthConfig { TenantId = "tenant-1", InactivityCloseAfterHours = 24, PasswordMinLength = 16 },
+            CancellationToken.None);
+
+        var config = await store.GetAsync("tenant-1", CancellationToken.None);
+        config!.InactivityCloseAfterHours.Should().Be(48, "the whole-row save never writes the column (D11)");
+        config.PasswordMinLength.Should().Be(16);
+    }
 }

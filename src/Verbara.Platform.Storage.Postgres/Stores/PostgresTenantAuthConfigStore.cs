@@ -79,13 +79,19 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             "agent_liveness_timeout_seconds, pending_pause_timeout_minutes, work_failover_grace_seconds, " +
             "voice_callback_grace_seconds, " +
             "max_voice_default, max_chat_default, max_email_default, max_sms_default, max_total_default, " +
-            "ip_allowlist_enabled, updated_at " +
+            "ip_allowlist_enabled, updated_at, inactivity_close_after_hours " +
             "FROM tenant_auth_config WHERE tenant_id = @TenantId",
             p => p.Add(new NpgsqlParameter("TenantId", tenantId)),
             TenantAuthConfigRow.Map, ct);
         return row?.ToTenantAuthConfig(this);
     }
 
+    /// <remarks>
+    /// conversations-close-after-inactivity (design D11): neither branch of the upsert names
+    /// <c>inactivity_close_after_hours</c>. A new row gets null (no override) and an existing row keeps the value an
+    /// operator set by SQL, whatever <see cref="TenantAuthConfig.InactivityCloseAfterHours"/> the (possibly cached,
+    /// pre-UPDATE) entity carries.
+    /// </remarks>
     public async Task SaveAsync(TenantAuthConfig config, CancellationToken ct)
     {
         await _dataSource.ExecuteAsync(
@@ -196,6 +202,7 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
         public int max_total_default { get; init; } = 5;
         public bool ip_allowlist_enabled { get; init; }
         public DateTime? updated_at { get; init; }
+        public int? inactivity_close_after_hours { get; init; }
 
         public static TenantAuthConfigRow Map(NpgsqlDataReader r)
         {
@@ -234,6 +241,7 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
                 max_total_default = r.GetInt32("max_total_default"),
                 ip_allowlist_enabled = r.GetBoolean("ip_allowlist_enabled"),
                 updated_at = r.GetDateTimeOrNull("updated_at"),
+                inactivity_close_after_hours = r.GetInt32OrNull("inactivity_close_after_hours"),
             };
         }
 
@@ -273,6 +281,7 @@ internal sealed class PostgresTenantAuthConfigStore : ITenantAuthConfigStore
             MaxTotalDefault = max_total_default,
             IpAllowlistEnabled = ip_allowlist_enabled,
             UpdatedAt = updated_at,
+            InactivityCloseAfterHours = inactivity_close_after_hours,
         };
     }
 }

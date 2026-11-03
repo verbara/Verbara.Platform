@@ -91,6 +91,15 @@ public sealed class TenantAuthConfig
     /// </summary>
     public bool IpAllowlistEnabled { get; set; }
 
+    /// <summary>
+    /// conversations-close-after-inactivity (design D11): the tenant's override of the host inactivity window
+    /// (<c>Conversations:InactivityCloseAfterHours</c>), in hours; <see langword="null"/> means the host default.
+    /// Column <c>tenant_auth_config.inactivity_close_after_hours</c>, set by SQL only: both stores read it in
+    /// <c>GetAsync</c> and <b>neither</b> writes it in <c>SaveAsync</c> — the whole-row save of a cached, pre-UPDATE
+    /// row must not write a stale value over the SQL-set one. No endpoint, DTO field or Web field exposes it.
+    /// </summary>
+    public int? InactivityCloseAfterHours { get; set; }
+
     public DateTimeOffset? UpdatedAt { get; set; }
 
     public bool IsMfaRequiredForRole(string role) =>

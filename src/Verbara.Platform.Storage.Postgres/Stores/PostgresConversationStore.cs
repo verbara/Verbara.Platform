@@ -15,6 +15,16 @@ internal sealed class PostgresConversationStore : IConversationStore
         .Select(state => (int)state)
         .ToArray();
 
+    /// <summary>
+    /// conversations-close-after-inactivity (design D2): which stored messages count as customer-facing activity —
+    /// an <c>Inbound</c> message (direction 0), or an <c>Outbound</c> one (1) not stored <c>Failed</c> (3); a send
+    /// refused before it reached a connector, and every <c>System</c> message, never count. One SQL fragment over a
+    /// <c>messages m</c> alias: migration 026's backfill, the clock reconcile and the upgrade note's dry-run repeat it
+    /// verbatim.
+    /// </summary>
+    internal const string ActivityMessagePredicate =
+        "(m.direction = 0 OR (m.direction = 1 AND m.delivery_status <> 3))";
+
     private readonly NpgsqlDataSource _dataSource;
 
     public PostgresConversationStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
@@ -23,7 +33,7 @@ internal sealed class PostgresConversationStore : IConversationStore
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at " +
             "FROM conversations WHERE tenant_id = @TenantId AND conversation_id = @ConversationId",
             p =>
             {
@@ -78,7 +88,7 @@ internal sealed class PostgresConversationStore : IConversationStore
 
         var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            $"metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            $"metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at " +
             $"FROM conversations WHERE {where} ORDER BY created_at DESC LIMIT @Limit OFFSET @Offset",
             p =>
             {
@@ -96,9 +106,13 @@ internal sealed class PostgresConversationStore : IConversationStore
     // licensed-agent writer's transaction by the overload below (an ownership change and its ledger row).
     private const string SaveSql =
         "INSERT INTO conversations (conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-        "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority) " +
+        "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at) " +
         "VALUES (@ConversationId, @TenantId, @ContactId, @Channel, @State, @OwnerKind, @OwnerId, @CaseId, " +
-        "@Metadata::jsonb, @CreatedAt, @ClosedAt, @UpdatedAt, @CreatedBy, @UpdatedBy, @VoiceLinkedId, @QueuePriority) " +
+        "@Metadata::jsonb, @CreatedAt, @ClosedAt, @UpdatedAt, @CreatedBy, @UpdatedBy, @VoiceLinkedId, @QueuePriority, " +
+        // conversations-close-after-inactivity (design D2): the INSERT starts the clock (the send of a conversation born
+        // with a message, else the creation); the DO UPDATE below never names it, so a whole-row save of a row loaded
+        // before a message arrived cannot roll it back. Only the claim statements move it.
+        "COALESCE(@LastMessageAt, @CreatedAt)) " +
         "ON CONFLICT (tenant_id, conversation_id) DO UPDATE SET " +
         "  state = EXCLUDED.state, owner_kind = EXCLUDED.owner_kind, owner_id = EXCLUDED.owner_id, " +
         "  case_id = EXCLUDED.case_id, metadata = EXCLUDED.metadata, closed_at = EXCLUDED.closed_at, " +
@@ -159,6 +173,7 @@ internal sealed class PostgresConversationStore : IConversationStore
         p.Add(new NpgsqlParameter("UpdatedBy", NpgsqlDbType.Text) { Value = (object?)conversation.UpdatedBy ?? DBNull.Value });
         p.Add(new NpgsqlParameter("VoiceLinkedId", NpgsqlDbType.Text) { Value = (object?)conversation.VoiceLinkedId ?? DBNull.Value });
         p.Add(new NpgsqlParameter("QueuePriority", conversation.QueuePriority));
+        p.Add(new NpgsqlParameter("LastMessageAt", NpgsqlDbType.TimestampTz) { Value = (object?)conversation.LastMessageAt ?? DBNull.Value });
     }
 
     public async Task<bool> TryConditionalCloseWrapUpAsync(
@@ -214,7 +229,7 @@ internal sealed class PostgresConversationStore : IConversationStore
         // Terminal states: Closed = 3, Abandoned = 4 (check ConversationStateMachine)
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at " +
             "FROM conversations " +
             "WHERE tenant_id = @TenantId AND contact_id = @ContactId AND channel = @Channel " +
             "  AND state NOT IN (SELECT unnest(@TerminalStates)) " +
@@ -255,7 +270,7 @@ internal sealed class PostgresConversationStore : IConversationStore
     {
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at " +
             "FROM conversations WHERE tenant_id = @TenantId AND voice_linked_id = @VoiceLinkedId",
             p =>
             {
@@ -273,7 +288,7 @@ internal sealed class PostgresConversationStore : IConversationStore
         // tenant. Used only for failover tenant recovery on hangup (see IConversationStore).
         var row = await _dataSource.QueryFirstOrDefaultAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at " +
             "FROM conversations WHERE voice_linked_id = @VoiceLinkedId ORDER BY created_at DESC",
             p => p.Add(new NpgsqlParameter("VoiceLinkedId", voiceLinkedId)),
             ConversationRow.Map, ct);
@@ -287,7 +302,7 @@ internal sealed class PostgresConversationStore : IConversationStore
         // (the Pro CsatCapture carries no tenant — see IConversationStore).
         var row = await _dataSource.QueryFirstOrDefaultAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at " +
             "FROM conversations WHERE conversation_id = @ConversationId",
             p => p.Add(new NpgsqlParameter("ConversationId", conversationId.Value)),
             ConversationRow.Map, ct);
@@ -298,7 +313,7 @@ internal sealed class PostgresConversationStore : IConversationStore
     {
         var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at " +
             "FROM conversations WHERE tenant_id = @TenantId AND contact_id = @ContactId " +
             "ORDER BY created_at DESC",
             p =>
@@ -370,7 +385,7 @@ internal sealed class PostgresConversationStore : IConversationStore
     {
         var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at " +
             // Only a queue-owned conversation is routable by QueueDistributionWorker; letting
             // ownerless Queued rows into the bounded window would starve the routable ones.
             "FROM conversations WHERE tenant_id = @TenantId AND state = @State " +
@@ -391,7 +406,7 @@ internal sealed class PostgresConversationStore : IConversationStore
     {
         var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at " +
             "FROM conversations WHERE tenant_id = @TenantId AND state = @State " +
             "ORDER BY queue_priority ASC, created_at ASC LIMIT @Limit",
             p =>
@@ -434,7 +449,7 @@ internal sealed class PostgresConversationStore : IConversationStore
         var failoverWorkStates = ConversationStateMachine.FailoverWorkStates.Select(s => (int)s).ToArray();
         var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at " +
             "FROM conversations " +
             "WHERE tenant_id = @TenantId AND owner_kind = @OwnerKind AND owner_id = @AgentId " +
             "  AND state = ANY(@States)",
@@ -457,7 +472,7 @@ internal sealed class PostgresConversationStore : IConversationStore
         // enqueues a callback or escalates, so the set self-bounds.
         var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at " +
             "FROM conversations " +
             "WHERE state = @State AND metadata->>'pendingCallbackEval' = 'true'",
             p =>
@@ -475,7 +490,7 @@ internal sealed class PostgresConversationStore : IConversationStore
         // supervisor stuck-work view so a human can re-arm the rescue or close the call.
         var rows = await _dataSource.QueryListAsync(
             "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
-            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at " +
             "FROM conversations " +
             "WHERE tenant_id = @TenantId AND state = @State AND metadata->>'callbackStuck' = 'true'",
             p =>
@@ -516,6 +531,7 @@ internal sealed class PostgresConversationStore : IConversationStore
         public string? updated_by { get; init; }
         public string? voice_linked_id { get; init; }
         public int queue_priority { get; init; }
+        public DateTime? last_message_at { get; init; }
 
         public static ConversationRow Map(NpgsqlDataReader r) => new()
         {
@@ -535,6 +551,7 @@ internal sealed class PostgresConversationStore : IConversationStore
             updated_by = r.GetStringOrNull("updated_by"),
             voice_linked_id = r.GetStringOrNull("voice_linked_id"),
             queue_priority = r.GetInt32("queue_priority"),
+            last_message_at = r.GetDateTimeOrNull("last_message_at"),
         };
 
         public Conversation ToConversation()
@@ -566,6 +583,7 @@ internal sealed class PostgresConversationStore : IConversationStore
                 UpdatedBy = updated_by,
                 VoiceLinkedId = voice_linked_id,
                 QueuePriority = queue_priority,
+                LastMessageAt = last_message_at,
             };
 
             foreach (var kv in metaDict)

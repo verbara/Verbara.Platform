@@ -861,4 +861,44 @@ public sealed class InMemoryConversationStoreTests
             DeliveryStatus = MessageDeliveryStatus.Delivered,
             CreatedAt = at,
         }, CancellationToken.None);
+
+    // conversations-close-after-inactivity task 1.4 (design D2): the clock starts at the creation (or at the send of a
+    // conversation born with a message) and the whole-row save never rolls it back.
+
+    [Fact]
+    public async Task SaveAsync_ShouldStartTheClockAtCreatedAt_WhenANewConversationHasNoLastMessageAt()
+    {
+        var store = new InMemoryConversationStore();
+        var conv = MakeConversation(Tenant1);
+
+        await store.SaveAsync(conv, CancellationToken.None);
+
+        (await store.GetByIdAsync(Tenant1, conv.ConversationId, CancellationToken.None))!
+            .LastMessageAt.Should().Be(conv.CreatedAt);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldNotRollTheClockBack_WhenAStaleCopyIsSavedWhole()
+    {
+        var store = new InMemoryConversationStore();
+        var conv = MakeConversation(Tenant1);
+        conv.LastMessageAt = conv.CreatedAt.AddHours(5);
+        await store.SaveAsync(conv, CancellationToken.None);
+        var stale = new Conversation
+        {
+            ConversationId = conv.ConversationId,
+            TenantId = conv.TenantId,
+            ContactId = conv.ContactId,
+            Channel = conv.Channel,
+            State = ConversationState.OnHold,
+            CreatedAt = conv.CreatedAt,
+            LastMessageAt = conv.CreatedAt,
+        };
+
+        await store.SaveAsync(stale, CancellationToken.None);
+
+        var stored = await store.GetByIdAsync(Tenant1, conv.ConversationId, CancellationToken.None);
+        stored!.State.Should().Be(ConversationState.OnHold);
+        stored.LastMessageAt.Should().Be(conv.CreatedAt.AddHours(5), "the whole-row save never writes the clock (D2)");
+    }
 }

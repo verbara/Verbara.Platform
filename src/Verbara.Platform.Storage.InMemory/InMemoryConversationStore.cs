@@ -55,7 +55,15 @@ internal sealed class InMemoryConversationStore : IConversationStore
                 return Task.CompletedTask;
         }
 
-        _items[(conversation.TenantId, conversation.ConversationId)] = conversation;
+        // conversations-close-after-inactivity (design D2): the insert starts the clock (the creation, or the send of a
+        // conversation born with a message); an update never writes it, so a stale copy cannot roll it back. Mirrors
+        // SaveSql's INSERT-only COALESCE(@LastMessageAt, @CreatedAt).
+        var key = (conversation.TenantId, conversation.ConversationId);
+        conversation.LastMessageAt = _items.TryGetValue(key, out var stored)
+            ? stored.LastMessageAt
+            : conversation.LastMessageAt ?? conversation.CreatedAt;
+
+        _items[key] = conversation;
         return Task.CompletedTask;
     }
 
