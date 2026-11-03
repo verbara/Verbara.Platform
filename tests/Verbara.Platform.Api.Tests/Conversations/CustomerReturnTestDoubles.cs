@@ -339,6 +339,7 @@ internal sealed class HookedConversationStore(IConversationStore inner) : IConve
     public Task<IReadOnlyList<Conversation>> ListInactiveAsync(TenantId tenantId, IReadOnlyCollection<ConversationState> states, DateTimeOffset cutoff, int limit, CancellationToken ct) => inner.ListInactiveAsync(tenantId, states, cutoff, limit, ct);
     public Task<InactivityCloseOutcome?> TryCloseInactiveAsync(TenantId tenantId, InactivityCloseRequest request, CancellationToken ct) => inner.TryCloseInactiveAsync(tenantId, request, ct);
     public Task<bool> TryClaimForSendAsync(TenantId tenantId, EntityId conversationId, DateTimeOffset now, bool advanceClock, CancellationToken ct) => inner.TryClaimForSendAsync(tenantId, conversationId, now, advanceClock, ct);
+    public Task<int> ReconcileLastMessageAtAsync(TenantId tenantId, CancellationToken ct) => inner.ReconcileLastMessageAtAsync(tenantId, ct);
 }
 
 /// <summary>Forwards every member to the real message store; hooks around the inbound insert.</summary>

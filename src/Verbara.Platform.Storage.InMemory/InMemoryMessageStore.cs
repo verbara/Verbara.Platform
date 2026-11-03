@@ -25,6 +25,19 @@ internal sealed class InMemoryMessageStore : IMessageStore
         }
     }
 
+    /// <summary>
+    /// conversations-close-after-inactivity (design D2): the newest <c>created_at</c> of each of the tenant's
+    /// conversations over its activity messages — an <c>Inbound</c> message, or an <c>Outbound</c> one not stored
+    /// <c>Failed</c> (the Postgres store's <c>ActivityMessagePredicate</c>). Conversations with none are absent.
+    /// </summary>
+    internal Dictionary<EntityId, DateTimeOffset> NewestActivityByConversation(TenantId tenantId) =>
+        _items.Values
+            .Where(m => m.TenantId == tenantId
+                && (m.Direction == MessageDirection.Inbound
+                    || (m.Direction == MessageDirection.Outbound && m.DeliveryStatus != MessageDeliveryStatus.Failed)))
+            .GroupBy(m => m.ConversationId)
+            .ToDictionary(g => g.Key, g => g.Max(m => m.CreatedAt));
+
     public Task SaveAsync(Message message, CancellationToken ct)
     {
         _items[(message.TenantId, message.MessageId)] = message;

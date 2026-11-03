@@ -195,4 +195,14 @@ public interface IConversationStore
     /// </summary>
     Task<bool> TryClaimForSendAsync(
         TenantId tenantId, EntityId conversationId, DateTimeOffset now, bool advanceClock, CancellationToken ct);
+
+    /// <summary>
+    /// The clock reconciliation (design D2): for the tenant's non-terminal digital rows, advances
+    /// <see cref="Conversation.LastMessageAt"/> to the newest stored <b>activity message</b> (an <c>Inbound</c> message, or
+    /// an <c>Outbound</c> one not stored <c>Failed</c>; never a <c>System</c> message) at its <c>created_at</c>, only
+    /// where that is newer than the clock. Monotonic and idempotent: it never moves a clock back, and a second run
+    /// changes nothing. Covers the messages an older binary stored without advancing the clock (a rollback, then a
+    /// re-upgrade). Returns how many rows it advanced.
+    /// </summary>
+    Task<int> ReconcileLastMessageAtAsync(TenantId tenantId, CancellationToken ct);
 }

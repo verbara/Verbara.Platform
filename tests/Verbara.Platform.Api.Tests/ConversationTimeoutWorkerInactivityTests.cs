@@ -320,6 +320,7 @@ public sealed partial class ConversationTimeoutWorkerTests
         private readonly IDisposable _subscription;
         private readonly MeterListener _listener = new();
         private readonly Dictionary<string, long> _counted = new(StringComparer.Ordinal);
+        private readonly List<string> _passCalls = [];
         private int _listInactiveCalls;
         private int _closeAttempts;
 
@@ -343,6 +344,8 @@ public sealed partial class ConversationTimeoutWorkerTests
                 .Returns(c => ListThenHoldAsync(c.ArgAt<TenantId>(0), c.ArgAt<IReadOnlyCollection<ConversationState>>(1), c.ArgAt<DateTimeOffset>(2), c.ArgAt<int>(3), c.ArgAt<CancellationToken>(4)));
             Store.TryCloseInactiveAsync(Arg.Any<TenantId>(), Arg.Any<InactivityCloseRequest>(), Arg.Any<CancellationToken>())
                 .Returns(c => CloseAsync(c.ArgAt<TenantId>(0), c.ArgAt<InactivityCloseRequest>(1), c.ArgAt<CancellationToken>(2)));
+            Store.ReconcileLastMessageAtAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+                .Returns(c => ReconcileAsync(c.ArgAt<TenantId>(0), c.ArgAt<CancellationToken>(1)));
 
             Switchboard = new ConversationSwitchboard(Store, Capacity, Substitute.For<IAgentStore>(), Clock, EventBus, AccountStatus);
 
@@ -414,6 +417,15 @@ public sealed partial class ConversationTimeoutWorkerTests
         /// <summary>Runs after <c>ListInactiveAsync</c> returned and before the worker sees the rows.</summary>
         public Func<Task>? AfterList { get; set; }
 
+        /// <summary>Runs inside <c>ReconcileLastMessageAtAsync</c>, before the real reconcile (2.8: a fault injection).</summary>
+        public Func<TenantId, Task>? BeforeReconcile { get; set; }
+
+        /// <summary>The pass's reconcile and list calls in order, as <c>reconcile:&lt;tenant&gt;</c> / <c>list:&lt;tenant&gt;</c> (2.8).</summary>
+        public IReadOnlyList<string> PassCalls
+        {
+            get { lock (_passCalls) return [.. _passCalls]; }
+        }
+
         /// <summary>The baseline: the close is a load, set <c>Closed</c>, unconditional full-row save.</summary>
         public bool UnconditionalClose { get; init; }
 
@@ -468,12 +480,21 @@ public sealed partial class ConversationTimeoutWorkerTests
             TenantId tenant, IReadOnlyCollection<ConversationState> states, DateTimeOffset cutoff, int limit, CancellationToken ct)
         {
             Interlocked.Increment(ref _listInactiveCalls);
+            lock (_passCalls) _passCalls.Add($"list:{tenant.Value}");
             // Copies, as the Postgres store materializes rows: the in-memory store hands out its live entities, which a
             // concurrent close would mutate under the other worker's feet.
             var rows = (await Inner.ListInactiveAsync(tenant, states, cutoff, limit, ct)).Select(Snapshot).ToList();
             if (AfterList is { } hold)
                 await hold();
             return rows;
+        }
+
+        private async Task<int> ReconcileAsync(TenantId tenant, CancellationToken ct)
+        {
+            lock (_passCalls) _passCalls.Add($"reconcile:{tenant.Value}");
+            if (BeforeReconcile is { } hook)
+                await hook(tenant);
+            return await Inner.ReconcileLastMessageAtAsync(tenant, ct);
         }
 
         private static Conversation Snapshot(Conversation c) => new()

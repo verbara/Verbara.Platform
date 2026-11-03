@@ -644,6 +644,36 @@ internal sealed class PostgresConversationStore : IConversationStore
         return affected == 1;
     }
 
+    /// <summary>
+    /// D2's reconcile, one statement: for each of the tenant's non-terminal, non-voice rows, the newest activity message
+    /// (<see cref="ActivityMessagePredicate"/>, computed per row the way migration 026 backfills, through
+    /// <c>idx_messages_conversation</c>), applied only where it is newer than the clock. The outer WHERE re-checks the
+    /// state and the clock on the row version it updates (READ COMMITTED re-evaluation), and <c>GREATEST</c> keeps the
+    /// write monotonic, so concurrent reconciles, claims and closes never move a clock back or touch a closed row.
+    /// </summary>
+    internal const string ReconcileLastMessageAtSql =
+        "WITH newest AS (" +
+        "  SELECT o.conversation_id, " +
+        "    (SELECT max(m.created_at) FROM messages m " +
+        "     WHERE m.tenant_id = o.tenant_id AND m.conversation_id = o.conversation_id AND " + ActivityMessagePredicate + ") AS at " +
+        "  FROM conversations o " +
+        "  WHERE o.tenant_id = @TenantId AND o.state <> ALL(@TerminalStates) AND o.channel <> @Voice) " +
+        "UPDATE conversations c SET last_message_at = GREATEST(c.last_message_at, newest.at) " +
+        "FROM newest " +
+        "WHERE c.tenant_id = @TenantId AND c.conversation_id = newest.conversation_id " +
+        "  AND newest.at > c.last_message_at AND c.state <> ALL(@TerminalStates)";
+
+    public Task<int> ReconcileLastMessageAtAsync(TenantId tenantId, CancellationToken ct) =>
+        _dataSource.ExecuteAsync(
+            ReconcileLastMessageAtSql,
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("TerminalStates", NpgsqlDbType.Array | NpgsqlDbType.Integer) { Value = s_terminalStateValues });
+                p.Add(new NpgsqlParameter("Voice", NpgsqlDbType.Integer) { Value = (int)ChannelType.Voice });
+            },
+            ct);
+
     private static int[] GetTerminalStateInts()
     {
         var terminalStates = new List<int>();

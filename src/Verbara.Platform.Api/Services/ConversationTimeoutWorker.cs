@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Verbara.Platform.Api.Health;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
@@ -62,6 +63,9 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     // D11: the per-tenant override warnings are logged once per tenant per process (the worker is a singleton).
     private readonly HashSet<string> _invalidWindowWarned = new(StringComparer.Ordinal);
     private readonly HashSet<string> _belowWhatsAppWarned = new(StringComparer.Ordinal);
+
+    // D2: the tenants whose clocks this process has reconciled (once per tenant per process, before the first list).
+    private readonly HashSet<string> _clockReconciled = new(StringComparer.Ordinal);
 
     // When this replica last started an inactivity pass (D4: at most one per InactivityCloseSweepIntervalSeconds).
     private DateTimeOffset? _lastInactivityPassAt;
@@ -228,6 +232,9 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         if (await InactivityWindowAsync(tid, now, ct) is not { } window)
             return;
 
+        if (!await EnsureClockReconciledAsync(tid, ct))
+            return;
+
         var cutoff = now - window;
         var backlogCutoff = cutoff - InactivityBacklogGrace();
 
@@ -267,6 +274,37 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             await AuditInactivityCloseAsync(tid, request, outcome);
             RecordInactivityClose(tid, request, channel, outcome);
         }
+    }
+
+    /// <summary>
+    /// D2: reconciles the tenant's clocks from its stored activity messages once per process, before that tenant's first
+    /// <c>ListInactiveAsync</c>, so messages an older binary stored without advancing the clock (a rollback, then a
+    /// re-upgrade) keep their conversations open. Not a <c>Host.StartAsync</c> step: it runs in the pass, which runs only
+    /// with the switch on, so a start that turns the switch on reconciles. Logs its duration and the rows it advanced
+    /// (the Unknowns input). Returns <see langword="false"/> when it failed: the tenant is not swept this pass (no tenant
+    /// is swept on an unreconciled clock) and the next pass retries.
+    /// </summary>
+    private async Task<bool> EnsureClockReconciledAsync(TenantId tid, CancellationToken ct)
+    {
+        if (_clockReconciled.Contains(tid.Value))
+            return true;
+
+        var started = Stopwatch.GetTimestamp();
+        int advanced;
+        try
+        {
+            advanced = await _conversationStore.ReconcileLastMessageAtAsync(tid, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogInactivityReconcileFailed(tid.Value, ex);
+            return false;
+        }
+
+        var durationMs = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        _clockReconciled.Add(tid.Value);
+        LogInactivityReconciled(tid.Value, advanced, durationMs);
+        return true;
     }
 
     /// <summary>
@@ -791,6 +829,15 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     [LoggerMessage(EventId = 7605, Level = LogLevel.Warning,
         Message = "Inactivity close of conversation {ConversationId} committed but it could not be counted")]
     private partial void LogInactivityCountFailed(string conversationId, Exception ex);
+
+    [LoggerMessage(EventId = 7606, Level = LogLevel.Information,
+        Message = "Inactivity clock reconcile for tenant {TenantId} advanced {RowsAdvanced} rows in {DurationMs} ms")]
+    private partial void LogInactivityReconciled(string tenantId, int rowsAdvanced, long durationMs);
+
+    [LoggerMessage(EventId = 7607, Level = LogLevel.Warning,
+        Message = "Inactivity clock reconcile failed for tenant {TenantId}; its conversations are not swept this pass and " +
+                  "the reconcile is retried on the next one")]
+    private partial void LogInactivityReconcileFailed(string tenantId, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Conversation timeout cycle failed")]
     private partial void LogTimeoutCycleError(Exception ex);

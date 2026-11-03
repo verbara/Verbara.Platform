@@ -379,6 +379,37 @@ internal sealed class InMemoryConversationStore : IConversationStore
         }
     }
 
+    /// <remarks>
+    /// Mirrors the Postgres statement: the newest activity message per conversation (the message store's
+    /// <see cref="InMemoryMessageStore.NewestActivityByConversation"/>), applied under each row's lock to the
+    /// non-terminal, non-voice rows of the tenant whose clock is older. A store built without a message store holds no
+    /// messages, so it has nothing to reconcile.
+    /// </remarks>
+    public Task<int> ReconcileLastMessageAtAsync(TenantId tenantId, CancellationToken ct)
+    {
+        if (_messages is null)
+            return Task.FromResult(0);
+
+        var newest = _messages.NewestActivityByConversation(tenantId);
+        var advanced = 0;
+        foreach (var conv in _items.Values.Where(c => c.TenantId == tenantId && c.Channel != ChannelType.Voice))
+        {
+            if (!newest.TryGetValue(conv.ConversationId, out var at))
+                continue;
+
+            lock (conv)
+            {
+                if (ConversationStateMachine.IsTerminal(conv.State) || conv.LastMessageAt is { } clock && clock >= at)
+                    continue;
+
+                conv.LastMessageAt = at;
+                advanced++;
+            }
+        }
+
+        return Task.FromResult(advanced);
+    }
+
     // GREATEST(COALESCE(last_message_at, '-infinity'), @Now): the clock never moves back.
     private static void AdvanceClock(Conversation conv, DateTimeOffset now)
     {

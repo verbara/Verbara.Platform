@@ -421,5 +421,7 @@ public sealed class CollectReasonNodeHandlerTests
         public Task<bool> TryClaimForSendAsync(
             TenantId tenantId, EntityId conversationId, DateTimeOffset now, bool advanceClock, CancellationToken ct) =>
             Task.FromResult(false);
+
+        public Task<int> ReconcileLastMessageAtAsync(TenantId tenantId, CancellationToken ct) => Task.FromResult(0);
     }
 }

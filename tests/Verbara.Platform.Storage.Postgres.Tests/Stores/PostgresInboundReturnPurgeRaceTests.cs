@@ -175,5 +175,6 @@ public sealed class PostgresInboundReturnPurgeRaceTests : IClassFixture<MessageC
         public Task<InactivityCloseOutcome?> TryCloseInactiveAsync(TenantId tenantId, InactivityCloseRequest request, CancellationToken ct) => inner.TryCloseInactiveAsync(tenantId, request, ct);
         public Task<bool> TryClaimForInboundAsync(TenantId tenantId, EntityId conversationId, DateTimeOffset now, CancellationToken ct) => inner.TryClaimForInboundAsync(tenantId, conversationId, now, ct);
         public Task<bool> TryClaimForSendAsync(TenantId tenantId, EntityId conversationId, DateTimeOffset now, bool advanceClock, CancellationToken ct) => inner.TryClaimForSendAsync(tenantId, conversationId, now, advanceClock, ct);
+        public Task<int> ReconcileLastMessageAtAsync(TenantId tenantId, CancellationToken ct) => inner.ReconcileLastMessageAtAsync(tenantId, ct);
     }
 }
