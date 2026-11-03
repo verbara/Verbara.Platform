@@ -2,6 +2,7 @@ using Verbara.Platform.Api.Health;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Verbara.Platform.Identity;
 using Verbara.Platform.Switchboard;
 using Verbara.Platform.Typification;
 using Verbara.Platform.Typification.Ai;
@@ -53,6 +54,11 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     private readonly ITenantAutonomousDispositionStore? _gateStore;
 
     private readonly ConversationOptions _conversationOptions;
+    private readonly ITenantAuthConfigStore? _tenantAuthConfigStore;
+
+    // D11: the per-tenant override warnings are logged once per tenant per process (the worker is a singleton).
+    private readonly HashSet<string> _invalidWindowWarned = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _belowWhatsAppWarned = new(StringComparer.Ordinal);
 
     // When this replica last started an inactivity pass (D4: at most one per InactivityCloseSweepIntervalSeconds).
     private DateTimeOffset? _lastInactivityPassAt;
@@ -73,7 +79,8 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         IAuditService? auditService = null,
         AutonomousDispositionMetrics? autonomousMetrics = null,
         ITenantAutonomousDispositionStore? gateStore = null,
-        IOptions<ConversationOptions>? conversationOptions = null)
+        IOptions<ConversationOptions>? conversationOptions = null,
+        ITenantAuthConfigStore? tenantAuthConfigStore = null)
     {
         _conversationStore = conversationStore;
         _tenantStore = tenantStore;
@@ -91,6 +98,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         _autonomousMetrics = autonomousMetrics;
         _gateStore = gateStore;
         _conversationOptions = conversationOptions?.Value ?? new ConversationOptions();
+        _tenantAuthConfigStore = tenantAuthConfigStore;
     }
 
     /// <summary>
@@ -212,7 +220,10 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     /// </summary>
     private async Task ProcessInactivityClosesAsync(TenantId tid, DateTimeOffset now, CancellationToken ct)
     {
-        var cutoff = now - TimeSpan.FromHours(_conversationOptions.InactivityCloseAfterHours);
+        if (await InactivityWindowAsync(tid, now, ct) is not { } window)
+            return;
+
+        var cutoff = now - window;
         var backlogCutoff = cutoff - InactivityBacklogGrace();
 
         IReadOnlyList<Conversation> idle;
@@ -250,6 +261,51 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
 
             await AuditInactivityCloseAsync(tid, request, outcome);
         }
+    }
+
+    /// <summary>
+    /// D11: the tenant's effective window. Read once per tenant per pass through <see cref="ITenantAuthConfigStore"/>
+    /// (the cached store in the host, so a SQL change lands within the cache TTL plus one sweep interval plus one tick).
+    /// No row, a null column or no store means the host window; a stored value below 1 h is ignored for the host window
+    /// with a warning naming the tenant, and one below 24 h applies with the WhatsApp warning, each once per tenant per
+    /// process. Returns <see langword="null"/> when this tenant is not swept this pass: its config could not be read
+    /// (closing by the host window could close what a longer tenant window keeps open; the next pass retries), or the
+    /// window reaches back past the calendar's start, so nothing can be idle that long.
+    /// </summary>
+    private async Task<TimeSpan?> InactivityWindowAsync(TenantId tid, DateTimeOffset now, CancellationToken ct)
+    {
+        var hours = _conversationOptions.InactivityCloseAfterHours;
+        if (_tenantAuthConfigStore is not null)
+        {
+            int? stored;
+            try
+            {
+                stored = (await _tenantAuthConfigStore.GetAsync(tid.Value, ct))?.InactivityCloseAfterHours;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogInactivityWindowReadFailed(tid.Value, ex);
+                return null;
+            }
+
+            if (stored is { } tenantHours)
+            {
+                if (tenantHours < ConversationOptionsSetup.MinAfterHours)
+                {
+                    if (_invalidWindowWarned.Add(tid.Value))
+                        LogInactivityWindowInvalid(tid.Value, tenantHours, hours);
+                }
+                else
+                {
+                    hours = tenantHours;
+                    if (tenantHours < ConversationOptionsSetup.WhatsAppWindowHours && _belowWhatsAppWarned.Add(tid.Value))
+                        LogInactivityWindowBelowWhatsApp(tid.Value, tenantHours, ConversationOptionsSetup.WhatsAppWindowHours);
+                }
+            }
+        }
+
+        var reach = now - DateTimeOffset.MinValue - InactivityBacklogGrace();
+        return hours < reach.TotalHours ? TimeSpan.FromHours(hours) : null;
     }
 
     /// <summary>
@@ -673,6 +729,22 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Inactivity close of conversation {ConversationId} committed but its audit entry could not be written")]
     private partial void LogInactivityAuditFailed(string conversationId, Exception ex);
+
+    [LoggerMessage(EventId = 7601, Level = LogLevel.Warning,
+        Message = "Tenant {TenantId} stores an inactivity window of {StoredHours} h, below the 1 h minimum: ignored, the " +
+                  "host window of {HostHours} h applies to its conversations.")]
+    private partial void LogInactivityWindowInvalid(string tenantId, int storedHours, int hostHours);
+
+    [LoggerMessage(EventId = 7602, Level = LogLevel.Warning,
+        Message = "Tenant {TenantId} stores an inactivity window of {Hours} h, below WhatsApp's {WindowHours} h " +
+                  "customer-service window: its WhatsApp conversations will be closed while Meta still lets the agent " +
+                  "reply, so a returning customer's message opens a new conversation in the same WhatsApp thread.")]
+    private partial void LogInactivityWindowBelowWhatsApp(string tenantId, int hours, int windowHours);
+
+    [LoggerMessage(EventId = 7603, Level = LogLevel.Warning,
+        Message = "Inactivity pass could not read the inactivity window of tenant {TenantId}; its conversations are " +
+                  "not swept this pass and are retried on the next one")]
+    private partial void LogInactivityWindowReadFailed(string tenantId, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Conversation timeout cycle failed")]
     private partial void LogTimeoutCycleError(Exception ex);

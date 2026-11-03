@@ -319,7 +319,7 @@ public sealed partial class ConversationTimeoutWorkerTests
             Inner = new InMemoryConversationStore(Messages);
             Clock.UtcNow.Returns(_ => Now);
             TenantStore.GetAllActiveAsync(Arg.Any<CancellationToken>())
-                .Returns(new[] { new Tenant { TenantId = TestTenantId, Name = "Tenant", Status = TenantStatus.Active } });
+                .Returns(_ => Tenants.Select(id => new Tenant { TenantId = id, Name = id, Status = TenantStatus.Active }).ToArray());
             AccountStatus.GetActiveUserIdsAsync(Arg.Any<TenantId>(), Arg.Any<IReadOnlyCollection<EntityId>>(), Arg.Any<CancellationToken>())
                 .Returns(call => Task.FromResult<IReadOnlySet<EntityId>>(new HashSet<EntityId>(call.Arg<IReadOnlyCollection<EntityId>>())));
 
@@ -345,6 +345,15 @@ public sealed partial class ConversationTimeoutWorkerTests
         }
 
         public TenantId Tenant { get; } = new(TestTenantId);
+
+        /// <summary>The active tenants the worker sweeps, in order (2.6 adds a second one).</summary>
+        public List<string> Tenants { get; } = [TestTenantId];
+
+        /// <summary>The tenant-auth-config store the worker reads the per-tenant window from (2.6, D11); none by default.</summary>
+        public Verbara.Platform.Identity.ITenantAuthConfigStore? TenantAuthConfig { get; set; }
+
+        public Microsoft.Extensions.Logging.ILogger<ConversationTimeoutWorker> Logger { get; set; } =
+            NullLogger<ConversationTimeoutWorker>.Instance;
         public DateTimeOffset Now { get; set; } = new(2026, 11, 3, 12, 0, 0, TimeSpan.Zero);
         public InMemoryMessageStore Messages { get; } = new();
         public InMemoryConversationStore Inner { get; }
@@ -386,17 +395,19 @@ public sealed partial class ConversationTimeoutWorkerTests
         public ConversationTimeoutWorker CreateWorker() => new(
             Store, TenantStore, Switchboard, EventBus, Clock, new ServiceHeartbeat(),
             Microsoft.Extensions.Options.Options.Create(Distribution),
-            NullLogger<ConversationTimeoutWorker>.Instance,
+            Logger,
             auditService: Audit,
-            conversationOptions: Microsoft.Extensions.Options.Options.Create(Options));
+            conversationOptions: Microsoft.Extensions.Options.Options.Create(Options),
+            tenantAuthConfigStore: TenantAuthConfig);
 
         public async Task<Conversation> SeedAsync(
-            ConversationState state, TimeSpan idle, ChannelType channel = ChannelType.WebChat, bool withClock = true)
+            ConversationState state, TimeSpan idle, ChannelType channel = ChannelType.WebChat, bool withClock = true,
+            TenantId? tenant = null)
         {
             var conv = new Conversation
             {
                 ConversationId = EntityId.New(),
-                TenantId = Tenant,
+                TenantId = tenant ?? Tenant,
                 ContactId = EntityId.New(),
                 Channel = channel,
                 Owner = state is ConversationState.Queued
@@ -412,7 +423,7 @@ public sealed partial class ConversationTimeoutWorkerTests
         }
 
         public async Task<Conversation> GetAsync(Conversation conv) =>
-            await Inner.GetByIdAsync(Tenant, conv.ConversationId, CancellationToken.None)
+            await Inner.GetByIdAsync(conv.TenantId, conv.ConversationId, CancellationToken.None)
             ?? throw new InvalidOperationException("seeded conversation vanished");
 
         private async Task<IReadOnlyList<Conversation>> ListThenHoldAsync(
