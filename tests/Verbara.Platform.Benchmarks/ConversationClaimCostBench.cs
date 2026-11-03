@@ -21,7 +21,7 @@
 //   recorded and raised to the operator, and does not by itself stop the change. A result inside the prediction is
 //   recorded and changes nothing.
 //
-// CONTROL: built with -p:ClaimCostControl=true (B only), the conversation store is wrapped so every claim UPDATE runs
+// CONTROL: built with CLAIM_COST_CONTROL=true in the environment (B only), the conversation store is wrapped so every claim UPDATE runs
 // twice (ClaimCostControlStore.cs); the run must show the added bytes per op.
 //
 // Environment: CLAIM_COST_PG = a connection string to the Live-DB container's "postgres" database. GlobalSetup drops
@@ -185,7 +185,7 @@ public class ConversationClaimCostBench
     }
 }
 
-/// <summary>The control hook: a no-op unless the project is built with <c>-p:ClaimCostControl=true</c>.</summary>
+/// <summary>The control hook: a no-op unless the project is built with <c>CLAIM_COST_CONTROL=true</c> in the environment.</summary>
 internal static partial class ClaimCostControl
 {
     public static void Apply(IServiceCollection services) => ApplyCore(services);

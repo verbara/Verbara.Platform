@@ -1,4 +1,4 @@
-// conversations-close-after-inactivity task 2.9, negative control (B only, -p:ClaimCostControl=true): the conversation
+// conversations-close-after-inactivity task 2.9, negative control (B only, CLAIM_COST_CONTROL=true in the environment): the conversation
 // store is wrapped so every claim UPDATE (inbound claim, send claim) runs twice. A bench that shows no added bytes per
 // op with this wrapper cannot see the claim. Every other member forwards the inner store's task unchanged (no
 // allocation of its own), so the added bytes are the second claim's (plus one async state machine per claim).

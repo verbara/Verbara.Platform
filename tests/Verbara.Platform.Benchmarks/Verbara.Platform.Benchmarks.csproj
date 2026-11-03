@@ -29,8 +29,10 @@
     <IsAotCompatible>false</IsAotCompatible>
   </PropertyGroup>
 
-  <!-- conversations-close-after-inactivity task 2.9: the claim-cost negative control (ClaimCostControlStore.cs). -->
-  <PropertyGroup Condition="'$(ClaimCostControl)' == 'true'">
+  <!-- conversations-close-after-inactivity task 2.9: the claim-cost negative control (ClaimCostControlStore.cs).
+       Read from the environment (MSBuild exposes it as a property) because BenchmarkDotNet rebuilds this project
+       in a child build that never sees a -p on the command line. -->
+  <PropertyGroup Condition="'$(CLAIM_COST_CONTROL)' == 'true'">
     <DefineConstants>$(DefineConstants);CLAIM_COST_CONTROL</DefineConstants>
   </PropertyGroup>
 
