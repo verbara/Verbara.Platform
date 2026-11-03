@@ -322,7 +322,9 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
 
         foreach (var conv in queued)
         {
-            if ((now - conv.CreatedAt).TotalSeconds <= _options.DefaultQueueTimeoutSeconds)
+            // D10: count from when the conversation last entered the queue (`_queuedAt`), falling back on its
+            // creation for a row queued before the key existed. An expired offer keeps the key.
+            if ((now - ConversationQueueClock.EnteredQueueAt(conv)).TotalSeconds <= _options.DefaultQueueTimeoutSeconds)
                 continue;
 
             conv.TransitionTo(ConversationState.Abandoned, now);

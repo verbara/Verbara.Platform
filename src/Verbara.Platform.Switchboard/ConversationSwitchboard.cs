@@ -61,6 +61,8 @@ public sealed partial class ConversationSwitchboard : IConversationSwitchboard
         var owner = ConversationOwner.ForQueue(queueId);
         conversation.Owner = owner;
         conversation.UpdatedAt = _clock.UtcNow;
+        // D10: the queue timeout counts from this save, the one that puts the conversation in the queue.
+        ConversationQueueClock.Stamp(conversation, conversation.UpdatedAt.Value);
 
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
         _eventBus.Publish(new ConversationStateChangedEvent(
@@ -225,6 +227,8 @@ public sealed partial class ConversationSwitchboard : IConversationSwitchboard
         conversation.Owner = owner;
         conversation.QueuePriority = queuePriority;
         conversation.UpdatedAt = _clock.UtcNow;
+        // D10: a transfer to a queue and the failover re-queue restart the queue wait; an expired offer does not.
+        ConversationQueueClock.Stamp(conversation, conversation.UpdatedAt.Value);
 
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
         _eventBus.Publish(new ConversationStateChangedEvent(
