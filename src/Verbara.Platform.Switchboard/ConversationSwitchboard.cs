@@ -436,6 +436,63 @@ public sealed partial class ConversationSwitchboard : IConversationSwitchboard
         return new OwnershipResult(true, conversation.Owner, conversation.State, null);
     }
 
+    public async Task<InactivityCloseOutcome?> CloseForInactivityAsync(
+        TenantId tenantId, InactivityCloseRequest request, ChannelType channel, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // D3: the scoped check, never the transition table (it has no agent-held → Closed edge) and never
+        // Conversation.TransitionTo. Voice is the voice bridge's. Refused without writing anything.
+        if (channel == ChannelType.Voice || !ConversationStateMachine.CanCloseForInactivity(request.ReadState))
+            return null;
+
+        // D4: decided on the state, owner and clock the pass READ — never on a fresh read, which would close a
+        // conversation transferred (or written to) since. A lost update means someone else changed it: no-op.
+        var outcome = await _store.TryCloseInactiveAsync(tenantId, request, ct).ConfigureAwait(false);
+        if (outcome is null)
+        {
+            LogInactivityCloseLost(_logger, request.ConversationId.Value, request.ReadState);
+            return null;
+        }
+
+        // D5: only the winner gets here, so the unit is released once across replicas.
+        await ReleaseAfterSystemCloseAsync(tenantId, request.ConversationId, request.ReadState, request.ReadOwner, channel)
+            .ConfigureAwait(false);
+
+        _eventBus.Publish(new ConversationStateChangedEvent(
+            tenantId.Value, request.ConversationId.Value, request.ReadState.ToString(), nameof(ConversationState.Closed)));
+        return outcome;
+    }
+
+    // D5, reusable by release-capacity-on-merge-and-spam: after a system close that this caller WON, releases the read
+    // owner's unit when the read state was agent-held (Active, OnHold, Consulting) and the owner an agent. Parked states
+    // (WaitingForCustomer, Resolved) hold none. Runs with CancellationToken.None (the close is committed); a failed
+    // release is logged and never undoes the close — the restart reconcile recounts.
+    private async Task ReleaseAfterSystemCloseAsync(
+        TenantId tenantId, EntityId conversationId, ConversationState readState, ConversationOwner? readOwner, ChannelType channel)
+    {
+        if (readState is not (ConversationState.Active or ConversationState.OnHold or ConversationState.Consulting)
+            || readOwner is not { Kind: ConversationOwnerKind.Agent, OwnerId: { } ownerId })
+        {
+            return;
+        }
+
+        try
+        {
+            await _capacity.ReleaseAsync(tenantId, ownerId, channel, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogSystemCloseReleaseFailed(_logger, conversationId.Value, ownerId.Value, ex.Message);
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Inactivity close of conversation {ConversationId} lost the conditional update (read as {State}); nothing changed or released.")]
+    private static partial void LogInactivityCloseLost(ILogger logger, string conversationId, ConversationState state);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "System close of conversation {ConversationId} committed but releasing agent {AgentId}'s capacity failed: {Error}")]
+    private static partial void LogSystemCloseReleaseFailed(ILogger logger, string conversationId, string agentId, string error);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Wrap-up of conversation {ConversationId} lost the conditional update (read as {State}); nothing changed or released.")]
     private static partial void LogWrapUpRaceLost(ILogger logger, string conversationId, ConversationState state);
 
