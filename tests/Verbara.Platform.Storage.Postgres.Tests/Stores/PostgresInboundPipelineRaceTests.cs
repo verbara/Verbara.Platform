@@ -30,7 +30,7 @@ public sealed class PostgresInboundPipelineRaceTests : IClassFixture<MessageCorr
         var lifecycle = new CreateBarrierLifecycle(
             new DefaultConversationLifecycleService(conversationStore, new SystemClock()), parties: 2);
         var pipeline = new InboundMessagePipeline(
-            new PostgresMessageStore(ds), new FixedContactResolver(Tenant), conversationStore, lifecycle);
+            new PostgresMessageStore(ds), new FixedContactResolver(Tenant), conversationStore, lifecycle, new SystemClock());
         var inbound = new InboundMessage(
             From: new ChannelAddress(ChannelType.WhatsApp, "+573001112233"),
             Content: new MessageEnvelope([new TextBlock("hola")]),

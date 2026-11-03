@@ -20,8 +20,9 @@ namespace Verbara.Platform.Api.Services;
 /// </para>
 /// <para>
 /// <b>Side effects run once, and never fail the delivery.</b> A message the store already held
-/// (<see cref="PipelineResult.IsDuplicate"/>) has no side effect at all: no event, no routing, no queue
-/// assignment, no bot turn. For a new message, a failure of its side effects is logged and the rest of the batch
+/// (<see cref="PipelineResult.IsDuplicate"/>) has no side effect but one: no event, no routing, no queue
+/// assignment, no bot turn; only a return close it won (<see cref="PipelineResult.ClosedOnReturnId"/>, the lost-insert
+/// branch of conversations-close-after-inactivity D8) is announced. For a new message, a failure of its side effects is logged and the rest of the batch
 /// carries on — retrying the delivery could not repair it, because the retry is a duplicate.
 /// </para>
 /// <para>
@@ -43,6 +44,7 @@ internal sealed partial class WebhookInboundProcessor
     private readonly IConversationLifecycleService _lifecycleService;
     private readonly DeliveryStatusHandler _deliveryStatusHandler;
     private readonly PlatformEventBus _eventBus;
+    private readonly CustomerReturnAnnouncer _returnAnnouncer;
     private readonly ILogger<WebhookInboundProcessor> _logger;
 
     public WebhookInboundProcessor(
@@ -56,6 +58,7 @@ internal sealed partial class WebhookInboundProcessor
         IConversationLifecycleService lifecycleService,
         DeliveryStatusHandler deliveryStatusHandler,
         PlatformEventBus eventBus,
+        CustomerReturnAnnouncer returnAnnouncer,
         ILogger<WebhookInboundProcessor> logger)
     {
         _pipeline = pipeline;
@@ -68,6 +71,7 @@ internal sealed partial class WebhookInboundProcessor
         _lifecycleService = lifecycleService;
         _deliveryStatusHandler = deliveryStatusHandler;
         _eventBus = eventBus;
+        _returnAnnouncer = returnAnnouncer;
         _logger = logger;
     }
 
@@ -78,9 +82,24 @@ internal sealed partial class WebhookInboundProcessor
 
         foreach (var inbound in result.Messages)
         {
-            var stored = await _pipeline.ProcessAsync(inbound, tenantId, channel, ct).ConfigureAwait(false);
+            // A failure after a won return close is announced before it propagates (audit round 4, F1).
+            var stored = await _returnAnnouncer.ProcessAsync(_pipeline, inbound, tenantId, channel, ct).ConfigureAwait(false);
             if (stored.IsDuplicate)
             {
+                // D8: a duplicate's only side effect is the return close it won (the lost-insert branch). Contained like
+                // any other side effect (audit round 4, P3): an announcer fault is logged, never a non-2xx.
+                if (stored.ClosedOnReturnId is { } closedOnReturn)
+                {
+                    try
+                    {
+                        await _returnAnnouncer.AnnounceAsync(tenantId, closedOnReturn).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        LogDispatchFailed(ex, tenantId.Value, closedOnReturn.Value, stored.MessageId.Value);
+                    }
+                }
+
                 LogDuplicateSkipped(tenantId.Value, stored.MessageId.Value);
                 continue;
             }
@@ -102,6 +121,10 @@ internal sealed partial class WebhookInboundProcessor
     private async Task DispatchAsync(
         TenantId tenantId, ChannelType channel, InboundMessage inbound, PipelineResult stored, CancellationToken ct)
     {
+        // D8: the Resolved conversation this message closed is announced before the new conversation is.
+        if (stored.ClosedOnReturnId is { } closedOnReturn)
+            await _returnAnnouncer.AnnounceAsync(tenantId, closedOnReturn).ConfigureAwait(false);
+
         // SSE events for real-time UI updates.
         if (stored.IsNewConversation)
         {

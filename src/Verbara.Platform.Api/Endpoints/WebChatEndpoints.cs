@@ -233,7 +233,7 @@ internal static partial class WebChatEndpoints
                         Guid.NewGuid().ToString("N"),
                         clock.UtcNow);
 
-                    var pipelineResult = await pipeline.ProcessAsync(inbound, session.TenantId, ChannelType.WebChat, ct);
+                    var pipelineResult = await inboundRouter.ProcessInboundAsync(pipeline, inbound, session.TenantId, ct);
                     await inboundRouter.RouteFirstInboundAsync(
                         sessionId, session.TenantId, pipelineResult, inbound.Content, ct);
                 }
@@ -281,7 +281,7 @@ internal static partial class WebChatEndpoints
             Guid.NewGuid().ToString("N"),
             clock.UtcNow);
 
-        var pipelineResult = await pipeline.ProcessAsync(inbound, session.TenantId, ChannelType.WebChat, ct);
+        var pipelineResult = await inboundRouter.ProcessInboundAsync(pipeline, inbound, session.TenantId, ct);
         await inboundRouter.RouteFirstInboundAsync(
             sessionId, session.TenantId, pipelineResult, inbound.Content, ct);
 

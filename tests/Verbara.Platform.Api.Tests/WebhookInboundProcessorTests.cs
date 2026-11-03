@@ -53,7 +53,11 @@ public sealed class WebhookInboundProcessorTests : IDisposable
 
     private WebhookInboundProcessor CreateSut() =>
         new(_pipeline, _router, _switchboard, _conversationService, _conversations, _contacts, _bot, _lifecycle,
-            _statuses, _eventBus, NullLogger<WebhookInboundProcessor>.Instance);
+            _statuses, _eventBus, Announcer(), NullLogger<WebhookInboundProcessor>.Instance);
+
+    private CustomerReturnAnnouncer Announcer() =>
+        new(_eventBus, Substitute.For<Verbara.Platform.Audit.IAuditService>(), new ConversationCloseMetrics(),
+            NullLogger<CustomerReturnAnnouncer>.Instance);
 
     private async Task<Conversation> SeedBotOwnedAsync()
     {
@@ -161,7 +165,7 @@ public sealed class WebhookInboundProcessorTests : IDisposable
         });
         var sut = new WebhookInboundProcessor(_pipeline, _router, _switchboard, _conversationService, _conversations,
             _contacts, _bot, new DefaultConversationLifecycleService(_conversations, clock), _statuses, _eventBus,
-            NullLogger<WebhookInboundProcessor>.Instance);
+            Announcer(), NullLogger<WebhookInboundProcessor>.Instance);
 
         var act = () => sut.ProcessAsync(
             Tenant, ChannelType.WhatsApp, Delivery(Inbound("wamid.end-active", conversation)), CancellationToken.None);

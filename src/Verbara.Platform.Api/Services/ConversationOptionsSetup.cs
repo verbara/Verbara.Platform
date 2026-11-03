@@ -54,6 +54,7 @@ internal static class ConversationOptionsSetup
     {
         services.AddConversationOptionsBinding();
         services.AddSingleton<ConversationCloseMetrics>();
+        services.AddSingleton<CustomerReturnAnnouncer>();
         return services;
     }
 

@@ -13,4 +13,10 @@ public sealed class PipelineContext
     public Message? PersistedMessage { get; set; }
     public bool IsDuplicate { get; set; }
     public bool IsNewConversation { get; set; }
+
+    /// <summary>
+    /// The <c>Resolved</c> conversation this delivery closed with <c>customer-returned</c> (design D8); set by
+    /// <see cref="ConversationResolutionStep"/> only when its close won.
+    /// </summary>
+    public EntityId? ClosedOnReturnId { get; set; }
 }
