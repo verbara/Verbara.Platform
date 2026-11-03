@@ -146,6 +146,37 @@ public sealed class GdprStoreExtensionTests
         (await store.GetByIdAsync(Tenant, recent.ConversationId, CancellationToken.None)).Should().NotBeNull();
     }
 
+    // Review round 4 (operator decision 2026-11-03): Resolved counts as terminal for the purge, and its clock is
+    // closed_at when set, else updated_at (else created_at). closed_at is NULL on Resolved rows today; once row C4
+    // closes them it is the clock that wins, whatever updated_at says.
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldKeepConversation_WhenResolvedClosedAfterCutoffThoughUpdatedBefore()
+    {
+        var store = new InMemoryConversationStore();
+        var closedRecently = MakeResolved(
+            createdAt: PurgeNow.AddDays(-200), updatedAt: PurgeNow.AddDays(-120), closedAt: PurgeNow.AddDays(-10));
+        await store.SaveAsync(closedRecently, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(0, "a Resolved conversation's clock is closed_at when set, and it closed inside the window");
+        (await store.GetByIdAsync(Tenant, closedRecently.ConversationId, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldDeleteConversation_WhenResolvedClosedBeforeCutoffThoughUpdatedAfter()
+    {
+        var store = new InMemoryConversationStore();
+        var closedLongAgo = MakeResolved(
+            createdAt: PurgeNow.AddDays(-200), updatedAt: PurgeNow.AddDays(-10), closedAt: PurgeNow.AddDays(-120));
+        await store.SaveAsync(closedLongAgo, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(1, "a Resolved conversation's clock is closed_at when set, and it closed before the window");
+    }
+
     [Theory]
     [InlineData(ConversationState.Queued)]
     [InlineData(ConversationState.Active)]
@@ -285,7 +316,7 @@ public sealed class GdprStoreExtensionTests
     };
 
     private static Conversation MakeResolved(
-        DateTimeOffset createdAt, DateTimeOffset? updatedAt, TenantId? tenant = null) => new()
+        DateTimeOffset createdAt, DateTimeOffset? updatedAt, TenantId? tenant = null, DateTimeOffset? closedAt = null) => new()
     {
         ConversationId = EntityId.New(),
         TenantId = tenant ?? Tenant,
@@ -294,6 +325,7 @@ public sealed class GdprStoreExtensionTests
         State = ConversationState.Resolved,
         CreatedAt = createdAt,
         UpdatedAt = updatedAt,
+        ClosedAt = closedAt,
     };
 
     private static Conversation MakeClosed(

@@ -40,7 +40,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   deleted with its messages once it was old enough. Now a closed, abandoned, merged or spam conversation is deleted
   once it closed before the window, so one opened long ago but closed last week is kept for the full window. A
   resolved conversation, which is never closed on its own, is deleted once it has had no change and no new message for
-  the whole window, so a customer reply to a resolved conversation keeps it.
+  the whole window (counted from its close instead, when one is recorded), so a customer reply to a resolved
+  conversation keeps it.
   A conversation in any other state is never deleted. Messages of a deleted conversation are still removed in the
   same pass.
 

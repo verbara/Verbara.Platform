@@ -340,16 +340,17 @@ internal sealed class PostgresConversationStore : IConversationStore
     public async Task<int> DeleteClosedBeforeAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
     {
         // A terminal row is purged counted from its close. Every terminal write stamps closed_at; a row without one
-        // compares as NULL and is kept rather than guessed at. A Resolved row is never closed automatically, so it
-        // is purged once idle for the whole window: its last change (updated_at), or created_at when updated_at is
-        // NULL — the clock the previous purge used, so this never deletes a row it would have kept — and no message
-        // at or after the cutoff, because a customer reply is appended to messages without touching the row (the
-        // probe is a range seek on idx_messages_conversation (tenant_id, conversation_id, created_at)). Any other
-        // state is live and never purged.
+        // compares as NULL and is kept rather than guessed at. Resolved also counts as terminal for the purge
+        // (operator decision 2026-11-03); its clock is closed_at when set, else its last change (updated_at), else
+        // created_at when updated_at is NULL — the clock the previous purge used, so this never deletes a row it would
+        // have kept. Resolved rows carry closed_at NULL today (nothing closes them on its own). A Resolved row also
+        // needs no message at or after the cutoff, because a customer reply is appended to messages without touching
+        // the row (the probe is a range seek on idx_messages_conversation (tenant_id, conversation_id, created_at)).
+        // Any other state is live and never purged.
         return await _dataSource.ExecuteAsync(
             "DELETE FROM conversations c WHERE c.tenant_id = @TenantId AND (" +
             "(c.state = ANY(@TerminalStates) AND c.closed_at < @Cutoff) OR " +
-            "(c.state = @ResolvedState AND COALESCE(c.updated_at, c.created_at) < @Cutoff " +
+            "(c.state = @ResolvedState AND COALESCE(c.closed_at, c.updated_at, c.created_at) < @Cutoff " +
             "AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.tenant_id = c.tenant_id " +
             "AND m.conversation_id = c.conversation_id AND m.created_at >= @Cutoff)))",
             p =>

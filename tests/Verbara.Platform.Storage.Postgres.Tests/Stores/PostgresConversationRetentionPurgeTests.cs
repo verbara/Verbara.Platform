@@ -161,6 +161,31 @@ public sealed class PostgresConversationRetentionPurgeTests : IClassFixture<Mess
         (await conversations.GetByIdAsync(Tenant, idle, CancellationToken.None)).Should().BeNull();
     }
 
+    // Review round 4 (operator decision 2026-11-03): a Resolved row's clock is closed_at when set, else updated_at
+    // (else created_at). Resolved rows carry closed_at NULL today; once they are closed automatically it wins.
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldCountResolvedFromClosedAt_WhenClosedAtIsSet()
+    {
+        var ds = await _fixture.CreateDatabaseAsync();
+        var conversations = new PostgresConversationStore(ds);
+        var messages = new PostgresMessageStore(ds);
+        var closedRecently = await SaveAsync(conversations, ConversationState.Resolved, Now.AddDays(-200),
+            closedAt: Now.AddDays(-10), updatedAt: Now.AddDays(-120));
+        var closedLongAgo = await SaveAsync(conversations, ConversationState.Resolved, Now.AddDays(-200),
+            closedAt: Now.AddDays(-120), updatedAt: Now.AddDays(-10));
+        await AddMessageAsync(messages, closedLongAgo, Now.AddDays(-150));
+
+        var deleted = await conversations.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+        var orphans = await messages.DeleteOrphanedAsync(Tenant, CancellationToken.None);
+
+        deleted.Should().Be(1, "only the Resolved row whose closed_at is before the cutoff is purged");
+        orphans.Should().Be(1, "the purged conversation's message goes with it");
+        (await conversations.GetByIdAsync(Tenant, closedRecently, CancellationToken.None))
+            .Should().NotBeNull("closed_at inside the window keeps it, though updated_at is old");
+        (await conversations.GetByIdAsync(Tenant, closedLongAgo, CancellationToken.None))
+            .Should().BeNull("closed_at before the window purges it, though updated_at is recent");
+    }
+
     private static async Task<EntityId> SaveAsync(
         PostgresConversationStore store, ConversationState state, DateTimeOffset createdAt, DateTimeOffset? closedAt,
         TenantId? tenant = null, DateTimeOffset? updatedAt = null, bool stampUpdatedAt = true)
