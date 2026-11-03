@@ -46,18 +46,188 @@ public sealed class GdprStoreExtensionTests
         remaining.Should().BeEmpty();
     }
 
+    // retention-purges-closed-conversations-only: the retention clock is the close, and only a
+    // terminal conversation (Closed, Abandoned, Merged, Spam) is ever purged.
+
+    private static readonly DateTimeOffset PurgeNow = new(2026, 11, 2, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Cutoff = PurgeNow.AddDays(-90);
+
     [Fact]
-    public async Task DeleteOlderThanAsync_ShouldDeleteOldConversations()
+    public async Task DeleteClosedBeforeAsync_ShouldKeepConversation_WhenOpenAndCreatedBeforeCutoff()
     {
         var store = new InMemoryConversationStore();
-        var old = MakeConversation(Contact1, createdAt: DateTimeOffset.UtcNow.AddDays(-90));
-        var recent = MakeConversation(Contact1, createdAt: DateTimeOffset.UtcNow);
-        await store.SaveAsync(old, CancellationToken.None);
-        await store.SaveAsync(recent, CancellationToken.None);
+        var open = MakeConversation(Contact1, createdAt: PurgeNow.AddDays(-200));
+        await store.SaveAsync(open, CancellationToken.None);
 
-        var deleted = await store.DeleteOlderThanAsync(Tenant, DateTimeOffset.UtcNow.AddDays(-30), CancellationToken.None);
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(0, "an open conversation is never purged, however old");
+        (await store.GetByIdAsync(Tenant, open.ConversationId, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldKeepConversation_WhenCreatedBeforeCutoffButClosedAfter()
+    {
+        var store = new InMemoryConversationStore();
+        var closedRecently = MakeClosed(ConversationState.Closed, createdAt: PurgeNow.AddDays(-200), closedAt: PurgeNow.AddDays(-10));
+        await store.SaveAsync(closedRecently, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(0, "the retention window counts from the close, not the creation");
+        (await store.GetByIdAsync(Tenant, closedRecently.ConversationId, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Theory]
+    [InlineData(ConversationState.Closed)]
+    [InlineData(ConversationState.Abandoned)]
+    [InlineData(ConversationState.Merged)]
+    [InlineData(ConversationState.Spam)]
+    public async Task DeleteClosedBeforeAsync_ShouldDeleteConversation_WhenTerminalAndClosedBeforeCutoff(ConversationState state)
+    {
+        var store = new InMemoryConversationStore();
+        var old = MakeClosed(state, createdAt: PurgeNow.AddDays(-200), closedAt: PurgeNow.AddDays(-120));
+        var otherTenant = MakeClosed(state, createdAt: PurgeNow.AddDays(-200), closedAt: PurgeNow.AddDays(-120), tenant: new TenantId("tenant-2"));
+        await store.SaveAsync(old, CancellationToken.None);
+        await store.SaveAsync(otherTenant, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
 
         deleted.Should().Be(1);
+        (await store.GetByIdAsync(Tenant, old.ConversationId, CancellationToken.None)).Should().BeNull();
+        (await store.GetByIdAsync(otherTenant.TenantId, otherTenant.ConversationId, CancellationToken.None))
+            .Should().NotBeNull("the purge is tenant-scoped");
+    }
+
+    // Review round 2: nothing moves Resolved to Closed automatically, so a Resolved conversation is purged once it
+    // has been idle (last change, falling back to creation) for the whole window — the old created_at purge
+    // deleted these rows and the terminal-only filter would have kept them forever.
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldDeleteConversation_WhenResolvedAndIdleSinceBeforeCutoff()
+    {
+        var store = new InMemoryConversationStore();
+        var idle = MakeResolved(createdAt: PurgeNow.AddDays(-200), updatedAt: PurgeNow.AddDays(-120));
+        var otherTenant = MakeResolved(
+            createdAt: PurgeNow.AddDays(-200), updatedAt: PurgeNow.AddDays(-120), tenant: new TenantId("tenant-2"));
+        await store.SaveAsync(idle, CancellationToken.None);
+        await store.SaveAsync(otherTenant, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(1, "a Resolved conversation idle for the whole window is purged");
+        (await store.GetByIdAsync(Tenant, idle.ConversationId, CancellationToken.None)).Should().BeNull();
+        (await store.GetByIdAsync(otherTenant.TenantId, otherTenant.ConversationId, CancellationToken.None))
+            .Should().NotBeNull("the purge is tenant-scoped");
+    }
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldDeleteConversation_WhenResolvedWithoutUpdatedAtAndCreatedBeforeCutoff()
+    {
+        var store = new InMemoryConversationStore();
+        var legacy = MakeResolved(createdAt: PurgeNow.AddDays(-200), updatedAt: null);
+        await store.SaveAsync(legacy, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(1, "without a last-change stamp the creation date is the last known activity");
+    }
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldKeepConversation_WhenResolvedAndUpdatedAfterCutoff()
+    {
+        var store = new InMemoryConversationStore();
+        var recent = MakeResolved(createdAt: PurgeNow.AddDays(-200), updatedAt: PurgeNow.AddDays(-10));
+        await store.SaveAsync(recent, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(0, "a Resolved conversation touched inside the window is kept");
+        (await store.GetByIdAsync(Tenant, recent.ConversationId, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    // Review round 4 (operator decision 2026-11-03): Resolved counts as terminal for the purge, and its clock is
+    // closed_at when set, else updated_at (else created_at). closed_at is NULL on Resolved rows today; once row C4
+    // closes them it is the clock that wins, whatever updated_at says.
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldKeepConversation_WhenResolvedClosedAfterCutoffThoughUpdatedBefore()
+    {
+        var store = new InMemoryConversationStore();
+        var closedRecently = MakeResolved(
+            createdAt: PurgeNow.AddDays(-200), updatedAt: PurgeNow.AddDays(-120), closedAt: PurgeNow.AddDays(-10));
+        await store.SaveAsync(closedRecently, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(0, "a Resolved conversation's clock is closed_at when set, and it closed inside the window");
+        (await store.GetByIdAsync(Tenant, closedRecently.ConversationId, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldDeleteConversation_WhenResolvedClosedBeforeCutoffThoughUpdatedAfter()
+    {
+        var store = new InMemoryConversationStore();
+        var closedLongAgo = MakeResolved(
+            createdAt: PurgeNow.AddDays(-200), updatedAt: PurgeNow.AddDays(-10), closedAt: PurgeNow.AddDays(-120));
+        await store.SaveAsync(closedLongAgo, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(1, "a Resolved conversation's clock is closed_at when set, and it closed before the window");
+    }
+
+    [Theory]
+    [InlineData(ConversationState.Queued)]
+    [InlineData(ConversationState.Active)]
+    [InlineData(ConversationState.WrapUp)]
+    [InlineData(ConversationState.WaitingForCustomer)]
+    [InlineData(ConversationState.Snoozed)]
+    [InlineData(ConversationState.Escalated)]
+    public async Task DeleteClosedBeforeAsync_ShouldKeepConversation_WhenLiveAndIdleSinceBeforeCutoff(ConversationState state)
+    {
+        var store = new InMemoryConversationStore();
+        var live = MakeResolved(createdAt: PurgeNow.AddDays(-200), updatedAt: PurgeNow.AddDays(-120));
+        live.State = state;
+        await store.SaveAsync(live, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(0, "a live conversation is never purged, however idle");
+    }
+
+    // Review round 3: a customer reply to a Resolved conversation is appended as a message without touching the
+    // conversation row, so its last change stays old. A message inside the window is activity too.
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldKeepConversation_WhenResolvedIdleButMessagedAfterCutoff()
+    {
+        var messages = new InMemoryMessageStore();
+        var store = new InMemoryConversationStore(messages);
+        var replied = MakeResolved(createdAt: PurgeNow.AddDays(-200), updatedAt: PurgeNow.AddDays(-120));
+        await store.SaveAsync(replied, CancellationToken.None);
+        await messages.SaveAsync(MakeMessage(replied.ConversationId, PurgeNow.AddDays(-5)), CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(0, "a message inside the window is recent activity, though the row itself is old");
+        (await store.GetByIdAsync(Tenant, replied.ConversationId, CancellationToken.None)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task DeleteClosedBeforeAsync_ShouldDeleteConversation_WhenResolvedIdleAndMessagedOnlyBeforeCutoff()
+    {
+        var messages = new InMemoryMessageStore();
+        var store = new InMemoryConversationStore(messages);
+        var idle = MakeResolved(createdAt: PurgeNow.AddDays(-200), updatedAt: PurgeNow.AddDays(-120));
+        var otherTenantRecent = MakeMessage(idle.ConversationId, PurgeNow.AddDays(-5), new TenantId("tenant-2"));
+        await store.SaveAsync(idle, CancellationToken.None);
+        await messages.SaveAsync(MakeMessage(idle.ConversationId, PurgeNow.AddDays(-150)), CancellationToken.None);
+        await messages.SaveAsync(otherTenantRecent, CancellationToken.None);
+
+        var deleted = await store.DeleteClosedBeforeAsync(Tenant, Cutoff, CancellationToken.None);
+
+        deleted.Should().Be(1, "only messages of the same tenant from inside the window keep a Resolved conversation");
     }
 
     // ─── MessageStore ──────────────────────────────────────────────────────────
@@ -145,16 +315,41 @@ public sealed class GdprStoreExtensionTests
         CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
     };
 
-    private static Message MakeMessage(EntityId conversationId) => new()
+    private static Conversation MakeResolved(
+        DateTimeOffset createdAt, DateTimeOffset? updatedAt, TenantId? tenant = null, DateTimeOffset? closedAt = null) => new()
+    {
+        ConversationId = EntityId.New(),
+        TenantId = tenant ?? Tenant,
+        ContactId = Contact1,
+        Channel = ChannelType.WebChat,
+        State = ConversationState.Resolved,
+        CreatedAt = createdAt,
+        UpdatedAt = updatedAt,
+        ClosedAt = closedAt,
+    };
+
+    private static Conversation MakeClosed(
+        ConversationState state, DateTimeOffset createdAt, DateTimeOffset closedAt, TenantId? tenant = null) => new()
+    {
+        ConversationId = EntityId.New(),
+        TenantId = tenant ?? Tenant,
+        ContactId = Contact1,
+        Channel = ChannelType.WebChat,
+        State = state,
+        CreatedAt = createdAt,
+        ClosedAt = closedAt,
+    };
+
+    private static Message MakeMessage(EntityId conversationId, DateTimeOffset? createdAt = null, TenantId? tenant = null) => new()
     {
         MessageId = EntityId.New(),
         ConversationId = conversationId,
-        TenantId = Tenant,
+        TenantId = tenant ?? Tenant,
         Direction = MessageDirection.Inbound,
         Channel = ChannelType.WebChat,
         Content = new MessageEnvelope([new TextBlock("test")]),
         DeliveryStatus = MessageDeliveryStatus.Sent,
-        CreatedAt = DateTimeOffset.UtcNow,
+        CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
     };
 
     private static AuthEvent MakeAuthEvent(string userId, DateTimeOffset? createdAt = null) => new()

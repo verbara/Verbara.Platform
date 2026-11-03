@@ -57,8 +57,17 @@ public interface IConversationStore
     /// </summary>
     Task<bool> DeleteIfNoMessagesAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct);
 
-    /// <summary>Deletes conversations older than cutoff and returns the count deleted (retention policy).</summary>
-    Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct);
+    /// <summary>
+    /// Retention purge: deletes the tenant's conversations in a terminal state (Closed, Abandoned, Merged, Spam —
+    /// <see cref="ConversationStateMachine.IsTerminal"/>) whose <see cref="Conversation.ClosedAt"/> is before
+    /// <paramref name="cutoff"/>, plus the <see cref="ConversationState.Resolved"/> ones, which count as terminal for the
+    /// purge: their clock is <see cref="Conversation.ClosedAt"/> when set, else the last change
+    /// (<see cref="Conversation.UpdatedAt"/>, else <see cref="Conversation.CreatedAt"/>), and they also need no message at
+    /// or after the cutoff, since nothing closes a Resolved conversation on its own and a customer reply is stored as
+    /// a message without touching the conversation — and returns the count deleted. A live conversation (any other state) is
+    /// never deleted, however old. Messages are not touched here — the caller removes the orphans after.
+    /// </summary>
+    Task<int> DeleteClosedBeforeAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct);
 
     /// <summary>Returns conversations in Queued state ordered by CreatedAt ASC (FIFO).</summary>
     Task<IReadOnlyList<Conversation>> ListQueuedAsync(TenantId tenantId, int limit, CancellationToken ct);

@@ -129,7 +129,7 @@ internal sealed partial class RetentionPurgeService : BackgroundService
             if (policy.ConversationRetentionDays.HasValue)
             {
                 var cutoff = now.AddDays(-policy.ConversationRetentionDays.Value);
-                var convDeleted = await _conversationStore.DeleteOlderThanAsync(tid, cutoff, ct);
+                var convDeleted = await _conversationStore.DeleteClosedBeforeAsync(tid, cutoff, ct);
                 if (convDeleted > 0)
                     entitiesDeleted["conversations"] = convDeleted;
 

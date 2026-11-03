@@ -132,10 +132,25 @@ internal sealed class InMemoryConversationStore : IConversationStore
             tenantId, conversationId, () => _items.TryRemove((tenantId, conversationId), out _)));
     }
 
-    public Task<int> DeleteOlderThanAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
+    // Mirrors the Postgres purge filter: a terminal row counts from its close; a Resolved row (terminal for the purge)
+    // from its close when set, else its last change, else its creation, and only with no message at or after the
+    // cutoff (a customer reply lands in the message store, not on the row); any other state is live and never past
+    // retention. A store built without a message store holds no messages, so the message condition holds trivially.
+    private bool IsPastRetention(Conversation conversation, DateTimeOffset cutoff)
+    {
+        if (ConversationStateMachine.IsTerminal(conversation.State))
+            return conversation.ClosedAt < cutoff;
+
+        if (conversation.State != ConversationState.Resolved || (conversation.ClosedAt ?? conversation.UpdatedAt ?? conversation.CreatedAt) >= cutoff)
+            return false;
+
+        return _messages?.HasMessageSince(conversation.TenantId, conversation.ConversationId, cutoff) != true;
+    }
+
+    public Task<int> DeleteClosedBeforeAsync(TenantId tenantId, DateTimeOffset cutoff, CancellationToken ct)
     {
         var toDelete = _items
-            .Where(kv => kv.Key.Item1 == tenantId && kv.Value.CreatedAt < cutoff)
+            .Where(kv => kv.Key.Item1 == tenantId && IsPastRetention(kv.Value, cutoff))
             .Select(kv => kv.Key)
             .ToList();
 
