@@ -139,7 +139,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
                         ResiliencePolicyKey,
                         async innerCt =>
                         {
-                            await ProcessTimeoutsAsync(innerCt);
+                            await ProcessTimeoutsAsync(innerCt, stoppingToken);
                             return 0;
                         },
                         stoppingToken);
@@ -170,11 +170,20 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         }
     }
 
-    internal async Task ProcessTimeoutsAsync(CancellationToken ct)
+    internal Task ProcessTimeoutsAsync(CancellationToken ct) => ProcessTimeoutsAsync(ct, ct);
+
+    /// <summary>
+    /// One tick: every tenant's offer, queue and wrap-up timeouts under <paramref name="ct"/> (the resilience policy's
+    /// per-attempt budget), then, when it is due, the inactivity pass under <paramref name="inactivityCt"/> (the host's
+    /// stopping token). The pass is not cut by the attempt budget: its once-per-process clock reconcile and a backlog
+    /// wave of closes can outlast it, and a cancelled pass would leave every later tenant unswept (review round 1).
+    /// Each of its statements stays bounded by the connection's command timeout, and a fault in it is logged per tenant.
+    /// The pass's interval starts only once the timeouts succeeded, so a retry of a failed attempt still runs it.
+    /// </summary>
+    internal async Task ProcessTimeoutsAsync(CancellationToken ct, CancellationToken inactivityCt)
     {
         var tenants = await _tenantStore.GetAllActiveAsync(ct);
         var now = _clock.UtcNow;
-        var inactivityPassDue = TryStartInactivityPass(now);
 
         foreach (var tenant in tenants)
         {
@@ -183,10 +192,13 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
             await ProcessOfferTimeoutsAsync(tid, tenant.TenantId, now, ct);
             await ProcessQueueTimeoutsAsync(tid, tenant.TenantId, now, ct);
             await ProcessWrapUpTimeoutsAsync(tid, tenant.TenantId, now, ct);
-
-            if (inactivityPassDue)
-                await ProcessInactivityClosesAsync(tid, now, ct);
         }
+
+        if (!TryStartInactivityPass(now))
+            return;
+
+        foreach (var tenant in tenants)
+            await ProcessInactivityClosesAsync(new TenantId(tenant.TenantId), now, inactivityCt);
     }
 
     /// <summary>

@@ -420,6 +420,15 @@ public sealed partial class ConversationTimeoutWorkerTests
         /// <summary>Runs inside <c>ReconcileLastMessageAtAsync</c>, before the real reconcile (2.8: a fault injection).</summary>
         public Func<TenantId, Task>? BeforeReconcile { get; set; }
 
+        /// <summary>
+        /// How long <c>ReconcileLastMessageAtAsync</c> takes before the real reconcile, honouring the token the worker
+        /// passes, as a Postgres statement does (review round 1: the pass against the tick's resilience budget).
+        /// </summary>
+        public TimeSpan ReconcileDelay { get; set; }
+
+        /// <summary>The per-tick resilience policy the worker runs under (review round 1); the no-op policy by default.</summary>
+        public Verbara.Sdk.Resilience.ResiliencePolicy? Policy { get; set; }
+
         /// <summary>The pass's reconcile and list calls in order, as <c>reconcile:&lt;tenant&gt;</c> / <c>list:&lt;tenant&gt;</c> (2.8).</summary>
         public IReadOnlyList<string> PassCalls
         {
@@ -445,6 +454,7 @@ public sealed partial class ConversationTimeoutWorkerTests
             Store, TenantStore, Switchboard, EventBus, Clock, new ServiceHeartbeat(),
             Microsoft.Extensions.Options.Options.Create(Distribution),
             Logger,
+            policy: Policy,
             auditService: Audit,
             conversationOptions: Microsoft.Extensions.Options.Options.Create(Options),
             tenantAuthConfigStore: TenantAuthConfig,
@@ -494,6 +504,8 @@ public sealed partial class ConversationTimeoutWorkerTests
             lock (_passCalls) _passCalls.Add($"reconcile:{tenant.Value}");
             if (BeforeReconcile is { } hook)
                 await hook(tenant);
+            if (ReconcileDelay > TimeSpan.Zero)
+                await Task.Delay(ReconcileDelay, ct);
             return await Inner.ReconcileLastMessageAtAsync(tenant, ct);
         }
 
