@@ -86,6 +86,45 @@ public sealed class ConversationInactivityOptionsTests
                 "the startup failure names the key {0} so the operator knows what to fix", key);
     }
 
+    // Review round 1, P3: an unparsable value used to be ignored and the default kept, so a typo such as
+    // InactivityCloseEnabled=fasle left the close on. It now fails the start like an out-of-range value.
+    [Theory]
+    [InlineData("Conversations:InactivityCloseEnabled", "fasle")]
+    [InlineData("Conversations:InactivityCloseEnabled", "0")]
+    [InlineData("Conversations:InactivityCloseAfterHours", "72h")]
+    [InlineData("Conversations:InactivityCloseAfterHours", "99999999999")]
+    [InlineData("Conversations:InactivityCloseSweepIntervalSeconds", "sixty")]
+    [InlineData("Conversations:InactivityCloseSweepIntervalSeconds", "60.5")]
+    [InlineData("Conversations:InactivityCloseBatchSize", "1e2")]
+    public void Host_ShouldFailStartupNamingTheKeyAndValue_WhenAValueIsUnparsable(string key, string value)
+    {
+        using var factory = Factory(new Dictionary<string, string?> { [key] = value });
+
+        var start = () => factory.Services;
+
+        start.Should().Throw<Exception>()
+            .Where(e => Flatten(e).Contains(key, StringComparison.Ordinal)
+                        && Flatten(e).Contains($"'{value}'", StringComparison.Ordinal),
+                "the startup failure names the key {0} and the value it could not read", key);
+    }
+
+    [Theory]
+    [InlineData("Conversations:InactivityCloseEnabled")]
+    [InlineData("Conversations:InactivityCloseAfterHours")]
+    [InlineData("Conversations:InactivityCloseSweepIntervalSeconds")]
+    [InlineData("Conversations:InactivityCloseBatchSize")]
+    public void Host_ShouldStartWithTheDefault_WhenAValueIsEmpty(string key)
+    {
+        using var factory = Factory(new Dictionary<string, string?> { [key] = " " });
+
+        var options = factory.Services.GetRequiredService<IOptions<ConversationOptions>>().Value;
+
+        options.InactivityCloseEnabled.Should().BeTrue();
+        options.InactivityCloseAfterHours.Should().Be(72);
+        options.InactivityCloseSweepIntervalSeconds.Should().Be(60);
+        options.InactivityCloseBatchSize.Should().Be(100);
+    }
+
     [Fact]
     public void Host_ShouldLogExactlyOneWhatsAppWarning_WhenTheHostWindowIs12Hours()
     {

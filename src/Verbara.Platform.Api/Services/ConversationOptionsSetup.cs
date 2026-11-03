@@ -7,8 +7,9 @@ namespace Verbara.Platform.Api.Services;
 /// <summary>
 /// Binds <see cref="ConversationOptions"/> from the <c>Conversations</c> section the way <c>Program.cs</c> binds
 /// <c>Distribution</c>: explicit <c>TryParse</c>, no reflection binder, so it stays AOT-safe
-/// (conversations-close-after-inactivity design D1). An out-of-range value fails startup with a message naming the
-/// key (<see cref="ConversationOptionsValidator"/> + <c>ValidateOnStart</c>); a host window below WhatsApp's 24 h
+/// (conversations-close-after-inactivity design D1). An unparsable or out-of-range value fails startup with a message
+/// naming the key (<see cref="ConversationOptionsValidator"/> + <c>ValidateOnStart</c>); an empty value counts as
+/// unset and keeps the default; a host window below WhatsApp's 24 h
 /// window logs one warning when the host starts (<see cref="ConversationOptionsStartupCheck"/>).
 /// </summary>
 internal static class ConversationOptionsSetup
@@ -29,7 +30,10 @@ internal static class ConversationOptionsSetup
     /// <summary>WhatsApp's customer-service window (<c>WhatsAppSessionWindow.Length</c>), in hours.</summary>
     public const int WhatsAppWindowHours = 24;
 
-    /// <summary>Copies every key the section sets onto <paramref name="options"/>; an unparsable value is ignored.</summary>
+    /// <summary>
+    /// Copies every key the section sets onto <paramref name="options"/>. An unparsable value leaves the default in
+    /// place here and is reported by <see cref="FindUnparsable"/>, which the validator runs at startup.
+    /// </summary>
     public static void Bind(IConfiguration section, ConversationOptions options)
     {
         ArgumentNullException.ThrowIfNull(section);
@@ -43,6 +47,31 @@ internal static class ConversationOptionsSetup
             options.InactivityCloseSweepIntervalSeconds = interval;
         if (TryParseInt(section["InactivityCloseBatchSize"], out var batch))
             options.InactivityCloseBatchSize = batch;
+    }
+
+    /// <summary>
+    /// One failure per key the section sets to a value <see cref="Bind"/> cannot read (review round 1, P3: a typo such
+    /// as <c>InactivityCloseEnabled=fasle</c> used to keep the default silently). An empty or whitespace value counts
+    /// as unset, as the SMB compose and the Helm chart leave it.
+    /// </summary>
+    public static IReadOnlyList<string> FindUnparsable(IConfiguration section)
+    {
+        ArgumentNullException.ThrowIfNull(section);
+
+        var failures = new List<string>();
+        var enabled = section["InactivityCloseEnabled"];
+        if (!string.IsNullOrWhiteSpace(enabled) && !bool.TryParse(enabled, out _))
+            failures.Add($"{EnabledKey} must be true or false (got '{enabled}').");
+        AddIfNotInteger(failures, AfterHoursKey, section["InactivityCloseAfterHours"]);
+        AddIfNotInteger(failures, SweepIntervalKey, section["InactivityCloseSweepIntervalSeconds"]);
+        AddIfNotInteger(failures, BatchSizeKey, section["InactivityCloseBatchSize"]);
+        return failures;
+    }
+
+    private static void AddIfNotInteger(List<string> failures, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value) && !TryParseInt(value, out _))
+            failures.Add($"{key} must be a whole number (got '{value}').");
     }
 
     /// <summary>
@@ -64,7 +93,8 @@ internal static class ConversationOptionsSetup
         services.AddOptions<ConversationOptions>()
             .Configure<IConfiguration>((options, configuration) => Bind(configuration.GetSection(SectionName), options))
             .ValidateOnStart();
-        services.AddSingleton<IValidateOptions<ConversationOptions>, ConversationOptionsValidator>();
+        services.AddSingleton<IValidateOptions<ConversationOptions>>(provider =>
+            new ConversationOptionsValidator(provider.GetRequiredService<IConfiguration>().GetSection(SectionName)));
         services.AddTransient<IStartupFilter, ConversationOptionsStartupCheck>();
         return services;
     }
@@ -73,12 +103,17 @@ internal static class ConversationOptionsSetup
         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
 }
 
-/// <summary>The ranges of design D1; each failure names its key.</summary>
-internal sealed class ConversationOptionsValidator : IValidateOptions<ConversationOptions>
+/// <summary>
+/// The ranges of design D1, plus every value of <paramref name="section"/> the binder could not read (review round 1,
+/// P3); each failure names its key.
+/// </summary>
+internal sealed class ConversationOptionsValidator(IConfiguration section) : IValidateOptions<ConversationOptions>
 {
     public ValidateOptionsResult Validate(string? name, ConversationOptions options)
     {
-        var failures = new List<string>();
+        ArgumentNullException.ThrowIfNull(options);
+
+        var failures = new List<string>(ConversationOptionsSetup.FindUnparsable(section));
         if (options.InactivityCloseAfterHours < ConversationOptionsSetup.MinAfterHours)
             failures.Add($"{ConversationOptionsSetup.AfterHoursKey} must be at least {ConversationOptionsSetup.MinAfterHours} " +
                 $"(got {options.InactivityCloseAfterHours}); to turn the inactivity close off set {ConversationOptionsSetup.EnabledKey}=false.");
