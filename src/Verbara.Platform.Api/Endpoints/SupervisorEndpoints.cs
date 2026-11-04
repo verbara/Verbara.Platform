@@ -233,8 +233,10 @@ internal static class SupervisorEndpoints
         [FromBody] CoachingNoteRequest body,
         HttpContext context,
         [FromServices] IMessageStore messageStore,
+        [FromServices] IConversationStore conversations,
         [FromServices] IClock clock,
         [FromServices] PlatformEventBus eventBus,
+        [FromServices] ILoggerFactory loggers,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -260,9 +262,13 @@ internal static class SupervisorEndpoints
 
         await messageStore.SaveAsync(note, ct);
 
-        // Publish SSE event for the agent
+        // Publish SSE event for the conversation's agent: its owner or open-offer agent as it is now, read after the note
+        // is stored (contact-history-opens-by-assignment, design D17). An unknown id keeps this route's behaviour and
+        // publishes with an empty audience (readers only).
+        var audience = await ConversationAudienceRead.CurrentAsync(
+            conversations, loggers, tenantId, note.ConversationId, CancellationToken.None);
         eventBus.Publish(new ConversationMessageEvent(
-            tenantId.Value, id, note.MessageId.Value, "System", "Coaching"));
+            tenantId.Value, id, note.MessageId.Value, "System", "Coaching") { Audience = audience });
 
         return TypedResults.Ok(new MessageResponse("Coaching note sent"));
     }

@@ -132,10 +132,16 @@ internal sealed partial class WebhookInboundProcessor
                 tenantId.Value, stored.ConversationId.Value, "", "Queued"));
         }
 
-        _eventBus.Publish(new ConversationMessageEvent(
-            tenantId.Value, stored.ConversationId.Value, stored.MessageId.Value, "Inbound", channel.ToString()));
-
+        // The message is published after the conversation is loaded, so its live-stream audience is the conversation's
+        // owner or open-offer agent as it is now (contact-history-opens-by-assignment, design D17). A conversation that
+        // cannot be loaded still publishes it, with an empty audience: readers only (fail closed).
         var conversation = await _conversationStore.GetByIdAsync(tenantId, stored.ConversationId, ct).ConfigureAwait(false);
+        _eventBus.Publish(new ConversationMessageEvent(
+            tenantId.Value, stored.ConversationId.Value, stored.MessageId.Value, "Inbound", channel.ToString())
+        {
+            Audience = ConversationOffer.AudienceOf(conversation),
+        });
+
         var contact = await _contactStore.GetByIdAsync(tenantId, stored.ContactId, ct).ConfigureAwait(false);
         if (conversation is null || contact is null)
             return;

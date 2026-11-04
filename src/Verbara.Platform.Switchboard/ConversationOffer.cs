@@ -27,6 +27,27 @@ public static class ConversationOffer
             && string.Equals(offeredTo, agentId.Value, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The live-stream audience of a <c>conversation.message</c> of <paramref name="conversation"/>
+    /// (contact-history-opens-by-assignment, design D17): its owner when the owner kind is <c>Agent</c>, and the agent it
+    /// is open-offered to when its state is <c>Offered</c>. A <see langword="null"/> conversation, or one with neither,
+    /// has <see cref="ConversationAudience.None"/>. Pass the conversation as it is now, read after any ownership change
+    /// the same operation made.
+    /// </summary>
+    public static ConversationAudience AudienceOf(Conversation? conversation)
+    {
+        if (conversation is null)
+            return ConversationAudience.None;
+
+        var owner = conversation.Owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } ownerId } ? ownerId.Value : null;
+        var offeredTo = conversation.State == ConversationState.Offered
+            && conversation.Metadata.TryGetValue(OfferedToKey, out var offered)
+            && !string.IsNullOrEmpty(offered)
+                ? offered
+                : null;
+        return owner is null && offeredTo is null ? ConversationAudience.None : new ConversationAudience(owner, offeredTo);
+    }
+
     /// <summary>Whether <paramref name="conversation"/> records an offer made to an agent other than <paramref name="agentId"/>.</summary>
     internal static bool IsOfferedToAnotherAgent(Conversation conversation, EntityId agentId) =>
         conversation.Metadata.TryGetValue(OfferedToKey, out var offeredTo)

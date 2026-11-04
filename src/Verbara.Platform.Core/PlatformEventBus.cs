@@ -1,5 +1,6 @@
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using System.Text.Json.Serialization;
 
 using Verbara.Platform.Core.Notifications;
 using Verbara.Sdk.Push.Bus;
@@ -97,13 +98,23 @@ public sealed record ConversationAssignedEvent(
     : PlatformEvent(TenantId, "conversation.assigned", DateTimeOffset.UtcNow);
 
 /// <summary>Raised when a new message arrives in a conversation.</summary>
+/// <remarks>
+/// Content-bearing (contact-history-opens-by-assignment, design D17): the live stream delivers it to the readers of every
+/// conversation and to the agents of <see cref="Audience"/>, which each publisher stamps from the conversation's current
+/// state through <c>ConversationOffer.AudienceOf</c>. An event published without one reaches only the readers.
+/// </remarks>
 public sealed record ConversationMessageEvent(
     string TenantId,
     string ConversationId,
     string MessageId,
     string Sender,
     string Text)
-    : PlatformEvent(TenantId, "conversation.message", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "conversation.message", DateTimeOffset.UtcNow), IConversationContentEvent
+{
+    /// <summary>The conversation's owner agent and open-offer agent when the event was published. Never serialized.</summary>
+    [JsonIgnore]
+    public ConversationAudience Audience { get; init; } = ConversationAudience.None;
+}
 
 /// <summary>Raised when a conversation changes state.</summary>
 public sealed record ConversationStateChangedEvent(
@@ -240,7 +251,12 @@ public sealed record AgentAssistSuggestionEvent(
     string Priority,
     string Source,
     string? TriggerPhrase)
-    : PlatformEvent(TenantId, "agentassist.suggestion", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "agentassist.suggestion", DateTimeOffset.UtcNow), IConversationContentEvent
+{
+    /// <summary>Only the agent the event names in <c>AgentId</c>, never the conversation's owner or offered agent (design D17). Never serialized.</summary>
+    [JsonIgnore]
+    public ConversationAudience Audience { get; } = ConversationAudience.ForAgent(AgentId);
+}
 
 /// <summary>Raised when a sentiment reading is produced for a live call segment.</summary>
 public sealed record AgentAssistSentimentEvent(
@@ -252,7 +268,12 @@ public sealed record AgentAssistSentimentEvent(
     float Score,
     string Label,
     IReadOnlyList<string> TriggerWords)
-    : PlatformEvent(TenantId, "agentassist.sentiment", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "agentassist.sentiment", DateTimeOffset.UtcNow), IConversationContentEvent
+{
+    /// <summary>Only the agent the event names in <c>AgentId</c>, never the conversation's owner or offered agent (design D17). Never serialized.</summary>
+    [JsonIgnore]
+    public ConversationAudience Audience { get; } = ConversationAudience.ForAgent(AgentId);
+}
 
 /// <summary>Raised when a compliance rule violation is detected during a live call.</summary>
 public sealed record AgentAssistComplianceAlertEvent(
@@ -263,7 +284,12 @@ public sealed record AgentAssistComplianceAlertEvent(
     string RuleId,
     string? Phrase,
     string Severity)
-    : PlatformEvent(TenantId, "agentassist.compliance_alert", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "agentassist.compliance_alert", DateTimeOffset.UtcNow), IConversationContentEvent
+{
+    /// <summary>Only the agent the event names in <c>AgentId</c>, never the conversation's owner or offered agent (design D17). Never serialized.</summary>
+    [JsonIgnore]
+    public ConversationAudience Audience { get; } = ConversationAudience.ForAgent(AgentId);
+}
 
 /// <summary>Raised when a transcript segment is produced during a live call.</summary>
 public sealed record AgentAssistTranscriptEvent(
@@ -274,7 +300,12 @@ public sealed record AgentAssistTranscriptEvent(
     string Speaker,
     string Text,
     bool IsFinal)
-    : PlatformEvent(TenantId, "agentassist.transcript", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "agentassist.transcript", DateTimeOffset.UtcNow), IConversationContentEvent
+{
+    /// <summary>Only the agent the event names in <c>AgentId</c>, never the conversation's owner or offered agent (design D17). Never serialized.</summary>
+    [JsonIgnore]
+    public ConversationAudience Audience { get; } = ConversationAudience.ForAgent(AgentId);
+}
 
 // ─── Notification Events ─────────────────────────────────────────────────────
 

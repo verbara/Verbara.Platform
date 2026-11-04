@@ -404,6 +404,7 @@ internal static class ConversationEndpoints
         [FromServices] IMessageStore messages,
         [FromServices] IClock clock,
         [FromServices] PlatformEventBus eventBus,
+        [FromServices] ILoggerFactory loggers,
         [FromBody] TransferRequest body,
         CancellationToken ct)
     {
@@ -452,9 +453,15 @@ internal static class ConversationEndpoints
         if (!result.Success)
             return ConversationActor.Conflict(result.FailureReason ?? "The conversation could not be transferred.");
 
+        // The note's live-stream audience is the conversation's owner or open-offer agent after the move, read again here:
+        // the pre-transfer copy still names the former owner on a store that returns detached rows (design D17, spec
+        // audit F2). The move has committed, so the read is contained and ignores the request's cancellation (F3).
         metadata[ConversationTransferNote.AuditKey] = note is null
             ? ConversationTransferNote.None
-            : await ConversationTransferNote.TryWriteAsync(context, messages, clock, eventBus, conversation, note);
+            : await ConversationTransferNote.TryWriteAsync(
+                context, messages, clock, eventBus, conversation, note,
+                await ConversationAudienceRead.CurrentAsync(
+                    conversations, loggers, tenantId, conversation.ConversationId, CancellationToken.None));
 
         if (bySupervisor)
             metadata[ConversationAudit.BySupervisor] = CallerIdentity.ResolveUserIdOrSystem(context.User);

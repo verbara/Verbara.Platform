@@ -200,8 +200,13 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
                 tenantId.Value, conversationId.Value, "", nameof(ConversationState.Active)));
         }
 
+        // The live-stream audience (contact-history-opens-by-assignment, design D17): the conversation the message went
+        // out in, reused or born here, is owned by the starting agent.
         _eventBus.Publish(new ConversationMessageEvent(
-            tenantId.Value, conversationId.Value, message.MessageId.Value, "Outbound", channel.ToString()));
+            tenantId.Value, conversationId.Value, message.MessageId.Value, "Outbound", channel.ToString())
+        {
+            Audience = ConversationOffer.AudienceOf(conversation),
+        });
 
         return OutboundStartOutcome.Started(conversation, message, reused: open is not null);
     }

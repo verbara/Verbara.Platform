@@ -19,11 +19,19 @@ namespace Verbara.Platform.Api.Tests.Sse;
 internal sealed class ProbeConversationStore(IConversationStore inner, bool detached) : IConversationStore
 {
     private readonly ConcurrentDictionary<EntityId, byte> _hidden = new();
+    private readonly ConcurrentDictionary<EntityId, Action<Conversation?, CancellationToken>> _onRead = new();
 
     public bool Detached { get; } = detached;
 
     /// <summary>From now on <see cref="GetByIdAsync"/> answers <see langword="null"/> for <paramref name="conversationId"/>.</summary>
     public void Hide(EntityId conversationId) => _hidden[conversationId] = 0;
+
+    /// <summary>
+    /// From now on <see cref="GetByIdAsync"/> of <paramref name="conversationId"/> runs <paramref name="onRead"/> on the row
+    /// it read (and the token it was given) before answering; <paramref name="onRead"/> may throw, as a failed read does.
+    /// </summary>
+    public void OnRead(EntityId conversationId, Action<Conversation?, CancellationToken> onRead) =>
+        _onRead[conversationId] = onRead;
 
     private Conversation? Out(Conversation? c) => Detached ? Copy(c) : c;
 
@@ -33,8 +41,15 @@ internal sealed class ProbeConversationStore(IConversationStore inner, bool deta
         return Detached ? [.. rows.Select(r => Copy(r)!)] : rows;
     }
 
-    public async Task<Conversation?> GetByIdAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct) =>
-        _hidden.ContainsKey(conversationId) ? null : Out(await inner.GetByIdAsync(tenantId, conversationId, ct));
+    public async Task<Conversation?> GetByIdAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
+    {
+        if (_hidden.ContainsKey(conversationId))
+            return null;
+        var row = Out(await inner.GetByIdAsync(tenantId, conversationId, ct));
+        if (_onRead.TryGetValue(conversationId, out var onRead))
+            onRead(row, ct);
+        return row;
+    }
 
     public async Task<PagedResult<Conversation>> ListAsync(TenantId tenantId, ConversationQuery query, CancellationToken ct)
     {

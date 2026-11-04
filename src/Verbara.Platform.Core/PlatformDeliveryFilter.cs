@@ -15,6 +15,13 @@ namespace Verbara.Platform.Core;
 /// Registered after <c>AddVerbaraPush()</c> so it overrides the SDK default and gives
 /// the platform a single hook for any future Platform-specific delivery rules
 /// (per-role gating, per-permission gating, etc.).
+/// <para>
+/// Conversation content is narrowed after this filter, not here: the live stream applies
+/// <c>Verbara.Platform.Api.Endpoints.Shared.ConversationContentDelivery.IsDeliverable</c> to every
+/// <see cref="IConversationContentEvent"/>, with the subscriber's conversation reader class resolved once per stream
+/// (contact-history-opens-by-assignment, design D17). This filter stays tenant isolation and user targeting, because
+/// <see cref="SubscriberContext"/> has no room for the subscriber's Agent profile.
+/// </para>
 /// </summary>
 public sealed class PlatformDeliveryFilter : IEventDeliveryFilter
 {

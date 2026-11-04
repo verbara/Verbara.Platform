@@ -77,6 +77,38 @@ public sealed class DefaultConversationServiceTests : IDisposable
     private static ChannelAddress WhatsAppAddress() =>
         new(ChannelType.WhatsApp, "+1234567890");
 
+    // ─── contact-history-opens-by-assignment task 2.8 (design D17): the published message's audience ───
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldStampTheOwnerAgentAsTheAudience_WhenAnAgentOwnsTheConversation()
+    {
+        var conversation = BuildConversation(owner: ConversationOwner.ForAgent(_agentId));
+        _conversationStore.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>()).Returns(conversation);
+        _contactStore.GetByIdAsync(_tenantId, _contactId, Arg.Any<CancellationToken>()).Returns(BuildContact(WhatsAppAddress()));
+        var published = new List<ConversationMessageEvent>();
+        using var sub = _eventBus.Events.Subscribe(e => { if (e is ConversationMessageEvent m) published.Add(m); });
+
+        await CreateSut().SendMessageAsync(
+            _conversationId, _tenantId, _envelope, _agentId, ConversationOwnerKind.Agent, CancellationToken.None);
+
+        published.Should().ContainSingle().Which.Audience.Should().Be(new ConversationAudience(_agentId.Value, null));
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldStampAnEmptyAudience_WhenTheSystemSendsInAConversationNoAgentOwns()
+    {
+        var conversation = BuildConversation(owner: ConversationOwner.System);
+        _conversationStore.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>()).Returns(conversation);
+        _contactStore.GetByIdAsync(_tenantId, _contactId, Arg.Any<CancellationToken>()).Returns(BuildContact(WhatsAppAddress()));
+        var published = new List<ConversationMessageEvent>();
+        using var sub = _eventBus.Events.Subscribe(e => { if (e is ConversationMessageEvent m) published.Add(m); });
+
+        await CreateSut().SendMessageAsync(
+            _conversationId, _tenantId, _envelope, EntityId.From("system"), ConversationOwnerKind.System, CancellationToken.None);
+
+        published.Should().ContainSingle().Which.Audience.Should().Be(ConversationAudience.None);
+    }
+
     // ─── SendMessageAsync — persistence ──────────────────────────────────────
 
     [Fact]

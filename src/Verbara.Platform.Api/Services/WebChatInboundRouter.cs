@@ -17,7 +17,7 @@ namespace Verbara.Platform.Api.Services;
 /// to an agent. This bridge closes that gap. It routes the session's first inbound message and any
 /// message whose conversation still needs routing (<see cref="WebhookInboundProcessor.NeedsRouting"/>: the
 /// session's conversation ended, so the pipeline created a fresh owner-less one, or reused one still queued
-/// and owner-less); other messages are no-ops.
+/// and owner-less); other messages are only published on the live stream (contact-history-opens-by-assignment, design D17).
 /// </summary>
 internal sealed partial class WebChatInboundRouter
 {
@@ -59,11 +59,21 @@ internal sealed partial class WebChatInboundRouter
         IInboundMessagePipeline pipeline, InboundMessage inbound, TenantId tenantId, CancellationToken ct) =>
         _returnAnnouncer.ProcessAsync(pipeline, inbound, tenantId, ChannelType.WebChat, ct);
 
+    // The visitor's message on the live stream, for the conversation's owner or open-offer agent as loaded just before
+    // (design D17); a conversation that could not be loaded gives an empty audience (readers only), as on the webhook path.
+    private void PublishInbound(TenantId tenantId, PipelineResult pipelineResult, Conversation? conversation) =>
+        _eventBus.Publish(new ConversationMessageEvent(
+            tenantId.Value, pipelineResult.ConversationId.Value,
+            pipelineResult.MessageId.Value, "Inbound", ChannelType.WebChat.ToString())
+        {
+            Audience = ConversationOffer.AudienceOf(conversation),
+        });
+
     /// <summary>
     /// Routes and assigns the conversation to a queue on the session's first inbound message, or when the conversation
     /// the message was stored in still needs routing (<see cref="WebhookInboundProcessor.NeedsRouting"/>: it is new, or
-    /// <c>Queued</c> with no owner). Other calls only keep the session on the visitor's conversation. Publishes the same
-    /// SSE events as the webhook path so the agent UI updates live.
+    /// <c>Queued</c> with no owner). Other calls keep the session on the visitor's conversation and publish the message.
+    /// Every non-duplicate message is published as the webhook path publishes it, so the agent UI updates live.
     /// </summary>
     /// <remarks>
     /// conversations-close-after-inactivity (design D8): a return close the delivery won
@@ -102,14 +112,16 @@ internal sealed partial class WebChatInboundRouter
         if (!firstOfSession
             && (conversation is null || !WebhookInboundProcessor.NeedsRouting(pipelineResult, conversation)))
         {
+            // Every stored message is published, not only the one that routes (contact-history-opens-by-assignment,
+            // design D17, spec audit F3): a later message of an Offered or Active conversation reaches its agent live.
+            PublishInbound(tenantId, pipelineResult, conversation);
             return;
         }
 
+        // The routing branch keeps its order: the state first, then the message, published once.
         _eventBus.Publish(new ConversationStateChangedEvent(
             tenantId.Value, pipelineResult.ConversationId.Value, "", "Queued"));
-        _eventBus.Publish(new ConversationMessageEvent(
-            tenantId.Value, pipelineResult.ConversationId.Value,
-            pipelineResult.MessageId.Value, "Inbound", ChannelType.WebChat.ToString()));
+        PublishInbound(tenantId, pipelineResult, conversation);
 
         var contact = await _contactStore.GetByIdAsync(tenantId, pipelineResult.ContactId, ct).ConfigureAwait(false);
         if (conversation is null || contact is null)
