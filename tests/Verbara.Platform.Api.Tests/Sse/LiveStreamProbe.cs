@@ -125,12 +125,15 @@ internal sealed class LiveStreamProbe : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            // Expected: DisposeAsync stopped the reader.
         }
         catch (IOException)
         {
+            // Expected: the server or DisposeAsync closed the stream.
         }
         catch (ObjectDisposedException)
         {
+            // Expected: DisposeAsync disposed the response under the reader.
         }
     }
 
@@ -144,6 +147,7 @@ internal sealed class LiveStreamProbe : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            // Expected: the reader ends on the stop just requested.
         }
 
         _client.Dispose();

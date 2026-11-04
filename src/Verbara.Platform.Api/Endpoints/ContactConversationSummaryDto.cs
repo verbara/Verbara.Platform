@@ -67,6 +67,7 @@ internal static class ContactConversationSummaryMapper
         var conversation = summary.Conversation;
         var lastMessageAt = LastMessageAt(summary);
         var agentId = conversation.Owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } ownerId } ? ownerId.Value : null;
+        var queueId = conversation.QueueId is { } queue ? queue.Value : null;
 
         return new ContactConversationSummaryDto(
             Id: conversation.ConversationId.Value,
@@ -76,8 +77,8 @@ internal static class ContactConversationSummaryMapper
             ClosedAt: conversation.ClosedAt,
             DurationSeconds: DurationSeconds(conversation, lastMessageAt),
             ClosedReason: ClosedReasonOf(conversation),
-            QueueId: conversation.QueueId?.Value,
-            QueueName: conversation.QueueId is null ? null : summary.QueueName,
+            QueueId: queueId,
+            QueueName: queueId is null ? null : summary.QueueName,
             AgentId: agentId,
             AgentDisplayName: agentId is null ? null : summary.AgentDisplayName,
             Disposition: summary.Disposition is { } disposition

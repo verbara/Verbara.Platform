@@ -100,11 +100,12 @@ internal static class ContactEndpoints
             if (schema is null)
                 continue;
 
-            foreach (var disposition in dispositions.Where(d => d.SchemaId == version.SchemaId && d.SchemaVersion == version.SchemaVersion))
-            {
-                if (schema.Nodes.FirstOrDefault(node => node.NodeId == disposition.NodeId) is { } node)
-                    labels[disposition] = node.Label;
-            }
+            var resolved = dispositions
+                .Where(d => d.SchemaId == version.SchemaId && d.SchemaVersion == version.SchemaVersion)
+                .Select(d => (Disposition: d, Node: schema.Nodes.FirstOrDefault(node => node.NodeId == d.NodeId)))
+                .Where(pair => pair.Node is not null);
+            foreach (var (disposition, node) in resolved)
+                labels[disposition] = node!.Label;
         }
 
         return labels;

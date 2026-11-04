@@ -23,6 +23,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Verbara.Platform.Api.Tests.Logging;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
+using NSubstitute.ReturnsExtensions;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -202,7 +203,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         var session = MakeSession("link-anon", Tenant);
         _sessions.GetById("s-link-anon").Returns(session);
         _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-anon", Arg.Any<CancellationToken>())
-            .Returns((Conversation?)null);
+            .ReturnsNull();
         StubContact();
         var bridge = CreateBridge();
 
@@ -249,7 +250,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         AddCallerWithCallerId(session, "PJSIP/trunk-00000001", callerIdNum);
         _sessions.GetById("s-link-placeholder").Returns(session);
         _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-placeholder", Arg.Any<CancellationToken>())
-            .Returns((Conversation?)null);
+            .ReturnsNull();
         StubContact();
         var bridge = CreateBridge();
 
@@ -268,7 +269,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         AddCallerWithCallerId(session, "PJSIP/trunk-00000002", "+15550001111");
         _sessions.GetById("s-link-number").Returns(session);
         _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-number", Arg.Any<CancellationToken>())
-            .Returns((Conversation?)null);
+            .ReturnsNull();
         StubContact();
         var bridge = CreateBridge();
 

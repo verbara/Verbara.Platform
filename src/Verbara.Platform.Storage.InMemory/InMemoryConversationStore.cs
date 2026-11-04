@@ -12,6 +12,7 @@ internal sealed class InMemoryConversationStore : IConversationStore
     private readonly InMemoryMessageStore? _messages;
     private readonly InMemoryContactSummarySources? _summarySources;
 
+    /// <summary>Creates the store, with the stores its contact summaries and message checks read.</summary>
     /// <param name="messages">
     /// The message store <see cref="DeleteIfNoMessagesAsync"/> and <see cref="ListContactSummariesAsync"/> consult; a
     /// store built without one cannot answer them.

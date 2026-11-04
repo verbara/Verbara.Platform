@@ -162,9 +162,9 @@ public sealed class ConversationHistoryEndpointTests : IClassFixture<Conversatio
         var limit = fixture["firstPage"]!["request"]!["query"]!["limit"]!.GetValue<string>();
 
         var first = await OkBodyAsync(await client.GetAsync($"{route}?limit={limit}"));
-        var nextBefore = first["nextBefore"]?.GetValue<string>();
-        nextBefore.Should().NotBeNullOrEmpty("hasMore is true, so the cursor is present");
-        var older = await OkBodyAsync(await client.GetAsync($"{route}?limit={limit}&before={Uri.EscapeDataString(nextBefore!)}"));
+        var nextBefore = first["nextBefore"]?.GetValue<string>() ?? string.Empty;
+        nextBefore.Should().NotBeEmpty("hasMore is true, so the cursor is present");
+        var older = await OkBodyAsync(await client.GetAsync($"{route}?limit={limit}&before={Uri.EscapeDataString(nextBefore)}"));
 
         // The cursor is opaque: the fixture's placeholder stands for whatever value the server wrote.
         var expectedFirst = Normalize(fixture["firstPage"]!["body"])!.AsObject();
