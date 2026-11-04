@@ -108,6 +108,40 @@ tenant API keys bound to no user, roles without a conversation permission and ag
   conversations a queue owns. It is additive; a rollback to the previous image leaves the column, which that image
   ignores.
 - **Deploy Platform before the console release that reads `/history`**: an older Platform answers that route 404.
+- **Until that console release is deployed, the console already shipped shows the new `disposition` object as text.**
+  It still reads `disposition` as a string, so on the History tab every typified past conversation shows a badge reading
+  `wrap_up.dispositions.[object Object]` instead of the disposition's name. The rest of the row still renders, and no data
+  is lost or changed: the badge corrects itself once the console is updated, with no Platform step. Keep the gap short:
+  deploy Platform, then the console release straight after.
+
+## [2.38.1] - 2026-11-04
+
+Patch release. Platform moves to Verbara.Sdk.Pro `2.25.1-pro`, with no source change: a node whose owner is gone can be
+updated and deleted through the management API, a removed node's calls are kept for two minutes and then released
+instead of staying held until restart, a drain is no longer undone by the owner's health check, and a call reconstructed
+by a takeover ends when it hangs up. Four cluster-endpoint answers change (below, Dependencies).
+
+### Dependencies
+
+- **Verbara.Sdk.Pro `2.25.0-pro` → `2.25.1-pro`**, the 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk stays `2.9.0`. The triple
+  is **Sdk `2.9.0` × Pro `2.25.1-pro` × Platform `2.38.1`**. Pro moves no packed floor: across the 70
+  `project.assets.json`, only those 22 packages change version, and no package appears, drops or crosses a major. (#537)
+- **Behaviour consumed from Pro 2.25.1-pro: cluster nodes are removed, drained and taken over cleanly** (Pro/ADR-0023,
+  addendum 2026-11-04). No Platform source changes for it; read in the code, not covered by a Platform test against a
+  real `ClusterManager`:
+  - `PUT` and `DELETE /api/v1/management/cluster/nodes/{id}` now reach a node whose owner is gone, instead of answering
+    404 on every live replica (#530). `POST` with such an id answers **409**: delete it, then add it again.
+    `GET /api/v1/management/cluster/status` lists those nodes, so a node that a replica stopped configuring is listed
+    again, as unserved. A node a live replica serves stays hidden on the others.
+  - `DELETE` of a node with calls up returns at once. Its calls are kept for two minutes, so a `POST` of the same id on
+    the same replica within that window records each call's real ending; otherwise they are released without an
+    ending (`CallReleasedEvent`, which no Platform subscriber handles). A re-add that lands on another replica does not
+    get the window. Drain first, as before, so endings are recorded.
+  - A drain sticks: the owner's health check no longer turns a `Draining` node back to `Healthy` within about 15 s, and
+    a cancelled drain restores the state the node had before it instead of always `Healthy`. A drain issued on a replica
+    that does not own the node is still routable in the owner's view.
+  - A call reconstructed by a takeover now ends when it hangs up, and the voice conversation closes. Its EventStore row
+    is still not written when its tenant was never stamped (Pro follow-up). (#537)
 
 ## [2.38.0] - 2026-11-03
 
