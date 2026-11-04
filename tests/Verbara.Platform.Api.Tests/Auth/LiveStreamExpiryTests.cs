@@ -153,7 +153,9 @@ public sealed class LiveStreamExpiryTests : IDisposable
     }
 
     /// <summary>
-    /// Whether the stream still delivers: publishes a tenant-wide event and waits for it to arrive.
+    /// Whether the stream still delivers: publishes a tenant-wide event and waits for it to arrive. The probe is a
+    /// non-content event (<c>conversation.offer_expired</c>): conversation content reaches only its readers
+    /// (contact-history-opens-by-assignment, design D17), and this stream's user reads none.
     /// The stream subscribes to the bus just after it sends its headers, so an event published at
     /// once can precede the subscription; each attempt publishes a fresh probe, and any probe
     /// arriving proves the stream alive. <see langword="false"/> once the server has ended it.
@@ -164,8 +166,8 @@ public sealed class LiveStreamExpiryTests : IDisposable
         var marker = $"probe-{Guid.NewGuid():N}";
         for (var attempt = 1; ; attempt++)
         {
-            bus.Publish(new ConversationMessageEvent(
-                AccountStatusApiFactory.CustomerTenantId, "probe-conversation", $"{marker}-{attempt}", "probe", "probe"));
+            bus.Publish(new ConversationOfferExpiredEvent(
+                AccountStatusApiFactory.CustomerTenantId, $"{marker}-{attempt}", "probe-agent"));
 
             using var window = CancellationTokenSource.CreateLinkedTokenSource(ct);
             window.CancelAfter(TimeSpan.FromMilliseconds(250));

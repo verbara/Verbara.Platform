@@ -17,7 +17,7 @@ namespace Verbara.Platform.Api.Services;
 /// to an agent. This bridge closes that gap. It routes the session's first inbound message and any
 /// message whose conversation still needs routing (<see cref="WebhookInboundProcessor.NeedsRouting"/>: the
 /// session's conversation ended, so the pipeline created a fresh owner-less one, or reused one still queued
-/// and owner-less); other messages are no-ops.
+/// and owner-less); other messages are only published on the live stream (contact-history-opens-by-assignment, design D17).
 /// </summary>
 internal sealed partial class WebChatInboundRouter
 {
@@ -59,11 +59,21 @@ internal sealed partial class WebChatInboundRouter
         IInboundMessagePipeline pipeline, InboundMessage inbound, TenantId tenantId, CancellationToken ct) =>
         _returnAnnouncer.ProcessAsync(pipeline, inbound, tenantId, ChannelType.WebChat, ct);
 
+    // The visitor's message on the live stream, for the conversation's owner or open-offer agent as loaded just before
+    // (design D17); a conversation that could not be loaded or read gives an empty audience (readers only), as on the webhook path.
+    private void PublishInbound(TenantId tenantId, PipelineResult pipelineResult, Conversation? conversation) =>
+        _eventBus.Publish(new ConversationMessageEvent(
+            tenantId.Value, pipelineResult.ConversationId.Value,
+            pipelineResult.MessageId.Value, "Inbound", ChannelType.WebChat.ToString())
+        {
+            Audience = ConversationOffer.AudienceOf(conversation),
+        });
+
     /// <summary>
     /// Routes and assigns the conversation to a queue on the session's first inbound message, or when the conversation
     /// the message was stored in still needs routing (<see cref="WebhookInboundProcessor.NeedsRouting"/>: it is new, or
-    /// <c>Queued</c> with no owner). Other calls only keep the session on the visitor's conversation. Publishes the same
-    /// SSE events as the webhook path so the agent UI updates live.
+    /// <c>Queued</c> with no owner). Other calls keep the session on the visitor's conversation and publish the message.
+    /// Every non-duplicate message is published as the webhook path publishes it, so the agent UI updates live.
     /// </summary>
     /// <remarks>
     /// conversations-close-after-inactivity (design D8): a return close the delivery won
@@ -98,21 +108,30 @@ internal sealed partial class WebChatInboundRouter
         // opened (the session's conversation ended), or one still queued and owner-less (a replacement another
         // delivery opened, or an earlier routing that found no queue) — the predicate the webhook path uses.
         var firstOfSession = _sessionManager.TryMarkRouted(sessionId);
-        var conversation = await _conversationStore.GetByIdAsync(tenantId, pipelineResult.ConversationId, ct).ConfigureAwait(false);
+        var conversation = await ReadForPublishAsync(tenantId, pipelineResult.ConversationId).ConfigureAwait(false);
         if (!firstOfSession
             && (conversation is null || !WebhookInboundProcessor.NeedsRouting(pipelineResult, conversation)))
+        {
+            // Every stored message is published, not only the one that routes (contact-history-opens-by-assignment,
+            // design D17, spec audit F3): a later message of an Offered or Active conversation reaches its agent live.
+            PublishInbound(tenantId, pipelineResult, conversation);
+            return;
+        }
+
+        // The routing branch keeps its order: the state first, then the message, published once.
+        _eventBus.Publish(new ConversationStateChangedEvent(
+            tenantId.Value, pipelineResult.ConversationId.Value, "", "Queued"));
+        PublishInbound(tenantId, pipelineResult, conversation);
+
+        // Before the contact read: a conversation that could not be read routes nothing, so a contact read failing in the
+        // same outage must not fail the request of a message already stored and published.
+        if (conversation is null)
         {
             return;
         }
 
-        _eventBus.Publish(new ConversationStateChangedEvent(
-            tenantId.Value, pipelineResult.ConversationId.Value, "", "Queued"));
-        _eventBus.Publish(new ConversationMessageEvent(
-            tenantId.Value, pipelineResult.ConversationId.Value,
-            pipelineResult.MessageId.Value, "Inbound", ChannelType.WebChat.ToString()));
-
         var contact = await _contactStore.GetByIdAsync(tenantId, pipelineResult.ContactId, ct).ConfigureAwait(false);
-        if (conversation is null || contact is null)
+        if (contact is null)
         {
             return;
         }
@@ -143,6 +162,32 @@ internal sealed partial class WebChatInboundRouter
             LogNoQueueResolved(ex, tenantId.Value, sessionId);
         }
     }
+
+    // The message is stored, so this read must not fail the request: every WebChat message gets a new external id
+    // (WebChatEndpoints), so a resend would store a second message, not find a duplicate. A failed read gives a null
+    // conversation (an empty audience, readers only), and the request's token is not taken, so a visitor who hangs up here
+    // does not lose the publish, as on the webhook path. A conversation left unrouted this way is still Queued and
+    // owner-less, so the session's next message routes it (WebhookInboundProcessor.NeedsRouting), unless the queue timeout
+    // abandoned it first (ConversationTimeoutWorker).
+    private async Task<Conversation?> ReadForPublishAsync(TenantId tenantId, EntityId conversationId)
+    {
+        try
+        {
+            return await _conversationStore.GetByIdAsync(tenantId, conversationId, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // The type only: a database error can quote the row.
+            LogConversationReadFailed(tenantId.Value, conversationId.Value, ex.GetType().Name);
+            return null;
+        }
+    }
+
+    [LoggerMessage(
+        EventId = 7402,
+        Level = LogLevel.Warning,
+        Message = "WebChat message of tenant {TenantId} conversation {ConversationId} is published to the readers only, and not routed: the conversation could not be read ({ExceptionType}). The next inbound message retries.")]
+    private partial void LogConversationReadFailed(string tenantId, string conversationId, string exceptionType);
 
     [LoggerMessage(
         EventId = 7401,

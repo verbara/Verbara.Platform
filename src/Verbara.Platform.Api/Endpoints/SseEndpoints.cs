@@ -3,10 +3,12 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Core;
 using Verbara.Platform.Core.Push;
 using Verbara.Platform.Identity;
+using Verbara.Platform.Queues;
 using Verbara.Sdk.Push.Delivery;
 using Microsoft.AspNetCore.Mvc;
 
@@ -24,6 +26,7 @@ internal static partial class SseEndpoints
         PlatformEventBus eventBus,
         IEventDeliveryFilter deliveryFilter,
         [FromServices] IUserStore userStore,
+        [FromServices] IAgentStore agentStore,
         [FromServices] LiveConnectionRegistry liveConnections,
         [FromServices] TimeProvider time,
         ILoggerFactory loggerFactory,
@@ -69,15 +72,23 @@ internal static partial class SseEndpoints
 
         var streamToken = streamCts.Token;
 
+        var tenantId = context.Items.TryGetValue("TenantId", out var tid)
+            ? tid as TenantId?
+            : null;
+
+        // Who this stream is to the conversation read rule (contact-history-opens-by-assignment, design D17), resolved
+        // once and fixed for the stream's life: a role or profile change applies at the next reconnect, which the
+        // credential's expiry above forces. An unscoped stream is classified as nobody and receives no content event.
+        var reader = tenantId is { } scope
+            ? await ConversationReaderClass.ResolveAsync(context, scope, agentStore, streamToken)
+            : null;
+
         context.Response.ContentType = "text/event-stream";
         context.Response.Headers.CacheControl = "no-cache";
         context.Response.Headers.Connection = "keep-alive";
 
         await context.Response.Body.FlushAsync(streamToken);
 
-        var tenantId = context.Items.TryGetValue("TenantId", out var tid)
-            ? tid as TenantId?
-            : null;
         var userId = context.User.FindFirst("sub")?.Value;
 
         LogClientConnected(logger, tenantId?.Value, userId);
@@ -109,7 +120,9 @@ internal static partial class SseEndpoints
                     // Anonymous / unscoped stream: align subscriber tenant to the event's so the
                     // filter's tenant check passes; user-targeting still applies.
                     ? subscriberContext with { TenantId = e.Metadata.TenantId }
-                    : subscriberContext))
+                    : subscriberContext)
+                // Conversation content reaches only its readers and the agents of its audience (design D17).
+                && ConversationContentDelivery.IsDeliverable(e, reader))
             .Subscribe(evt =>
             {
                 if (!channel.Writer.TryWrite(evt))

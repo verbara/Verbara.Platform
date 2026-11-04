@@ -137,6 +137,7 @@ internal static partial class WebChatEndpoints
         [FromServices] WebChatInboundRouter inboundRouter,
         [FromServices] IClock clock,
         [FromServices] PlatformEventBus eventBus,
+        [FromServices] IConversationStore conversations,
         [FromServices] IOptions<WebChatOptions> options,
         [FromServices] ILoggerFactory loggerFactory)
     {
@@ -239,9 +240,13 @@ internal static partial class WebChatEndpoints
                 }
                 else if (clientMsg?.Type == "typing")
                 {
+                    // The conversation's agent as it is now, read per frame: a per-socket cache would go stale on every
+                    // transfer and accept (contact-history-opens-by-assignment, design D17).
+                    var audience = await ConversationAudienceRead.CurrentAsync(
+                        conversations, loggerFactory, session.TenantId, session.ConversationId, ct);
                     eventBus.Publish(new ConversationMessageEvent(
                         session.TenantId.Value, session.ConversationId.Value,
-                        "", "TypingIndicator", "WebChat"));
+                        "", "TypingIndicator", "WebChat") { Audience = audience });
                 }
             }
         }

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Verbara.Platform.Core;
 
 /// <summary>
@@ -24,4 +26,13 @@ public sealed record CsatResponseRecordedEvent(
     int Rating,
     string? Comment,
     DateTimeOffset CapturedAt)
-    : PlatformEvent(TenantId, "csat.response_recorded", CapturedAt);
+    : PlatformEvent(TenantId, "csat.response_recorded", CapturedAt), IConversationContentEvent
+{
+    /// <summary>
+    /// No agent (contact-history-opens-by-assignment, design D17): the survey answer arrives after the conversation
+    /// ended and no console reads it from the stream, so on the live stream it reaches only the readers of every
+    /// conversation. Never serialized.
+    /// </summary>
+    [JsonIgnore]
+    public ConversationAudience Audience => ConversationAudience.None;
+}

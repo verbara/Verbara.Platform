@@ -1,4 +1,5 @@
 using Verbara.Platform.Api.Services;
+using Verbara.Platform.Api.Tests.Logging;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Channels.WebChat;
 using Verbara.Platform.Conversations;
@@ -8,6 +9,7 @@ using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Routing.Inbound;
 using Verbara.Platform.Storage.InMemory;
 using Verbara.Platform.Switchboard;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -227,5 +229,191 @@ public sealed class WebChatInboundRoutingTests
 
         await act.Should().NotThrowAsync();
         await switchboard.DidNotReceiveWithAnyArgs().AssignToQueueAsync(default, default, default, default);
+    }
+
+    // ─── A conversation read that fails still publishes the stored message, to the readers only (design D17) ───
+
+    private sealed record ReadFailureHarness(
+        WebChatInboundRouter Sut,
+        string SessionId,
+        IConversationStore Conversations,
+        IContactStore Contacts,
+        IInboundRouter Router,
+        IConversationSwitchboard Switchboard,
+        List<PlatformEvent> Published,
+        IDisposable Subscription);
+
+    private static async Task<ReadFailureHarness> BuildWithStubbedStoresAsync(ILogger<WebChatInboundRouter>? logger = null)
+    {
+        var conversations = Substitute.For<IConversationStore>();
+        var contacts = Substitute.For<IContactStore>();
+        contacts.GetByIdAsync(Tenant, ContactId, Arg.Any<CancellationToken>())
+            .Returns(new Contact { ContactId = ContactId, TenantId = Tenant, CreatedAt = DateTimeOffset.UtcNow });
+        var router = Substitute.For<IInboundRouter>();
+        router.RouteAsync(default!, default).ReturnsForAnyArgs(new RouteResult(QueueId, default, null, null));
+        var switchboard = Substitute.For<IConversationSwitchboard>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var sessionManager = new WebChatSessionManager(Options.Create(new WebChatOptions()));
+        var sessionId = await sessionManager.ConnectAsync(Tenant, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-r"), clock);
+        var bus = new PlatformEventBus();
+        var published = new List<PlatformEvent>();
+        var subscription = bus.Events.Subscribe(published.Add);
+        var sut = new WebChatInboundRouter(router, switchboard, conversations, contacts, bus, sessionManager, Announcer(bus), logger ?? NullLogger<WebChatInboundRouter>.Instance);
+        return new ReadFailureHarness(sut, sessionId, conversations, contacts, router, switchboard, published, subscription);
+    }
+
+    private static Conversation QueuedOwnerless() => new()
+    {
+        ConversationId = ConvId,
+        TenantId = Tenant,
+        ContactId = ContactId,
+        Channel = ChannelType.WebChat,
+        State = ConversationState.Queued,
+        CreatedAt = DateTimeOffset.UtcNow,
+    };
+
+    private static Conversation OwnedBy(EntityId agentId) => new()
+    {
+        ConversationId = ConvId,
+        TenantId = Tenant,
+        ContactId = ContactId,
+        Channel = ChannelType.WebChat,
+        State = ConversationState.Active,
+        Owner = ConversationOwner.ForAgent(agentId),
+        CreatedAt = DateTimeOffset.UtcNow,
+    };
+
+    public static TheoryData<Exception> FailedReads() => new()
+    {
+        new InvalidOperationException("database unavailable"),
+        new TaskCanceledException("a command timeout"),
+    };
+
+    [Theory]
+    [MemberData(nameof(FailedReads))]
+    public async Task RouteFirstInboundAsync_ShouldPublishWithAnEmptyAudienceAndNotRoute_WhenTheReadThrowsOnTheFirstMessage(Exception failure)
+    {
+        var h = await BuildWithStubbedStoresAsync();
+        using var subscription = h.Subscription;
+        h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).ThrowsAsync(failure);
+
+        var act = () => h.Sut.RouteFirstInboundAsync(h.SessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+
+        await act.Should().NotThrowAsync("the message is stored, and a resend would store a second one: every WebChat message gets a new external id");
+        h.Published.OfType<ConversationStateChangedEvent>().Should().ContainSingle(e => e.NewState == "Queued");
+        h.Published.OfType<ConversationMessageEvent>().Should().ContainSingle()
+            .Which.Audience.Should().Be(ConversationAudience.None, "an unread conversation names no agent (fail closed)");
+        await h.Router.DidNotReceiveWithAnyArgs().RouteAsync(default!, default);
+        await h.Switchboard.DidNotReceiveWithAnyArgs().AssignToQueueAsync(default, default, default, default);
+    }
+
+    [Theory]
+    [MemberData(nameof(FailedReads))]
+    public async Task RouteFirstInboundAsync_ShouldPublishWithAnEmptyAudienceAndNotRoute_WhenTheConversationAndContactReadsBothThrowOnTheFirstMessage(Exception failure)
+    {
+        var h = await BuildWithStubbedStoresAsync();
+        using var subscription = h.Subscription;
+        h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).ThrowsAsync(failure);
+        h.Contacts.GetByIdAsync(Tenant, ContactId, Arg.Any<CancellationToken>()).ThrowsAsync(failure);
+
+        var act = () => h.Sut.RouteFirstInboundAsync(h.SessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+
+        await act.Should().NotThrowAsync("the null conversation routes nothing, so the contact it would be routed with is not needed");
+        h.Published.OfType<ConversationStateChangedEvent>().Should().ContainSingle(e => e.NewState == "Queued");
+        h.Published.OfType<ConversationMessageEvent>().Should().ContainSingle()
+            .Which.Audience.Should().Be(ConversationAudience.None);
+        await h.Router.DidNotReceiveWithAnyArgs().RouteAsync(default!, default);
+        await h.Switchboard.DidNotReceiveWithAnyArgs().AssignToQueueAsync(default, default, default, default);
+    }
+
+    [Theory]
+    [MemberData(nameof(FailedReads))]
+    public async Task RouteFirstInboundAsync_ShouldPublishWithAnEmptyAudience_WhenTheReadThrowsOnALaterMessage(Exception failure)
+    {
+        var h = await BuildWithStubbedStoresAsync();
+        using var subscription = h.Subscription;
+        h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).Returns(OwnedBy(EntityId.From("agent-wc-1")));
+        await h.Sut.RouteFirstInboundAsync(h.SessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+        h.Published.Clear();
+        h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).ThrowsAsync(failure);
+
+        var act = () => h.Sut.RouteFirstInboundAsync(
+            h.SessionId, Tenant, new PipelineResult(ConvId, ContactId, EntityId.From("msg-2"), IsNewConversation: false), Content(), CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        h.Published.Should().ContainSingle().Which.Should().BeOfType<ConversationMessageEvent>()
+            .Which.Audience.Should().Be(ConversationAudience.None);
+    }
+
+    [Fact]
+    public async Task RouteFirstInboundAsync_ShouldLogOnlyTheExceptionType_WhenTheReadThrows()
+    {
+        using var capture = new LogRecordCapture();
+        using var loggers = new LoggerFactory([capture]);
+        var h = await BuildWithStubbedStoresAsync(loggers.CreateLogger<WebChatInboundRouter>());
+        using var subscription = h.Subscription;
+        h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).ThrowsAsync(new InvalidOperationException("row quoted: hola"));
+
+        await h.Sut.RouteFirstInboundAsync(h.SessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+
+        capture.Records.Should().ContainSingle(r => r.EventId.Id == 7402 && r.Message.Contains(nameof(InvalidOperationException), StringComparison.Ordinal));
+        capture.RecordsContaining("row quoted").Should().BeEmpty("a database error can quote the row");
+    }
+
+    [Fact]
+    public async Task RouteFirstInboundAsync_ShouldRouteOnTheNextMessage_WhenTheReadFailedOnTheFirst()
+    {
+        var h = await BuildWithStubbedStoresAsync();
+        using var subscription = h.Subscription;
+        h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).ThrowsAsync(new InvalidOperationException("database unavailable"));
+        await h.Sut.RouteFirstInboundAsync(h.SessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+        await h.Router.DidNotReceiveWithAnyArgs().RouteAsync(default!, default);
+        h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).Returns(QueuedOwnerless());
+
+        await h.Sut.RouteFirstInboundAsync(
+            h.SessionId, Tenant, new PipelineResult(ConvId, ContactId, EntityId.From("msg-2"), IsNewConversation: false), Content(), CancellationToken.None);
+
+        await h.Switchboard.Received(1).AssignToQueueAsync(ConvId, Tenant, QueueId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RouteFirstInboundAsync_ShouldPublishTheStoredMessageWithItsAudience_WhenTheRequestIsCancelledBeforeTheRead()
+    {
+        var h = await BuildWithStubbedStoresAsync();
+        using var subscription = h.Subscription;
+        var agentId = EntityId.From("agent-wc-1");
+        h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).Returns(call =>
+        {
+            call.Arg<CancellationToken>().ThrowIfCancellationRequested();
+            return OwnedBy(agentId);
+        });
+        h.Contacts.GetByIdAsync(Tenant, ContactId, Arg.Any<CancellationToken>()).Returns(call =>
+        {
+            call.Arg<CancellationToken>().ThrowIfCancellationRequested();
+            return new Contact { ContactId = ContactId, TenantId = Tenant, CreatedAt = DateTimeOffset.UtcNow };
+        });
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        var act = () => h.Sut.RouteFirstInboundAsync(h.SessionId, Tenant, FirstMessageResult(), Content(), cancelled.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>("the first message goes on to the contact read, which does take the request's token");
+        h.Published.OfType<ConversationMessageEvent>().Should().ContainSingle("the publish happens before the cancellation can end the flow")
+            .Which.Audience.Should().Be(new ConversationAudience(agentId.Value, null));
+        await h.Router.DidNotReceiveWithAnyArgs().RouteAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task RouteFirstInboundAsync_ShouldPropagateAndPublishNothing_WhenTheReadRunsOutOfMemory()
+    {
+        var h = await BuildWithStubbedStoresAsync();
+        using var subscription = h.Subscription;
+        h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).ThrowsAsync(new InsufficientMemoryException());
+
+        var act = () => h.Sut.RouteFirstInboundAsync(h.SessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<OutOfMemoryException>("InsufficientMemoryException is the OutOfMemoryException a test may throw (CA2201)");
+        h.Published.Should().BeEmpty();
     }
 }

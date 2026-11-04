@@ -1,5 +1,6 @@
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using System.Text.Json.Serialization;
 
 using Verbara.Platform.Core.Notifications;
 using Verbara.Sdk.Push.Bus;
@@ -78,12 +79,58 @@ public abstract record PlatformEvent(string TenantId, string Type, DateTimeOffse
     /// <inheritdoc />
     public override string EventType => Type;
 
+    private PushEventMetadata? _metadata;
+
     /// <summary>
-    /// Computed metadata bridging platform-level fields into the Sdk.Push envelope.
-    /// Default: tenant broadcast (no user target). Override in records that carry a
-    /// specific recipient (e.g. <see cref="NotificationEvent"/>).
+    /// Metadata bridging platform-level fields into the Sdk.Push envelope, built on the first read and then one instance
+    /// for the life of the event: the delivery filter reads it twice for every event and subscriber of a stream.
+    /// Default: tenant broadcast (no user target). Override through <see cref="MetadataFor"/> in records that carry a
+    /// specific recipient (e.g. <see cref="NotificationEvent"/>). The override stays on the record because the serializer
+    /// writes a member where the most derived record declares it, so moving it would change that event's wire order.
     /// </summary>
-    public override PushEventMetadata Metadata => new(TenantId, UserId: null, Timestamp, CorrelationId: null);
+    public override PushEventMetadata Metadata => MetadataFor(userId: null);
+
+    /// <summary>
+    /// The event's metadata, built once. Subscribers read it concurrently (the bus publishes on the caller's thread and
+    /// the Sdk.Push bus reads the same event on its own), and the value is immutable, so losing the race costs one
+    /// discarded instance: <see cref="Interlocked.CompareExchange{T}(ref T, T, T)"/> makes every reader return the first
+    /// instance published, and it is the fence that publishes it whole.
+    /// </summary>
+    private protected PushEventMetadata MetadataFor(string? userId)
+    {
+        if (Volatile.Read(ref _metadata) is { } built)
+        {
+            return built;
+        }
+
+        var candidate = new PushEventMetadata(TenantId, userId, Timestamp, CorrelationId: null);
+        return Interlocked.CompareExchange(ref _metadata, candidate, null) ?? candidate;
+    }
+
+    /// <summary>
+    /// A copy starts with no metadata: <c>with</c> runs this constructor and then assigns the changed members, so a
+    /// metadata built from the original's tenant, recipient or time must not travel with it. A new member of this record
+    /// has to be copied here by hand.
+    /// </summary>
+    protected PlatformEvent(PlatformEvent original)
+        : base(original)
+    {
+        ArgumentNullException.ThrowIfNull(original);
+        TenantId = original.TenantId;
+        Type = original.Type;
+        Timestamp = original.Timestamp;
+    }
+
+    /// <summary>Written by hand so that the built metadata stays out of it: an event already read equals one not read yet.</summary>
+    public virtual bool Equals(PlatformEvent? other) =>
+        ReferenceEquals(this, other)
+        || (base.Equals(other)
+            && string.Equals(TenantId, other!.TenantId, StringComparison.Ordinal)
+            && string.Equals(Type, other.Type, StringComparison.Ordinal)
+            && Timestamp.Equals(other.Timestamp));
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(base.GetHashCode(), TenantId, Type, Timestamp);
 }
 
 /// <summary>Raised when a conversation is assigned to an agent.</summary>
@@ -97,13 +144,23 @@ public sealed record ConversationAssignedEvent(
     : PlatformEvent(TenantId, "conversation.assigned", DateTimeOffset.UtcNow);
 
 /// <summary>Raised when a new message arrives in a conversation.</summary>
+/// <remarks>
+/// Content-bearing (contact-history-opens-by-assignment, design D17): the live stream delivers it to the readers of every
+/// conversation and to the agents of <see cref="Audience"/>, which each publisher stamps from the conversation's current
+/// state through <c>ConversationOffer.AudienceOf</c>. An event published without one reaches only the readers.
+/// </remarks>
 public sealed record ConversationMessageEvent(
     string TenantId,
     string ConversationId,
     string MessageId,
     string Sender,
     string Text)
-    : PlatformEvent(TenantId, "conversation.message", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "conversation.message", DateTimeOffset.UtcNow), IConversationContentEvent
+{
+    /// <summary>The conversation's owner agent and open-offer agent when the event was published. Never serialized.</summary>
+    [JsonIgnore]
+    public ConversationAudience Audience { get; init; } = ConversationAudience.None;
+}
 
 /// <summary>Raised when a conversation changes state.</summary>
 public sealed record ConversationStateChangedEvent(
@@ -240,7 +297,12 @@ public sealed record AgentAssistSuggestionEvent(
     string Priority,
     string Source,
     string? TriggerPhrase)
-    : PlatformEvent(TenantId, "agentassist.suggestion", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "agentassist.suggestion", DateTimeOffset.UtcNow), IConversationContentEvent
+{
+    /// <summary>Only the agent the event names in <c>AgentId</c>, never the conversation's owner or offered agent (design D17). Never serialized.</summary>
+    [JsonIgnore]
+    public ConversationAudience Audience { get; } = ConversationAudience.ForAgent(AgentId);
+}
 
 /// <summary>Raised when a sentiment reading is produced for a live call segment.</summary>
 public sealed record AgentAssistSentimentEvent(
@@ -252,7 +314,12 @@ public sealed record AgentAssistSentimentEvent(
     float Score,
     string Label,
     IReadOnlyList<string> TriggerWords)
-    : PlatformEvent(TenantId, "agentassist.sentiment", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "agentassist.sentiment", DateTimeOffset.UtcNow), IConversationContentEvent
+{
+    /// <summary>Only the agent the event names in <c>AgentId</c>, never the conversation's owner or offered agent (design D17). Never serialized.</summary>
+    [JsonIgnore]
+    public ConversationAudience Audience { get; } = ConversationAudience.ForAgent(AgentId);
+}
 
 /// <summary>Raised when a compliance rule violation is detected during a live call.</summary>
 public sealed record AgentAssistComplianceAlertEvent(
@@ -263,7 +330,12 @@ public sealed record AgentAssistComplianceAlertEvent(
     string RuleId,
     string? Phrase,
     string Severity)
-    : PlatformEvent(TenantId, "agentassist.compliance_alert", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "agentassist.compliance_alert", DateTimeOffset.UtcNow), IConversationContentEvent
+{
+    /// <summary>Only the agent the event names in <c>AgentId</c>, never the conversation's owner or offered agent (design D17). Never serialized.</summary>
+    [JsonIgnore]
+    public ConversationAudience Audience { get; } = ConversationAudience.ForAgent(AgentId);
+}
 
 /// <summary>Raised when a transcript segment is produced during a live call.</summary>
 public sealed record AgentAssistTranscriptEvent(
@@ -274,7 +346,12 @@ public sealed record AgentAssistTranscriptEvent(
     string Speaker,
     string Text,
     bool IsFinal)
-    : PlatformEvent(TenantId, "agentassist.transcript", DateTimeOffset.UtcNow);
+    : PlatformEvent(TenantId, "agentassist.transcript", DateTimeOffset.UtcNow), IConversationContentEvent
+{
+    /// <summary>Only the agent the event names in <c>AgentId</c>, never the conversation's owner or offered agent (design D17). Never serialized.</summary>
+    [JsonIgnore]
+    public ConversationAudience Audience { get; } = ConversationAudience.ForAgent(AgentId);
+}
 
 // ─── Notification Events ─────────────────────────────────────────────────────
 
@@ -298,5 +375,5 @@ public sealed record NotificationEvent(
     : PlatformEvent(TenantId, "notification.created", Timestamp)
 {
     /// <inheritdoc />
-    public override PushEventMetadata Metadata => new(TenantId, UserId, Timestamp, CorrelationId: null);
+    public override PushEventMetadata Metadata => MetadataFor(UserId);
 }

@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using Verbara.Platform.Core;
 using Verbara.Platform.Conversations;
+using Verbara.Platform.Queues;
+using Verbara.Platform.Typification.Stores;
 
 namespace Verbara.Platform.Storage.InMemory;
 
@@ -8,11 +10,23 @@ internal sealed class InMemoryConversationStore : IConversationStore
 {
     private readonly ConcurrentDictionary<(TenantId, EntityId), Conversation> _items = new();
     private readonly InMemoryMessageStore? _messages;
+    private readonly InMemoryContactSummarySources? _summarySources;
 
+    /// <summary>Creates the store, with the stores its contact summaries and message checks read.</summary>
     /// <param name="messages">
-    /// The message store <see cref="DeleteIfNoMessagesAsync"/> consults; a store built without one cannot answer it.
+    /// The message store <see cref="DeleteIfNoMessagesAsync"/> and <see cref="ListContactSummariesAsync"/> consult; a
+    /// store built without one cannot answer them.
     /// </param>
-    public InMemoryConversationStore(InMemoryMessageStore? messages = null) => _messages = messages;
+    /// <param name="summarySources">
+    /// The stores <see cref="ListContactSummariesAsync"/> joins (queue names, agent names, dispositions); a store built
+    /// without them cannot answer it.
+    /// </param>
+    public InMemoryConversationStore(
+        InMemoryMessageStore? messages = null, InMemoryContactSummarySources? summarySources = null)
+    {
+        _messages = messages;
+        _summarySources = summarySources;
+    }
 
     public Task<Conversation?> GetByIdAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
     {
@@ -27,7 +41,15 @@ internal sealed class InMemoryConversationStore : IConversationStore
             .Where(c => query.State == null || c.State == query.State)
             .Where(c => query.ContactId == null || c.ContactId == query.ContactId)
             .Where(c => query.CaseId == null || c.CaseId == query.CaseId)
-            .Where(c => query.AssignedAgentId == null || (c.Owner != null && c.Owner.OwnerId == query.AssignedAgentId))
+            // contact-history-opens-by-assignment (design D4): kind and id together, as the Postgres filter.
+            .Where(c => query.AssignedAgentId == null
+                || (c.Owner is { Kind: ConversationOwnerKind.Agent } owner && owner.OwnerId == query.AssignedAgentId))
+            // contact-history-opens-by-assignment (design D4): owned by the agent in any state, or an open offer to it.
+            .Where(c => query.VisibleToAgentId is not { } visibleTo
+                || (c.Owner is { Kind: ConversationOwnerKind.Agent } visibleOwner && visibleOwner.OwnerId == visibleTo)
+                || (c.State == ConversationState.Offered
+                    && c.Metadata.TryGetValue(ConversationQuery.OfferedToMetadataKey, out var offeredTo)
+                    && string.Equals(offeredTo, visibleTo.Value, StringComparison.Ordinal)))
             .Where(c => query.Channel == null || c.Channel == query.Channel)
             .ToList();
 
@@ -59,9 +81,17 @@ internal sealed class InMemoryConversationStore : IConversationStore
         // conversation born with a message); an update never writes it, so a stale copy cannot roll it back. Mirrors
         // SaveSql's INSERT-only COALESCE(@LastMessageAt, @CreatedAt).
         var key = (conversation.TenantId, conversation.ConversationId);
-        conversation.LastMessageAt = _items.TryGetValue(key, out var stored)
-            ? stored.LastMessageAt
+        var exists = _items.TryGetValue(key, out var stored);
+        conversation.LastMessageAt = exists
+            ? stored!.LastMessageAt
             : conversation.LastMessageAt ?? conversation.CreatedAt;
+
+        // contact-history-opens-by-assignment (design D7): the store, never the caller, writes the last queue. A queue
+        // owner names its queue; any other owner keeps the stored one (none on an insert). Mirrors SaveSql's
+        // COALESCE(QueueIdWriteCase, conversations.queue_id).
+        conversation.QueueId = conversation.Owner is { Kind: ConversationOwnerKind.Queue, OwnerId: { } queueId }
+            ? queueId
+            : exists ? stored!.QueueId : null;
 
         _items[key] = conversation;
         return Task.CompletedTask;
@@ -108,6 +138,67 @@ internal sealed class InMemoryConversationStore : IConversationStore
     {
         var result = _items.Values.FirstOrDefault(c => c.ConversationId == conversationId);
         return Task.FromResult(result);
+    }
+
+    public async Task<PagedResult<ContactConversationSummary>> ListContactSummariesAsync(
+        TenantId tenantId, EntityId contactId, EntityId? ownedByAgentId, int page, int pageSize, CancellationToken ct)
+    {
+        // contact-history-opens-by-assignment (design D5, D6, D18): mirrors the Postgres summary query — every state,
+        // created_at then the id descending (ordinal), the owner restriction on kind and id together, then the joins.
+        var messages = _messages ?? throw new InvalidOperationException(
+            "This conversation store was built without a message store, so it cannot read a contact's summaries.");
+        var sources = _summarySources ?? throw new InvalidOperationException(
+            "This conversation store was built without its summary sources, so it cannot read a contact's summaries.");
+
+        var matching = _items.Values
+            .Where(c => c.TenantId == tenantId && c.ContactId == contactId)
+            .Where(c => ownedByAgentId is not { } owner
+                || (c.Owner is { Kind: ConversationOwnerKind.Agent } agentOwner && agentOwner.OwnerId == owner))
+            .OrderByDescending(c => c.CreatedAt)
+            .ThenByDescending(c => c.ConversationId.Value, StringComparer.Ordinal)
+            .ToList();
+
+        var items = new List<ContactConversationSummary>();
+        foreach (var conversation in matching.Skip((page - 1) * pageSize).Take(pageSize))
+        {
+            var queueName = conversation.QueueId is { } queueId
+                ? (await sources.Queues().GetByIdAsync(tenantId, queueId, ct))?.Name
+                : null;
+            var agentName = conversation.Owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } agentId }
+                ? (await sources.Agents().GetByIdAsync(tenantId, agentId, ct))?.DisplayName
+                : null;
+
+            ConversationDispositionRef? disposition = null;
+            if (await sources.Submissions().GetByConversationIdAsync(tenantId, conversation.ConversationId, ct) is { } submission)
+            {
+                var correction = await sources.Corrections().GetAsync(tenantId, conversation.ConversationId, ct);
+                disposition = new ConversationDispositionRef(
+                    correction?.CorrectedLeafNodeId ?? submission.LeafNodeId, submission.SchemaId, submission.SchemaVersion);
+            }
+
+            var last = messages.NewestActivityMessage(tenantId, conversation.ConversationId);
+            items.Add(new ContactConversationSummary(
+                conversation,
+                queueName,
+                agentName,
+                disposition,
+                last is null ? null : new ConversationActivityMessage(last.Direction, last.Content, last.CreatedAt)));
+        }
+
+        return new PagedResult<ContactConversationSummary>(items, matching.Count, page, pageSize);
+    }
+
+    public Task<bool> HoldsOpenConversationOfContactAsync(TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct)
+    {
+        // contact-history-opens-by-assignment (design D2): owner kind and id together, any non-terminal state. An
+        // offered conversation is owned by its queue, so an offer is not holding.
+        var holds = _items.Values.Any(c =>
+            c.TenantId == tenantId &&
+            c.ContactId == contactId &&
+            c.Owner is { Kind: ConversationOwnerKind.Agent } owner &&
+            owner.OwnerId == agentId &&
+            !ConversationStateMachine.IsTerminal(c.State));
+        return Task.FromResult(holds);
     }
 
     public Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)

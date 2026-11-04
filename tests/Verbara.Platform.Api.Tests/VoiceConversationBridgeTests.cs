@@ -23,6 +23,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Verbara.Platform.Api.Tests.Logging;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
+using NSubstitute.ReturnsExtensions;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -191,6 +192,93 @@ public sealed class VoiceConversationBridgeTests : IDisposable
             Arg.Any<CancellationToken>());
         events.OfType<ConversationStateChangedEvent>()
             .Should().Contain(ev => ev.OldState == "" && ev.NewState == nameof(ConversationState.Queued));
+    }
+
+    // contact-history-opens-by-assignment task 1.7 (design D18): the address the bridge resolves for a withheld caller
+    // id is the shared sentinel of SharedContactAddresses, so the read rule's shared-contact exclusion and the bridge
+    // cannot drift apart.
+    [Fact]
+    public async Task HandleEventAsync_ShouldResolveASharedSentinelAddress_WhenTheCallerIdIsWithheld()
+    {
+        var session = MakeSession("link-anon", Tenant);
+        _sessions.GetById("s-link-anon").Returns(session);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-anon", Arg.Any<CancellationToken>())
+            .ReturnsNull();
+        StubContact();
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallQueuedEvent("s-link-anon", "primary", _clock.UtcNow, "acme-Support", 1));
+
+        var resolved = _contacts.ReceivedCalls()
+            .Where(call => call.GetMethodInfo().Name == nameof(IContactIdentityResolver.ResolveAsync))
+            .Select(call => call.GetArguments()[1] as ChannelAddress)
+            .Should().ContainSingle().Subject;
+        SharedContactAddresses.IsShared(resolved!).Should().BeTrue(
+            "every withheld-caller-id call resolves to the tenant's one shared anonymous voice contact");
+        SharedContactAddresses.All.Should().Contain(resolved!);
+    }
+
+    // CallSession.AddParticipant is SDK-internal (see AddCaller): a caller leg with a caller id number.
+    private static void AddCallerWithCallerId(CallSession session, string channel, string callerIdNum)
+    {
+        var participant = new SessionParticipant
+        {
+            UniqueId = channel,
+            Channel = channel,
+            Technology = "PJSIP",
+            Role = ParticipantRole.Caller,
+            CallerIdNum = callerIdNum,
+        };
+        var add = typeof(CallSession).GetMethod("AddParticipant", BindingFlags.Instance | BindingFlags.NonPublic)
+                  ?? throw new InvalidOperationException("CallSession.AddParticipant not found.");
+        add.Invoke(session, [participant]);
+    }
+
+    // contact-history-opens-by-assignment review round 1 (design D18): Asterisk's AMI reports a missing caller id as
+    // the literal "<unknown>", and carriers send "Restricted", "Unavailable" or "Private". Resolved as given, each
+    // became one more tenant-wide voice contact the read rule did not see as shared, so it opened every withheld
+    // caller's transcript to whoever held one of them. Each must resolve to the one anonymous sentinel.
+    [Theory]
+    [InlineData("<unknown>")]
+    [InlineData("unknown")]
+    [InlineData("Restricted")]
+    [InlineData("Unavailable")]
+    [InlineData("Private")]
+    public async Task HandleEventAsync_ShouldResolveTheAnonymousSentinel_WhenTheCallerIdIsAWithheldPlaceholder(string callerIdNum)
+    {
+        var session = MakeSession("link-placeholder", Tenant);
+        AddCallerWithCallerId(session, "PJSIP/trunk-00000001", callerIdNum);
+        _sessions.GetById("s-link-placeholder").Returns(session);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-placeholder", Arg.Any<CancellationToken>())
+            .ReturnsNull();
+        StubContact();
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallQueuedEvent("s-link-placeholder", "primary", _clock.UtcNow, "acme-Support", 1));
+
+        await _contacts.Received(1).ResolveAsync(
+            Arg.Is<TenantId>(t => t.Value == Tenant),
+            Arg.Is<ChannelAddress>(a => a != null && a.Channel == ChannelType.Voice && a.Address == SharedContactAddresses.AnonymousVoiceCaller),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldResolveTheCallerNumber_WhenTheCallerIdIsANumber()
+    {
+        var session = MakeSession("link-number", Tenant);
+        AddCallerWithCallerId(session, "PJSIP/trunk-00000002", "+15550001111");
+        _sessions.GetById("s-link-number").Returns(session);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-number", Arg.Any<CancellationToken>())
+            .ReturnsNull();
+        StubContact();
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallQueuedEvent("s-link-number", "primary", _clock.UtcNow, "acme-Support", 1));
+
+        await _contacts.Received(1).ResolveAsync(
+            Arg.Is<TenantId>(t => t.Value == Tenant),
+            Arg.Is<ChannelAddress>(a => a != null && a.Channel == ChannelType.Voice && a.Address == "+15550001111"),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -928,6 +1016,30 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         conversation.State.Should().Be(ConversationState.WrapUp);
         await _capacity.Received(1).ReleaseAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), ChannelType.Voice, Arg.Any<CancellationToken>());
         await _agents.Received(1).SaveAsync(Arg.Is<Agent>(a => a != null && a.State == AgentState.ACW), Arg.Any<CancellationToken>());
+    }
+
+    // Review round 1: a withheld placeholder ("<unknown>", "Restricted", ...) is not a number a callback can dial, so it
+    // is never stamped as the callback number; A6 escalates the callback it cannot place.
+    [Fact]
+    public async Task OnCallEnded_ShouldNotStampCallbackNumber_WhenTheCallerIdIsAWithheldPlaceholder()
+    {
+        var session = MakeSession("link-cb-unknown", Tenant, AgentInterface);
+        session.QueueName = "acme-Support";
+        AddCallerWithCallerId(session, "PJSIP/trunk-00000003", "<unknown>");
+        _sessions.GetById("s-link-cb-unknown").Returns(session);
+        var conversation = VoiceConversation("link-cb-unknown", ConversationState.Active);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-cb-unknown", Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        StubQueue("Support");
+        StubContactWithVoiceAddress(conversation.ContactId, SharedContactAddresses.AnonymousVoiceCaller);
+        _agents.GetByIdAsync(Arg.Any<TenantId>(), Arg.Is<EntityId>(id => id.Value == AgentGuid), Arg.Any<CancellationToken>())
+            .Returns(AgentInState(AgentState.Busy));
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallEndedEvent("s-link-cb-unknown", "primary", _clock.UtcNow, null, TimeSpan.FromSeconds(42), TimeSpan.FromSeconds(39)));
+
+        conversation.Metadata.Should().ContainKey("pendingCallbackEval");
+        conversation.Metadata.Should().NotContainKey("callbackNumber");
     }
 
     [Fact]

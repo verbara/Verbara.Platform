@@ -30,16 +30,31 @@
 // WhatsApp window), so every run starts from the same seeded database.
 //
 // Repro: dotnet run -c Release --project tests/Verbara.Platform.Benchmarks -- --filter '*ConversationClaimCostBench*'
+//
+// contact-history-opens-by-assignment task 3.6, cell T-1 (frozen plan: Predictions/contact-history-opens-by-assignment.md,
+// sha256 a761a6da…): two more operations, built only on APIs that exist at the merge base 0cfdb299 and at the candidate:
+//   InboundPublish = WebhookInboundProcessor.ProcessAsync of one fresh webhook message for the seeded Active
+//                    conversation, the real inbound publishing path (internal to the Api, reached through a delegate
+//                    bound once in GlobalSetup, so no reflection runs per op), with an in-process event bus;
+//   Save           = IConversationStore.SaveAsync of the seeded conversation, the whole-row upsert with the D7 CASE.
+// Its control is AUDIENCE_COST_CONTROL=true (B only): AudienceCostControlStore.cs doubles SaveAsync, and a local patch of
+// the measured tree adds a 2 KiB buffer per ConversationOffer.AudienceOf call. The routing and bot seams are stubs that
+// throw: the seeded conversation is Active and owned by no bot, so the processor never reaches them.
 
 using BenchmarkDotNet.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using NpgsqlTypes;
+using System.Reflection;
+using Verbara.Platform.Audit;
+using Verbara.Platform.Bot;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
+using Verbara.Platform.Routing.Inbound;
 using Verbara.Platform.Storage.Postgres;
+using Verbara.Platform.Switchboard;
 
 namespace Verbara.Platform.Benchmarks;
 
@@ -59,6 +74,9 @@ public class ConversationClaimCostBench
     private NpgsqlDataSource? _dataSource;
     private IInboundMessagePipeline _pipeline = null!;
     private IConversationService _conversations = null!;
+    private IConversationStore _conversationStore = null!;
+    private Func<TenantId, ChannelType, WebhookResult, CancellationToken, Task> _processWebhook = null!;
+    private Conversation _seeded = null!;
     private EntityId _conversationId;
     private long _sequence;
 
@@ -90,11 +108,27 @@ public class ConversationClaimCostBench
         Verbara.Platform.Switchboard.ServiceCollectionExtensions.AddSwitchboard(services);
         services.AddPostgresStorage(_dataSource);
         services.AddSingleton<IChannelConnector, SucceedingWhatsAppConnector>();
+        services.AddSingleton<IAuditService, DefaultAuditService>();
+        services.AddSingleton<Verbara.Platform.Api.Services.ConversationCloseMetrics>();
+        services.AddSingleton<IInboundRouter, UnreachableRouter>();
+        services.AddSingleton<IVirtualAgent, UnreachableVirtualAgent>();
+        // The switchboard only routes (an Active conversation never is) and hands a bot's conversation back; the proxy
+        // throws if either is ever reached. AddSwitchboard's own registration needs the capacity seam, not wired here.
+        services.AddSingleton(_ => Unreachable.Of<IConversationSwitchboard>());
+        var apiAssembly = typeof(Verbara.Platform.Api.Services.ConversationCloseMetrics).Assembly;
+        var announcerType = apiAssembly.GetType("Verbara.Platform.Api.Services.CustomerReturnAnnouncer", throwOnError: true)!;
+        services.AddSingleton(announcerType, sp => ActivatorUtilities.CreateInstance(sp, announcerType));
         ClaimCostControl.Apply(services);
+        AudienceCostControl.Apply(services);
         _provider = services.BuildServiceProvider();
 
         _pipeline = _provider.GetRequiredService<IInboundMessagePipeline>();
         _conversations = _provider.GetRequiredService<IConversationService>();
+        _conversationStore = _provider.GetRequiredService<IConversationStore>();
+        var processorType = apiAssembly.GetType("Verbara.Platform.Api.Services.WebhookInboundProcessor", throwOnError: true)!;
+        var processor = ActivatorUtilities.CreateInstance(_provider, processorType);
+        _processWebhook = processorType.GetMethod("ProcessAsync", BindingFlags.Instance | BindingFlags.Public)!
+            .CreateDelegate<Func<TenantId, ChannelType, WebhookResult, CancellationToken, Task>>(processor);
 
         // Seed: the first inbound creates the contact (with its WhatsApp address) and the conversation, and opens the
         // WhatsApp window; the row is then moved to Active.
@@ -121,6 +155,21 @@ public class ConversationClaimCostBench
             .ConfigureAwait(false);
         if (sent.DeliveryStatus != MessageDeliveryStatus.Sent)
             throw new InvalidOperationException($"Reply was not sent: {sent.DeliveryStatus}.");
+
+        // InboundPublish must reach the publish of the inbound conversation.message of the seeded conversation.
+        var published = 0;
+        using (_provider.GetRequiredService<PlatformEventBus>().Events.Subscribe(new CountingObserver(
+                   e => e is ConversationMessageEvent m && m.ConversationId == _conversationId.Value && m.Sender == "Inbound",
+                   () => Interlocked.Increment(ref published))))
+        {
+            await InboundPublish().ConfigureAwait(false);
+        }
+        if (published != 1)
+            throw new InvalidOperationException($"InboundPublish published {published} inbound messages, not 1.");
+
+        _seeded = await _conversationStore.GetByIdAsync(Tenant, _conversationId, CancellationToken.None).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The seeded conversation could not be read back.");
+        await Save().ConfigureAwait(false);
     }
 
     [GlobalCleanup]
@@ -141,11 +190,18 @@ public class ConversationClaimCostBench
         _conversations.SendMessageAsync(
             _conversationId, Tenant, Text, SystemSender, ConversationOwnerKind.System, CancellationToken.None);
 
+    [Benchmark]
+    public Task InboundPublish() =>
+        _processWebhook(Tenant, ChannelType.WhatsApp, WebhookResult.From([NextInbound()], []), CancellationToken.None);
+
+    [Benchmark]
+    public Task Save() => _conversationStore.SaveAsync(_seeded, CancellationToken.None);
+
     private InboundMessage NextInbound() =>
         new(From, Text, "wamid.in." + Interlocked.Increment(ref _sequence).ToString(System.Globalization.CultureInfo.InvariantCulture),
             DateTimeOffset.UtcNow);
 
-    private static async Task ApplyMigrationsAsync(NpgsqlDataSource dataSource)
+    internal static async Task ApplyMigrationsAsync(NpgsqlDataSource dataSource)
     {
         var assembly = typeof(Verbara.Platform.Storage.Postgres.ServiceCollectionExtensions).Assembly;
         var names = assembly.GetManifestResourceNames()
@@ -164,6 +220,47 @@ public class ConversationClaimCostBench
             await using var cmd = dataSource.CreateCommand(sql);
             await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
+    }
+
+    private sealed class CountingObserver(Func<PlatformEvent, bool> match, Action hit) : IObserver<PlatformEvent>
+    {
+        public void OnCompleted()
+        {
+        }
+
+        public void OnError(Exception error)
+        {
+        }
+
+        public void OnNext(PlatformEvent value)
+        {
+            if (match(value))
+                hit();
+        }
+    }
+
+    /// <summary>A proxy of <typeparamref name="T"/> whose every member throws: a seam the measured path never reaches.</summary>
+#pragma warning disable CA1852 // DispatchProxy.Create derives a type from it at run time, so it cannot be sealed.
+    internal class Unreachable : DispatchProxy
+#pragma warning restore CA1852
+    {
+        public static T Of<T>()
+            where T : class => Create<T, Unreachable>();
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) =>
+            throw new InvalidOperationException($"The benchmark reached {targetMethod?.Name}, which its seeded conversation never does.");
+    }
+
+    private sealed class UnreachableRouter : IInboundRouter
+    {
+        public Task<RouteResult> RouteAsync(RoutingContext context, CancellationToken ct) =>
+            throw new InvalidOperationException("The benchmark's seeded conversation is never routed.");
+    }
+
+    private sealed class UnreachableVirtualAgent : IVirtualAgent
+    {
+        public Task<BotResponse> ProcessMessageAsync(EntityId conversationId, TenantId tenantId, MessageEnvelope message, CancellationToken ct) =>
+            throw new InvalidOperationException("No bot owns the benchmark's seeded conversation.");
     }
 
     /// <summary>A WhatsApp connector that succeeds without I/O, with a new provider id per send.</summary>
@@ -187,6 +284,14 @@ public class ConversationClaimCostBench
 
 /// <summary>The control hook: a no-op unless the project is built with <c>CLAIM_COST_CONTROL=true</c> in the environment.</summary>
 internal static partial class ClaimCostControl
+{
+    public static void Apply(IServiceCollection services) => ApplyCore(services);
+
+    static partial void ApplyCore(IServiceCollection services);
+}
+
+/// <summary>The T-1 control hook: a no-op unless the project is built with <c>AUDIENCE_COST_CONTROL=true</c> in the environment.</summary>
+internal static partial class AudienceCostControl
 {
     public static void Apply(IServiceCollection services) => ApplyCore(services);
 

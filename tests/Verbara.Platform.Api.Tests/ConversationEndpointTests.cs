@@ -40,12 +40,13 @@ public sealed class ConversationEndpointTests : IClassFixture<AuthenticatedPlatf
     }
 
     [Fact]
-    public async Task GetMessages_ShouldReturn200_WhenConversationExists()
+    public async Task GetMessages_ShouldReturn404_WhenConversationDoesNotExist()
     {
-        // GetMessages returns empty list when conversation has no messages — still 200
+        // contact-history-opens-by-assignment (spec conversation-read-scope, "An id outside the caller's tenant MUST
+        // answer 404 before the rule runs"): an unknown id no longer answers 200 with an empty transcript.
         var response = await _client.GetAsync("/api/conversations/any-id/messages?limit=20&offset=0");
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]

@@ -45,13 +45,19 @@ internal static partial class ConversationTransferNote
     /// <see cref="Written"/> once it is stored and <see cref="Failed"/> when it could not be. The stored message is the
     /// contract and the event a convenience, so a failed publish leaves the answer at <see cref="Written"/>.
     /// </summary>
+    /// <remarks>
+    /// The message is built from <paramref name="conversation"/>, the handler's pre-transfer copy, whose id, tenant and
+    /// channel a transfer does not change. The event's <paramref name="audience"/> is the conversation's after the move
+    /// (contact-history-opens-by-assignment, design D17): the new owner or open-offer agent, never the former owner.
+    /// </remarks>
     public static async Task<string> TryWriteAsync(
         HttpContext context,
         IMessageStore messages,
         IClock clock,
         PlatformEventBus eventBus,
         Conversation conversation,
-        string note)
+        string note,
+        ConversationAudience audience)
     {
         var userId = CallerIdentity.ResolveUserIdOrSystem(context.User);
         var message = new Message
@@ -81,7 +87,10 @@ internal static partial class ConversationTransferNote
         try
         {
             eventBus.Publish(new ConversationMessageEvent(
-                conversation.TenantId.Value, conversation.ConversationId.Value, message.MessageId.Value, "System", note));
+                conversation.TenantId.Value, conversation.ConversationId.Value, message.MessageId.Value, "System", note)
+            {
+                Audience = audience,
+            });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

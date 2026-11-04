@@ -40,7 +40,7 @@ internal static class PermissionSeeder
     /// </summary>
     internal static IEnumerable<PermissionRow> GetPermissions()
     {
-        // ── contacts (8) ──
+        // ── contacts (9) ──
         yield return P("contacts:conversation:handle", "contacts", "conversation", "handle",
             "Handle inbound/outbound conversations");
         yield return P("contacts:conversation:transfer", "contacts", "conversation", "transfer",
@@ -54,6 +54,10 @@ internal static class PermissionSeeder
         yield return P("contacts:conversation:whisper", "contacts", "conversation", "whisper",
             "Whisper to agent during active conversation",
             ["contacts:conversation:monitor", "contacts:conversation:handle"]);
+        // contact-history-opens-by-assignment (design D16, Platform/ADR-0047): reads every conversation and transcript of
+        // the tenant, with no listening and no action. Implies nothing: implication is catalog metadata only (ADR-0037).
+        yield return P("contacts:conversation:read", "contacts", "conversation", "read",
+            "Read every conversation and transcript of the tenant");
         yield return P("contacts:contact:view", "contacts", "contact", "view",
             "View contact information");
         yield return P("contacts:contact:edit", "contacts", "contact", "edit",

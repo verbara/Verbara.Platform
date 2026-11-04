@@ -229,7 +229,11 @@ public sealed class TransferNoteEndpointTests : IClassFixture<TransferNoteApiFac
             toQueue ? queue.QueueId.Value : target.AgentId.Value);
         ok["newState"]!.GetValue<string>().Should().Be(state);
 
-        var history = await client.GetStringAsync(Route(conversation, "messages"));
+        // contact-history-opens-by-assignment (design D2, D12): the transfer moved the conversation away, so the former
+        // owner no longer reads it (TranscriptReads_ShouldRefuseTheFormerOwnerNotReadable_…); a Supervisor of the
+        // tenant reads the stored note instead. Only the reader changed.
+        using var supervisorClient = _factory.ClientFor(_factory.NewUser(UserRole.Supervisor, "note-reader"));
+        var history = await supervisorClient.GetStringAsync(Route(conversation, "messages"));
         ShouldBeTheFixturesElement(
             JsonNode.Parse(history)!.AsArray().Should().ContainSingle().Subject!.AsObject(),
             conversation, user.UserId.Value);
@@ -374,7 +378,10 @@ public sealed class TransferNoteEndpointTests : IClassFixture<TransferNoteApiFac
 
     // This pins today's behaviour, not a wish: the console reads the first 50 messages, so a note written after 50
     // stays out of the page it reads. Gap B14 of the agent console plan, "cargar anteriores", turns these two tests.
-    private async Task<(HttpClient Client, Conversation Conversation)> TransferWithANoteAfterFiftyMessagesAsync()
+    // contact-history-opens-by-assignment (design D10, spec audit F4): a transfer to a queue leaves no later owner, and
+    // the former owner no longer reads the conversation, so both pins read with a Supervisor of the same tenant (a
+    // monitor). Every ordering and paging assertion is unchanged; the former owner's refusal is its own test below.
+    private async Task<(HttpClient Owner, HttpClient Supervisor, Conversation Conversation)> TransferWithANoteAfterFiftyMessagesAsync()
     {
         var (user, _, conversation) = SeedOwned();
         _factory.SeedMessages(conversation, 50);
@@ -382,14 +389,16 @@ public sealed class TransferNoteEndpointTests : IClassFixture<TransferNoteApiFac
         var client = _factory.ClientFor(user);
         (await client.PostAsJsonAsync(Route(conversation, "transfer"), ToQueue(queue, Note)))
             .StatusCode.Should().Be(HttpStatusCode.OK);
-        return (client, conversation);
+        var (supervisor, _) = _factory.NewAgent("supervisor", UserRole.Supervisor);
+        return (client, _factory.ClientFor(supervisor), conversation);
     }
 
     [Fact]
     public async Task GetMessages_ShouldAnswerTheFiftyStoredAndNotTheNote_WhenNoQueryIsGiven()
     {
-        var (client, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
-        using var owned = client;
+        var (owner, client, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
+        using var formerOwner = owner;
+        using var reader = client;
 
         var page = JsonNode.Parse(await client.GetStringAsync(Route(conversation, "messages")))!.AsArray();
 
@@ -400,14 +409,74 @@ public sealed class TransferNoteEndpointTests : IClassFixture<TransferNoteApiFac
     [Fact]
     public async Task GetMessages_ShouldAnswerTheNote_WhenTheOffsetReachesIt()
     {
-        var (client, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
-        using var owned = client;
+        var (owner, client, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
+        using var formerOwner = owner;
+        using var reader = client;
 
         var page = JsonNode.Parse(await client.GetStringAsync($"{Route(conversation, "messages")}?offset=50"))!.AsArray();
 
         var note = page.Should().ContainSingle().Subject!;
         note["direction"]!.GetValue<string>().Should().Be("System");
         note["content"]!["blocks"]![0]!["text"]!.GetValue<string>().Should().Be(Note);
+    }
+
+    // contact-history-opens-by-assignment task 2.4 (design D10, spec audit F4): the /history counterparts of the two
+    // pins above, read by the same Supervisor. Newest first, the note written after the fifty stored messages is the
+    // first item of the first page, and the cursor reaches the oldest stored message on the next page.
+    [Fact]
+    public async Task GetHistory_ShouldAnswerTheNoteFirst_WhenNoQueryIsGiven()
+    {
+        var (owner, client, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
+        using var formerOwner = owner;
+        using var reader = client;
+
+        var page = JsonNode.Parse(await client.GetStringAsync(Route(conversation, "history")))!.AsObject();
+
+        var items = page["items"]!.AsArray();
+        items.Should().HaveCount(50);
+        items[0]!["direction"]!.GetValue<string>().Should().Be("System");
+        items[0]!["content"]!["blocks"]![0]!["text"]!.GetValue<string>().Should().Be(Note);
+        items.Skip(1).Select(message => message!["direction"]!.GetValue<string>()).Should().OnlyContain(d => d == "Inbound");
+        items[1]!["content"]!["blocks"]![0]!["text"]!.GetValue<string>().Should().Be("seeded message 49");
+        page["hasMore"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetHistory_ShouldAnswerTheOldestStoredMessage_WhenTheCursorReachesIt()
+    {
+        var (owner, client, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
+        using var formerOwner = owner;
+        using var reader = client;
+        var first = JsonNode.Parse(await client.GetStringAsync(Route(conversation, "history")))!.AsObject();
+
+        var page = JsonNode.Parse(await client.GetStringAsync(
+            $"{Route(conversation, "history")}?before={Uri.EscapeDataString(first["nextBefore"]!.GetValue<string>())}"))!.AsObject();
+
+        var oldest = page["items"]!.AsArray().Should().ContainSingle().Subject!;
+        oldest["direction"]!.GetValue<string>().Should().Be("Inbound");
+        oldest["content"]!["blocks"]![0]!["text"]!.GetValue<string>().Should().Be("seeded message 0");
+        page["hasMore"]!.GetValue<bool>().Should().BeFalse();
+        page.ContainsKey("nextBefore").Should().BeFalse();
+    }
+
+    // contact-history-opens-by-assignment task 1.3 (design D2 step 4, D10; spec "The allowance ends with the
+    // assignment"): red on the unfixed code, green with tasks 2.2 and 2.4. After the transfer to a queue the former
+    // owner holds nothing of the conversation, so both transcript routes refuse it.
+    [Fact]
+    public async Task TranscriptReads_ShouldRefuseTheFormerOwnerNotReadable_WhenItTransferredTheConversationToAQueue()
+    {
+        var (owner, supervisor, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
+        using var formerOwner = owner;
+        using var reader = supervisor;
+
+        foreach (var route in new[] { Route(conversation, "messages"), Route(conversation, "history") })
+        {
+            using var response = await formerOwner.GetAsync(route);
+            var body = await response.Content.ReadAsStringAsync();
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden, because: $"{route} answered {body}");
+            JsonNode.DeepEquals(JsonNode.Parse(body), new JsonObject { ["error"] = "not-readable" })
+                .Should().BeTrue(because: $"{route} answered {body}");
+        }
     }
 
     // ─── "A stored note SHALL be published to the console on conversation.message" ──

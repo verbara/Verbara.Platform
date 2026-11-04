@@ -113,6 +113,37 @@ internal sealed class PostgresMessageStore : IMessageStore
         return rows.Select(r => r.ToMessage()).ToList();
     }
 
+    /// <summary>
+    /// contact-history-opens-by-assignment (design D10): the keyset read, newest first. The row comparison and the order
+    /// use the message id under <c>COLLATE "C"</c>, so ties on <c>created_at</c> break ordinally, as in memory, and a
+    /// cursor inside a run of equal times continues where the page ended. One row past <paramref name="limit"/> is read
+    /// to decide <see cref="MessageHistorySlice.HasMore"/>. The tenant and the conversation always pin the read; the
+    /// cursor only bounds it. Both cursor parameters may be <c>NULL</c>, so both carry an explicit type (42P08).
+    /// </summary>
+    public async Task<MessageHistorySlice> GetConversationHistoryAsync(
+        TenantId tenantId, EntityId conversationId, int limit, MessageHistoryCursor? before, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        var rows = await _dataSource.QueryListAsync(
+            "SELECT " + Columns + " FROM messages " +
+            "WHERE tenant_id = @TenantId AND conversation_id = @ConversationId " +
+            "  AND (@BeforeAt IS NULL OR (created_at, message_id COLLATE \"C\") < (@BeforeAt, @BeforeId COLLATE \"C\")) " +
+            "ORDER BY created_at DESC, message_id COLLATE \"C\" DESC LIMIT @Take",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId",       tenantId.Value));
+                p.Add(new NpgsqlParameter("ConversationId", conversationId.Value));
+                p.Add(new NpgsqlParameter("BeforeAt", NpgsqlDbType.TimestampTz) { Value = before is { } at ? at.CreatedAt : DBNull.Value });
+                p.Add(new NpgsqlParameter("BeforeId", NpgsqlDbType.Text) { Value = before is { } id ? id.MessageId.Value : DBNull.Value });
+                p.Add(new NpgsqlParameter("Take", NpgsqlDbType.Integer) { Value = limit + 1 });
+            },
+            MessageRow.Map, ct);
+
+        var hasMore = rows.Count > limit;
+        var items = rows.Take(limit).Select(r => r.ToMessage()).ToList();
+        return new MessageHistorySlice(items, hasMore);
+    }
+
     // SQL mirror of MessageDeliveryStatusRules.CanAdvance (design D9): Pending < Sent < Delivered < Read,
     // Failed terminal and reachable only from Pending/Sent. The enum values are compile-time constants.
     private static readonly string StoredRankSql =

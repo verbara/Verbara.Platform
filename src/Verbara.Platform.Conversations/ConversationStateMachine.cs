@@ -49,13 +49,19 @@ public static class ConversationStateMachine
         (ConversationState.Escalated, ConversationState.Queued),
     ];
 
-    private static readonly HashSet<ConversationState> s_terminalStates =
+    /// <summary>
+    /// The terminal states: <c>Closed</c>, <c>Abandoned</c>, <c>Merged</c>, <c>Spam</c>. Read by the stores that bind
+    /// them in SQL, so the set is stated once (contact-history-opens-by-assignment, design D2).
+    /// </summary>
+    public static readonly IReadOnlyList<ConversationState> TerminalStates =
     [
         ConversationState.Closed,
         ConversationState.Abandoned,
         ConversationState.Merged,
         ConversationState.Spam,
     ];
+
+    private static readonly HashSet<ConversationState> s_terminalStates = [.. TerminalStates];
 
     /// <summary>W4 — conversation states that count as the agent actively working an item
     /// (block a deferred pause from applying). Excludes parked + pre-accept + terminal.</summary>

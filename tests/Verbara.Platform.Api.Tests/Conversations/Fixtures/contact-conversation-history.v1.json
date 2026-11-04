@@ -1,0 +1,102 @@
+{
+  "_comment": "GET /api/v1/contacts/{id}/conversations after this change (design D5-D9). The route keeps its path and its query (`page` default 1, `pageSize` default 25, clamped 1..100) and its PagedResult envelope (Verbara.Platform.Core/PagedResult.cs: items, totalCount, page, pageSize, totalPages, hasNextPage, hasPreviousPage), but each element is no longer the raw Conversation record: it is ContactConversationSummaryDto, a sealed record registered in ApiJsonContext (camelCase, enums as PascalCase strings, a member that is null on the server is ABSENT from the JSON, not a literal null: WhenWritingNull at Program.cs:1454 and ApiJsonContext.cs:725). Items are ordered newest first: createdAt descending, then id descending. Terminal conversations (Closed, Abandoned, Merged, Spam) are included. The conversation the caller holds right now is flagged with heldByCaller=true, never removed from the list. `_omittedWhileNull` names, per element, the members that element does not carry and why. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d/conversations",
+    "query": { "page": "1", "pageSize": "25" },
+    "status": 200
+  },
+  "body": {
+    "items": [
+      {
+        "_example": "the conversation the calling agent holds now (it owns it, Active): heldByCaller=true. No closedAt, durationSeconds, closedReason or disposition while it is open.",
+        "_omittedWhileNull": ["closedAt", "durationSeconds", "closedReason", "disposition"],
+        "id": "c3b2a1f0e9d84c7b6a5f4e3d2c1b0a99",
+        "channel": "WhatsApp",
+        "state": "Active",
+        "createdAt": "2026-11-03T14:02:11.000+00:00",
+        "queueId": "q-support-0001",
+        "queueName": "Support",
+        "agentId": "a-0f1e2d3c4b5a6978",
+        "agentDisplayName": "Agent B",
+        "lastMessageAt": "2026-11-03T14:05:40.000+00:00",
+        "lastMessage": {
+          "direction": "Inbound",
+          "blockType": "Text",
+          "preview": "Hi again, the replacement card has not arrived yet",
+          "createdAt": "2026-11-03T14:05:40.000+00:00"
+        },
+        "heldByCaller": true
+      },
+      {
+        "_example": "a past conversation of the same contact, closed by the inactivity close (Platform/ADR-0046), handled and typified by another agent. It records a system close reason, so durationSeconds = lastMessageAt - createdAt in whole seconds (10:20:05 - 09:15:00 = 3905), not closedAt - createdAt (263105, which would measure the 72 h silence; design D6, fable review wf_ed1d2a54-7d6).",
+        "_omittedWhileNull": [],
+        "id": "4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a",
+        "channel": "WhatsApp",
+        "state": "Closed",
+        "createdAt": "2026-10-28T09:15:00.000+00:00",
+        "closedAt": "2026-10-31T10:20:05.000+00:00",
+        "durationSeconds": 3905,
+        "closedReason": "inactivity",
+        "queueId": "q-support-0001",
+        "queueName": "Support",
+        "agentId": "a-9e8d7c6b5a493827",
+        "agentDisplayName": "Agent A",
+        "disposition": {
+          "nodeId": "n-card-replacement",
+          "label": "Card replacement requested"
+        },
+        "lastMessageAt": "2026-10-28T10:20:05.000+00:00",
+        "lastMessage": {
+          "direction": "Outbound",
+          "blockType": "Text",
+          "preview": "Your replacement card has been ordered and should arrive within five business days.",
+          "createdAt": "2026-10-28T10:20:05.000+00:00"
+        },
+        "heldByCaller": false
+      },
+      {
+        "_example": "an old conversation closed before this change shipped with no owner at all (queued and owner-less, the state a failed routing leaves, then abandoned, so no agent). Migration 027 backfills queue_id only for rows a queue owns (owner_kind = 3, design D7), so this row stays without one; a row a queue still owned would carry queueId, and queueName while that queue exists. It was never typified, and its last message was an image (preview is empty for a block without text). It is a pre-026-style row: migration 026 backfilled its conversations.last_message_at with its created_at (2026-09-02T18:00:00), yet lastMessageAt is 18:01:12 because the summary takes the newest activity message first (design D6). No system close reason, so durationSeconds = closedAt - createdAt = 1800.",
+        "_storedLastMessageAt": "2026-09-02T18:00:00.000+00:00",
+        "_omittedWhileNull": ["queueId", "queueName", "agentId", "agentDisplayName", "disposition", "closedReason"],
+        "id": "0a9b8c7d6e5f40312233445566778899",
+        "channel": "WhatsApp",
+        "state": "Abandoned",
+        "createdAt": "2026-09-02T18:00:00.000+00:00",
+        "closedAt": "2026-09-02T18:30:00.000+00:00",
+        "durationSeconds": 1800,
+        "lastMessageAt": "2026-09-02T18:01:12.000+00:00",
+        "lastMessage": {
+          "direction": "Inbound",
+          "blockType": "Image",
+          "preview": "",
+          "createdAt": "2026-09-02T18:01:12.000+00:00"
+        },
+        "heldByCaller": false
+      }
+    ],
+    "totalCount": 3,
+    "page": 1,
+    "pageSize": 25,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "fields": {
+    "id": "string, the conversation id (DTO field is `id`, .claude/rules/api-host.md); the value GET /api/v1/conversations/{id} and GET /api/v1/conversations/{id}/history take",
+    "channel": "ChannelType, PascalCase string",
+    "state": "ConversationState, PascalCase string; any state, terminal included",
+    "createdAt": "date-time, always present",
+    "closedAt": "date-time, absent while the conversation has none",
+    "durationSeconds": "int64 >= 0, whole seconds, floored, never below 0: lastMessageAt - createdAt when closedReason is present (a system close: inactivity, inactivity-backlog, customer-returned), closedAt - createdAt otherwise (a close by a person, the wrap-up timeout, an abandon); absent when closedAt is absent",
+    "closedReason": "string, the conversation's `_closedReason` metadata value (inactivity, inactivity-backlog, customer-returned, ConversationCloseReasons.cs); absent when it has none",
+    "queueId": "string, the last queue the conversation was placed in (conversations.queue_id, design D7); absent when unknown",
+    "queueName": "string, that queue's current name (queue_configs.name); absent when queueId is absent or the queue no longer exists",
+    "agentId": "string, the owner's agent id when the owner kind is Agent; absent otherwise",
+    "agentDisplayName": "string, that agent's DisplayName; absent when agentId is absent or the agent no longer exists",
+    "disposition": "object {nodeId, label}: nodeId is typification_submission_corrections.corrected_leaf_node_id when a correction exists (ADR-0034), else typification_submissions.leaf_node_id; label is that node's label in the submitted schema version (schema_id, schema_version); absent when the conversation was never typified. `label` is absent when the node can no longer be resolved; `nodeId` is always present inside the object",
+    "lastMessageAt": "date-time, always present: COALESCE(createdAt of the newest activity message, conversations.last_message_at). The column alone is wrong for terminal rows closed before migration 026, which backfilled them with created_at (design D6); when lastMessage is present the two values are equal",
+    "lastMessage": "object {direction, blockType, preview, createdAt}, the newest activity message (PostgresConversationStore.ActivityMessagePredicate: Inbound, or Outbound not Failed; System never counts); absent when the conversation has none. direction is MessageDirection, blockType is the MessageBlockType of its first block, preview is the text of its first text block trimmed and cut to 160 characters, or \"\" when the first block has no text",
+    "heldByCaller": "boolean, always present: true when the conversation is not terminal and the caller's Agent profile owns it (design D3); false for an open offer (operator answer Q3, 2026-11-03: an offer is a preview, not a hold) and for a caller with no Agent profile"
+  }
+}

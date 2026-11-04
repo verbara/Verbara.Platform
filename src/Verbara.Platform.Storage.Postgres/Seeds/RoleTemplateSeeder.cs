@@ -249,6 +249,8 @@ public static class RoleTemplateSeeder
                 "callanalytics:analysis:view",
                 "reporting:historical:view",
                 "reporting:historical:export",
+                // contact-history-opens-by-assignment (design D16): QA reads every conversation, listens to none.
+                "contacts:conversation:read",
             ]);
 
         // ── Manager ──
@@ -318,6 +320,9 @@ public static class RoleTemplateSeeder
                 "analytics:cdr:view",
                 "analytics:cdr:export",
                 "contacts:contact:view",
+                // contact-history-opens-by-assignment (design D16): an integration bound to an Api user reads every
+                // conversation; a key bound to no user carries no role and stays refused.
+                "contacts:conversation:read",
             ]);
 
         // ── Platform Admin ──
@@ -362,7 +367,8 @@ public static class RoleTemplateSeeder
         [
             "contacts:conversation:handle", "contacts:conversation:transfer",
             "contacts:conversation:monitor", "contacts:conversation:barge",
-            "contacts:conversation:whisper", "contacts:contact:view",
+            "contacts:conversation:whisper", "contacts:conversation:read",
+            "contacts:contact:view",
             "contacts:contact:edit", "contacts:contact:create",
             "queues:queue:view", "queues:queue:create",
             "queues:queue:edit", "queues:queue:delete",
