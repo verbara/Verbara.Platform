@@ -43,6 +43,16 @@ public interface IConversationStore
     /// </summary>
     Task<Conversation?> FindByIdAcrossTenantsAsync(EntityId conversationId, CancellationToken ct);
 
+    /// <summary>
+    /// Whether agent <paramref name="agentId"/> <b>holds</b> a conversation of contact <paramref name="contactId"/> in
+    /// <paramref name="tenantId"/>: one whose owner is the agent (owner kind <see cref="ConversationOwnerKind.Agent"/>
+    /// and id together) and whose state is not terminal (<see cref="ConversationStateMachine.TerminalStates"/>). An
+    /// open offer is not holding: an offered conversation is owned by its queue (contact-history-opens-by-assignment,
+    /// design D2, Q3). The contact branch of the conversation read rule; served by
+    /// <c>idx_conversations_contact (tenant_id, contact_id, state)</c>.
+    /// </summary>
+    Task<bool> HoldsOpenConversationOfContactAsync(TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct);
+
     /// <summary>Returns all conversations for a given contact (GDPR export).</summary>
     Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct);
 

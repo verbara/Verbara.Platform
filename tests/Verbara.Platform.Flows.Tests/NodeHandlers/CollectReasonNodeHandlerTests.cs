@@ -364,6 +364,10 @@ public sealed class CollectReasonNodeHandlerTests
             EntityId conversationId, CancellationToken ct) =>
             Task.FromResult<Conversation?>(null);
 
+        public Task<bool> HoldsOpenConversationOfContactAsync(
+            TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct) =>
+            Task.FromResult(false);
+
         public Task<IReadOnlyList<Conversation>> ListByContactAsync(
             TenantId tenantId, EntityId contactId, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<Conversation>>([]);

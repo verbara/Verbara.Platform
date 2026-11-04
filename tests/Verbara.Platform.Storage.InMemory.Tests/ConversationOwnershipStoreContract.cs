@@ -4,13 +4,16 @@ using Verbara.Platform.Core;
 namespace Verbara.Platform.Storage.TestSupport;
 
 /// <summary>
-/// contact-history-opens-by-assignment tasks 1.4 and 1.5 (design D4, D7), run against every store.
+/// contact-history-opens-by-assignment tasks 1.4, 1.5 and 2.1 (design D2, D4, D7), run against every store.
 /// <list type="bullet">
 /// <item><c>queue_id</c> is written by the store, never by a caller: a whole-row save whose owner is a queue stores
 /// that queue, any other save keeps the stored value, so it names the last queue through routing, accept, transfer to
 /// an agent, transfer to a queue, failover re-queue and close, and never clears.</item>
 /// <item><see cref="ConversationQuery.AssignedAgentId"/> filters on the owner's kind as well as its id: a queue whose
 /// id equals an agent's id does not own the agent's conversations.</item>
+/// <item><see cref="IConversationStore.HoldsOpenConversationOfContactAsync"/> answers whether the agent owns a
+/// non-terminal conversation of the contact in the tenant: an offer, a terminal row and a row moved to another owner
+/// do not count.</item>
 /// </list>
 /// </summary>
 /// <remarks>Linked into Verbara.Platform.Storage.Postgres.Tests.</remarks>
@@ -169,6 +172,159 @@ public abstract class ConversationOwnershipStoreContract
 
         page.Items.Select(c => c.ConversationId).Should().Equal(ownedByAgent.ConversationId);
         page.TotalCount.Should().Be(1);
+    }
+
+    // ── HoldsOpenConversationOfContactAsync (design D2, task 2.1) ─────────────────
+
+    private static Conversation OfContact(EntityId contactId, ConversationOwner? owner, ConversationState state)
+    {
+        var conversation = NewConversation(owner, state);
+        return new Conversation
+        {
+            ConversationId = conversation.ConversationId,
+            TenantId = conversation.TenantId,
+            ContactId = contactId,
+            Channel = conversation.Channel,
+            State = state,
+            Owner = owner,
+            CreatedAt = conversation.CreatedAt,
+            UpdatedAt = Now.AddMinutes(-30),
+        };
+    }
+
+    private static Task<bool> HoldsAsync(IConversationStore store, EntityId contactId, EntityId agentId) =>
+        store.HoldsOpenConversationOfContactAsync(Tenant, contactId, agentId, CancellationToken.None);
+
+    [Theory]
+    [InlineData(ConversationState.Active)]
+    [InlineData(ConversationState.Resolved)]
+    [InlineData(ConversationState.WrapUp)]
+    [InlineData(ConversationState.WaitingForCustomer)]
+    [InlineData(ConversationState.OnHold)]
+    public async Task HoldsOpenConversationOfContactAsync_ShouldAnswerTrue_WhenTheAgentOwnsANonTerminalConversationOfTheContact(
+        ConversationState state)
+    {
+        var store = await NewStoreAsync();
+        var contact = EntityId.From($"contact-{Guid.NewGuid():N}");
+        await store.SaveAsync(OfContact(contact, ConversationOwner.ForAgent(AgentA), state), CancellationToken.None);
+
+        (await HoldsAsync(store, contact, AgentA)).Should().BeTrue($"an owned {state} conversation is held (design D2)");
+        (await HoldsAsync(store, contact, AgentB)).Should().BeFalse("another agent holds nothing of the contact");
+    }
+
+    [Theory]
+    [InlineData(ConversationState.Closed)]
+    [InlineData(ConversationState.Abandoned)]
+    [InlineData(ConversationState.Merged)]
+    [InlineData(ConversationState.Spam)]
+    public async Task HoldsOpenConversationOfContactAsync_ShouldAnswerFalse_WhenTheAgentOwnsOnlyATerminalConversationOfTheContact(
+        ConversationState state)
+    {
+        var store = await NewStoreAsync();
+        var contact = EntityId.From($"contact-{Guid.NewGuid():N}");
+        await store.SaveAsync(OfContact(contact, ConversationOwner.ForAgent(AgentA), state), CancellationToken.None);
+
+        (await HoldsAsync(store, contact, AgentA)).Should().BeFalse($"a {state} conversation is terminal, so it is not held");
+    }
+
+    [Fact]
+    public async Task HoldsOpenConversationOfContactAsync_ShouldAnswerFalse_WhenTheAgentIsOnlyOfferedAConversationOfTheContact()
+    {
+        var store = await NewStoreAsync();
+        var contact = EntityId.From($"contact-{Guid.NewGuid():N}");
+        var offered = OfContact(contact, ConversationOwner.ForQueue(QueueOne), ConversationState.Offered);
+        offered.SetMetadata("_offeredTo", AgentA.Value); // ConversationOffer.OfferedToKey (Switchboard)
+        await store.SaveAsync(offered, CancellationToken.None);
+
+        (await HoldsAsync(store, contact, AgentA)).Should().BeFalse("an offer is not holding (design D2, Q3)");
+    }
+
+    [Fact]
+    public async Task HoldsOpenConversationOfContactAsync_ShouldAnswerFalse_WhenTheWrapUpIsClosedByTheWrapUpTimeout()
+    {
+        var store = await NewStoreAsync();
+        var contact = EntityId.From($"contact-{Guid.NewGuid():N}");
+        var wrapUp = OfContact(contact, ConversationOwner.ForAgent(AgentA), ConversationState.WrapUp);
+        await store.SaveAsync(wrapUp, CancellationToken.None);
+        (await HoldsAsync(store, contact, AgentA)).Should().BeTrue("a WrapUp counts as held until its timeout closes it");
+
+        // The wrap-up timeout's close: the worker's blank close (TransitionTo Closed + SaveAsync), owner kept.
+        var expired = await LoadAsync(store, wrapUp);
+        expired.TransitionTo(ConversationState.Closed, Now);
+        expired.UpdatedAt = Now;
+        await store.SaveAsync(expired, CancellationToken.None);
+
+        (await LoadAsync(store, wrapUp)).Owner.Should().Be(ConversationOwner.ForAgent(AgentA), "the close keeps the owner");
+        (await HoldsAsync(store, contact, AgentA)).Should().BeFalse("the closed wrap-up no longer counts");
+    }
+
+    [Fact]
+    public async Task HoldsOpenConversationOfContactAsync_ShouldAnswerFalse_WhenTheAutonomousWrapUpCloseWins()
+    {
+        var store = await NewStoreAsync();
+        var contact = EntityId.From($"contact-{Guid.NewGuid():N}");
+        var wrapUp = OfContact(contact, ConversationOwner.ForAgent(AgentA), ConversationState.WrapUp);
+        await store.SaveAsync(wrapUp, CancellationToken.None);
+
+        (await store.TryConditionalCloseWrapUpAsync(Tenant, wrapUp.ConversationId, Now, CancellationToken.None)).Should().BeTrue();
+
+        (await HoldsAsync(store, contact, AgentA)).Should().BeFalse("the wrap-up closed by the compare-and-set no longer counts");
+    }
+
+    [Fact]
+    public async Task HoldsOpenConversationOfContactAsync_ShouldAnswerFalse_WhenTheConversationWasTransferredAway()
+    {
+        var store = await NewStoreAsync();
+        var contact = EntityId.From($"contact-{Guid.NewGuid():N}");
+        var conversation = OfContact(contact, ConversationOwner.ForAgent(AgentA), ConversationState.Active);
+        await store.SaveAsync(conversation, CancellationToken.None);
+
+        var toAgent = await LoadAsync(store, conversation);
+        toAgent.Owner = ConversationOwner.ForAgent(AgentB);
+        await store.SaveAsync(toAgent, CancellationToken.None);
+        (await HoldsAsync(store, contact, AgentA)).Should().BeFalse("the allowance ends when the conversation moves to another owner");
+        (await HoldsAsync(store, contact, AgentB)).Should().BeTrue("the new owner holds it");
+
+        var toQueue = await LoadAsync(store, conversation);
+        toQueue.Owner = ConversationOwner.ForQueue(QueueOne);
+        toQueue.State = ConversationState.Queued;
+        await store.SaveAsync(toQueue, CancellationToken.None);
+        (await HoldsAsync(store, contact, AgentB)).Should().BeFalse("a transfer to a queue leaves no agent holding it");
+    }
+
+    [Fact]
+    public async Task HoldsOpenConversationOfContactAsync_ShouldAnswerFalse_WhenAQueueOrBotSharesTheAgentsId()
+    {
+        var store = await NewStoreAsync();
+        var contact = EntityId.From($"contact-{Guid.NewGuid():N}");
+        var sharedId = EntityId.From($"shared-{Guid.NewGuid():N}");
+        await store.SaveAsync(OfContact(contact, ConversationOwner.ForQueue(sharedId), ConversationState.Queued), CancellationToken.None);
+        await store.SaveAsync(OfContact(contact, ConversationOwner.ForBot(sharedId), ConversationState.Active), CancellationToken.None);
+
+        (await HoldsAsync(store, contact, sharedId)).Should().BeFalse("ownership is the owner's kind and id together");
+    }
+
+    [Fact]
+    public async Task HoldsOpenConversationOfContactAsync_ShouldAnswerFalse_WhenTheHeldConversationIsOfAnotherContactOrTenant()
+    {
+        var store = await NewStoreAsync();
+        var contact = EntityId.From($"contact-{Guid.NewGuid():N}");
+        var otherContact = EntityId.From($"contact-{Guid.NewGuid():N}");
+        await store.SaveAsync(OfContact(otherContact, ConversationOwner.ForAgent(AgentA), ConversationState.Active), CancellationToken.None);
+        var otherTenant = new Conversation
+        {
+            ConversationId = EntityId.From($"c-{Guid.NewGuid():N}"),
+            TenantId = new TenantId("t-ownership-other"),
+            ContactId = contact,
+            Channel = ChannelType.WhatsApp,
+            State = ConversationState.Active,
+            Owner = ConversationOwner.ForAgent(AgentA),
+            CreatedAt = Now.AddHours(-1),
+        };
+        await store.SaveAsync(otherTenant, CancellationToken.None);
+
+        (await HoldsAsync(store, contact, AgentA)).Should().BeFalse("holding is scoped to the contact and the tenant");
+        (await HoldsAsync(store, otherContact, AgentA)).Should().BeTrue();
     }
 
     /// <summary>A copy that shares nothing with the stored row, as a Postgres read builds one.</summary>

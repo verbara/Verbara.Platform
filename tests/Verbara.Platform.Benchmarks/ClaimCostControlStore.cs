@@ -56,6 +56,9 @@ internal sealed class DoubleClaimConversationStore(IConversationStore inner) : I
         inner.FindByVoiceLinkedIdAcrossTenantsAsync(voiceLinkedId, ct);
     public Task<Conversation?> FindByIdAcrossTenantsAsync(EntityId conversationId, CancellationToken ct) =>
         inner.FindByIdAcrossTenantsAsync(conversationId, ct);
+    public Task<bool> HoldsOpenConversationOfContactAsync(TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct) =>
+        inner.HoldsOpenConversationOfContactAsync(tenantId, contactId, agentId, ct);
+
     public Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct) =>
         inner.ListByContactAsync(tenantId, contactId, ct);
     public Task<int> DeleteByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct) =>

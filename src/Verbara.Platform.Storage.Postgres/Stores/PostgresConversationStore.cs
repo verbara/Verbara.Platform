@@ -328,6 +328,27 @@ internal sealed class PostgresConversationStore : IConversationStore
         return row?.ToConversation();
     }
 
+    public async Task<bool> HoldsOpenConversationOfContactAsync(TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct)
+    {
+        // contact-history-opens-by-assignment (design D2): owner kind and id together, any non-terminal state (the
+        // terminal set bound from ConversationStateMachine). Served by idx_conversations_contact (tenant_id,
+        // contact_id, state). An offered conversation is owned by its queue, so an offer is not holding.
+        var holds = await _dataSource.ExecuteScalarAsync<bool?>(
+            "SELECT EXISTS (SELECT 1 FROM conversations " +
+            "WHERE tenant_id = @TenantId AND contact_id = @ContactId AND state <> ALL(@TerminalStates) " +
+            "  AND owner_kind = @OwnerKind AND owner_id = @AgentId)",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("ContactId", NpgsqlDbType.Text) { Value = contactId.Value });
+                p.Add(new NpgsqlParameter("TerminalStates", NpgsqlDbType.Array | NpgsqlDbType.Integer) { Value = s_terminalStateValues });
+                p.Add(new NpgsqlParameter("OwnerKind", NpgsqlDbType.Integer) { Value = (int)ConversationOwnerKind.Agent });
+                p.Add(new NpgsqlParameter("AgentId", NpgsqlDbType.Text) { Value = agentId.Value });
+            },
+            ct);
+        return holds ?? false;
+    }
+
     public async Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
         var rows = await _dataSource.QueryListAsync(

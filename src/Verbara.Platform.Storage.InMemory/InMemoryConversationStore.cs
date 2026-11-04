@@ -120,6 +120,19 @@ internal sealed class InMemoryConversationStore : IConversationStore
         return Task.FromResult(result);
     }
 
+    public Task<bool> HoldsOpenConversationOfContactAsync(TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct)
+    {
+        // contact-history-opens-by-assignment (design D2): owner kind and id together, any non-terminal state. An
+        // offered conversation is owned by its queue, so an offer is not holding.
+        var holds = _items.Values.Any(c =>
+            c.TenantId == tenantId &&
+            c.ContactId == contactId &&
+            c.Owner is { Kind: ConversationOwnerKind.Agent } owner &&
+            owner.OwnerId == agentId &&
+            !ConversationStateMachine.IsTerminal(c.State));
+        return Task.FromResult(holds);
+    }
+
     public Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
         IReadOnlyList<Conversation> result = _items.Values
