@@ -1,5 +1,8 @@
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Verbara.Platform.Queues;
+using Verbara.Platform.Typification.Stores;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,7 +15,11 @@ internal static class ContactEndpoints
         var group = app.MapGroup("/contacts").RequireAuthorization("Authenticated").RequireOperationalTenant();
 
         group.MapGet("/{id}", GetContact);
-        group.MapGet("/{id}/conversations", GetContactConversations);
+        // contact-history-opens-by-assignment (design D5, D13, D14): governed by ConversationReadRule; an unknown contact
+        // answers an empty 404 before the rule runs, a refusal is 403 not-readable.
+        group.MapGet("/{id}/conversations", GetContactConversations)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound);
         group.MapGet("/", SearchContacts);
         group.MapPost("/", CreateContact);
         group.MapPut("/{id}", UpdateContact);
@@ -30,23 +37,78 @@ internal static class ContactEndpoints
         return contact is null ? TypedResults.NotFound() : TypedResults.Ok(contact);
     }
 
-    private static async Task<Ok<PagedResult<Conversation>>> GetContactConversations(
+    /// <summary>The largest page of a contact's history (design D5).</summary>
+    internal const int MaxContactConversationsPageSize = 100;
+
+    /// <summary>
+    /// The contact's conversations, one summary each, newest first, every state included (design D5, D6, D9): 404 for an
+    /// unknown contact, then the read rule (<see cref="ConversationReader.CanReadContactAsync"/>), then one summary query,
+    /// restricted to the caller's own conversations for a shared contact (D18). <paramref name="pageSize"/> is clamped to
+    /// 1..100 and <paramref name="page"/> to at least 1.
+    /// </summary>
+    private static async Task<Results<Ok<PagedResult<ContactConversationSummaryDto>>, NotFound, JsonHttpResult<ErrorResponse>>> GetContactConversations(
         string id,
         HttpContext context,
         [FromServices] IConversationStore store,
+        [FromServices] IContactStore contacts,
+        [FromServices] IAgentStore agents,
+        [FromServices] ITypificationSchemaStore schemas,
         int page = 1,
         int pageSize = 25,
         CancellationToken ct = default)
     {
         var tenantId = GetTenantId(context);
-        var query = new ConversationQuery
+        var contact = await contacts.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (contact is null)
+            return TypedResults.NotFound();
+
+        var reader = await ConversationReadRule.ResolveAsync(context, tenantId, agents, store, contacts, ct);
+        if (!await reader.CanReadContactAsync(contact, ct))
+            return ConversationReadRule.Refusal();
+
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, MaxContactConversationsPageSize);
+        var summaries = await store.ListContactSummariesAsync(
+            tenantId, contact.ContactId, reader.OwnerRestrictionOf(contact), page, pageSize, ct);
+
+        var labels = await DispositionLabelsAsync(tenantId, summaries.Items, schemas, ct);
+        var items = summaries.Items
+            .Select(summary => ContactConversationSummaryMapper.ToDto(
+                summary,
+                reader.IsHeldByCaller(summary.Conversation),
+                summary.Disposition is { } disposition ? labels.GetValueOrDefault(disposition) : null))
+            .ToList();
+        return TypedResults.Ok(new PagedResult<ContactConversationSummaryDto>(items, summaries.TotalCount, page, pageSize));
+    }
+
+    /// <summary>
+    /// The label of each disposition of the page, read from the schema version it was submitted against (design D6):
+    /// one schema read per distinct (schema, version) pair, usually one. A missing schema or node has no entry, so the
+    /// summary keeps <c>nodeId</c> and omits <c>label</c>.
+    /// </summary>
+    private static async Task<Dictionary<ConversationDispositionRef, string>> DispositionLabelsAsync(
+        TenantId tenantId,
+        IReadOnlyList<ContactConversationSummary> summaries,
+        ITypificationSchemaStore schemas,
+        CancellationToken ct)
+    {
+        var labels = new Dictionary<ConversationDispositionRef, string>();
+        var dispositions = summaries.Select(s => s.Disposition).OfType<ConversationDispositionRef>().ToList();
+        foreach (var version in dispositions.Select(d => (d.SchemaId, d.SchemaVersion)).Distinct())
         {
-            ContactId = EntityId.From(id),
-            Page = page,
-            PageSize = pageSize,
-        };
-        var result = await store.ListAsync(tenantId, query, ct);
-        return TypedResults.Ok(result);
+            var schema = await schemas.GetByIdAsync(tenantId, version.SchemaId, version.SchemaVersion, ct);
+            if (schema is null)
+                continue;
+
+            var resolved = dispositions
+                .Where(d => d.SchemaId == version.SchemaId && d.SchemaVersion == version.SchemaVersion)
+                .Select(d => (Disposition: d, Node: schema.Nodes.FirstOrDefault(node => node.NodeId == d.NodeId)))
+                .Where(pair => pair.Node is not null);
+            foreach (var (disposition, node) in resolved)
+                labels[disposition] = node!.Label;
+        }
+
+        return labels;
     }
 
     private static async Task<Ok<PagedResult<Contact>>> SearchContacts(

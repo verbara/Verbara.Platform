@@ -134,9 +134,15 @@ internal sealed partial class DefaultConversationService : IConversationService
         if (refusalCode is null)
             await DeliverAsync(conversation, message, templateId, ct).ConfigureAwait(false);
 
+        // The live-stream audience (contact-history-opens-by-assignment, design D17), stamped from the conversation this
+        // send loaded; the send changes no ownership. A transfer another request commits during the provider delivery
+        // is not seen here (design D17 "Staleness"): it applies from the next message.
         _eventBus.Publish(new ConversationMessageEvent(
             tenantId.Value, conversationId.Value, message.MessageId.Value,
-            "Outbound", conversation.Channel.ToString()));
+            "Outbound", conversation.Channel.ToString())
+        {
+            Audience = ConversationOffer.AudienceOf(conversation),
+        });
 
         return MessageSendOutcome.Stored(message);
     }

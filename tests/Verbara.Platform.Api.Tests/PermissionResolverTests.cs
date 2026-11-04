@@ -93,4 +93,26 @@ public sealed class PermissionResolverTests
         await _userRoleStore.Received(4)
             .GetEffectivePermissionsAsync(_tenantId, Arg.Any<EntityId>(), Arg.Any<CancellationToken>());
     }
+
+    // contact-history-opens-by-assignment task 1.8 (design D16, ADR-0037 exact membership): read never satisfies a
+    // monitor (listen) or handle gate, and monitor never satisfies a read gate.
+    [Theory]
+    [InlineData("contacts:conversation:monitor")]
+    [InlineData("contacts:conversation:handle")]
+    [InlineData("contacts:conversation:barge")]
+    [InlineData("contacts:conversation:whisper")]
+    public void HasPermission_ShouldBeFalse_WhenTheRoleHoldsOnlyTheReadPermission(string gate)
+    {
+        var onlyRead = new HashSet<string>(StringComparer.Ordinal) { "contacts:conversation:read" };
+
+        PermissionResolver.HasPermission(onlyRead, gate).Should().BeFalse();
+    }
+
+    [Fact]
+    public void HasPermission_ShouldBeFalseForRead_WhenTheRoleHoldsOnlyMonitor()
+    {
+        var onlyMonitor = new HashSet<string>(StringComparer.Ordinal) { "contacts:conversation:monitor" };
+
+        PermissionResolver.HasPermission(onlyMonitor, "contacts:conversation:read").Should().BeFalse();
+    }
 }

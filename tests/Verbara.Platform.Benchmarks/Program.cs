@@ -13,6 +13,7 @@
 
 using BenchmarkDotNet.Running;
 
-BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
+// The bench references the Api, whose own Program would shadow this one (CS0436), so the assembly is named by a bench.
+BenchmarkSwitcher.FromAssembly(typeof(Verbara.Platform.Benchmarks.ConversationClaimCostBench).Assembly).Run(args);
 
 internal sealed partial class Program;

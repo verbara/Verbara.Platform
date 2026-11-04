@@ -9,6 +9,160 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+A caller reads a conversation only when it may: an agent reads what it owns, what it is offered and the history of the
+contacts it holds now, and everyone else needs `contacts:conversation:monitor` or the new `contacts:conversation:read`
+(Platform/ADR-0047). The contact's history becomes a page of summaries, and a new route reads a transcript newest first.
+Conversation content on the live stream reaches only its readers. Read **Changed — BREAKING** and **Upgrading** first:
+tenant API keys bound to no user, roles without a conversation permission and agents outside a conversation now get
+403 `not-readable`, and `GET /api/v1/contacts/{id}/conversations` answers a new item shape.
+
+### Added
+
+- **`GET /api/v1/conversations/{id}/history` reads a conversation's messages newest first, a page at a time.** It answers
+  `MessageHistoryPageDto`: `items` (the same `Message` items as `/messages`), `hasMore`, and `nextBefore`, an opaque
+  cursor present only when `hasMore` is true. Pass it back as `?before=` for the next older page; a new message never
+  shifts a page, so nothing repeats or is skipped. `limit` defaults to `50`, clamped to `1` to `100`. The order is 404
+  for a conversation missing from the tenant, then the read rule (403 `not-readable`), then the cursor: a `before` that
+  does not decode answers 400 `{"error":"invalid-cursor"}`. `GET /api/v1/conversations/{id}/messages` keeps its shape
+  and its oldest-first order.
+- **The contact's history as summaries, `ContactConversationSummaryDto`.** Each item of
+  `GET /api/v1/contacts/{id}/conversations` carries `id`, `channel`, `state` (every state, terminal included), `createdAt`,
+  `lastMessageAt` and `heldByCaller` (the caller owns the conversation and it is not terminal; an offer is not held),
+  plus, when known, `closedAt`, `durationSeconds`, `closedReason`, `queueId` and `queueName` (the last queue it went
+  through), `agentId` and `agentDisplayName`, `disposition` (`nodeId`, and `label` from the schema version it was
+  submitted against) and `lastMessage` (`direction`, `blockType`, a `preview` of up to 160 characters, `createdAt`). An
+  unknown member is absent, never `null`. The page is newest first and read in one query. Migration `027` adds the column
+  `conversations.queue_id` for it, filled from now on whenever a queue owns the conversation and backfilled for the
+  conversations a queue owns at upgrade; older conversations show no queue.
+- **The permission `contacts:conversation:read`**: read every conversation and transcript of the tenant, with no
+  listening and no action (the `/supervisor` routes and the listen routes still need what they needed). It is granted
+  to the Quality Analyst and `Api` role templates and to the admin templates, and existing tenants' cloned roles gain
+  it at the next start. Supervisor and Manager need no new grant: `contacts:conversation:monitor` already reads
+  everything.
+
+### Changed — BREAKING
+
+- **The conversation reads follow one read rule** (`GET /api/v1/conversations/{id}`, `/{id}/messages`, `/{id}/history`
+  and `GET /api/v1/contacts/{id}/conversations`). A refusal is 403 `{"error":"not-readable"}`, which does not say why;
+  a missing id still answers an empty 404, before the rule. A caller reads every conversation of its tenant when it
+  holds `contacts:conversation:monitor` or `contacts:conversation:read`, or has the Admin or SystemAdmin role; that keeps
+  Supervisor, Manager, Quality Analyst, Admin, SystemAdmin and management keys as they were. Any other caller needs
+  `contacts:conversation:handle` and an Agent profile, and then reads a conversation only when it:
+  - owns it, in any state, including after it closed;
+  - is offered it: an open offer opens that conversation only. The contact's other conversations and the contact list
+    answer 403 until the agent accepts the offer;
+  - holds the contact now, that is, owns an open (not terminal) conversation of that contact. An agent that only owned
+    the contact's conversations in the past, with nothing open of it now, reads the ones it owned and gets 403 on the
+    others and on the contact list.
+
+  Every other conversation of the tenant now answers 403 `not-readable` to an agent, where it answered 200.
+- **The shared anonymous voice contact opens nothing beyond the caller's own calls.** A new call whose caller id is empty
+  or a withheld placeholder (`<unknown>`, `unknown`, `Restricted`, `Unavailable` or `Private`, in any case) resolves to the
+  tenant's one `anonymous` voice contact. An agent answering one of them no longer reads the others: they answer 403, and
+  its contact list holds only its own conversations of that contact, with `totalCount` counting only those. A contact an
+  earlier version created from a placeholder gets the same treatment and stays as it is: it gains no new calls and its
+  conversations do not move, so that tenant's withheld callers have their history split across two contacts. Such a
+  call no longer stamps the placeholder as `callbackNumber`, so a callback for it escalates instead of dialing it.
+- **Callers with no conversation permission are refused.** A role without `contacts:conversation:handle`,
+  `contacts:conversation:monitor` or `contacts:conversation:read` gets 403 on every read above. A tenant API key
+  bound to no user carries no role and no permission, so it gets 403 on all of them too (see Upgrading). A key bound to a user
+  reads as that user: a user whose role is `Api` reads everything through `contacts:conversation:read`, and a user whose
+  role is Agent reads as that agent.
+- **`GET /api/v1/conversations` lists only what the caller may read.** A caller that reads everything gets the list
+  unchanged. An agent with `?agentId=` set to its own profile gets, as before, the conversations it owns; `?agentId=`
+  naming another profile answers 403 `not-readable`; with no `agentId` it gets the conversations it owns or is offered.
+  A caller without `contacts:conversation:handle` or an Agent profile gets 403. `?agentId=` now matches agent owners
+  only, never a queue or bot owner with the same id.
+- **`GET /api/v1/contacts/{id}/conversations` answers `PagedResult<ContactConversationSummaryDto>`** instead of the raw
+  `Conversation` record per item (see Added). An unknown contact answers 404 instead of an empty page, and `pageSize`
+  is now clamped to `1` to `100` (default `25`). An integration that parsed the old items must read the summary.
+- **Conversation content on the live stream reaches only its readers.** Six event types carry what a customer or an
+  agent said or wrote, and are no longer delivered to every stream of the tenant: `conversation.message`, the four
+  `agentassist.*` events (`transcript`, `suggestion`, `compliance_alert`, `sentiment`) and `csat.response_recorded`.
+  A stream that reads everything (`contacts:conversation:monitor`, `contacts:conversation:read`, Admin or SystemAdmin)
+  still receives all six. Otherwise a stream with `contacts:conversation:handle` receives `conversation.message` only for
+  the conversations its agent owns or is offered, at the moment the message is published, and `agentassist.*` only when
+  the event's `agentId` names its agent; `csat.response_recorded` reaches no agent. Every other stream, an anonymous one
+  included, is not delivered these events. The other events, `conversation.offered`, `conversation.assigned` and
+  `conversation.state_changed` included, are unchanged, and so is every event's JSON. A role change applies at the
+  stream's next reconnect. Tenant webhooks are not affected.
+
+### Fixed
+
+- **Every stored WebChat customer message is published on the live stream as `conversation.message`.** Only the message
+  that routed the session was published; the later messages of an offered or active WebChat conversation were stored
+  but never reached the agent's console live. The routing message is still published once, after
+  `conversation.state_changed` `Queued`.
+- **A stored customer message stays on the live stream when its conversation cannot be read.** A failed read of the
+  conversation used to fail a WebChat request after the message was stored. It now publishes the message to the readers of
+  every conversation only, on the webhook channels too, and the next customer message routes the conversation, unless the
+  queue timeout abandoned it first. A sender that hangs up during that read no longer changes the publish. A failed read of
+  the contact, after the conversation was read, still fails the WebChat request of a message already stored and published.
+
+### Upgrading
+
+- **An integration on a tenant API key bound to no user now gets 403 `not-readable`** on the conversation reads and the
+  contact's history. To keep it working, bind the key to a user whose role is `Api` (that role now holds
+  `contacts:conversation:read`), or use a management key. Check also every other role your integrations or users rely
+  on: one without `contacts:conversation:handle`, `contacts:conversation:monitor` or `contacts:conversation:read` is
+  refused.
+- **Tenants whose equivalent roles carry another id do not gain `contacts:conversation:read`.** The start-up seed copies
+  the new grant only into a tenant role whose id is the template's (`quality_analyst`, `api`, and the admin roles). A
+  tenant that keeps its Quality Analyst or API role under another id must add the permission itself, with
+  `PUT /api/v1/admin/roles/{id}`, or that role's users are refused.
+- **During a rolling deploy, older replicas still answer as before.** A conversation that an older replica moves to a
+  queue in that window gets no `queue_id`, so the history shows no queue for it; nothing fills it later. Until every
+  replica runs the new version, the older replicas' streams still deliver conversation content to the whole tenant.
+- **Migration `027` runs at start-up**: it adds the nullable column `conversations.queue_id` and backfills it for the
+  conversations a queue owns. It is additive; a rollback to the previous image leaves the column, which that image
+  ignores.
+- **Deploy Platform before the console release that reads `/history`**: an older Platform answers that route 404.
+- **Until that console release is deployed, the console already shipped shows the new `disposition` object as text.**
+  It still reads `disposition` as a string, so on the History tab every typified past conversation shows a badge reading
+  `wrap_up.dispositions.[object Object]` instead of the disposition's name. The rest of the row still renders, and no data
+  is lost or changed: the badge corrects itself once the console is updated, with no Platform step. An agent the contact
+  list now refuses (403) sees that console's "no history" message, not a refusal. Keep the gap short: deploy Platform,
+  then the console release straight after.
+
+## [2.38.1] - 2026-11-04
+
+Patch release. Platform moves to Verbara.Sdk.Pro `2.25.1-pro`, with no source change: a node whose owner is gone can be
+updated and deleted through the management API, a removed node's calls are kept for two minutes and then released
+instead of staying held until restart, a drain is no longer undone by the owner's health check, and a call reconstructed
+by a takeover ends when it hangs up. Four cluster-endpoint answers change (below, Dependencies).
+
+### Dependencies
+
+- **Verbara.Sdk.Pro `2.25.0-pro` → `2.25.1-pro`**, the 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk stays `2.9.0`. The triple
+  is **Sdk `2.9.0` × Pro `2.25.1-pro` × Platform `2.38.1`**. Pro moves no packed floor: across the 70
+  `project.assets.json`, only those 22 packages change version, and no package appears, drops or crosses a major. (#537)
+- **Behaviour consumed from Pro 2.25.1-pro: cluster nodes are removed, drained and taken over cleanly** (Pro/ADR-0023,
+  addendum 2026-11-04). No Platform source changes for it; read in the code, not covered by a Platform test against a
+  real `ClusterManager`:
+  - `PUT` and `DELETE /api/v1/management/cluster/nodes/{id}` now reach a node whose owner is gone, instead of answering
+    404 on every live replica (#530). `POST` with such an id answers **409**: delete it, then add it again.
+    `GET /api/v1/management/cluster/status` lists those nodes, so a node that a replica stopped configuring is listed
+    again, as unserved. A node a live replica serves stays hidden on the others.
+  - `DELETE` of a node with calls up returns at once. Its calls are kept for two minutes, so a `POST` of the same id on
+    the same replica within that window records each call's real ending; otherwise they are released without an
+    ending (`CallReleasedEvent`, which no Platform subscriber handles). A re-add that lands on another replica does not
+    get the window. Drain first, as before, so endings are recorded.
+  - A drain sticks: the owner's health check no longer turns a `Draining` node back to `Healthy` within about 15 s, and
+    a cancelled drain restores the state the node had before it instead of always `Healthy`. A drain issued on a replica
+    that does not own the node is still routable in the owner's view.
+  - A call reconstructed by a takeover now ends when it hangs up, and the voice conversation closes. Its EventStore row
+    is still not written when its tenant was never stamped (Pro follow-up). (#537)
+
+## [2.38.0] - 2026-11-03
+
+Minor release. An open digital conversation with no message for 72 hours closes by itself, a customer reply to a resolved
+conversation opens a new routed one, and the retention purge deletes only closed conversations. WhatsApp keeps messages
+from customers who use a username. Platform moves to Verbara.Sdk.Pro `2.25.0-pro`, so a cluster takeover between Api
+replicas is clean. Three changes need attention before upgrading: the first start closes every open digital conversation
+already idle past the window (read [Upgrading to 2.38.0](docs/operations/upgrade-2.38.0.md) first, and with more than one Api
+replica keep `Conversations:InactivityCloseEnabled=false` until every replica runs 2.38.0); `DELETE /api/v1/auth/sessions/{tokenId}` refuses
+the current session, and it and `revoke-others` answer 204 instead of an empty 200; and three cluster-endpoint answers change (below, Dependencies).
+
 ### Added
 
 - **`GET /api/v1/auth/sessions` rows carry `lastActivityAt`**, never null. Each token refresh creates a new row, so today
@@ -100,6 +254,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   entry each. Run the dry-run counts of the upgrade note
   first. `Conversations:InactivityCloseEnabled=false` stages it, and with more than one Api replica keep it off until
   every replica runs the new version. See [Upgrading to 2.38.0](docs/operations/upgrade-2.38.0.md). (#533)
+
+### Dependencies
+
+- **Verbara.Sdk.Pro `2.24.1-pro` → `2.25.0-pro`**, the 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk stays `2.9.0`. The triple is
+  **Sdk `2.9.0` × Pro `2.25.0-pro` × Platform `2.38.0`**. Pro raises the `StackExchange.Redis` floor to `3.4.29`, which
+  this repo already pins (#526). `Microsoft.Extensions.Diagnostics.HealthChecks` has no pin here and resolves `10.0.13` →
+  `10.0.14` through the graph. Across the 70 `project.assets.json`, nothing else changes version, and no package appears,
+  drops or crosses a major. (#535)
+- **Behaviour consumed from Pro 2.25.0-pro: a cluster takeover between Api replicas is clean** (Pro/ADR-0023). With two
+  replicas that both reach Asterisk, the owner's stop used to make the peer's takeover fail with "already exists in the
+  pool" and leave one more AMI session per stop. Now the peer adopts the connection it already holds and takes over once.
+  With a replica that does not configure the node, that replica no longer takes it over: the node stays `Unhealthy` on the
+  stopped replica until it returns. Measured on this repo's `v2.37.0` image with only these pins moved: verbara-lab cell
+  `pro-301`, 6 of 6 runs before reproduce the defect, 6 of 6 after pass. No Platform source changes for it. (#535)
+- **What the cluster endpoints answer now** (read in the code, not covered by a test against a real `ClusterManager`):
+  `POST /api/v1/management/cluster/nodes` answers **400** when the node's failover lock stays busy past
+  `FailoverOptions.ReconnectionTimeout`, and **202** instead of 201 for a node a live peer owns. A node with no replica
+  left that configures it keeps its gone owner, so `GET`, `PUT` and `DELETE` on it answer 404 on every live replica.
+  Tracked in #530. (#535)
 
 ## [2.37.0] - 2026-11-01
 

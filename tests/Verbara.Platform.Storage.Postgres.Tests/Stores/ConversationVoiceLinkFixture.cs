@@ -71,7 +71,8 @@ public sealed class ConversationVoiceLinkFixture : IAsyncLifetime
 
     // conversations DDL — subset of the consolidated 001_Baseline.sql (final folded shape:
     // voice_linked_id + queue_priority included; the legacy wrap_up column was dropped; last_message_at and its
-    // index as migration 026 leaves them, conversations-close-after-inactivity).
+    // index as migration 026 leaves them, conversations-close-after-inactivity; queue_id as migration 027 adds it,
+    // contact-history-opens-by-assignment).
     private const string SchemaSql = """
         CREATE TABLE conversations (
             conversation_id TEXT NOT NULL,
@@ -91,6 +92,7 @@ public sealed class ConversationVoiceLinkFixture : IAsyncLifetime
             voice_linked_id TEXT,
             queue_priority INTEGER NOT NULL DEFAULT 0,
             last_message_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            queue_id TEXT NULL,
             PRIMARY KEY (tenant_id, conversation_id)
         );
         CREATE INDEX idx_conversations_state_last_message ON conversations (tenant_id, state, last_message_at);

@@ -823,6 +823,23 @@
           "updatedBy",
           "fullName"
         ],
+        "ContactConversationSummaryDto": [
+          "id",
+          "channel",
+          "state",
+          "createdAt",
+          "closedAt",
+          "durationSeconds",
+          "closedReason",
+          "queueId",
+          "queueName",
+          "agentId",
+          "agentDisplayName",
+          "disposition",
+          "lastMessageAt",
+          "lastMessage",
+          "heldByCaller"
+        ],
         "Conversation": [
           "conversationId",
           "tenantId",
@@ -840,6 +857,16 @@
           "queuePriority",
           "metadata",
           "sessions"
+        ],
+        "ConversationDispositionDto": [
+          "nodeId",
+          "label"
+        ],
+        "ConversationLastMessageDto": [
+          "direction",
+          "blockType",
+          "preview",
+          "createdAt"
         ],
         "ConversationStartRefusal": [
           "error",
@@ -881,6 +908,11 @@
           "createdBy",
           "updatedBy"
         ],
+        "MessageHistoryPageDto": [
+          "items",
+          "hasMore",
+          "nextBefore"
+        ],
         "OwnershipResult": [
           "success",
           "newOwner",
@@ -897,6 +929,15 @@
           "hasPreviousPage"
         ],
         "PagedResultOfContact": [
+          "items",
+          "totalCount",
+          "page",
+          "pageSize",
+          "totalPages",
+          "hasNextPage",
+          "hasPreviousPage"
+        ],
+        "PagedResultOfContactConversationSummaryDto": [
           "items",
           "totalCount",
           "page",

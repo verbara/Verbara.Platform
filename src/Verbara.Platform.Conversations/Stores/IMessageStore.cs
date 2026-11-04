@@ -7,6 +7,16 @@ public interface IMessageStore
     Task SaveAsync(Message message, CancellationToken ct);
     Task<Message?> GetByIdAsync(TenantId tenantId, EntityId messageId, CancellationToken ct);
     Task<IReadOnlyList<Message>> GetConversationMessagesAsync(TenantId tenantId, EntityId conversationId, int limit, int offset, CancellationToken ct);
+
+    /// <summary>
+    /// contact-history-opens-by-assignment (design D10): the conversation's messages newest first, at most
+    /// <paramref name="limit"/>, ordered <c>created_at</c> descending then message id descending (ordinal). With
+    /// <paramref name="before"/>, only the messages strictly older than that position by (<c>created_at</c>, message id).
+    /// Keyset, not offset, so a message stored between two reads never repeats or skips one. The tenant and the
+    /// conversation always pin the read: a position taken from another conversation only bounds it.
+    /// </summary>
+    Task<MessageHistorySlice> GetConversationHistoryAsync(
+        TenantId tenantId, EntityId conversationId, int limit, MessageHistoryCursor? before, CancellationToken ct);
     Task UpdateDeliveryStatusAsync(TenantId tenantId, EntityId messageId, MessageDeliveryStatus status, DateTimeOffset? timestamp, CancellationToken ct);
     Task<Message?> FindByExternalIdAsync(TenantId tenantId, string externalMessageId, CancellationToken ct);
 

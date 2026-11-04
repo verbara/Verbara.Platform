@@ -19,7 +19,8 @@ namespace Verbara.Platform.Api.OpenApi;
 /// <c>string</c> union; <see cref="ComplianceSeverityEnumTransformer"/> narrows
 /// <c>ComplianceRuleSummaryDto.severity</c> to the <c>Info | Warning | Critical</c> enum;
 /// <see cref="NullableCredentialValuesTransformer"/> lets a channel credential value be <c>null</c>;
-/// <see cref="VoiceResponseMembersTransformer"/> marks which voice dial and transfer members are always written.
+/// <see cref="VoiceResponseMembersTransformer"/> marks which voice dial and transfer members are always written;
+/// <see cref="ContactHistoryResponseMembersTransformer"/> does the same for the contact and conversation history DTOs.
 /// </summary>
 internal static class VerbaraOpenApiExtensions
 {
@@ -31,7 +32,8 @@ internal static class VerbaraOpenApiExtensions
                 .AddSchemaTransformer<NumericSchemaTruthTransformer>()
                 .AddSchemaTransformer<ComplianceSeverityEnumTransformer>()
                 .AddSchemaTransformer<NullableCredentialValuesTransformer>()
-                .AddSchemaTransformer<VoiceResponseMembersTransformer>());
+                .AddSchemaTransformer<VoiceResponseMembersTransformer>()
+                .AddSchemaTransformer<ContactHistoryResponseMembersTransformer>());
         }
 
         return services;

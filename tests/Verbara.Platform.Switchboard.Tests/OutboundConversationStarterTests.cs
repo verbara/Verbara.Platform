@@ -88,6 +88,25 @@ public sealed class OutboundConversationStarterTests : IDisposable
             _tenantId, _agentId, ChannelType.WhatsApp, CancellationToken.None);
     }
 
+    // ─── contact-history-opens-by-assignment task 2.8 (design D17): the published message's audience ───
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StartAsync_ShouldStampTheStartingAgentAsTheAudience_WhenTheMessageIsPublished(bool reuse)
+    {
+        if (reuse)
+            OpenConversation(ConversationOwner.ForAgent(_agentId));
+        var published = new List<ConversationMessageEvent>();
+        using var sub = _eventBus.Events.Subscribe(e => { if (e is ConversationMessageEvent m) published.Add(m); });
+
+        var outcome = await CreateSut().StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
+
+        outcome.IsRefused.Should().BeFalse();
+        published.Should().ContainSingle().Which.Audience.Should().Be(new ConversationAudience(_agentId.Value, null),
+            "the conversation the start sends in is owned by the starting agent");
+    }
+
     // ─── all-or-nothing ───────────────────────────────────────────────────────
 
     [Fact]

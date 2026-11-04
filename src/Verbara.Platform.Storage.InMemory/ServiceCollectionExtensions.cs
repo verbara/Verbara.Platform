@@ -45,7 +45,15 @@ public static class ServiceCollectionExtensions
         // One message store instance serves both: the conversation store asks it whether a conversation is empty.
         services.AddSingleton<InMemoryMessageStore>();
         services.AddSingleton<IMessageStore>(sp => sp.GetRequiredService<InMemoryMessageStore>());
-        services.AddSingleton<IConversationStore>(sp => new InMemoryConversationStore(sp.GetRequiredService<InMemoryMessageStore>()));
+        // contact-history-opens-by-assignment (design D6): the contact summary joins the queue, agent and typification
+        // stores, each resolved at first use from the container, as the Postgres query joins their tables.
+        services.AddSingleton<IConversationStore>(sp => new InMemoryConversationStore(
+            sp.GetRequiredService<InMemoryMessageStore>(),
+            new InMemoryContactSummarySources(
+                sp.GetRequiredService<IQueueStore>,
+                sp.GetRequiredService<IAgentStore>,
+                sp.GetRequiredService<ITypificationSubmissionStore>,
+                sp.GetRequiredService<ITypificationSubmissionCorrectionStore>)));
         services.AddSingleton<IContactStore, InMemoryContactStore>();
         services.AddSingleton<ICaseStore, InMemoryCaseStore>();
         services.AddSingleton<ICannedResponseStore, InMemoryCannedResponseStore>();

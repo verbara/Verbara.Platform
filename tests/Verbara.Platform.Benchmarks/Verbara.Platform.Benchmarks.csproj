@@ -27,6 +27,11 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <!-- BenchmarkDotNet emits IL at runtime; AOT analyzer cannot apply. -->
     <IsAotCompatible>false</IsAotCompatible>
+    <!-- Directory.Build.props turns the trim and AOT analyzers on everywhere. This JIT-only console binds a few internal
+         Api members once per GlobalSetup by reflection (contact-history-opens-by-assignment task 3.6), which those
+         analyzers flag; nothing here is ever trimmed or published AOT. -->
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>false</EnableAotAnalyzer>
   </PropertyGroup>
 
   <!-- conversations-close-after-inactivity task 2.9: the claim-cost negative control (ClaimCostControlStore.cs).
@@ -34,6 +39,12 @@
        in a child build that never sees a -p on the command line. -->
   <PropertyGroup Condition="'$(CLAIM_COST_CONTROL)' == 'true'">
     <DefineConstants>$(DefineConstants);CLAIM_COST_CONTROL</DefineConstants>
+  </PropertyGroup>
+
+  <!-- contact-history-opens-by-assignment task 3.6, the T-1 control (AudienceCostControlStore.cs), read from the
+       environment for the same reason as CLAIM_COST_CONTROL above. -->
+  <PropertyGroup Condition="'$(AUDIENCE_COST_CONTROL)' == 'true'">
+    <DefineConstants>$(DefineConstants);AUDIENCE_COST_CONTROL</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -51,6 +62,9 @@
     <ProjectReference Include="..\..\src\Verbara.Platform.Channels.Core\Verbara.Platform.Channels.Core.csproj" />
     <ProjectReference Include="..\..\src\Verbara.Platform.Switchboard\Verbara.Platform.Switchboard.csproj" />
     <ProjectReference Include="..\..\src\Verbara.Platform.Storage.Postgres\Verbara.Platform.Storage.Postgres.csproj" />
+    <!-- contact-history-opens-by-assignment task 3.6: T-1's InboundPublish (WebhookInboundProcessor) and T-2/T-3's
+         delivery predicate and audience read live in the Api. -->
+    <ProjectReference Include="..\..\src\Verbara.Platform.Api\Verbara.Platform.Api.csproj" />
   </ItemGroup>
 
 </Project>

@@ -117,6 +117,14 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(TypificationBand))]
 [JsonSerializable(typeof(Verbara.Platform.Typification.TypificationSubmission))]
 [JsonSerializable(typeof(PagedResult<Conversation>))]
+// contact-history-opens-by-assignment (design D14): GET /contacts/{id}/conversations. The closed envelope is its own
+// line: the route's Ok<PagedResult<ContactConversationSummaryDto>> has no metadata at run time without it (AOT).
+[JsonSerializable(typeof(PagedResult<ContactConversationSummaryDto>))]
+[JsonSerializable(typeof(ContactConversationSummaryDto))]
+[JsonSerializable(typeof(ConversationDispositionDto))]
+[JsonSerializable(typeof(ConversationLastMessageDto))]
+// contact-history-opens-by-assignment (design D10, D14): GET /conversations/{id}/history.
+[JsonSerializable(typeof(MessageHistoryPageDto))]
 [JsonSerializable(typeof(PagedResult<Contact>))]
 [JsonSerializable(typeof(PagedResult<ApiKey>))]
 [JsonSerializable(typeof(PagedResult<CampaignSummaryDto>))]

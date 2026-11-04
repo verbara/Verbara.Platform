@@ -47,6 +47,16 @@ public sealed class Conversation : ITenantScoped, IAuditable
     [JsonIgnore]
     public DateTimeOffset? LastMessageAt { get; set; }
 
+    /// <summary>
+    /// contact-history-opens-by-assignment (design D7): the last queue that owned this conversation. Written by the
+    /// stores only, never by a caller: every whole-row save whose owner is a queue stores that queue, and any other save
+    /// keeps the stored value, so it never clears (an assignment to an agent overwrites the queue owner, not this).
+    /// <see langword="null"/> until a queue owns the conversation, and for rows written before migration 027 that no
+    /// queue owned then. Off the wire: the <c>Conversation</c> shape does not change; the contact history reads it.
+    /// </summary>
+    [JsonIgnore]
+    public EntityId? QueueId { get; set; }
+
     private readonly Dictionary<string, string> _metadata = new();
     public IReadOnlyDictionary<string, string> Metadata => _metadata;
 

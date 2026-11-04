@@ -154,6 +154,10 @@ public sealed class TransferNoteApiFactory : ConversationOwnershipApiFactory
             TenantId tenantId, EntityId conversationId, int limit, int offset, CancellationToken ct) =>
             inner.GetConversationMessagesAsync(tenantId, conversationId, limit, offset, ct);
 
+        public Task<MessageHistorySlice> GetConversationHistoryAsync(
+            TenantId tenantId, EntityId conversationId, int limit, MessageHistoryCursor? before, CancellationToken ct) =>
+            inner.GetConversationHistoryAsync(tenantId, conversationId, limit, before, ct);
+
         public Task UpdateDeliveryStatusAsync(
             TenantId tenantId, EntityId messageId, MessageDeliveryStatus status, DateTimeOffset? timestamp, CancellationToken ct) =>
             inner.UpdateDeliveryStatusAsync(tenantId, messageId, status, timestamp, ct);
