@@ -56,9 +56,13 @@ tenant API keys bound to no user, roles without a conversation permission and ag
     others and on the contact list.
 
   Every other conversation of the tenant now answers 403 `not-readable` to an agent, where it answered 200.
-- **The shared anonymous voice contact opens nothing beyond the caller's own calls.** Every withheld-number call of a
-  tenant shares one contact. An agent answering one of them no longer reads the others: they answer 403, and its contact
-  list holds only its own conversations of that contact, with `totalCount` counting only those.
+- **The shared anonymous voice contact opens nothing beyond the caller's own calls.** A new call whose caller id is empty
+  or a withheld placeholder (`<unknown>`, `unknown`, `Restricted`, `Unavailable` or `Private`, in any case) resolves to the
+  tenant's one `anonymous` voice contact. An agent answering one of them no longer reads the others: they answer 403, and
+  its contact list holds only its own conversations of that contact, with `totalCount` counting only those. A contact an
+  earlier version created from a placeholder gets the same treatment and stays as it is: it gains no new calls and its
+  conversations do not move, so that tenant's withheld callers have their history split across two contacts. Such a
+  call no longer stamps the placeholder as `callbackNumber`, so a callback for it escalates instead of dialing it.
 - **Callers with no conversation permission are refused.** A role without `contacts:conversation:handle`,
   `contacts:conversation:monitor` or `contacts:conversation:read` gets 403 on every read above. A tenant API key
   bound to no user carries no role and no permission, so it gets 403 on all of them too (see Upgrading). A key bound to a user
@@ -89,6 +93,10 @@ tenant API keys bound to no user, roles without a conversation permission and ag
   that routed the session was published; the later messages of an offered or active WebChat conversation were stored
   but never reached the agent's console live. The routing message is still published once, after
   `conversation.state_changed` `Queued`.
+- **A stored customer message stays on the live stream when its conversation cannot be read.** A failed read used to fail
+  a WebChat request after the message was stored. It now publishes the message to the readers of every conversation only,
+  on the webhook channels too, and the next customer message routes the conversation. A sender that hangs up during that
+  read no longer changes the publish.
 
 ### Upgrading
 
