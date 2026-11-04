@@ -300,10 +300,29 @@ public sealed class WebChatInboundRoutingTests
 
         var act = () => h.Sut.RouteFirstInboundAsync(h.SessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
 
-        await act.Should().NotThrowAsync("the message is stored and a retry of it is a duplicate");
+        await act.Should().NotThrowAsync("the message is stored, and a resend would store a second one: every WebChat message gets a new external id");
         h.Published.OfType<ConversationStateChangedEvent>().Should().ContainSingle(e => e.NewState == "Queued");
         h.Published.OfType<ConversationMessageEvent>().Should().ContainSingle()
             .Which.Audience.Should().Be(ConversationAudience.None, "an unread conversation names no agent (fail closed)");
+        await h.Router.DidNotReceiveWithAnyArgs().RouteAsync(default!, default);
+        await h.Switchboard.DidNotReceiveWithAnyArgs().AssignToQueueAsync(default, default, default, default);
+    }
+
+    [Theory]
+    [MemberData(nameof(FailedReads))]
+    public async Task RouteFirstInboundAsync_ShouldPublishWithAnEmptyAudienceAndNotRoute_WhenTheConversationAndContactReadsBothThrowOnTheFirstMessage(Exception failure)
+    {
+        var h = await BuildWithStubbedStoresAsync();
+        using var subscription = h.Subscription;
+        h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).ThrowsAsync(failure);
+        h.Contacts.GetByIdAsync(Tenant, ContactId, Arg.Any<CancellationToken>()).ThrowsAsync(failure);
+
+        var act = () => h.Sut.RouteFirstInboundAsync(h.SessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+
+        await act.Should().NotThrowAsync("the null conversation routes nothing, so the contact it would be routed with is not needed");
+        h.Published.OfType<ConversationStateChangedEvent>().Should().ContainSingle(e => e.NewState == "Queued");
+        h.Published.OfType<ConversationMessageEvent>().Should().ContainSingle()
+            .Which.Audience.Should().Be(ConversationAudience.None);
         await h.Router.DidNotReceiveWithAnyArgs().RouteAsync(default!, default);
         await h.Switchboard.DidNotReceiveWithAnyArgs().AssignToQueueAsync(default, default, default, default);
     }

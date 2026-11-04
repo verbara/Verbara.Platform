@@ -123,8 +123,15 @@ internal sealed partial class WebChatInboundRouter
             tenantId.Value, pipelineResult.ConversationId.Value, "", "Queued"));
         PublishInbound(tenantId, pipelineResult, conversation);
 
+        // Before the contact read: a conversation that could not be read routes nothing, so a contact read failing in the
+        // same outage must not fail the request of a message already stored and published.
+        if (conversation is null)
+        {
+            return;
+        }
+
         var contact = await _contactStore.GetByIdAsync(tenantId, pipelineResult.ContactId, ct).ConfigureAwait(false);
-        if (conversation is null || contact is null)
+        if (contact is null)
         {
             return;
         }
@@ -156,10 +163,12 @@ internal sealed partial class WebChatInboundRouter
         }
     }
 
-    // The message is stored and its session's first-message mark may be spent, so a retry routes and publishes nothing: a
-    // failed read gives a null conversation (an empty audience, readers only), and the request's token is not taken, so a
-    // visitor who hangs up here does not lose the publish, as on the webhook path. A conversation left unrouted this way is
-    // still Queued and owner-less, so the session's next message routes it (WebhookInboundProcessor.NeedsRouting).
+    // The message is stored, so this read must not fail the request: every WebChat message gets a new external id
+    // (WebChatEndpoints), so a resend would store a second message, not find a duplicate. A failed read gives a null
+    // conversation (an empty audience, readers only), and the request's token is not taken, so a visitor who hangs up here
+    // does not lose the publish, as on the webhook path. A conversation left unrouted this way is still Queued and
+    // owner-less, so the session's next message routes it (WebhookInboundProcessor.NeedsRouting), unless the queue timeout
+    // abandoned it first (ConversationTimeoutWorker).
     private async Task<Conversation?> ReadForPublishAsync(TenantId tenantId, EntityId conversationId)
     {
         try

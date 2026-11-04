@@ -93,10 +93,11 @@ tenant API keys bound to no user, roles without a conversation permission and ag
   that routed the session was published; the later messages of an offered or active WebChat conversation were stored
   but never reached the agent's console live. The routing message is still published once, after
   `conversation.state_changed` `Queued`.
-- **A stored customer message stays on the live stream when its conversation cannot be read.** A failed read used to fail
-  a WebChat request after the message was stored. It now publishes the message to the readers of every conversation only,
-  on the webhook channels too, and the next customer message routes the conversation. A sender that hangs up during that
-  read no longer changes the publish.
+- **A stored customer message stays on the live stream when its conversation cannot be read.** A failed read of the
+  conversation used to fail a WebChat request after the message was stored. It now publishes the message to the readers of
+  every conversation only, on the webhook channels too, and the next customer message routes the conversation, unless the
+  queue timeout abandoned it first. A sender that hangs up during that read no longer changes the publish. A failed read of
+  the contact, after the conversation was read, still fails the WebChat request of a message already stored and published.
 
 ### Upgrading
 
