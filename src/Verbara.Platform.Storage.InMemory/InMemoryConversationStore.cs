@@ -27,7 +27,9 @@ internal sealed class InMemoryConversationStore : IConversationStore
             .Where(c => query.State == null || c.State == query.State)
             .Where(c => query.ContactId == null || c.ContactId == query.ContactId)
             .Where(c => query.CaseId == null || c.CaseId == query.CaseId)
-            .Where(c => query.AssignedAgentId == null || (c.Owner != null && c.Owner.OwnerId == query.AssignedAgentId))
+            // contact-history-opens-by-assignment (design D4): kind and id together, as the Postgres filter.
+            .Where(c => query.AssignedAgentId == null
+                || (c.Owner is { Kind: ConversationOwnerKind.Agent } owner && owner.OwnerId == query.AssignedAgentId))
             .Where(c => query.Channel == null || c.Channel == query.Channel)
             .ToList();
 
@@ -59,9 +61,17 @@ internal sealed class InMemoryConversationStore : IConversationStore
         // conversation born with a message); an update never writes it, so a stale copy cannot roll it back. Mirrors
         // SaveSql's INSERT-only COALESCE(@LastMessageAt, @CreatedAt).
         var key = (conversation.TenantId, conversation.ConversationId);
-        conversation.LastMessageAt = _items.TryGetValue(key, out var stored)
-            ? stored.LastMessageAt
+        var exists = _items.TryGetValue(key, out var stored);
+        conversation.LastMessageAt = exists
+            ? stored!.LastMessageAt
             : conversation.LastMessageAt ?? conversation.CreatedAt;
+
+        // contact-history-opens-by-assignment (design D7): the store, never the caller, writes the last queue. A queue
+        // owner names its queue; any other owner keeps the stored one (none on an insert). Mirrors SaveSql's
+        // COALESCE(QueueIdWriteCase, conversations.queue_id).
+        conversation.QueueId = conversation.Owner is { Kind: ConversationOwnerKind.Queue, OwnerId: { } queueId }
+            ? queueId
+            : exists ? stored!.QueueId : null;
 
         _items[key] = conversation;
         return Task.CompletedTask;

@@ -193,6 +193,30 @@ public sealed class VoiceConversationBridgeTests : IDisposable
             .Should().Contain(ev => ev.OldState == "" && ev.NewState == nameof(ConversationState.Queued));
     }
 
+    // contact-history-opens-by-assignment task 1.7 (design D18): the address the bridge resolves for a withheld caller
+    // id is the shared sentinel of SharedContactAddresses, so the read rule's shared-contact exclusion and the bridge
+    // cannot drift apart.
+    [Fact]
+    public async Task HandleEventAsync_ShouldResolveASharedSentinelAddress_WhenTheCallerIdIsWithheld()
+    {
+        var session = MakeSession("link-anon", Tenant);
+        _sessions.GetById("s-link-anon").Returns(session);
+        _conversations.FindByVoiceLinkedIdAsync(Arg.Any<TenantId>(), "link-anon", Arg.Any<CancellationToken>())
+            .Returns((Conversation?)null);
+        StubContact();
+        var bridge = CreateBridge();
+
+        await bridge.HandleEventAsync(new CallQueuedEvent("s-link-anon", "primary", _clock.UtcNow, "acme-Support", 1));
+
+        var resolved = _contacts.ReceivedCalls()
+            .Where(call => call.GetMethodInfo().Name == nameof(IContactIdentityResolver.ResolveAsync))
+            .Select(call => call.GetArguments()[1] as ChannelAddress)
+            .Should().ContainSingle().Subject;
+        SharedContactAddresses.IsShared(resolved!).Should().BeTrue(
+            "every withheld-caller-id call resolves to the tenant's one shared anonymous voice contact");
+        SharedContactAddresses.All.Should().Contain(resolved!);
+    }
+
     [Fact]
     public async Task HandleEventAsync_ShouldNotCreateConversation_WhenTenantUnresolved()
     {

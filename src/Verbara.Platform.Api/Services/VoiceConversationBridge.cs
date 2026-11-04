@@ -87,7 +87,6 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     internal const string DialerContactIdKey = "dialerContactId";
     /// <summary>Session and Conversation metadata key of the originate's action id, the key of the dialer's disposition.</summary>
     internal const string DialerActionIdKey = "dialerActionId";
-    private const string AnonymousCaller = "anonymous";
 
     private readonly ICallSessionManager _sessions;
     private readonly VerbaraServerPool _serverPool;
@@ -270,9 +269,10 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         // 3B.0 these calls share one per-tenant "anonymous" voice Contact (the conventional CCaaS
         // bucket) — the Conversations stay distinct (correlated by the per-call voice_linked_id), only
         // the contact identity is shared. Per-caller separation for withheld-CID is deferred to 3B.1
-        // (screen-pop / contact UX). Tenant-scoped, so no cross-tenant bleed.
+        // (screen-pop / contact UX). Tenant-scoped, so no cross-tenant bleed. The address is the shared sentinel of
+        // SharedContactAddresses, so the read rule never opens one caller's call to another's agent (design D18).
         var callerNumber = dialedNumber
-                           ?? (string.IsNullOrWhiteSpace(session.CallerIdNum) ? AnonymousCaller : session.CallerIdNum!);
+                           ?? (string.IsNullOrWhiteSpace(session.CallerIdNum) ? SharedContactAddresses.AnonymousVoiceCaller : session.CallerIdNum!);
         var contact = await _contacts.ResolveAsync(tenantId, new ChannelAddress(ChannelType.Voice, callerNumber), CancellationToken.None).ConfigureAwait(false);
 
         var conversation = new Conversation
@@ -426,7 +426,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
             LogContactLookupFailed(contactId.Value, ex.Message);
         }
 
-        return session.CallerIdName ?? session.CallerIdNum ?? AnonymousCaller;
+        return session.CallerIdName ?? session.CallerIdNum ?? SharedContactAddresses.AnonymousVoiceCaller;
     }
 
     /// <summary>
@@ -586,7 +586,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         conversation.SetMetadata("callbackEvalSince", _clock.UtcNow.ToString("O", CultureInfo.InvariantCulture));
 
         var number = await ResolveCallbackNumberAsync(tenantId, session, conversation.ContactId).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(number) && !string.Equals(number, AnonymousCaller, StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(number) && !string.Equals(number, SharedContactAddresses.AnonymousVoiceCaller, StringComparison.OrdinalIgnoreCase))
             conversation.SetMetadata("callbackNumber", number);
         // else: leave callbackNumber absent — A6 escalates a callback it can't place a number for.
 

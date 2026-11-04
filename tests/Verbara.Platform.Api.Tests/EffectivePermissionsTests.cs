@@ -37,6 +37,14 @@ public sealed class EffectivePermissionsTests
         result.Should().BeEquivalentTo(RoleDefaultPermissions.Admin);
     }
 
+    // contact-history-opens-by-assignment task 1.8 (design D16): the client fallback mirrors the admin template, which
+    // now carries contacts:conversation:read (living rbac-permission-vocabulary).
+    [Fact]
+    public void AdminFallback_ShouldListTheConversationReadPermission_WhenTheAdminTemplateGrantsIt()
+    {
+        RoleDefaultPermissions.Admin.Should().Contain("contacts:conversation:read");
+    }
+
     [Fact]
     public void EffectivePermissions_ShouldFallBackToRoleDefaults_WhenResolvedIsEmpty()
     {

@@ -57,7 +57,7 @@ public class ConversationOwnershipApiFactory : ImpersonationApiFactory
         services.AddSingleton<IUserRoleStore>(RoleTemplateGrants);
     }
 
-    private static IUserRoleStore RoleTemplateGrants(IServiceProvider services)
+    private IUserRoleStore RoleTemplateGrants(IServiceProvider services)
     {
         var roles = Substitute.For<IUserRoleStore>();
         roles.GetEffectivePermissionsAsync(Arg.Any<TenantId>(), Arg.Any<EntityId>(), Arg.Any<CancellationToken>())
@@ -65,13 +65,22 @@ public class ConversationOwnershipApiFactory : ImpersonationApiFactory
         return roles;
     }
 
-    private static async Task<IReadOnlySet<string>> GrantsOfAsync(IServiceProvider services, TenantId tenantId, EntityId userId)
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<EntityId, string> _templateOverrides = new();
+
+    /// <summary>
+    /// From now on <paramref name="user"/>'s server-side permissions are role template <paramref name="templateId"/>'s
+    /// instead of its role's — a tenant role granted by an administrator (Manager, Quality Analyst), which no
+    /// <see cref="UserRole"/> names. The user's role claim, and so every role policy, is unchanged.
+    /// </summary>
+    public void GrantTemplate(User user, string templateId) => _templateOverrides[user.UserId] = templateId;
+
+    private async Task<IReadOnlySet<string>> GrantsOfAsync(IServiceProvider services, TenantId tenantId, EntityId userId)
     {
         var user = await services.GetRequiredService<IUserStore>().GetByIdAsync(tenantId, userId, CancellationToken.None);
         if (user is null)
             return new HashSet<string>(StringComparer.Ordinal);
 
-        var template = user.Role switch
+        var template = _templateOverrides.TryGetValue(user.UserId, out var granted) ? granted : user.Role switch
         {
             UserRole.Agent => "agent",
             UserRole.Supervisor => "supervisor",
@@ -153,13 +162,14 @@ public class ConversationOwnershipApiFactory : ImpersonationApiFactory
         ConversationOwner? owner,
         ConversationState state,
         IReadOnlyDictionary<string, string>? metadata = null,
-        ChannelType channel = ChannelType.WebChat)
+        ChannelType channel = ChannelType.WebChat,
+        EntityId? contactId = null)
     {
         var conversation = new Conversation
         {
             ConversationId = EntityId.From($"conv-{Guid.NewGuid():N}"),
             TenantId = Tenant,
-            ContactId = EntityId.From($"contact-{Guid.NewGuid():N}"),
+            ContactId = contactId ?? EntityId.From($"contact-{Guid.NewGuid():N}"),
             Channel = channel,
             State = state,
             Owner = owner,
@@ -178,7 +188,8 @@ public class ConversationOwnershipApiFactory : ImpersonationApiFactory
     /// A queued conversation offered to <paramref name="agent"/>, stamped the way an offer is
     /// (<c>_offeredTo</c>, <c>_offeredAt</c>).
     /// </summary>
-    public Conversation SeedOfferTo(Agent agent, Queue queue) =>
+    public Conversation SeedOfferTo(
+        Agent agent, Queue queue, ChannelType channel = ChannelType.WebChat, EntityId? contactId = null) =>
         SeedConversation(
             ConversationOwner.ForQueue(queue.QueueId),
             ConversationState.Offered,
@@ -186,7 +197,26 @@ public class ConversationOwnershipApiFactory : ImpersonationApiFactory
             {
                 ["_offeredTo"] = agent.AgentId.Value,
                 ["_offeredAt"] = DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
-            });
+            },
+            channel,
+            contactId);
+
+    /// <summary>A contact of the customer tenant holding <paramref name="addresses"/>.</summary>
+    public Contact SeedContact(params ChannelAddress[] addresses)
+    {
+        var contact = new Contact
+        {
+            ContactId = EntityId.From($"contact-{Guid.NewGuid():N}"),
+            TenantId = Tenant,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        foreach (var address in addresses)
+            contact.AddAddress(address);
+        using var scope = Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<IContactStore>().SaveAsync(contact, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        return contact;
+    }
 
     /// <summary>A queue of the customer tenant.</summary>
     public Queue SeedQueue()

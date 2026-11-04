@@ -374,7 +374,10 @@ public sealed class TransferNoteEndpointTests : IClassFixture<TransferNoteApiFac
 
     // This pins today's behaviour, not a wish: the console reads the first 50 messages, so a note written after 50
     // stays out of the page it reads. Gap B14 of the agent console plan, "cargar anteriores", turns these two tests.
-    private async Task<(HttpClient Client, Conversation Conversation)> TransferWithANoteAfterFiftyMessagesAsync()
+    // contact-history-opens-by-assignment (design D10, spec audit F4): a transfer to a queue leaves no later owner, and
+    // the former owner no longer reads the conversation, so both pins read with a Supervisor of the same tenant (a
+    // monitor). Every ordering and paging assertion is unchanged; the former owner's refusal is its own test below.
+    private async Task<(HttpClient Owner, HttpClient Supervisor, Conversation Conversation)> TransferWithANoteAfterFiftyMessagesAsync()
     {
         var (user, _, conversation) = SeedOwned();
         _factory.SeedMessages(conversation, 50);
@@ -382,14 +385,16 @@ public sealed class TransferNoteEndpointTests : IClassFixture<TransferNoteApiFac
         var client = _factory.ClientFor(user);
         (await client.PostAsJsonAsync(Route(conversation, "transfer"), ToQueue(queue, Note)))
             .StatusCode.Should().Be(HttpStatusCode.OK);
-        return (client, conversation);
+        var (supervisor, _) = _factory.NewAgent("supervisor", UserRole.Supervisor);
+        return (client, _factory.ClientFor(supervisor), conversation);
     }
 
     [Fact]
     public async Task GetMessages_ShouldAnswerTheFiftyStoredAndNotTheNote_WhenNoQueryIsGiven()
     {
-        var (client, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
-        using var owned = client;
+        var (owner, client, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
+        using var formerOwner = owner;
+        using var reader = client;
 
         var page = JsonNode.Parse(await client.GetStringAsync(Route(conversation, "messages")))!.AsArray();
 
@@ -400,14 +405,35 @@ public sealed class TransferNoteEndpointTests : IClassFixture<TransferNoteApiFac
     [Fact]
     public async Task GetMessages_ShouldAnswerTheNote_WhenTheOffsetReachesIt()
     {
-        var (client, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
-        using var owned = client;
+        var (owner, client, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
+        using var formerOwner = owner;
+        using var reader = client;
 
         var page = JsonNode.Parse(await client.GetStringAsync($"{Route(conversation, "messages")}?offset=50"))!.AsArray();
 
         var note = page.Should().ContainSingle().Subject!;
         note["direction"]!.GetValue<string>().Should().Be("System");
         note["content"]!["blocks"]![0]!["text"]!.GetValue<string>().Should().Be(Note);
+    }
+
+    // contact-history-opens-by-assignment task 1.3 (design D2 step 4, D10; spec "The allowance ends with the
+    // assignment"): red on the unfixed code, green with tasks 2.2 and 2.4. After the transfer to a queue the former
+    // owner holds nothing of the conversation, so both transcript routes refuse it.
+    [Fact]
+    public async Task TranscriptReads_ShouldRefuseTheFormerOwnerNotReadable_WhenItTransferredTheConversationToAQueue()
+    {
+        var (owner, supervisor, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
+        using var formerOwner = owner;
+        using var reader = supervisor;
+
+        foreach (var route in new[] { Route(conversation, "messages"), Route(conversation, "history") })
+        {
+            using var response = await formerOwner.GetAsync(route);
+            var body = await response.Content.ReadAsStringAsync();
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden, because: $"{route} answered {body}");
+            JsonNode.DeepEquals(JsonNode.Parse(body), new JsonObject { ["error"] = "not-readable" })
+                .Should().BeTrue(because: $"{route} answered {body}");
+        }
     }
 
     // ─── "A stored note SHALL be published to the console on conversation.message" ──

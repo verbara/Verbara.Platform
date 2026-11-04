@@ -55,7 +55,14 @@ public sealed class ConversationClockFixture : IAsyncLifetime
     }
 
     /// <summary>A new database with every migration applied, or only those before 026.</summary>
-    public async Task<NpgsqlDataSource> CreateDatabaseAsync(bool before026 = false)
+    public Task<NpgsqlDataSource> CreateDatabaseAsync(bool before026 = false) =>
+        CreateDatabaseBeforeAsync(before026 ? Migration026 : null);
+
+    /// <summary>
+    /// A new database with every migration applied that sorts before <paramref name="migration"/>, or every migration
+    /// when it is <see langword="null"/>.
+    /// </summary>
+    public async Task<NpgsqlDataSource> CreateDatabaseBeforeAsync(string? migration)
     {
         var name = $"clk_{Guid.NewGuid():N}";
         await using (var admin = NpgsqlDataSource.Create(ConnectionStringFor("postgres")))
@@ -67,7 +74,7 @@ public sealed class ConversationClockFixture : IAsyncLifetime
 
         foreach (var (file, sql) in Migrations())
         {
-            if (before026 && string.CompareOrdinal(file, Migration026) >= 0)
+            if (migration is not null && string.CompareOrdinal(file, migration) >= 0)
                 break;
             await using var cmd = ds.CreateCommand(sql);
             await cmd.ExecuteNonQueryAsync();
