@@ -1,0 +1,154 @@
+{
+  "_comment": "The visitor identity token a tenant's site signs and the widget passes to POST /api/v1/webchat/sessions as `identityToken` (level 2, design D4-D7). Format: a compact JWS (JWT) `base64url(header).base64url(payload).base64url(signature)`, HMAC-SHA256 over the ASCII bytes of `base64url(header).base64url(payload)`, keyed with the UTF-8 bytes of the tenant's WebChat credential `identityTokenSecret` (fixtures/webchat-identity-secret-admin.v1.json). JWT was chosen over the CSAT `v1.{payload}.{sig}` format so a Partner's site signs with any JWT library (design D4). The secrets below are FIXTURE VALUES ONLY: they exist so tests can recompute every signature byte for byte; they are not, and must never become, a real tenant's secret. The token is never logged, stored or echoed by the Platform; only its refusal code is logged with the tenant (design D7). There is no replay cache in the first cut: a token can be presented again until its `exp`, which is why its lifetime is capped at 3600 s (design D6). Every child change's delta spec must cite these field names and codes VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "header": {
+    "alg": "HS256",
+    "typ": "JWT"
+  },
+  "headerRules": {
+    "alg": "required, exactly \"HS256\"; any other value (\"none\", \"HS512\", \"RS256\", absent) answers identity-token-malformed before any signature is computed",
+    "typ": "optional; when present it MUST be \"JWT\"",
+    "kid": "optional and ignored: the verifier tries the current secret, then the previous one inside its grace window (design D8), so a site needs no key id"
+  },
+  "claims": {
+    "external_id": "string, REQUIRED, 1..256 characters after trimming: the site's own stable id of its logged-in customer. It is the level-2 key: the contact is resolved by the WebChat address `webchat-external:<external_id>` (fixtures/contact-identity-level.v1.json). The site SHOULD use an opaque id, never an e-mail or a national id: it is stored and shown to agents in the contact's addresses",
+    "aud": "string or array, REQUIRED: the Verbara tenant id the token is for. Either a string equal to the request's `tenantId`, or a non-empty JSON array of strings every member of which equals the request's `tenantId` (a JWT library that always writes `aud` as an array is accepted). An array holding any other member is refused with identity-token-wrong-tenant; an empty array, a non-string member or any other type is identity-token-malformed (boundary-matrix H1, review fix, 2026-11-04)",
+    "iat": "integer Unix seconds, REQUIRED: when the site signed the token",
+    "exp": "integer Unix seconds, REQUIRED: exp > iat and exp - iat <= 3600",
+    "name": "string, optional, at most 200 characters: the customer's display name; fills the contact's first name only when the contact has no name, exactly as the inbound resolver does today",
+    "email": "string, optional, at most 320 characters: stored as the contact custom field `webchatEmail`; it NEVER becomes an Email channel address and never links contacts (design D3)"
+  },
+  "clock": {
+    "skewSeconds": 300,
+    "maxLifetimeSeconds": 3600,
+    "rules": "refused when iat > now + 300 (identity-token-not-yet-valid) or now > exp + 300 (identity-token-expired); the 5-minute skew is the CsatWebChatTokenVerifier precedent"
+  },
+  "testVector": {
+    "_note": "now = 2026-11-04T14:05:00Z (Unix 1793801100). tenantId of the request = t-demo-0001. The tenant's current identityTokenSecret is `currentSecret`; `previousSecret` was replaced at 2026-11-04T09:00:00Z, so it is inside its 24 h grace (design D8). `previousSecret` is tried only when `identityTokenSecretReplacedAt` parses as an ISO 8601 instant: a previous secret with a missing or unparseable stamp is never tried (fail closed; review P2, 2026-11-04).",
+    "now": 1793801100,
+    "tenantId": "t-demo-0001",
+    "currentSecret": "fixture-only-not-a-real-secret-6f1c2a9e4b7d",
+    "previousSecret": "fixture-only-previous-secret-before-rotation-a4",
+    "previousSecretReplacedAt": "2026-11-04T09:00:00.000+00:00",
+    "otherTenantSecret": "fixture-only-another-tenant-secret-3e8b5c1d",
+    "payload": {
+      "external_id": "cust-48151623",
+      "aud": "t-demo-0001",
+      "iat": 1793800800,
+      "exp": 1793802600,
+      "name": "Ana Pérez",
+      "email": "ana.perez@example.com"
+    },
+    "accepted": [
+      {
+        "case": "signed with the current secret, inside its lifetime",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOiJ0LWRlbW8tMDAwMSIsImlhdCI6MTc5MzgwMDgwMCwiZXhwIjoxNzkzODAyNjAwLCJuYW1lIjoiQW5hIFBcdTAwZTlyZXoiLCJlbWFpbCI6ImFuYS5wZXJlekBleGFtcGxlLmNvbSJ9.7i5YprN-i4Q8vRfkXtSuGLH7fanAIFXTFCAyFOC0_-I",
+        "identityLevel": "Verified",
+        "contactAddress": "webchat-external:cust-48151623"
+      },
+      {
+        "case": "signed with the previous secret, inside the 24 h grace after rotation",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOiJ0LWRlbW8tMDAwMSIsImlhdCI6MTc5MzgwMDgwMCwiZXhwIjoxNzkzODAyNjAwLCJuYW1lIjoiQW5hIFBcdTAwZTlyZXoiLCJlbWFpbCI6ImFuYS5wZXJlekBleGFtcGxlLmNvbSJ9.S0GVwH8paxiasZn6c9CI5R0QvKPc1U8hFDQQoTPfyo0",
+        "identityLevel": "Verified",
+        "contactAddress": "webchat-external:cust-48151623"
+      },
+      {
+        "case": "signed with the current secret, `aud` given as a one-member JSON array [\"t-demo-0001\"] (boundary-matrix H1)",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOlsidC1kZW1vLTAwMDEiXSwiaWF0IjoxNzkzODAwODAwLCJleHAiOjE3OTM4MDI2MDAsIm5hbWUiOiJBbmEgUFx1MDBlOXJleiIsImVtYWlsIjoiYW5hLnBlcmV6QGV4YW1wbGUuY29tIn0.LQ070xQjUZVicqzn7WT-eTNgKBVPr8NeAHtEjk-DVyI",
+        "identityLevel": "Verified",
+        "contactAddress": "webchat-external:cust-48151623"
+      }
+    ],
+    "refused": [
+      {
+        "case": "the tenant has no identityTokenSecret configured",
+        "token": "(any token)",
+        "identityTokenRefusal": "identity-token-not-configured"
+      },
+      {
+        "case": "alg none",
+        "token": "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOiJ0LWRlbW8tMDAwMSIsImlhdCI6MTc5MzgwMDgwMCwiZXhwIjoxNzkzODAyNjAwLCJuYW1lIjoiQW5hIFBcdTAwZTlyZXoiLCJlbWFpbCI6ImFuYS5wZXJlekBleGFtcGxlLmNvbSJ9.",
+        "identityTokenRefusal": "identity-token-malformed"
+      },
+      {
+        "case": "alg HS512 (only HS256 is accepted)",
+        "token": "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOiJ0LWRlbW8tMDAwMSIsImlhdCI6MTc5MzgwMDgwMCwiZXhwIjoxNzkzODAyNjAwLCJuYW1lIjoiQW5hIFBcdTAwZTlyZXoiLCJlbWFpbCI6ImFuYS5wZXJlekBleGFtcGxlLmNvbSJ9.jv6eu3HzVrbffd1ep3YoCGDy1GcDTYEcefgYsAUytcM",
+        "identityTokenRefusal": "identity-token-malformed"
+      },
+      {
+        "case": "not three segments, not base64url, or longer than 4096 characters",
+        "token": "not-a-token",
+        "identityTokenRefusal": "identity-token-malformed"
+      },
+      {
+        "case": "signed with another tenant's secret (bad signature)",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOiJ0LWRlbW8tMDAwMSIsImlhdCI6MTc5MzgwMDgwMCwiZXhwIjoxNzkzODAyNjAwLCJuYW1lIjoiQW5hIFBcdTAwZTlyZXoiLCJlbWFpbCI6ImFuYS5wZXJlekBleGFtcGxlLmNvbSJ9.uNfYkHNx55mh0K3RF4iOXH0TZPD-RLbktxUPUG_-JSg",
+        "identityTokenRefusal": "identity-token-signature-invalid"
+      },
+      {
+        "case": "validly signed, no external_id claim",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJ0LWRlbW8tMDAwMSIsImlhdCI6MTc5MzgwMDgwMCwiZXhwIjoxNzkzODAyNjAwLCJuYW1lIjoiQW5hIFBcdTAwZTlyZXoiLCJlbWFpbCI6ImFuYS5wZXJlekBleGFtcGxlLmNvbSJ9.kKfjSYHkOu2f71M749v-WrL5opI3rwXIYznI7FO2EjA",
+        "identityTokenRefusal": "identity-token-malformed"
+      },
+      {
+        "case": "validly signed for another tenant (aud t-other-0002, request tenantId t-demo-0001)",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOiJ0LW90aGVyLTAwMDIiLCJpYXQiOjE3OTM4MDA4MDAsImV4cCI6MTc5MzgwMjYwMCwibmFtZSI6IkFuYSBQXHUwMGU5cmV6IiwiZW1haWwiOiJhbmEucGVyZXpAZXhhbXBsZS5jb20ifQ.3OkDkMeK9VmqYd5W4B3guvlGB-CeOvvHQn2Q0fdarf8",
+        "identityTokenRefusal": "identity-token-wrong-tenant"
+      },
+      {
+        "case": "validly signed, `aud` an array holding the request tenant and another tenant [\"t-demo-0001\",\"t-other-0002\"]",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOlsidC1kZW1vLTAwMDEiLCJ0LW90aGVyLTAwMDIiXSwiaWF0IjoxNzkzODAwODAwLCJleHAiOjE3OTM4MDI2MDAsIm5hbWUiOiJBbmEgUFx1MDBlOXJleiIsImVtYWlsIjoiYW5hLnBlcmV6QGV4YW1wbGUuY29tIn0.fR-e_3wlP0V-ilvlaTHq1YGJCV4fkWJgOHkxnUeGJ2Y",
+        "identityTokenRefusal": "identity-token-wrong-tenant"
+      },
+      {
+        "case": "validly signed, `aud` an empty JSON array []",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOltdLCJpYXQiOjE3OTM4MDA4MDAsImV4cCI6MTc5MzgwMjYwMCwibmFtZSI6IkFuYSBQXHUwMGU5cmV6IiwiZW1haWwiOiJhbmEucGVyZXpAZXhhbXBsZS5jb20ifQ.3rqq44UgH05-WMK8adsE8XPgOBZfGeClvLqQaARCL1k",
+        "identityTokenRefusal": "identity-token-malformed"
+      },
+      {
+        "case": "validly signed, exp - iat = 86400 (over the 3600 s cap)",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOiJ0LWRlbW8tMDAwMSIsImlhdCI6MTc5MzgwMDgwMCwiZXhwIjoxNzkzODg3MjAwLCJuYW1lIjoiQW5hIFBcdTAwZTlyZXoiLCJlbWFpbCI6ImFuYS5wZXJlekBleGFtcGxlLmNvbSJ9.zZSaaJuDIZU3r6tdCQF5HGge516cTK-fsmy2TR5AvcI",
+        "identityTokenRefusal": "identity-token-lifetime-too-long"
+      },
+      {
+        "case": "validly signed, iat 2026-11-04T14:15:00Z (beyond now + 300 s)",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOiJ0LWRlbW8tMDAwMSIsImlhdCI6MTc5MzgwMTcwMCwiZXhwIjoxNzkzODAzNTAwLCJuYW1lIjoiQW5hIFBcdTAwZTlyZXoiLCJlbWFpbCI6ImFuYS5wZXJlekBleGFtcGxlLmNvbSJ9.tAcdjELOg4BjOpFaUmpq7oPYOW4AMQeaqtcKlDGhd6Q",
+        "identityTokenRefusal": "identity-token-not-yet-valid"
+      },
+      {
+        "case": "validly signed, exp 2026-11-04T13:00:00Z (more than 300 s before now)",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOiJ0LWRlbW8tMDAwMSIsImlhdCI6MTc5Mzc5MzYwMCwiZXhwIjoxNzkzNzk3MjAwLCJuYW1lIjoiQW5hIFBcdTAwZTlyZXoiLCJlbWFpbCI6ImFuYS5wZXJlekBleGFtcGxlLmNvbSJ9.v7FcgOrvMb8iLxbQjhJU2dWhOzbFF_AHjZ0piv8gRc8",
+        "identityTokenRefusal": "identity-token-expired"
+      },
+      {
+        "case": "signed with the previous secret after its 24 h grace ended, or after an admin removed identityTokenSecretPrevious",
+        "token": "(the valid_previous token above, presented at 2026-11-05T09:00:01Z or later)",
+        "identityTokenRefusal": "identity-token-signature-invalid"
+      },
+      {
+        "case": "signed with the previous secret inside 24 h of the rotation, but the stored identityTokenSecretReplacedAt is missing or does not parse as an ISO 8601 instant: the previous secret is never tried (fail closed)",
+        "token": "(the valid_previous token above, presented at 2026-11-04T14:05:00Z with identityTokenSecretReplacedAt absent or \"not-a-date\")",
+        "identityTokenRefusal": "identity-token-signature-invalid"
+      }
+    ]
+  },
+  "evaluationOrder": [
+    "1. no identityTokenSecret for the tenant -> identity-token-not-configured",
+    "2. structure, length <= 4096, base64url, header JSON, alg == HS256 -> else identity-token-malformed",
+    "3. HMAC-SHA256 with the current secret, then the previous secret only while identityTokenSecretReplacedAt parses and now < it + 24 h, compared in constant time -> else identity-token-signature-invalid",
+    "4. payload JSON, external_id / aud / iat / exp present and well typed (aud a string, or a non-empty array of strings), lengths within bounds -> else identity-token-malformed",
+    "5. aud == request tenantId (a string), or every member of the aud array == request tenantId -> else identity-token-wrong-tenant",
+    "6. exp > iat and exp - iat <= 3600 -> else identity-token-lifetime-too-long",
+    "7. iat <= now + 300 -> else identity-token-not-yet-valid",
+    "8. now <= exp + 300 -> else identity-token-expired"
+  ],
+  "refusalCodes": [
+    "identity-token-not-configured",
+    "identity-token-malformed",
+    "identity-token-signature-invalid",
+    "identity-token-wrong-tenant",
+    "identity-token-lifetime-too-long",
+    "identity-token-not-yet-valid",
+    "identity-token-expired"
+  ],
+  "replay": "No refusal code. A token is a bearer assertion valid until exp + 300 s; it is not single-use (two tabs or a reload present it again). Bounded by maxLifetimeSeconds; a jti replay cache is recorded as what would change it (design D6)."
+}
