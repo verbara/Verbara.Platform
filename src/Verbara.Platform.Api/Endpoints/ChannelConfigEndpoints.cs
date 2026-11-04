@@ -27,6 +27,12 @@ internal static class ChannelConfigEndpoints
     /// <summary><c>400</c> code: a key outside the channel's declared credential schema.</summary>
     internal const string UnknownCredentialKeyCode = "unknown-credential-key";
 
+    /// <summary><c>400</c> code: a value for a key only the server writes.</summary>
+    internal const string ServerManagedCredentialKeyCode = "server-managed-credential-key";
+
+    /// <summary><c>400</c> code: a WebChat identity token secret outside the allowed length.</summary>
+    internal const string WeakIdentityTokenSecretCode = "weak-identity-token-secret";
+
     /// <summary><c>400</c> code: the route names no known channel.</summary>
     internal const string InvalidChannelCode = "invalid-channel";
 
@@ -86,6 +92,7 @@ internal static class ChannelConfigEndpoints
         [FromBody] UpdateChannelConfigRequest body,
         [FromServices] ITenantChannelConfigStore store,
         [FromServices] IAuditService audit,
+        [FromServices] TimeProvider clock,
         CancellationToken ct)
     {
         if (!Enum.TryParse<ChannelType>(channel, ignoreCase: true, out var channelType))
@@ -95,9 +102,17 @@ internal static class ChannelConfigEndpoints
         if (unknownKeys.Count > 0)
             return TypedResults.BadRequest(new ErrorDetailResponse(UnknownCredentialKeyCode, unknownKeys));
 
+        var serverManagedKeys = ChannelCredentialMerge.ServerManagedKeys(channelType, body.Credentials);
+        if (serverManagedKeys.Count > 0)
+            return TypedResults.BadRequest(new ErrorDetailResponse(ServerManagedCredentialKeyCode, serverManagedKeys));
+
+        var weakKeys = ChannelCredentialMerge.WeakSecretKeys(channelType, body.Credentials);
+        if (weakKeys.Count > 0)
+            return TypedResults.BadRequest(new ErrorDetailResponse(WeakIdentityTokenSecretCode, weakKeys));
+
         var tenantId = GetTenantId(context);
         var before = await store.GetAsync(tenantId, channelType, ct);
-        var merge = ChannelCredentialMerge.Apply(before?.Credentials, body.Credentials);
+        var merge = ChannelCredentialMerge.Apply(channelType, before?.Credentials, body.Credentials, clock.GetUtcNow());
         var config = new TenantChannelConfig
         {
             TenantId = tenantId,
