@@ -79,12 +79,58 @@ public abstract record PlatformEvent(string TenantId, string Type, DateTimeOffse
     /// <inheritdoc />
     public override string EventType => Type;
 
+    private PushEventMetadata? _metadata;
+
     /// <summary>
-    /// Computed metadata bridging platform-level fields into the Sdk.Push envelope.
-    /// Default: tenant broadcast (no user target). Override in records that carry a
-    /// specific recipient (e.g. <see cref="NotificationEvent"/>).
+    /// Metadata bridging platform-level fields into the Sdk.Push envelope, built on the first read and then one instance
+    /// for the life of the event: the delivery filter reads it twice for every event and subscriber of a stream.
+    /// Default: tenant broadcast (no user target). Override through <see cref="MetadataFor"/> in records that carry a
+    /// specific recipient (e.g. <see cref="NotificationEvent"/>). The override stays on the record because the serializer
+    /// writes a member where the most derived record declares it, so moving it would change that event's wire order.
     /// </summary>
-    public override PushEventMetadata Metadata => new(TenantId, UserId: null, Timestamp, CorrelationId: null);
+    public override PushEventMetadata Metadata => MetadataFor(userId: null);
+
+    /// <summary>
+    /// The event's metadata, built once. Subscribers read it concurrently (the bus publishes on the caller's thread and
+    /// the Sdk.Push bus reads the same event on its own), and the value is immutable, so losing the race costs one
+    /// discarded instance: <see cref="Interlocked.CompareExchange{T}(ref T, T, T)"/> makes every reader return the first
+    /// instance published, and it is the fence that publishes it whole.
+    /// </summary>
+    private protected PushEventMetadata MetadataFor(string? userId)
+    {
+        if (Volatile.Read(ref _metadata) is { } built)
+        {
+            return built;
+        }
+
+        var candidate = new PushEventMetadata(TenantId, userId, Timestamp, CorrelationId: null);
+        return Interlocked.CompareExchange(ref _metadata, candidate, null) ?? candidate;
+    }
+
+    /// <summary>
+    /// A copy starts with no metadata: <c>with</c> runs this constructor and then assigns the changed members, so a
+    /// metadata built from the original's tenant, recipient or time must not travel with it. A new member of this record
+    /// has to be copied here by hand.
+    /// </summary>
+    protected PlatformEvent(PlatformEvent original)
+        : base(original)
+    {
+        ArgumentNullException.ThrowIfNull(original);
+        TenantId = original.TenantId;
+        Type = original.Type;
+        Timestamp = original.Timestamp;
+    }
+
+    /// <summary>Written by hand so that the built metadata stays out of it: an event already read equals one not read yet.</summary>
+    public virtual bool Equals(PlatformEvent? other) =>
+        ReferenceEquals(this, other)
+        || (base.Equals(other)
+            && string.Equals(TenantId, other!.TenantId, StringComparison.Ordinal)
+            && string.Equals(Type, other.Type, StringComparison.Ordinal)
+            && Timestamp.Equals(other.Timestamp));
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(base.GetHashCode(), TenantId, Type, Timestamp);
 }
 
 /// <summary>Raised when a conversation is assigned to an agent.</summary>
@@ -329,5 +375,5 @@ public sealed record NotificationEvent(
     : PlatformEvent(TenantId, "notification.created", Timestamp)
 {
     /// <inheritdoc />
-    public override PushEventMetadata Metadata => new(TenantId, UserId, Timestamp, CorrelationId: null);
+    public override PushEventMetadata Metadata => MetadataFor(UserId);
 }

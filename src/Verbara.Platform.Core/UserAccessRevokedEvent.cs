@@ -37,7 +37,7 @@ public sealed record UserAccessRevokedEvent(string TenantId, string UserId, stri
     public const string DeletedReason = "deleted";
 
     /// <inheritdoc />
-    public override PushEventMetadata Metadata => new(TenantId, UserId, Timestamp, CorrelationId: null);
+    public override PushEventMetadata Metadata => MetadataFor(UserId);
 
     /// <summary>
     /// Reads the event from either form a node receives it in: the typed record (published on this
