@@ -3,6 +3,7 @@ using Npgsql;
 using NpgsqlTypes;
 using Verbara.Platform.Core;
 using Verbara.Platform.Conversations;
+using Verbara.Platform.Conversations.Serialization;
 using Verbara.Sdk.Data.Npgsql;
 
 namespace Verbara.Platform.Storage.Postgres.Stores;
@@ -336,6 +337,64 @@ internal sealed class PostgresConversationStore : IConversationStore
             p => p.Add(new NpgsqlParameter("ConversationId", conversationId.Value)),
             ConversationRow.Map, ct);
         return row?.ToConversation();
+    }
+
+    /// <summary>
+    /// contact-history-opens-by-assignment (design D6): the one summary query. The conversation columns, the last
+    /// queue's name, the agent owner's display name, the disposition (the correction's leaf first) and the newest
+    /// activity message through a lateral read on <c>idx_messages_conversation</c>, with the shared
+    /// <see cref="ActivityMessagePredicate"/>. Ids order with the "C" collation, so the order is ordinal as in memory.
+    /// </summary>
+    private const string ContactSummarySelect =
+        "SELECT c.conversation_id, c.tenant_id, c.contact_id, c.channel, c.state, c.owner_kind, c.owner_id, c.case_id, " +
+        "c.metadata, c.created_at, c.closed_at, c.updated_at, c.created_by, c.updated_by, c.voice_linked_id, c.queue_priority, " +
+        "c.last_message_at, c.queue_id, " +
+        "q.name AS summary_queue_name, a.display_name AS summary_agent_display_name, " +
+        "COALESCE(corr.corrected_leaf_node_id, ts.leaf_node_id) AS summary_disposition_node_id, " +
+        "ts.schema_id AS summary_disposition_schema_id, ts.schema_version AS summary_disposition_schema_version, " +
+        "lm.direction AS summary_last_direction, lm.content AS summary_last_content, lm.created_at AS summary_last_created_at " +
+        "FROM conversations c " +
+        "LEFT JOIN queue_configs q ON q.tenant_id = c.tenant_id AND q.queue_id = c.queue_id " +
+        "LEFT JOIN agents a ON c.owner_kind = @AgentOwnerKind AND a.tenant_id = c.tenant_id AND a.agent_id = c.owner_id " +
+        "LEFT JOIN typification_submissions ts ON ts.tenant_id = c.tenant_id AND ts.conversation_id = c.conversation_id " +
+        "LEFT JOIN typification_submission_corrections corr " +
+        "  ON corr.tenant_id = c.tenant_id AND corr.conversation_id = c.conversation_id " +
+        "LEFT JOIN LATERAL (SELECT m.direction, m.content, m.created_at FROM messages m " +
+        "  WHERE m.tenant_id = c.tenant_id AND m.conversation_id = c.conversation_id AND " + ActivityMessagePredicate + " " +
+        "  ORDER BY m.created_at DESC, m.message_id COLLATE \"C\" DESC LIMIT 1) lm ON true ";
+
+    public async Task<PagedResult<ContactConversationSummary>> ListContactSummariesAsync(
+        TenantId tenantId, EntityId contactId, EntityId? ownedByAgentId, int page, int pageSize, CancellationToken ct)
+    {
+        // Design D5 step 3, D18: a shared contact's list holds only the caller's own conversations, kind and id together.
+        var where = "c.tenant_id = @TenantId AND c.contact_id = @ContactId" +
+                    (ownedByAgentId.HasValue ? " AND c.owner_kind = @AgentOwnerKind AND c.owner_id = @OwnedByAgentId" : string.Empty);
+
+        void BindFilters(NpgsqlParameterCollection p)
+        {
+            p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+            p.Add(new NpgsqlParameter("ContactId", NpgsqlDbType.Text) { Value = contactId.Value });
+            p.Add(new NpgsqlParameter("AgentOwnerKind", NpgsqlDbType.Integer) { Value = (int)ConversationOwnerKind.Agent });
+            if (ownedByAgentId is { } owner)
+                p.Add(new NpgsqlParameter("OwnedByAgentId", NpgsqlDbType.Text) { Value = owner.Value });
+        }
+
+        var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
+            $"SELECT COUNT(*) FROM conversations c WHERE {where}", BindFilters, ct) ?? 0L);
+
+        var rows = await _dataSource.QueryListAsync(
+            ContactSummarySelect + $"WHERE {where} " +
+            "ORDER BY c.created_at DESC, c.conversation_id COLLATE \"C\" DESC LIMIT @Limit OFFSET @Offset",
+            p =>
+            {
+                BindFilters(p);
+                p.Add(new NpgsqlParameter("Limit", NpgsqlDbType.Integer) { Value = pageSize });
+                p.Add(new NpgsqlParameter("Offset", NpgsqlDbType.Integer) { Value = (page - 1) * pageSize });
+            },
+            ContactSummaryRow.Map, ct);
+
+        return new PagedResult<ContactConversationSummary>(
+            [.. rows.Select(r => r.ToSummary())], total, page, pageSize);
     }
 
     public async Task<bool> HoldsOpenConversationOfContactAsync(TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct)
@@ -733,6 +792,50 @@ internal sealed class PostgresConversationStore : IConversationStore
                 terminalStates.Add((int)state);
         }
         return [.. terminalStates];
+    }
+
+    private sealed class ContactSummaryRow
+    {
+        public ConversationRow conversation { get; init; } = null!;
+        public string? queue_name { get; init; }
+        public string? agent_display_name { get; init; }
+        public string? disposition_node_id { get; init; }
+        public string? disposition_schema_id { get; init; }
+        public int? disposition_schema_version { get; init; }
+        public int? last_direction { get; init; }
+        public string? last_content { get; init; }
+        public DateTime? last_created_at { get; init; }
+
+        public static ContactSummaryRow Map(NpgsqlDataReader r) => new()
+        {
+            conversation = ConversationRow.Map(r),
+            queue_name = r.GetStringOrNull("summary_queue_name"),
+            agent_display_name = r.GetStringOrNull("summary_agent_display_name"),
+            disposition_node_id = r.GetStringOrNull("summary_disposition_node_id"),
+            disposition_schema_id = r.GetStringOrNull("summary_disposition_schema_id"),
+            disposition_schema_version = r.GetInt32OrNull("summary_disposition_schema_version"),
+            last_direction = r.GetInt32OrNull("summary_last_direction"),
+            last_content = r.GetStringOrNull("summary_last_content"),
+            last_created_at = r.GetDateTimeOrNull("summary_last_created_at"),
+        };
+
+        public ContactConversationSummary ToSummary()
+        {
+            var disposition = disposition_node_id is not null && disposition_schema_id is not null && disposition_schema_version is { } version
+                ? new ConversationDispositionRef(EntityId.From(disposition_node_id), EntityId.From(disposition_schema_id), version)
+                : null;
+
+            ConversationActivityMessage? last = null;
+            if (last_direction is { } direction && last_content is not null && last_created_at is { } createdAt)
+            {
+                var envelope = JsonSerializer.Deserialize(last_content, ConversationsJsonContext.Default.MessageEnvelope)
+                               ?? new MessageEnvelope([]);
+                last = new ConversationActivityMessage((MessageDirection)direction, envelope, createdAt);
+            }
+
+            return new ContactConversationSummary(
+                conversation.ToConversation(), queue_name, agent_display_name, disposition, last);
+        }
     }
 
     private sealed class ConversationRow

@@ -53,6 +53,17 @@ public interface IConversationStore
     /// </summary>
     Task<bool> HoldsOpenConversationOfContactAsync(TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct);
 
+    /// <summary>
+    /// One page of contact <paramref name="contactId"/>'s conversations in <paramref name="tenantId"/>, every state
+    /// included, newest first (<c>created_at</c> descending, then the conversation id descending, ordinal), each with
+    /// its queue name, its agent owner's display name, its disposition and its newest activity message, in one query
+    /// (contact-history-opens-by-assignment, design D5, D6, D8, D9). With <paramref name="ownedByAgentId"/> the page
+    /// and its total hold only the conversations that agent owns (owner kind <see cref="ConversationOwnerKind.Agent"/>
+    /// and id), the restriction of a shared contact (D18). <paramref name="page"/> is 1-based; the caller clamps both.
+    /// </summary>
+    Task<PagedResult<ContactConversationSummary>> ListContactSummariesAsync(
+        TenantId tenantId, EntityId contactId, EntityId? ownedByAgentId, int page, int pageSize, CancellationToken ct);
+
     /// <summary>Returns all conversations for a given contact (GDPR export).</summary>
     Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct);
 

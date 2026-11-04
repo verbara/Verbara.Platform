@@ -21,6 +21,7 @@
     <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\ConversationClockReconcileStoreContract.cs" Link="Stores\ConversationClockReconcileStoreContract.cs" />
     <!-- contact-history-opens-by-assignment 1.4, 1.5: queue_id and the owner-kind filter on both stores. -->
     <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\ConversationOwnershipStoreContract.cs" Link="Stores\ConversationOwnershipStoreContract.cs" />
+    <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\ContactConversationSummaryStoreContract.cs" Link="Stores\ContactConversationSummaryStoreContract.cs" />
   </ItemGroup>
 
   <ItemGroup>

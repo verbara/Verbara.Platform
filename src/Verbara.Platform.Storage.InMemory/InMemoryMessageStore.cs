@@ -38,6 +38,20 @@ internal sealed class InMemoryMessageStore : IMessageStore
             .GroupBy(m => m.ConversationId)
             .ToDictionary(g => g.Key, g => g.Max(m => m.CreatedAt));
 
+    /// <summary>
+    /// contact-history-opens-by-assignment (design D6): the conversation's newest activity message (the predicate of
+    /// <see cref="NewestActivityByConversation"/>), <c>created_at</c> then the message id descending (ordinal), or
+    /// <see langword="null"/> when it has none.
+    /// </summary>
+    internal Message? NewestActivityMessage(TenantId tenantId, EntityId conversationId) =>
+        _items.Values
+            .Where(m => m.TenantId == tenantId && m.ConversationId == conversationId
+                && (m.Direction == MessageDirection.Inbound
+                    || (m.Direction == MessageDirection.Outbound && m.DeliveryStatus != MessageDeliveryStatus.Failed)))
+            .OrderByDescending(m => m.CreatedAt)
+            .ThenByDescending(m => m.MessageId.Value, StringComparer.Ordinal)
+            .FirstOrDefault();
+
     public Task SaveAsync(Message message, CancellationToken ct)
     {
         _items[(message.TenantId, message.MessageId)] = message;

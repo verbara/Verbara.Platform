@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using Verbara.Platform.Core;
 using Verbara.Platform.Conversations;
+using Verbara.Platform.Queues;
+using Verbara.Platform.Typification.Stores;
 
 namespace Verbara.Platform.Storage.InMemory;
 
@@ -8,11 +10,22 @@ internal sealed class InMemoryConversationStore : IConversationStore
 {
     private readonly ConcurrentDictionary<(TenantId, EntityId), Conversation> _items = new();
     private readonly InMemoryMessageStore? _messages;
+    private readonly InMemoryContactSummarySources? _summarySources;
 
     /// <param name="messages">
-    /// The message store <see cref="DeleteIfNoMessagesAsync"/> consults; a store built without one cannot answer it.
+    /// The message store <see cref="DeleteIfNoMessagesAsync"/> and <see cref="ListContactSummariesAsync"/> consult; a
+    /// store built without one cannot answer them.
     /// </param>
-    public InMemoryConversationStore(InMemoryMessageStore? messages = null) => _messages = messages;
+    /// <param name="summarySources">
+    /// The stores <see cref="ListContactSummariesAsync"/> joins (queue names, agent names, dispositions); a store built
+    /// without them cannot answer it.
+    /// </param>
+    public InMemoryConversationStore(
+        InMemoryMessageStore? messages = null, InMemoryContactSummarySources? summarySources = null)
+    {
+        _messages = messages;
+        _summarySources = summarySources;
+    }
 
     public Task<Conversation?> GetByIdAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
     {
@@ -124,6 +137,54 @@ internal sealed class InMemoryConversationStore : IConversationStore
     {
         var result = _items.Values.FirstOrDefault(c => c.ConversationId == conversationId);
         return Task.FromResult(result);
+    }
+
+    public async Task<PagedResult<ContactConversationSummary>> ListContactSummariesAsync(
+        TenantId tenantId, EntityId contactId, EntityId? ownedByAgentId, int page, int pageSize, CancellationToken ct)
+    {
+        // contact-history-opens-by-assignment (design D5, D6, D18): mirrors the Postgres summary query — every state,
+        // created_at then the id descending (ordinal), the owner restriction on kind and id together, then the joins.
+        var messages = _messages ?? throw new InvalidOperationException(
+            "This conversation store was built without a message store, so it cannot read a contact's summaries.");
+        var sources = _summarySources ?? throw new InvalidOperationException(
+            "This conversation store was built without its summary sources, so it cannot read a contact's summaries.");
+
+        var matching = _items.Values
+            .Where(c => c.TenantId == tenantId && c.ContactId == contactId)
+            .Where(c => ownedByAgentId is not { } owner
+                || (c.Owner is { Kind: ConversationOwnerKind.Agent } agentOwner && agentOwner.OwnerId == owner))
+            .OrderByDescending(c => c.CreatedAt)
+            .ThenByDescending(c => c.ConversationId.Value, StringComparer.Ordinal)
+            .ToList();
+
+        var items = new List<ContactConversationSummary>();
+        foreach (var conversation in matching.Skip((page - 1) * pageSize).Take(pageSize))
+        {
+            var queueName = conversation.QueueId is { } queueId
+                ? (await sources.Queues().GetByIdAsync(tenantId, queueId, ct))?.Name
+                : null;
+            var agentName = conversation.Owner is { Kind: ConversationOwnerKind.Agent, OwnerId: { } agentId }
+                ? (await sources.Agents().GetByIdAsync(tenantId, agentId, ct))?.DisplayName
+                : null;
+
+            ConversationDispositionRef? disposition = null;
+            if (await sources.Submissions().GetByConversationIdAsync(tenantId, conversation.ConversationId, ct) is { } submission)
+            {
+                var correction = await sources.Corrections().GetAsync(tenantId, conversation.ConversationId, ct);
+                disposition = new ConversationDispositionRef(
+                    correction?.CorrectedLeafNodeId ?? submission.LeafNodeId, submission.SchemaId, submission.SchemaVersion);
+            }
+
+            var last = messages.NewestActivityMessage(tenantId, conversation.ConversationId);
+            items.Add(new ContactConversationSummary(
+                conversation,
+                queueName,
+                agentName,
+                disposition,
+                last is null ? null : new ConversationActivityMessage(last.Direction, last.Content, last.CreatedAt)));
+        }
+
+        return new PagedResult<ContactConversationSummary>(items, matching.Count, page, pageSize);
     }
 
     public Task<bool> HoldsOpenConversationOfContactAsync(TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct)

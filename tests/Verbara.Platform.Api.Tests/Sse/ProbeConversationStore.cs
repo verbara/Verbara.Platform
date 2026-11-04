@@ -59,6 +59,9 @@ internal sealed class ProbeConversationStore(IConversationStore inner, bool deta
     public async Task<Conversation?> FindByIdAcrossTenantsAsync(EntityId conversationId, CancellationToken ct) =>
         Out(await inner.FindByIdAcrossTenantsAsync(conversationId, ct));
 
+    public Task<PagedResult<ContactConversationSummary>> ListContactSummariesAsync(
+        TenantId tenantId, EntityId contactId, EntityId? ownedByAgentId, int page, int pageSize, CancellationToken ct) =>
+        inner.ListContactSummariesAsync(tenantId, contactId, ownedByAgentId, page, pageSize, ct);
     public Task<bool> HoldsOpenConversationOfContactAsync(TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct) =>
         inner.HoldsOpenConversationOfContactAsync(tenantId, contactId, agentId, ct);
 
