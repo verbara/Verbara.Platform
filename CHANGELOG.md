@@ -9,6 +9,106 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+A caller reads a conversation only when it may: an agent reads what it owns, what it is offered and the history of the
+contacts it holds now, and everyone else needs `contacts:conversation:monitor` or the new `contacts:conversation:read`
+(Platform/ADR-0047). The contact's history becomes a page of summaries, and a new route reads a transcript newest first.
+Conversation content on the live stream reaches only its readers. Read **Changed — BREAKING** and **Upgrading** first:
+tenant API keys bound to no user, roles without a conversation permission and agents outside a conversation now get
+403 `not-readable`, and `GET /api/v1/contacts/{id}/conversations` answers a new item shape.
+
+### Added
+
+- **`GET /api/v1/conversations/{id}/history` reads a conversation's messages newest first, a page at a time.** It answers
+  `MessageHistoryPageDto`: `items` (the same `Message` items as `/messages`), `hasMore`, and `nextBefore`, an opaque
+  cursor present only when `hasMore` is true. Pass it back as `?before=` for the next older page; a new message never
+  shifts a page, so nothing repeats or is skipped. `limit` defaults to `50`, clamped to `1` to `100`. The order is 404
+  for a conversation missing from the tenant, then the read rule (403 `not-readable`), then the cursor: a `before` that
+  does not decode answers 400 `{"error":"invalid-cursor"}`. `GET /api/v1/conversations/{id}/messages` keeps its shape
+  and its oldest-first order.
+- **The contact's history as summaries, `ContactConversationSummaryDto`.** Each item of
+  `GET /api/v1/contacts/{id}/conversations` carries `id`, `channel`, `state` (every state, terminal included), `createdAt`,
+  `lastMessageAt` and `heldByCaller` (the caller owns the conversation and it is not terminal; an offer is not held),
+  plus, when known, `closedAt`, `durationSeconds`, `closedReason`, `queueId` and `queueName` (the last queue it went
+  through), `agentId` and `agentDisplayName`, `disposition` (`nodeId`, and `label` from the schema version it was
+  submitted against) and `lastMessage` (`direction`, `blockType`, a `preview` of up to 160 characters, `createdAt`). An
+  unknown member is absent, never `null`. The page is newest first and read in one query. Migration `027` adds the column
+  `conversations.queue_id` for it, filled from now on whenever a queue owns the conversation and backfilled for the
+  conversations a queue owns at upgrade; older conversations show no queue.
+- **The permission `contacts:conversation:read`**: read every conversation and transcript of the tenant, with no
+  listening and no action (the `/supervisor` routes and the listen routes still need what they needed). It is granted
+  to the Quality Analyst and `Api` role templates and to the admin templates, and existing tenants' cloned roles gain
+  it at the next start. Supervisor and Manager need no new grant: `contacts:conversation:monitor` already reads
+  everything.
+
+### Changed — BREAKING
+
+- **The conversation reads follow one read rule** (`GET /api/v1/conversations/{id}`, `/{id}/messages`, `/{id}/history`
+  and `GET /api/v1/contacts/{id}/conversations`). A refusal is 403 `{"error":"not-readable"}`, which does not say why;
+  a missing id still answers an empty 404, before the rule. A caller reads every conversation of its tenant when it
+  holds `contacts:conversation:monitor` or `contacts:conversation:read`, or has the Admin or SystemAdmin role; that keeps
+  Supervisor, Manager, Quality Analyst, Admin, SystemAdmin and management keys as they were. Any other caller needs
+  `contacts:conversation:handle` and an Agent profile, and then reads a conversation only when it:
+  - owns it, in any state, including after it closed;
+  - is offered it: an open offer opens that conversation only. The contact's other conversations and the contact list
+    answer 403 until the agent accepts the offer;
+  - holds the contact now, that is, owns an open (not terminal) conversation of that contact. An agent that only owned
+    the contact's conversations in the past, with nothing open of it now, reads the ones it owned and gets 403 on the
+    others and on the contact list.
+
+  Every other conversation of the tenant now answers 403 `not-readable` to an agent, where it answered 200.
+- **The shared anonymous voice contact opens nothing beyond the caller's own calls.** Every withheld-number call of a
+  tenant shares one contact. An agent answering one of them no longer reads the others: they answer 403, and its contact
+  list holds only its own conversations of that contact, with `totalCount` counting only those.
+- **Callers with no conversation permission are refused.** A role without `contacts:conversation:handle`,
+  `contacts:conversation:monitor` or `contacts:conversation:read` gets 403 on every read above. A tenant API key
+  bound to no user carries no role and no permission, so it gets 403 on all of them too (see Upgrading). A key bound to a user
+  reads as that user: a user whose role is `Api` reads everything through `contacts:conversation:read`, and a user whose
+  role is Agent reads as that agent.
+- **`GET /api/v1/conversations` lists only what the caller may read.** A caller that reads everything gets the list
+  unchanged. An agent with `?agentId=` set to its own profile gets, as before, the conversations it owns; `?agentId=`
+  naming another profile answers 403 `not-readable`; with no `agentId` it gets the conversations it owns or is offered.
+  A caller without `contacts:conversation:handle` or an Agent profile gets 403. `?agentId=` now matches agent owners
+  only, never a queue or bot owner with the same id.
+- **`GET /api/v1/contacts/{id}/conversations` answers `PagedResult<ContactConversationSummaryDto>`** instead of the raw
+  `Conversation` record per item (see Added). An unknown contact answers 404 instead of an empty page, and `pageSize`
+  is now clamped to `1` to `100` (default `25`). An integration that parsed the old items must read the summary.
+- **Conversation content on the live stream reaches only its readers.** Six event types carry what a customer or an
+  agent said or wrote, and are no longer delivered to every stream of the tenant: `conversation.message`, the four
+  `agentassist.*` events (`transcript`, `suggestion`, `compliance_alert`, `sentiment`) and `csat.response_recorded`.
+  A stream that reads everything (`contacts:conversation:monitor`, `contacts:conversation:read`, Admin or SystemAdmin)
+  still receives all six. Otherwise a stream with `contacts:conversation:handle` receives `conversation.message` only for
+  the conversations its agent owns or is offered, at the moment the message is published, and `agentassist.*` only when
+  the event's `agentId` names its agent; `csat.response_recorded` reaches no agent. Every other stream, an anonymous one
+  included, is not delivered these events. The other events, `conversation.offered`, `conversation.assigned` and
+  `conversation.state_changed` included, are unchanged, and so is every event's JSON. A role change applies at the
+  stream's next reconnect. Tenant webhooks are not affected.
+
+### Fixed
+
+- **Every stored WebChat customer message is published on the live stream as `conversation.message`.** Only the message
+  that routed the session was published; the later messages of an offered or active WebChat conversation were stored
+  but never reached the agent's console live. The routing message is still published once, after
+  `conversation.state_changed` `Queued`.
+
+### Upgrading
+
+- **An integration on a tenant API key bound to no user now gets 403 `not-readable`** on the conversation reads and the
+  contact's history. To keep it working, bind the key to a user whose role is `Api` (that role now holds
+  `contacts:conversation:read`), or use a management key. Check also every other role your integrations or users rely
+  on: one without `contacts:conversation:handle`, `contacts:conversation:monitor` or `contacts:conversation:read` is
+  refused.
+- **Tenants whose equivalent roles carry another id do not gain `contacts:conversation:read`.** The start-up seed copies
+  the new grant only into a tenant role whose id is the template's (`quality_analyst`, `api`, and the admin roles). A
+  tenant that keeps its Quality Analyst or API role under another id must add the permission itself, with
+  `PUT /api/v1/admin/roles/{id}`, or that role's users are refused.
+- **During a rolling deploy, older replicas still answer as before.** A conversation that an older replica moves to a
+  queue in that window gets no `queue_id`, so the history shows no queue for it; nothing fills it later. Until every
+  replica runs the new version, the older replicas' streams still deliver conversation content to the whole tenant.
+- **Migration `027` runs at start-up**: it adds the nullable column `conversations.queue_id` and backfills it for the
+  conversations a queue owns. It is additive; a rollback to the previous image leaves the column, which that image
+  ignores.
+- **Deploy Platform before the console release that reads `/history`**: an older Platform answers that route 404.
+
 ## [2.38.0] - 2026-11-03
 
 Minor release. An open digital conversation with no message for 72 hours closes by itself, a customer reply to a resolved
