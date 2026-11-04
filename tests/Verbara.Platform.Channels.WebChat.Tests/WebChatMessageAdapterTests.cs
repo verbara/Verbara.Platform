@@ -1,3 +1,4 @@
+using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Channels.WebChat;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
@@ -13,6 +14,7 @@ public class WebChatMessageAdapterTests
         new()
         {
             SessionId = sessionId,
+            ContactId = EntityId.From("contact-1"),
             ConversationId = EntityId.From("conv-1"),
             TenantId = new TenantId("tenant-1"),
             CustomerAddress = new ChannelAddress(ChannelType.WebChat, visitorAddress),
@@ -79,6 +81,19 @@ public class WebChatMessageAdapterTests
     }
 
     [Fact]
+    public void ToInboundMessage_ShouldCarryTheSessionsCurrentBinding_WhenTheSessionWasRebound()
+    {
+        var session = MakeSession("session-bound", "webchat-bound");
+        session.ContactId = EntityId.From("contact-rebound");
+        session.ConversationId = EntityId.From("conversation-rebound");
+
+        var result = WebChatMessageAdapter.ToInboundMessage(session, MakeEnvelope(), "ext-id", DateTimeOffset.UtcNow);
+
+        result.SessionBinding.Should().Be(new InboundSessionBinding(
+            EntityId.From("contact-rebound"), EntityId.From("conversation-rebound"), new ChannelAddress(ChannelType.WebChat, "webchat-bound")));
+    }
+
+    [Fact]
     public void ToInboundMessage_ShouldUseVisitorAddress_WhenSessionIdDiffers()
     {
         // whatsapp-works-for-real D16: the session id is a transport handle; the contact address of a
@@ -86,6 +101,7 @@ public class WebChatMessageAdapterTests
         var session = new WebChatSession
         {
             SessionId = "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+            ContactId = EntityId.From("contact-1"),
             ConversationId = EntityId.From("conv-visitor-1"),
             TenantId = new TenantId("t-visitor"),
             CustomerAddress = new ChannelAddress(ChannelType.WebChat, "webchat-7c9e6679f2a54d0b8e1a3b5c7d9f1e2a"),

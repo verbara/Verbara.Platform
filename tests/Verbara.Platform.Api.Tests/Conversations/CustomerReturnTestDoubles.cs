@@ -147,7 +147,7 @@ internal sealed class CustomerReturnHarness : IDisposable
         Router, Switchboard, Store, Contacts, EventBus, Sessions, Announcer, NullLogger<WebChatInboundRouter>.Instance);
 
     public async Task<string> ConnectSessionAsync(EntityId conversationId) =>
-        await Sessions.ConnectAsync(Tenant, conversationId, Address, Clock);
+        await Sessions.ConnectAsync(Tenant, Contact.ContactId, conversationId, Address, Clock);
 
     public async Task<Conversation> SeedAsync(
         ConversationState state, TimeSpan idle, ConversationOwner? owner = null, bool ownerless = false)
@@ -324,7 +324,14 @@ internal sealed class HookedConversationStore(IConversationStore inner) : IConve
         return copy;
     }
 
-    public Task<Conversation?> GetByIdAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct) => inner.GetByIdAsync(tenantId, conversationId, ct);
+    /// <summary>When it returns an exception, the read by id throws it instead of reaching the store.</summary>
+    public Func<EntityId, Exception?>? GetByIdFault { get; set; }
+
+    public Task<Conversation?> GetByIdAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct) =>
+        GetByIdFault?.Invoke(conversationId) is { } fault
+            ? Task.FromException<Conversation?>(fault)
+            : inner.GetByIdAsync(tenantId, conversationId, ct);
+
     public Task<PagedResult<Conversation>> ListAsync(TenantId tenantId, ConversationQuery query, CancellationToken ct) => inner.ListAsync(tenantId, query, ct);
     public Task SaveAsync(Conversation conversation, CancellationToken ct) => inner.SaveAsync(conversation, ct);
     public Task<DateTimeOffset?> FindLastInboundAtAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) => inner.FindLastInboundAtAsync(tenantId, contactId, channel, ct);

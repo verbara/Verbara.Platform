@@ -97,10 +97,11 @@ internal sealed partial class WebChatInboundRouter
         if (pipelineResult.IsDuplicate)
             return;
 
-        // Typing indicators and later lookups follow the conversation the visitor is now in.
-        if (await _sessionManager.GetSessionAsync(sessionId).ConfigureAwait(false) is { } session
-            && session.ConversationId != pipelineResult.ConversationId)
+        // The session follows the visitor: its next message, its typing indicators and later lookups use the contact and
+        // the conversation this message was stored under. Both change when the contact was erased and replaced.
+        if (await _sessionManager.GetSessionAsync(sessionId).ConfigureAwait(false) is { } session)
         {
+            session.ContactId = pipelineResult.ContactId;
             session.ConversationId = pipelineResult.ConversationId;
         }
 

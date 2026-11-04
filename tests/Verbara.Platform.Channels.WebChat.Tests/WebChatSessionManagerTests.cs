@@ -34,7 +34,7 @@ public class WebChatSessionManagerTests
         var manager = CreateManager();
         var clock = MakeClock();
 
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), clock);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), clock);
         var session = await manager.GetSessionAsync(sessionId);
 
         session.Should().NotBeNull();
@@ -48,8 +48,8 @@ public class WebChatSessionManagerTests
         var manager = CreateManager();
         var clock = MakeClock();
 
-        var sessionId1 = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), clock);
-        var sessionId2 = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), clock);
+        var sessionId1 = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), clock);
+        var sessionId2 = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), clock);
 
         sessionId1.Should().NotBe(sessionId2);
     }
@@ -64,10 +64,11 @@ public class WebChatSessionManagerTests
         var conversationId = MakeConversation();
         var address = MakeAddress();
 
-        var sessionId = await manager.ConnectAsync(tenant, conversationId, address, clock);
+        var sessionId = await manager.ConnectAsync(tenant, EntityId.From("contact-1"), conversationId, address, clock);
         var session = await manager.GetSessionAsync(sessionId);
 
         session!.TenantId.Should().Be(tenant);
+        session.ContactId.Should().Be(EntityId.From("contact-1"));
         session.ConversationId.Should().Be(conversationId);
         session.CustomerAddress.Should().Be(address);
         session.CreatedAt.Should().Be(now);
@@ -79,7 +80,7 @@ public class WebChatSessionManagerTests
     {
         var manager = CreateManager();
         var clock = MakeClock();
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), clock);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), clock);
 
         await manager.DisconnectAsync(sessionId);
         var session = await manager.GetSessionAsync(sessionId);
@@ -103,7 +104,7 @@ public class WebChatSessionManagerTests
         var manager = CreateManager();
         var now = DateTimeOffset.UtcNow;
         var clock = MakeClock(now);
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), clock);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), clock);
         await manager.DisconnectAsync(sessionId);
 
         var result = await manager.ReconnectAsync(sessionId, clock);
@@ -130,7 +131,7 @@ public class WebChatSessionManagerTests
         var manager = CreateManager(sessionTimeout: TimeSpan.FromMinutes(30));
         var createdAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
         var creationClock = MakeClock(createdAt);
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), creationClock);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), creationClock);
         await manager.DisconnectAsync(sessionId);
 
         // Reconnect 31 minutes later (past timeout)
@@ -148,8 +149,8 @@ public class WebChatSessionManagerTests
         var createdAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
         var creationClock = MakeClock(createdAt);
 
-        var sessionId1 = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), creationClock);
-        var sessionId2 = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), creationClock);
+        var sessionId1 = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), creationClock);
+        var sessionId2 = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), creationClock);
 
         // Advance 31 minutes — both sessions are now expired
         var laterClock = MakeClock(createdAt.AddMinutes(31));
@@ -165,7 +166,7 @@ public class WebChatSessionManagerTests
     {
         var manager = CreateManager(sessionTimeout: TimeSpan.FromMinutes(30));
         var clock = MakeClock();
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), clock);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), clock);
 
         var removed = await manager.CleanupExpiredAsync(clock);
 
@@ -182,7 +183,7 @@ public class WebChatSessionManagerTests
         var creationClock = MakeClock(original);
         var touchClock = MakeClock(updated);
 
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), creationClock);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), creationClock);
         await manager.TouchAsync(sessionId, touchClock);
         var session = await manager.GetSessionAsync(sessionId);
 
@@ -206,7 +207,7 @@ public class WebChatSessionManagerTests
         var manager = CreateManager(sessionTimeout: TimeSpan.FromMinutes(30));
         var createdAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
         var creationClock = MakeClock(createdAt);
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), creationClock);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), creationClock);
         var session = await manager.GetSessionAsync(sessionId);
 
         var expiredClock = MakeClock(createdAt.AddMinutes(31));
@@ -221,7 +222,7 @@ public class WebChatSessionManagerTests
         var manager = CreateManager(sessionTimeout: TimeSpan.FromMinutes(30));
         var createdAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
         var creationClock = MakeClock(createdAt);
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), creationClock);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), creationClock);
         var session = await manager.GetSessionAsync(sessionId);
 
         var withinClock = MakeClock(createdAt.AddMinutes(29));
@@ -246,7 +247,7 @@ public class WebChatSessionManagerTests
         var manager = CreateManager();
         var address = new ChannelAddress(ChannelType.WebChat, "webchat-visitor-1");
 
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, MakeClock());
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), address, MakeClock());
         var session = await manager.GetSessionByVisitorAddressAsync(address.Address);
 
         session.Should().NotBeNull();
@@ -258,7 +259,7 @@ public class WebChatSessionManagerTests
     {
         var manager = CreateManager();
         var sessionId = await manager.ConnectAsync(
-            MakeTenant(), MakeConversation(), new ChannelAddress(ChannelType.WebChat, "webchat-visitor-2"), MakeClock());
+            MakeTenant(), EntityId.From("contact-1"), MakeConversation(), new ChannelAddress(ChannelType.WebChat, "webchat-visitor-2"), MakeClock());
 
         (await manager.GetSessionByVisitorAddressAsync(sessionId)).Should().BeNull();
     }
@@ -269,7 +270,7 @@ public class WebChatSessionManagerTests
         var start = DateTimeOffset.UtcNow;
         var manager = CreateManager(TimeSpan.FromMinutes(30));
         var address = new ChannelAddress(ChannelType.WebChat, "webchat-visitor-3");
-        await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, MakeClock(start));
+        await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), address, MakeClock(start));
 
         await manager.CleanupExpiredAsync(MakeClock(start.AddMinutes(31)));
 
@@ -282,8 +283,8 @@ public class WebChatSessionManagerTests
         var start = DateTimeOffset.UtcNow;
         var manager = CreateManager(TimeSpan.FromMinutes(30));
         var address = new ChannelAddress(ChannelType.WebChat, "webchat-visitor-4");
-        await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, MakeClock(start));
-        var newer = await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, MakeClock(start.AddMinutes(20)));
+        await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), address, MakeClock(start));
+        var newer = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), address, MakeClock(start.AddMinutes(20)));
 
         var removed = await manager.CleanupExpiredAsync(MakeClock(start.AddMinutes(31)));
 
@@ -296,7 +297,7 @@ public class WebChatSessionManagerTests
     {
         var manager = CreateManager();
         var clock = MakeClock();
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), clock);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), clock);
         (await manager.AttachSocketAsync(sessionId, clock)).Should().BeTrue();
         await manager.DetachSocketAsync(sessionId);
         var session = await manager.GetSessionAsync(sessionId);
@@ -314,7 +315,7 @@ public class WebChatSessionManagerTests
     {
         var manager = CreateManager();
         var clock = MakeClock();
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), clock);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), clock);
         await manager.AttachSocketAsync(sessionId, clock);
         await manager.AttachSocketAsync(sessionId, clock);
 
@@ -330,7 +331,7 @@ public class WebChatSessionManagerTests
     {
         var manager = CreateManager();
         var clock = MakeClock();
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), clock);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), clock);
 
         await manager.DetachSocketAsync(sessionId);
         await manager.DetachSocketAsync("unknown-session");
@@ -343,7 +344,7 @@ public class WebChatSessionManagerTests
     {
         var manager = CreateManager(sessionTimeout: TimeSpan.FromMinutes(30));
         var createdAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), MakeClock(createdAt));
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), MakeClock(createdAt));
 
         (await manager.AttachSocketAsync("unknown-session", MakeClock(createdAt))).Should().BeFalse();
         (await manager.AttachSocketAsync(sessionId, MakeClock(createdAt.AddMinutes(31)))).Should().BeFalse();
@@ -357,7 +358,7 @@ public class WebChatSessionManagerTests
         var createdAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
         var clock = MakeClock(createdAt);
         var address = new ChannelAddress(ChannelType.WebChat, "webchat-idle-but-attached");
-        var sessionId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), address, clock);
+        var sessionId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), address, clock);
         await manager.AttachSocketAsync(sessionId, clock);
 
         var removed = await manager.CleanupExpiredAsync(MakeClock(createdAt.AddHours(2)));
@@ -372,9 +373,9 @@ public class WebChatSessionManagerTests
         var manager = CreateManager(sessionTimeout: TimeSpan.FromMinutes(30));
         var createdAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
         var stale = new ChannelAddress(ChannelType.WebChat, "webchat-stale");
-        var staleId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), stale, MakeClock(createdAt));
+        var staleId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), stale, MakeClock(createdAt));
 
-        await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), MakeClock(createdAt.AddMinutes(31)));
+        await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), MakeClock(createdAt.AddMinutes(31)));
 
         (await manager.GetSessionAsync(staleId)).Should().BeNull("creating a session sweeps expired, unattached ones");
         (await manager.GetSessionByVisitorAddressAsync(stale.Address)).Should().BeNull();
@@ -385,10 +386,10 @@ public class WebChatSessionManagerTests
     {
         var manager = CreateManager(sessionTimeout: TimeSpan.FromSeconds(10));
         var createdAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
-        var firstId = await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), MakeClock(createdAt));
+        var firstId = await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), MakeClock(createdAt));
 
         // 30 s later the first session is expired, but the last sweep ran less than SweepInterval ago.
-        await manager.ConnectAsync(MakeTenant(), MakeConversation(), MakeAddress(), MakeClock(createdAt.AddSeconds(30)));
+        await manager.ConnectAsync(MakeTenant(), EntityId.From("contact-1"), MakeConversation(), MakeAddress(), MakeClock(createdAt.AddSeconds(30)));
 
         (await manager.GetSessionAsync(firstId)).Should().NotBeNull("sweeps are throttled to one per SweepInterval");
         WebChatSessionManager.SweepInterval.Should().BeGreaterThan(TimeSpan.FromSeconds(30));

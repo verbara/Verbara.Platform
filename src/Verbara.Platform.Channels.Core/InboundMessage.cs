@@ -22,4 +22,16 @@ public sealed record InboundMessage(
 
     /// <summary>The sender's display name as the provider reports it (WhatsApp <c>contacts[].profile.name</c>), if any.</summary>
     public string? ProfileName { get; init; }
+
+    /// <summary>
+    /// The WebChat session this message came from, or <c>null</c> on a provider webhook. A bound message is attributed
+    /// to the session's contact and stays in the session's own conversation; a webhook message is resolved by address.
+    /// </summary>
+    public InboundSessionBinding? SessionBinding { get; init; }
 }
+
+/// <summary>What a WebChat session says about the message it sends.</summary>
+/// <param name="ContactId">The contact the session is bound to.</param>
+/// <param name="ConversationId">The conversation the session is bound to.</param>
+/// <param name="SessionAddress">The session's address, which a conversation it opens records for its replies.</param>
+public sealed record InboundSessionBinding(EntityId ContactId, EntityId ConversationId, ChannelAddress SessionAddress);

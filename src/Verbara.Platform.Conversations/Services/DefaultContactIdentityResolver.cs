@@ -22,6 +22,10 @@ public sealed class DefaultContactIdentityResolver : IContactIdentityResolver
     /// </summary>
     public const string SystemActorId = "system";
 
+    /// <inheritdoc />
+    public Task<Contact?> FindByIdAsync(TenantId tenantId, EntityId contactId, CancellationToken ct) =>
+        _contactStore.GetByIdAsync(tenantId, contactId, ct);
+
     /// <summary>
     /// Finds the contact by <see cref="ContactIdentity.Address"/>, then by each alternate address in order; a found
     /// contact gains every address of the identity it lacked, and the display name when it has no name. When none

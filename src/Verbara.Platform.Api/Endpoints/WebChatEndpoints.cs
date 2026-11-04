@@ -116,7 +116,7 @@ internal static partial class WebChatEndpoints
             tid, contact.ContactId, visitorAddress, ct);
 
         var sessionId = await sessionManager.ConnectAsync(
-            tid, conversation.ConversationId, visitorAddress, clock);
+            tid, contact.ContactId, conversation.ConversationId, visitorAddress, clock);
 
         return TypedResults.Ok(new CreateSessionResponse(
             sessionId,
