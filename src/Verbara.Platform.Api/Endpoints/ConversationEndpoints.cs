@@ -34,9 +34,17 @@ internal static class ConversationEndpoints
     {
         var group = app.MapGroup("/conversations").RequireAuthorization("Authenticated").RequireOperationalTenant();
 
-        group.MapGet("/", ListConversations);
-        group.MapGet("/{id}", GetConversation);
-        group.MapGet("/{id}/messages", GetMessages);
+        // contact-history-opens-by-assignment (design D4, D11, D13; Platform/ADR-0047): the three reads are governed by
+        // ConversationReadRule. Its refusal is a 403 not-readable JSON result, which declares no response metadata of
+        // its own; a missing id answers an empty 404 before the rule runs.
+        group.MapGet("/", ListConversations)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
+        group.MapGet("/{id}", GetConversation)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound);
+        group.MapGet("/{id}/messages", GetMessages)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound);
         group.MapPost("/{id}/messages", SendMessage);
         group.MapPost("/{id}/accept", AcceptConversation);
         group.MapPost("/{id}/reject", RejectConversation);
@@ -147,9 +155,17 @@ internal static class ConversationEndpoints
         return new PagedResult<T>(items, matching.Count, clampedPage, clampedSize);
     }
 
-    private static async Task<Ok<PagedResult<Conversation>>> ListConversations(
+    /// <summary>
+    /// The tenant's conversations (design D4). A caller that reads all (monitor or read) gets the list unchanged. Any
+    /// other caller needs <c>handle</c> and an Agent profile: <paramref name="agentId"/> naming its own profile keeps
+    /// today's meaning (the conversations it owns), another profile is refused, and with no <paramref name="agentId"/>
+    /// the list is what it owns or is offered. The other filters apply on top.
+    /// </summary>
+    private static async Task<Results<Ok<PagedResult<Conversation>>, JsonHttpResult<ErrorResponse>>> ListConversations(
         HttpContext context,
         [FromServices] IConversationStore store,
+        [FromServices] IAgentStore agents,
+        [FromServices] IContactStore contacts,
         ConversationState? state,
         string? queueId,
         string? agentId,
@@ -158,10 +174,24 @@ internal static class ConversationEndpoints
         CancellationToken ct = default)
     {
         var tenantId = GetTenantId(context);
+        var reader = await ConversationReadRule.ResolveAsync(context, tenantId, agents, store, contacts, ct);
+        EntityId? assignedAgentId = agentId is not null ? EntityId.From(agentId) : null;
+        EntityId? visibleToAgentId = null;
+        if (!reader.ReadsAll)
+        {
+            if (reader.Class.HandlingAgentId is not { } self)
+                return ConversationReadRule.Refusal();
+            if (assignedAgentId is { } assigned && assigned != self)
+                return ConversationReadRule.Refusal();
+            if (assignedAgentId is null)
+                visibleToAgentId = self;
+        }
+
         var query = new ConversationQuery
         {
             State = state,
-            AssignedAgentId = agentId is not null ? EntityId.From(agentId) : null,
+            AssignedAgentId = assignedAgentId,
+            VisibleToAgentId = visibleToAgentId,
             Page = page,
             PageSize = pageSize,
         };
@@ -170,27 +200,47 @@ internal static class ConversationEndpoints
         return TypedResults.Ok(result);
     }
 
-    private static async Task<Results<Ok<Conversation>, NotFound>> GetConversation(
+    private static async Task<Results<Ok<Conversation>, NotFound, JsonHttpResult<ErrorResponse>>> GetConversation(
         string id,
         HttpContext context,
         [FromServices] IConversationStore store,
+        [FromServices] IAgentStore agents,
+        [FromServices] IContactStore contacts,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var conversation = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
-        return conversation is null ? TypedResults.NotFound() : TypedResults.Ok(conversation);
+        if (conversation is null)
+            return TypedResults.NotFound();
+
+        var reader = await ConversationReadRule.ResolveAsync(context, tenantId, agents, store, contacts, ct);
+        return await reader.CanReadAsync(conversation, ct)
+            ? TypedResults.Ok(conversation)
+            : ConversationReadRule.Refusal();
     }
 
-    private static async Task<Ok<IReadOnlyList<Message>>> GetMessages(
+    /// <summary>The transcript, oldest first, paged by <paramref name="limit"/> and <paramref name="offset"/>, as before (design D10).</summary>
+    private static async Task<Results<Ok<IReadOnlyList<Message>>, NotFound, JsonHttpResult<ErrorResponse>>> GetMessages(
         string id,
         HttpContext context,
         [FromServices] IMessageStore store,
+        [FromServices] IConversationStore conversations,
+        [FromServices] IAgentStore agents,
+        [FromServices] IContactStore contacts,
         int limit = 50,
         int offset = 0,
         CancellationToken ct = default)
     {
         var tenantId = GetTenantId(context);
-        var messages = await store.GetConversationMessagesAsync(tenantId, EntityId.From(id), limit, offset, ct);
+        var conversation = await conversations.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (conversation is null)
+            return TypedResults.NotFound();
+
+        var reader = await ConversationReadRule.ResolveAsync(context, tenantId, agents, conversations, contacts, ct);
+        if (!await reader.CanReadAsync(conversation, ct))
+            return ConversationReadRule.Refusal();
+
+        var messages = await store.GetConversationMessagesAsync(tenantId, conversation.ConversationId, limit, offset, ct);
         return TypedResults.Ok(messages);
     }
 

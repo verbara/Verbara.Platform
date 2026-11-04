@@ -85,6 +85,16 @@ internal sealed class PostgresConversationStore : IConversationStore
             binders.Add(p => p.Add(new NpgsqlParameter("AssignedOwnerKind", NpgsqlDbType.Integer) { Value = (int)ConversationOwnerKind.Agent }));
             binders.Add(p => p.Add(new NpgsqlParameter("OwnerId", query.AssignedAgentId.Value.Value)));
         }
+        if (query.VisibleToAgentId.HasValue)
+        {
+            // contact-history-opens-by-assignment (design D4): owned by the agent in any state, or an open offer to it.
+            whereClauses.Add(
+                "((owner_kind = @VisibleOwnerKind AND owner_id = @VisibleToAgentId) " +
+                $"OR (state = @OfferedState AND metadata->>'{ConversationQuery.OfferedToMetadataKey}' = @VisibleToAgentId))");
+            binders.Add(p => p.Add(new NpgsqlParameter("VisibleOwnerKind", NpgsqlDbType.Integer) { Value = (int)ConversationOwnerKind.Agent }));
+            binders.Add(p => p.Add(new NpgsqlParameter("OfferedState", NpgsqlDbType.Integer) { Value = (int)ConversationState.Offered }));
+            binders.Add(p => p.Add(new NpgsqlParameter("VisibleToAgentId", NpgsqlDbType.Text) { Value = query.VisibleToAgentId.Value.Value }));
+        }
         if (query.Channel.HasValue)
         {
             whereClauses.Add("channel = @Channel");

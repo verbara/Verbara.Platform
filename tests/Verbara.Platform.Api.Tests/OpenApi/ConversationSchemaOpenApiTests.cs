@@ -38,6 +38,38 @@ public sealed class ConversationSchemaOpenApiTests
         properties.Should().NotContain(p => string.Equals(p, "queueId", StringComparison.OrdinalIgnoreCase));
     }
 
+    public static TheoryData<string> GovernedConversationRoutes => new()
+    {
+        "/api/v{version}/conversations",
+        "/api/v{version}/conversations/{id}",
+        "/api/v{version}/conversations/{id}/messages",
+    };
+
+    /// <summary>
+    /// Task 2.2 (design D13, D14): every route the read rule governs declares its 403 <c>ErrorResponse</c>
+    /// (<c>not-readable</c>); the two by-id routes also declare their empty 404.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(GovernedConversationRoutes))]
+    public async Task ConversationReadRoutes_ShouldDeclareTheNotReadableRefusal_WhenTheDocumentIsEmitted(string route)
+    {
+        await using var factory = new OpenApiFactory();
+        using var client = factory.CreateClient();
+
+        var document = JsonNode.Parse(await client.GetStringAsync("/openapi/v1.json"))!;
+
+        var paths = document["paths"]!.AsObject();
+        paths.ContainsKey(route).Should().BeTrue(
+            $"the document names the route; its conversation paths are {string.Join(", ", paths.Select(kv => kv.Key).Where(k => k.Contains("/conversations", StringComparison.Ordinal)).Take(8))}");
+        var responses = paths[route]!["get"]!["responses"]!.AsObject();
+        var forbidden = responses["403"];
+        forbidden.Should().NotBeNull($"GET {route} declares the not-readable refusal");
+        forbidden!["content"]!["application/json"]!["schema"]!["$ref"]!.GetValue<string>()
+            .Should().Be("#/components/schemas/ErrorResponse");
+        if (route.Contains("{id}", StringComparison.Ordinal))
+            responses.ContainsKey("404").Should().BeTrue($"GET {route} declares its 404");
+    }
+
     private sealed class OpenApiFactory : WebApplicationFactory<Program>
     {
         protected override IHost CreateHost(IHostBuilder builder)

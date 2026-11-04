@@ -174,6 +174,69 @@ public abstract class ConversationOwnershipStoreContract
         page.TotalCount.Should().Be(1);
     }
 
+    // ── VisibleToAgentId (design D4, task 2.2) ───────────────────────────────────
+
+    private static Conversation OfferedTo(EntityId? agentId, ConversationState state = ConversationState.Offered)
+    {
+        var conversation = NewConversation(ConversationOwner.ForQueue(QueueOne), state);
+        if (agentId is { } offeredTo)
+            conversation.SetMetadata(ConversationQuery.OfferedToMetadataKey, offeredTo.Value);
+        return conversation;
+    }
+
+    [Fact]
+    public async Task ListAsync_ShouldReturnTheOwnedAndOfferedConversationsOnly_WhenVisibleToAgentIdIsSet()
+    {
+        var store = await NewStoreAsync();
+        var agent = EntityId.From($"visible-{Guid.NewGuid():N}");
+        var other = EntityId.From($"other-{Guid.NewGuid():N}");
+        var ownedActive = NewConversation(ConversationOwner.ForAgent(agent), ConversationState.Active);
+        var ownedClosed = NewConversation(ConversationOwner.ForAgent(agent), ConversationState.Closed);
+        var offered = OfferedTo(agent);
+        Conversation[] hidden =
+        [
+            OfferedTo(other),
+            OfferedTo(agentId: null),
+            // A stale offer stamp on a row that is no longer Offered is no offer.
+            OfferedTo(agent, ConversationState.Queued),
+            NewConversation(ConversationOwner.ForQueue(agent)),
+            NewConversation(ConversationOwner.ForBot(agent), ConversationState.Active),
+            NewConversation(ConversationOwner.ForAgent(other), ConversationState.Active),
+        ];
+        foreach (var conversation in hidden.Concat([ownedActive, ownedClosed, offered]))
+            await store.SaveAsync(conversation, CancellationToken.None);
+
+        var page = await store.ListAsync(
+            Tenant, new ConversationQuery { VisibleToAgentId = agent, PageSize = 100 }, CancellationToken.None);
+
+        page.Items.Select(c => c.ConversationId).Should().BeEquivalentTo(
+            [ownedActive.ConversationId, ownedClosed.ConversationId, offered.ConversationId]);
+        page.TotalCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task ListAsync_ShouldApplyTheOtherFiltersOnTop_WhenVisibleToAgentIdIsSet()
+    {
+        var store = await NewStoreAsync();
+        var agent = EntityId.From($"visible-{Guid.NewGuid():N}");
+        var ownedActive = NewConversation(ConversationOwner.ForAgent(agent), ConversationState.Active);
+        var ownedClosed = NewConversation(ConversationOwner.ForAgent(agent), ConversationState.Closed);
+        var offered = OfferedTo(agent);
+        var othersActive = NewConversation(ConversationOwner.ForAgent(AgentB), ConversationState.Active);
+        foreach (var conversation in new[] { ownedActive, ownedClosed, offered, othersActive })
+            await store.SaveAsync(conversation, CancellationToken.None);
+
+        var active = await store.ListAsync(
+            Tenant, new ConversationQuery { VisibleToAgentId = agent, State = ConversationState.Active }, CancellationToken.None);
+        var offers = await store.ListAsync(
+            Tenant, new ConversationQuery { VisibleToAgentId = agent, State = ConversationState.Offered }, CancellationToken.None);
+
+        active.Items.Select(c => c.ConversationId).Should().Equal(ownedActive.ConversationId);
+        active.TotalCount.Should().Be(1);
+        offers.Items.Select(c => c.ConversationId).Should().Equal(offered.ConversationId);
+        offers.TotalCount.Should().Be(1);
+    }
+
     // ── HoldsOpenConversationOfContactAsync (design D2, task 2.1) ─────────────────
 
     private static Conversation OfContact(EntityId contactId, ConversationOwner? owner, ConversationState state)

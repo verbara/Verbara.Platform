@@ -269,6 +269,135 @@ public sealed class ConversationReadScopeTests : IClassFixture<ConversationOwner
         await ShouldBeOkAsync(await client.GetAsync(ContactRoute(contact)));
     }
 
+    // ═══ Task 2.2: the rule on GET /{id}, /{id}/messages and the list (design D4, D11, D12) ═══
+
+    [Fact]
+    public async Task ListConversations_ShouldRefuseNotReadable_WhenTheAgentIdNamesAnotherAgent()
+    {
+        var (userA, _) = _factory.NewAgent("lister");
+        var (_, other) = _factory.NewAgent("other");
+        _factory.SeedConversation(ConversationOwner.ForAgent(other.AgentId), ConversationState.Active);
+        using var clientA = _factory.ClientFor(userA);
+
+        await ShouldBeNotReadableAsync(await clientA.GetAsync($"/api/v1/conversations?agentId={other.AgentId.Value}"));
+    }
+
+    [Fact]
+    public async Task ListConversations_ShouldRefuseNotReadable_WhenTheCallerHandlesButHasNoAgentProfile()
+    {
+        using var client = _factory.ClientFor(_factory.NewUser(UserRole.Agent, "profileless"));
+
+        await ShouldBeNotReadableAsync(await client.GetAsync("/api/v1/conversations"));
+    }
+
+    [Fact]
+    public async Task ListConversations_ShouldRefuseNotReadable_WhenTheCallerIsATenantApiKeyBoundToNoUser()
+    {
+        using var unbound = _factory.UnboundApiKeyClient();
+
+        await ShouldBeNotReadableAsync(await unbound.GetAsync("/api/v1/conversations"));
+    }
+
+    [Fact]
+    public async Task ListConversations_ShouldApplyTheStateFilterOnTop_WhenNoAgentIdIsSent()
+    {
+        var (userA, agentA) = _factory.NewAgent("state-lister");
+        var ownedActive = _factory.SeedConversation(ConversationOwner.ForAgent(agentA.AgentId), ConversationState.Active);
+        _factory.SeedConversation(ConversationOwner.ForAgent(agentA.AgentId), ConversationState.Closed);
+        var (_, other) = _factory.NewAgent("other");
+        _factory.SeedConversation(ConversationOwner.ForAgent(other.AgentId), ConversationState.Active);
+        using var clientA = _factory.ClientFor(userA);
+
+        var ids = await ConversationIdsAsync(await clientA.GetAsync("/api/v1/conversations?state=Active&pageSize=100"));
+
+        ids.Should().Equal([ownedActive.ConversationId.Value], "the state filter narrows the caller's own work only");
+    }
+
+    public static TheoryData<string> TenantReaders => new() { "supervisor", "quality_analyst" };
+
+    [Theory]
+    [MemberData(nameof(TenantReaders))]
+    public async Task ListConversations_ShouldListAnotherAgentsConversations_WhenTheCallerReadsAll(string who)
+    {
+        var (_, other) = _factory.NewAgent("listed");
+        var othersActive = _factory.SeedConversation(ConversationOwner.ForAgent(other.AgentId), ConversationState.Active);
+        var reader = who == "supervisor"
+            ? _factory.NewUser(UserRole.Supervisor, "list-supervisor")
+            : _factory.NewUser(UserRole.Agent, "list-quality-analyst");
+        if (who == "quality_analyst")
+            _factory.GrantTemplate(reader, "quality_analyst");
+        using var client = _factory.ClientFor(reader);
+
+        var byAgent = await ConversationIdsAsync(
+            await client.GetAsync($"/api/v1/conversations?agentId={other.AgentId.Value}&pageSize=100"));
+        var all = await ConversationIdsAsync(await client.GetAsync("/api/v1/conversations?pageSize=100"));
+
+        byAgent.Should().Equal([othersActive.ConversationId.Value], "a monitor or reader's list is unchanged (design D4)");
+        all.Should().Contain(othersActive.ConversationId.Value);
+    }
+
+    [Fact]
+    public async Task GetMessages_ShouldAnswer404_WhenTheIdNamesNoConversationOfTheTenant()
+    {
+        using var supervisor = _factory.ClientFor(_factory.NewUser(UserRole.Supervisor, "unknown-reader"));
+
+        var response = await supervisor.GetAsync($"/api/v1/conversations/conv-unknown-{Guid.NewGuid():N}/messages");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "a missing id answers 404 before the rule runs");
+        (await response.Content.ReadAsStringAsync()).Should().BeEmpty("a 404 keeps its empty body");
+    }
+
+    [Fact]
+    public async Task ConversationReads_ShouldRefuseNotReadable_WhenTheRolesGrantNoHandleEvenWithAnAgentProfile()
+    {
+        var (user, agent) = _factory.NewAgent("no-handle");
+        _factory.GrantTemplate(user, "partner_viewer");
+        var owned = _factory.SeedConversation(ConversationOwner.ForAgent(agent.AgentId), ConversationState.Active);
+        using var client = _factory.ClientFor(user);
+
+        await ShouldBeNotReadableAsync(await client.GetAsync(ConversationRoute(owned)));
+        await ShouldBeNotReadableAsync(await client.GetAsync(MessagesRoute(owned)));
+        await ShouldBeNotReadableAsync(await client.GetAsync($"/api/v1/conversations?agentId={agent.AgentId.Value}"));
+    }
+
+    [Fact]
+    public async Task ConversationReads_ShouldAnswer200_WhenTheAgentHoldsAnOpenConversationOfTheSameContact()
+    {
+        // The returning customer: B owns an Active conversation of K and opens A's closed one.
+        var (contact, _, closedOfA) = ContactWithAClosedConversation();
+        SeedMessage(closedOfA, "the earlier conversation");
+        var (userB, agentB) = _factory.NewAgent("returning");
+        _factory.SeedConversation(
+            ConversationOwner.ForAgent(agentB.AgentId), ConversationState.Active, contactId: contact.ContactId);
+        using var clientB = _factory.ClientFor(userB);
+
+        await ShouldBeOkAsync(await clientB.GetAsync(ConversationRoute(closedOfA)));
+        var messages = await clientB.GetAsync(MessagesRoute(closedOfA));
+        await ShouldBeOkAsync(messages);
+        JsonNode.Parse(await messages.Content.ReadAsStringAsync())!.AsArray().Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task GetMessages_ShouldAnswer404_WhenTheIdNamesAConversationOfAnotherTenant()
+    {
+        var foreign = new Conversation
+        {
+            ConversationId = EntityId.From($"conv-foreign-{Guid.NewGuid():N}"),
+            TenantId = new TenantId(ConversationOwnershipApiFactory.PlatformTenantId),
+            ContactId = EntityId.From($"contact-{Guid.NewGuid():N}"),
+            Channel = ChannelType.WebChat,
+            State = ConversationState.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await _factory.Services.GetRequiredService<IConversationStore>().SaveAsync(foreign, CancellationToken.None);
+        using var supervisor = _factory.ClientFor(_factory.NewUser(UserRole.Supervisor, "foreign-transcript-reader"));
+
+        var response = await supervisor.GetAsync(MessagesRoute(foreign));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadAsStringAsync()).Should().BeEmpty("a 404 keeps its empty body");
+    }
+
     [Fact]
     public async Task GetConversation_ShouldAnswer404_WhenTheIdNamesAConversationOfAnotherTenant()
     {

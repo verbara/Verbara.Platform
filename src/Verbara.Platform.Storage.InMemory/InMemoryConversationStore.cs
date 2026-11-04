@@ -30,6 +30,12 @@ internal sealed class InMemoryConversationStore : IConversationStore
             // contact-history-opens-by-assignment (design D4): kind and id together, as the Postgres filter.
             .Where(c => query.AssignedAgentId == null
                 || (c.Owner is { Kind: ConversationOwnerKind.Agent } owner && owner.OwnerId == query.AssignedAgentId))
+            // contact-history-opens-by-assignment (design D4): owned by the agent in any state, or an open offer to it.
+            .Where(c => query.VisibleToAgentId is not { } visibleTo
+                || (c.Owner is { Kind: ConversationOwnerKind.Agent } visibleOwner && visibleOwner.OwnerId == visibleTo)
+                || (c.State == ConversationState.Offered
+                    && c.Metadata.TryGetValue(ConversationQuery.OfferedToMetadataKey, out var offeredTo)
+                    && string.Equals(offeredTo, visibleTo.Value, StringComparison.Ordinal)))
             .Where(c => query.Channel == null || c.Channel == query.Channel)
             .ToList();
 

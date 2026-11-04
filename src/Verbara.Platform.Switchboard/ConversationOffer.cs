@@ -10,7 +10,7 @@ namespace Verbara.Platform.Switchboard;
 public static class ConversationOffer
 {
     /// <summary>Metadata key holding the id of the agent the conversation was offered to.</summary>
-    public const string OfferedToKey = "_offeredTo";
+    public const string OfferedToKey = ConversationQuery.OfferedToMetadataKey;
 
     /// <summary>Metadata key holding when the offer was made (round-trip "O" format, UTC).</summary>
     public const string OfferedAtKey = "_offeredAt";

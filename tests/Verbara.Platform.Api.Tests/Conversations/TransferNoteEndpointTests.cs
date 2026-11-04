@@ -229,7 +229,11 @@ public sealed class TransferNoteEndpointTests : IClassFixture<TransferNoteApiFac
             toQueue ? queue.QueueId.Value : target.AgentId.Value);
         ok["newState"]!.GetValue<string>().Should().Be(state);
 
-        var history = await client.GetStringAsync(Route(conversation, "messages"));
+        // contact-history-opens-by-assignment (design D2, D12): the transfer moved the conversation away, so the former
+        // owner no longer reads it (TranscriptReads_ShouldRefuseTheFormerOwnerNotReadable_…); a Supervisor of the
+        // tenant reads the stored note instead. Only the reader changed.
+        using var supervisorClient = _factory.ClientFor(_factory.NewUser(UserRole.Supervisor, "note-reader"));
+        var history = await supervisorClient.GetStringAsync(Route(conversation, "messages"));
         ShouldBeTheFixturesElement(
             JsonNode.Parse(history)!.AsArray().Should().ContainSingle().Subject!.AsObject(),
             conversation, user.UserId.Value);
