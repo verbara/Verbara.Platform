@@ -135,14 +135,15 @@ internal sealed partial class WebhookInboundProcessor
         // The message is published after the conversation is loaded, so its live-stream audience is the conversation's
         // owner or open-offer agent as it is now (contact-history-opens-by-assignment, design D17). A conversation that
         // cannot be loaded, or whose read fails, still publishes it, with an empty audience: readers only (fail closed). The
-        // message is stored, so a provider retry would only find a duplicate (spec audit round 2, F3). Only this delivery's
-        // own cancellation propagates, as ConversationAudienceRead does.
+        // message is stored, so a provider retry would only find a duplicate (spec audit round 2, F3). For the same reason
+        // the read does not take the delivery's token, which is the HTTP request's: a provider that hangs up here would lose
+        // the publish for good. Its cancellation can end the delivery only after the publish.
         Conversation? conversation = null;
         try
         {
-            conversation = await _conversationStore.GetByIdAsync(tenantId, stored.ConversationId, ct).ConfigureAwait(false);
+            conversation = await _conversationStore.GetByIdAsync(tenantId, stored.ConversationId, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException && !(ex is OperationCanceledException && ct.IsCancellationRequested))
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // The type only: a database error can quote the row.
             LogConversationReadFailed(tenantId.Value, stored.ConversationId.Value, ex.GetType().Name);

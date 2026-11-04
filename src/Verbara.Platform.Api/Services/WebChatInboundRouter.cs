@@ -60,7 +60,7 @@ internal sealed partial class WebChatInboundRouter
         _returnAnnouncer.ProcessAsync(pipeline, inbound, tenantId, ChannelType.WebChat, ct);
 
     // The visitor's message on the live stream, for the conversation's owner or open-offer agent as loaded just before
-    // (design D17); a conversation that could not be loaded gives an empty audience (readers only), as on the webhook path.
+    // (design D17); a conversation that could not be loaded or read gives an empty audience (readers only), as on the webhook path.
     private void PublishInbound(TenantId tenantId, PipelineResult pipelineResult, Conversation? conversation) =>
         _eventBus.Publish(new ConversationMessageEvent(
             tenantId.Value, pipelineResult.ConversationId.Value,
@@ -108,7 +108,7 @@ internal sealed partial class WebChatInboundRouter
         // opened (the session's conversation ended), or one still queued and owner-less (a replacement another
         // delivery opened, or an earlier routing that found no queue) — the predicate the webhook path uses.
         var firstOfSession = _sessionManager.TryMarkRouted(sessionId);
-        var conversation = await _conversationStore.GetByIdAsync(tenantId, pipelineResult.ConversationId, ct).ConfigureAwait(false);
+        var conversation = await ReadForPublishAsync(tenantId, pipelineResult.ConversationId).ConfigureAwait(false);
         if (!firstOfSession
             && (conversation is null || !WebhookInboundProcessor.NeedsRouting(pipelineResult, conversation)))
         {
@@ -155,6 +155,30 @@ internal sealed partial class WebChatInboundRouter
             LogNoQueueResolved(ex, tenantId.Value, sessionId);
         }
     }
+
+    // The message is stored and its session's first-message mark may be spent, so a retry routes and publishes nothing: a
+    // failed read gives a null conversation (an empty audience, readers only), and the request's token is not taken, so a
+    // visitor who hangs up here does not lose the publish, as on the webhook path. A conversation left unrouted this way is
+    // still Queued and owner-less, so the session's next message routes it (WebhookInboundProcessor.NeedsRouting).
+    private async Task<Conversation?> ReadForPublishAsync(TenantId tenantId, EntityId conversationId)
+    {
+        try
+        {
+            return await _conversationStore.GetByIdAsync(tenantId, conversationId, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // The type only: a database error can quote the row.
+            LogConversationReadFailed(tenantId.Value, conversationId.Value, ex.GetType().Name);
+            return null;
+        }
+    }
+
+    [LoggerMessage(
+        EventId = 7402,
+        Level = LogLevel.Warning,
+        Message = "WebChat message of tenant {TenantId} conversation {ConversationId} is published to the readers only, and not routed: the conversation could not be read ({ExceptionType}). The next inbound message retries.")]
+    private partial void LogConversationReadFailed(string tenantId, string conversationId, string exceptionType);
 
     [LoggerMessage(
         EventId = 7401,

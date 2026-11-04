@@ -239,9 +239,8 @@ public sealed class ConversationContentDeliveryRuleTests
 
     /// <summary>
     /// The SSE data line of each content event, serialized by <see cref="ApiJsonContext"/> on the branch base
-    /// <c>c82d6385</c>, before the audience existed, from the values of the host fixtures' frames (the fixtures' hand-written
-    /// <c>wire</c> strings put <c>tenantId</c> first and keep trailing zeros of the fraction; the serializer writes the
-    /// record's own members first and trims them, on main as here).
+    /// <c>c82d6385</c>, before the audience existed, from the values of the host fixtures' frames, whose <c>wire</c> strings
+    /// are these bytes: the serializer writes the record's own members first and trims trailing zeros of the fraction.
     /// </summary>
     public static TheoryData<string, string> WireBeforeTheAudience() => new()
     {

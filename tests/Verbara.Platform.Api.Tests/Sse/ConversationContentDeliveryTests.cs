@@ -340,4 +340,32 @@ public sealed class TransferNoteDeliveryTests : IClassFixture<DetachedContentDel
         streamS.Received(note.MessageId).Should().BeTrue("a monitor receives every message");
         streamA.Received(note.MessageId).Should().BeFalse("the former owner, whose transfer wrote it, does not");
     }
+
+    [Fact]
+    public async Task Transfer_ShouldDeliverTheNoteToTheFormerOwner_WhenItReadsEveryConversation()
+    {
+        var (userA, agentA) = _factory.NewAgent("transfer-from-reader", UserRole.Supervisor);
+        var (userB, agentB) = _factory.NewAgent("transfer-to-from-reader");
+        var (userC, _) = _factory.NewAgent("transfer-unrelated");
+        var conversation = _factory.SeedConversation(
+            ConversationOwner.ForAgent(agentA.AgentId), ConversationState.Active, channel: ChannelType.WhatsApp);
+        await using var streamA = await _factory.OpenStreamAsync("former owner A, a reader of every conversation", userA);
+        await using var streamB = await _factory.OpenStreamAsync("new owner B", userB);
+        await using var streamC = await _factory.OpenStreamAsync("unrelated agent C", userC);
+        using var capture = new MessageEventCapture(_factory.Bus);
+        using var clientA = _factory.ClientFor(userA);
+
+        var response = await clientA.PostAsJsonAsync(
+            $"/api/v1/conversations/{conversation.ConversationId.Value}/transfer",
+            new { targetQueueId = default(string), targetAgentId = agentB.AgentId.Value, note = Note });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var note = await capture.WaitForAsync(
+            e => e.ConversationId == conversation.ConversationId.Value && e.Sender == "System", "the transfer note");
+        await LiveStreamProbe.SyncAsync(_factory.Bus, ConversationOwnershipApiFactory.Tenant.Value, streamA, streamB, streamC);
+
+        streamA.Received(note.MessageId).Should().BeTrue("it receives the note as a reader of every conversation, not as the former owner");
+        streamB.Received(note.MessageId).Should().BeTrue();
+        streamC.Received(note.MessageId).Should().BeFalse();
+    }
 }
