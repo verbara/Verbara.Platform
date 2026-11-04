@@ -382,6 +382,7 @@ internal sealed class HookedMessageStore(IMessageStore inner) : IMessageStore
     public Task SaveAsync(Message message, CancellationToken ct) => inner.SaveAsync(message, ct);
     public Task<Message?> GetByIdAsync(TenantId tenantId, EntityId messageId, CancellationToken ct) => inner.GetByIdAsync(tenantId, messageId, ct);
     public Task<IReadOnlyList<Message>> GetConversationMessagesAsync(TenantId tenantId, EntityId conversationId, int limit, int offset, CancellationToken ct) => inner.GetConversationMessagesAsync(tenantId, conversationId, limit, offset, ct);
+    public Task<MessageHistorySlice> GetConversationHistoryAsync(TenantId tenantId, EntityId conversationId, int limit, MessageHistoryCursor? before, CancellationToken ct) => inner.GetConversationHistoryAsync(tenantId, conversationId, limit, before, ct);
     public Task UpdateDeliveryStatusAsync(TenantId tenantId, EntityId messageId, MessageDeliveryStatus status, DateTimeOffset? timestamp, CancellationToken ct) => inner.UpdateDeliveryStatusAsync(tenantId, messageId, status, timestamp, ct);
     public Task<Message?> FindByExternalIdAsync(TenantId tenantId, string externalMessageId, CancellationToken ct) => inner.FindByExternalIdAsync(tenantId, externalMessageId, ct);
     public Task MarkSentAsync(TenantId tenantId, EntityId messageId, string? externalMessageId, CancellationToken ct) => inner.MarkSentAsync(tenantId, messageId, externalMessageId, ct);

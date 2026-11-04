@@ -1,0 +1,107 @@
+{
+  "_comment": "GET /api/v1/conversations/{id}/history, NEW in this change (design D10, folds agent-console-contract-follow-ups task 1.3, gap B14). It reads a conversation's messages NEWEST FIRST, a page at a time, with a keyset cursor, for any state (terminal included). The response is MessageHistoryPageDto, a sealed record in ApiJsonContext: `items` is an array of the EXISTING Message record, unchanged (Verbara.Platform.Conversations/Message.cs: camelCase, enums as PascalCase strings, block discriminator `$type`, members null on the server ABSENT from the JSON, as in agent-console-contract-debt fixtures/transfer-note-message.v1.json). Order inside a page: createdAt descending, then messageId descending, so items[0] is the newest. Paging: the first request sends no `before`; when hasMore is true the client sends the page's `nextBefore` value back as `before` to get the next OLDER page; when hasMore is false nextBefore is absent. A message stored after the first page was read never shifts or repeats an older page (keyset, not offset). The client renders a page reversed (oldest at the top) and 'load earlier' fetches with `before`. `before` is opaque: the client never parses or builds it. An unparseable `before` answers 400 {\"error\":\"invalid-cursor\"}. The existing GET /api/v1/conversations/{id}/messages (limit/offset, oldest first, bare array) keeps its shape and order for compatibility and is gated by the same read rule. Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "firstPage": {
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/conversations/4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a/history",
+      "query": { "limit": "2" },
+      "_queryRules": "limit: optional, default 50, clamped to 1..100; before: optional, absent on the first page",
+      "status": 200
+    },
+    "body": {
+      "items": [
+        {
+          "_omittedWhileNull": ["externalMessageId", "readAt", "updatedAt", "createdBy", "updatedBy"],
+          "messageId": "m-0003-b1c2d3e4f5a6b7c8",
+          "conversationId": "4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a",
+          "tenantId": "demo",
+          "direction": "Outbound",
+          "channel": "WhatsApp",
+          "senderId": "a-9e8d7c6b5a493827",
+          "content": {
+            "blocks": [
+              {
+                "$type": "text",
+                "text": "Your replacement card has been ordered and should arrive within five business days.",
+                "type": "Text"
+              }
+            ]
+          },
+          "deliveryStatus": "Delivered",
+          "createdAt": "2026-10-28T10:20:05.000+00:00",
+          "deliveredAt": "2026-10-28T10:20:06.000+00:00"
+        },
+        {
+          "_omittedWhileNull": ["senderId", "deliveredAt", "readAt", "updatedAt", "createdBy", "updatedBy"],
+          "messageId": "m-0002-a1b2c3d4e5f6a7b8",
+          "conversationId": "4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a",
+          "tenantId": "demo",
+          "direction": "Inbound",
+          "channel": "WhatsApp",
+          "content": {
+            "blocks": [
+              {
+                "$type": "text",
+                "text": "My card was blocked after I reported it lost",
+                "type": "Text"
+              }
+            ]
+          },
+          "deliveryStatus": "Delivered",
+          "externalMessageId": "wamid.EXAMPLE0002",
+          "createdAt": "2026-10-28T09:16:30.000+00:00"
+        }
+      ],
+      "hasMore": true,
+      "nextBefore": "opaque-cursor-value-1"
+    }
+  },
+  "olderPage": {
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/conversations/4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a/history",
+      "query": { "limit": "2", "before": "opaque-cursor-value-1" },
+      "status": 200
+    },
+    "body": {
+      "_omittedWhileNull": ["nextBefore"],
+      "items": [
+        {
+          "_omittedWhileNull": ["senderId", "deliveredAt", "readAt", "updatedAt", "createdBy", "updatedBy"],
+          "messageId": "m-0001-f0e1d2c3b4a59687",
+          "conversationId": "4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a",
+          "tenantId": "demo",
+          "direction": "Inbound",
+          "channel": "WhatsApp",
+          "content": {
+            "blocks": [
+              {
+                "$type": "text",
+                "text": "Hello",
+                "type": "Text"
+              }
+            ]
+          },
+          "deliveryStatus": "Delivered",
+          "externalMessageId": "wamid.EXAMPLE0001",
+          "createdAt": "2026-10-28T09:15:00.000+00:00"
+        }
+      ],
+      "hasMore": false
+    }
+  },
+  "emptyConversation": {
+    "_comment": "a conversation with no message at all: 200 with an empty page, never 404",
+    "body": { "items": [], "hasMore": false }
+  },
+  "invalidCursor": {
+    "request": { "method": "GET", "path": "/api/v1/conversations/4f1d2b8c9a0e4d7f8c6b5a4e3d2c1b0a/history", "query": { "before": "not-a-cursor" } },
+    "status": 400,
+    "body": { "error": "invalid-cursor" }
+  },
+  "fields": {
+    "items": "Message[], the existing record unchanged, newest first (createdAt desc, then messageId desc); at most `limit` elements",
+    "hasMore": "boolean, always present: true when an older message exists than the last element of items",
+    "nextBefore": "string, opaque cursor naming the last element of items; present only when hasMore is true; sent back as the `before` query parameter"
+  }
+}

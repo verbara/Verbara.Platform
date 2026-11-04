@@ -123,6 +123,8 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(ContactConversationSummaryDto))]
 [JsonSerializable(typeof(ConversationDispositionDto))]
 [JsonSerializable(typeof(ConversationLastMessageDto))]
+// contact-history-opens-by-assignment (design D10, D14): GET /conversations/{id}/history.
+[JsonSerializable(typeof(MessageHistoryPageDto))]
 [JsonSerializable(typeof(PagedResult<Contact>))]
 [JsonSerializable(typeof(PagedResult<ApiKey>))]
 [JsonSerializable(typeof(PagedResult<CampaignSummaryDto>))]

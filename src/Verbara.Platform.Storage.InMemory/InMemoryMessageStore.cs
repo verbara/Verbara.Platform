@@ -76,6 +76,35 @@ internal sealed class InMemoryMessageStore : IMessageStore
         return Task.FromResult(result);
     }
 
+    /// <summary>
+    /// contact-history-opens-by-assignment (design D10): the Postgres keyset read, in memory. Newest first by
+    /// <c>created_at</c> then message id descending (ordinal, as <c>COLLATE "C"</c>), strictly older than
+    /// <paramref name="before"/>, one row past <paramref name="limit"/> read to decide <see cref="MessageHistorySlice.HasMore"/>.
+    /// </summary>
+    public Task<MessageHistorySlice> GetConversationHistoryAsync(
+        TenantId tenantId, EntityId conversationId, int limit, MessageHistoryCursor? before, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        var rows = _items.Values
+            .Where(m => m.TenantId == tenantId && m.ConversationId == conversationId)
+            .Where(m => before is not { } cursor || IsOlder(m, cursor))
+            .OrderByDescending(m => m.CreatedAt)
+            .ThenByDescending(m => m.MessageId.Value, StringComparer.Ordinal)
+            .Take(limit + 1)
+            .ToList();
+
+        var hasMore = rows.Count > limit;
+        if (hasMore)
+            rows.RemoveAt(limit);
+        return Task.FromResult(new MessageHistorySlice(rows, hasMore));
+    }
+
+    /// <summary>(<c>created_at</c>, message id) &lt; (<paramref name="cursor"/>), the id compared ordinally.</summary>
+    private static bool IsOlder(Message message, MessageHistoryCursor cursor) =>
+        message.CreatedAt < cursor.CreatedAt
+        || (message.CreatedAt == cursor.CreatedAt
+            && string.CompareOrdinal(message.MessageId.Value, cursor.MessageId.Value) < 0);
+
     public Task UpdateDeliveryStatusAsync(TenantId tenantId, EntityId messageId, MessageDeliveryStatus status, DateTimeOffset? timestamp, CancellationToken ct)
     {
         lock (_writeLock)

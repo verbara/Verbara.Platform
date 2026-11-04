@@ -420,6 +420,45 @@ public sealed class TransferNoteEndpointTests : IClassFixture<TransferNoteApiFac
         note["content"]!["blocks"]![0]!["text"]!.GetValue<string>().Should().Be(Note);
     }
 
+    // contact-history-opens-by-assignment task 2.4 (design D10, spec audit F4): the /history counterparts of the two
+    // pins above, read by the same Supervisor. Newest first, the note written after the fifty stored messages is the
+    // first item of the first page, and the cursor reaches the oldest stored message on the next page.
+    [Fact]
+    public async Task GetHistory_ShouldAnswerTheNoteFirst_WhenNoQueryIsGiven()
+    {
+        var (owner, client, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
+        using var formerOwner = owner;
+        using var reader = client;
+
+        var page = JsonNode.Parse(await client.GetStringAsync(Route(conversation, "history")))!.AsObject();
+
+        var items = page["items"]!.AsArray();
+        items.Should().HaveCount(50);
+        items[0]!["direction"]!.GetValue<string>().Should().Be("System");
+        items[0]!["content"]!["blocks"]![0]!["text"]!.GetValue<string>().Should().Be(Note);
+        items.Skip(1).Select(message => message!["direction"]!.GetValue<string>()).Should().OnlyContain(d => d == "Inbound");
+        items[1]!["content"]!["blocks"]![0]!["text"]!.GetValue<string>().Should().Be("seeded message 49");
+        page["hasMore"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetHistory_ShouldAnswerTheOldestStoredMessage_WhenTheCursorReachesIt()
+    {
+        var (owner, client, conversation) = await TransferWithANoteAfterFiftyMessagesAsync();
+        using var formerOwner = owner;
+        using var reader = client;
+        var first = JsonNode.Parse(await client.GetStringAsync(Route(conversation, "history")))!.AsObject();
+
+        var page = JsonNode.Parse(await client.GetStringAsync(
+            $"{Route(conversation, "history")}?before={Uri.EscapeDataString(first["nextBefore"]!.GetValue<string>())}"))!.AsObject();
+
+        var oldest = page["items"]!.AsArray().Should().ContainSingle().Subject!;
+        oldest["direction"]!.GetValue<string>().Should().Be("Inbound");
+        oldest["content"]!["blocks"]![0]!["text"]!.GetValue<string>().Should().Be("seeded message 0");
+        page["hasMore"]!.GetValue<bool>().Should().BeFalse();
+        page.ContainsKey("nextBefore").Should().BeFalse();
+    }
+
     // contact-history-opens-by-assignment task 1.3 (design D2 step 4, D10; spec "The allowance ends with the
     // assignment"): red on the unfixed code, green with tasks 2.2 and 2.4. After the transfer to a queue the former
     // owner holds nothing of the conversation, so both transcript routes refuse it.

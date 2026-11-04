@@ -45,6 +45,11 @@ internal static class ConversationEndpoints
         group.MapGet("/{id}/messages", GetMessages)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound);
+        // design D10, D14: the newest-first transcript page; a before it cannot read answers 400 invalid-cursor.
+        group.MapGet("/{id}/history", GetHistory)
+            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound);
         group.MapPost("/{id}/messages", SendMessage);
         group.MapPost("/{id}/accept", AcceptConversation);
         group.MapPost("/{id}/reject", RejectConversation);
@@ -243,6 +248,51 @@ internal static class ConversationEndpoints
         var messages = await store.GetConversationMessagesAsync(tenantId, conversation.ConversationId, limit, offset, ct);
         return TypedResults.Ok(messages);
     }
+
+    /// <summary>The newest messages first, a page at a time, behind an opaque keyset cursor (design D10).</summary>
+    /// <remarks>
+    /// 404 for a conversation missing from the tenant, then the read rule (403 <c>not-readable</c>), and only then the
+    /// cursor (400 <c>invalid-cursor</c>), so a caller the rule refuses learns nothing from it. <paramref name="limit"/>
+    /// defaults to 50, clamped to 1..100.
+    /// </remarks>
+    private static async Task<Results<Ok<MessageHistoryPageDto>, NotFound, BadRequest<ErrorResponse>, JsonHttpResult<ErrorResponse>>> GetHistory(
+        string id,
+        HttpContext context,
+        [FromServices] IMessageStore store,
+        [FromServices] IConversationStore conversations,
+        [FromServices] IAgentStore agents,
+        [FromServices] IContactStore contacts,
+        int limit = HistoryDefaultLimit,
+        string? before = null,
+        CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId(context);
+        var conversation = await conversations.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (conversation is null)
+            return TypedResults.NotFound();
+
+        var reader = await ConversationReadRule.ResolveAsync(context, tenantId, agents, conversations, contacts, ct);
+        if (!await reader.CanReadAsync(conversation, ct))
+            return ConversationReadRule.Refusal();
+
+        MessageHistoryCursor? cursor = null;
+        if (before is not null)
+        {
+            if (!MessageHistoryCursorCodec.TryDecode(before, out var decoded))
+                return TypedResults.BadRequest(new ErrorResponse(MessageHistoryCursorCodec.InvalidCursor));
+            cursor = decoded;
+        }
+
+        var slice = await store.GetConversationHistoryAsync(
+            tenantId, conversation.ConversationId, Math.Clamp(limit, 1, HistoryMaxLimit), cursor, ct);
+        return TypedResults.Ok(new MessageHistoryPageDto(
+            slice.Items,
+            slice.HasMore,
+            slice.HasMore ? MessageHistoryCursorCodec.Encode(slice.Items[^1]) : null));
+    }
+
+    private const int HistoryDefaultLimit = 50;
+    private const int HistoryMaxLimit = 100;
 
     // Only the owner sends on a conversation, as its Agent profile.
     private static async Task<Results<Ok<Message>, NotFound, JsonHttpResult<ErrorResponse>>> SendMessage(
