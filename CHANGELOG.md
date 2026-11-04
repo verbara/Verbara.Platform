@@ -111,8 +111,9 @@ tenant API keys bound to no user, roles without a conversation permission and ag
 - **Until that console release is deployed, the console already shipped shows the new `disposition` object as text.**
   It still reads `disposition` as a string, so on the History tab every typified past conversation shows a badge reading
   `wrap_up.dispositions.[object Object]` instead of the disposition's name. The rest of the row still renders, and no data
-  is lost or changed: the badge corrects itself once the console is updated, with no Platform step. Keep the gap short:
-  deploy Platform, then the console release straight after.
+  is lost or changed: the badge corrects itself once the console is updated, with no Platform step. An agent the contact
+  list now refuses (403) sees that console's "no history" message, not a refusal. Keep the gap short: deploy Platform,
+  then the console release straight after.
 
 ## [2.38.1] - 2026-11-04
 
