@@ -15,7 +15,14 @@ public sealed class DefaultConversationLifecycleService : IConversationLifecycle
 
     public async Task<Conversation> CreateAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
     {
-        var conversation = new Conversation
+        var conversation = NewQueued(tenantId, contactId, channel);
+
+        await _conversationStore.SaveAsync(conversation, ct).ConfigureAwait(false);
+        return conversation;
+    }
+
+    private Conversation NewQueued(TenantId tenantId, EntityId contactId, ChannelType channel) =>
+        new()
         {
             ConversationId = EntityId.New(),
             TenantId = tenantId,
@@ -24,6 +31,12 @@ public sealed class DefaultConversationLifecycleService : IConversationLifecycle
             State = ConversationState.Queued,
             CreatedAt = _clock.UtcNow,
         };
+
+    public async Task<Conversation> CreateForWebChatSessionAsync(TenantId tenantId, EntityId contactId, ChannelAddress sessionAddress, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sessionAddress);
+        var conversation = NewQueued(tenantId, contactId, ChannelType.WebChat);
+        conversation.SetMetadata(WebChatConversationMetadata.SessionAddressKey, sessionAddress.Address);
 
         await _conversationStore.SaveAsync(conversation, ct).ConfigureAwait(false);
         return conversation;

@@ -70,6 +70,30 @@ public class InboundMessagePipelineTests
         };
 
     // -------------------------------------------------------------------------
+    // A WebChat session message that opens a conversation records its session address (design D9)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Pipeline_ShouldOpenConversationForTheSessionAddress_WhenWebChatMessageFindsNoConversation()
+    {
+        var sessionAddress = new ChannelAddress(ChannelType.WebChat, "webchat-7c9e6679f2a54d0b8e1a3b5c7d9f1e2a");
+        var inbound = new InboundMessage(sessionAddress, new MessageEnvelope([]), "ext-webchat", DateTimeOffset.UtcNow);
+        var contact = MakeContact();
+        var opened = MakeConversation(contact.ContactId);
+        _contactResolver.ResolveAsync(TenantId, Arg.Any<ContactIdentity>(), Arg.Any<CancellationToken>()).Returns(contact);
+        _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, ChannelType.WebChat, Arg.Any<CancellationToken>())
+            .Returns((Conversation?)null);
+        _lifecycleService.CreateForWebChatSessionAsync(TenantId, contact.ContactId, sessionAddress, Arg.Any<CancellationToken>())
+            .Returns(opened);
+
+        var result = await _pipeline.ProcessAsync(inbound, TenantId, ChannelType.WebChat, CancellationToken.None);
+
+        result.ConversationId.Should().Be(opened.ConversationId);
+        result.IsNewConversation.Should().BeTrue();
+        await _lifecycleService.DidNotReceiveWithAnyArgs().CreateAsync(default, default, default, default);
+    }
+
+    // -------------------------------------------------------------------------
     // Full pipeline: new contact + new conversation
     // -------------------------------------------------------------------------
 

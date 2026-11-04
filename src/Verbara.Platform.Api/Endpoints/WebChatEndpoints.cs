@@ -112,8 +112,8 @@ internal static partial class WebChatEndpoints
         await contactStore.SaveAsync(contact, ct);
 
         // Create conversation
-        var conversation = await lifecycleService.CreateAsync(
-            tid, contact.ContactId, ChannelType.WebChat, ct);
+        var conversation = await lifecycleService.CreateForWebChatSessionAsync(
+            tid, contact.ContactId, visitorAddress, ct);
 
         var sessionId = await sessionManager.ConnectAsync(
             tid, conversation.ConversationId, visitorAddress, clock);

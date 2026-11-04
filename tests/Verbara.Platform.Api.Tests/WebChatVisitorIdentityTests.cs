@@ -9,6 +9,7 @@ using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 
 namespace Verbara.Platform.Api.Tests;
 
@@ -24,7 +25,7 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
     private const string InactiveChannelTenantId = "tenant-webchat-inactive";
     private const string MissingChannelTenantId = "tenant-webchat-missing";
     private static readonly TenantId VisitorTenant = new(VisitorTenantId);
-    private readonly Factory _factory = new();
+    private readonly Factory _factory = new() { CaptureLogs = true };
 
     public void Dispose() => _factory.Dispose();
 
@@ -516,6 +517,159 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         conversation.Owner = ConversationOwner.ForAgent(agentId);
         await conversationStore.SaveAsync(conversation, CancellationToken.None);
         return agentId;
+    }
+
+    // ─── The reply goes to the session address its conversation records (design D9, spec webchat-visitor-identity) ───
+
+    private const string SessionAddressKey = "_webchatSessionAddress";
+
+    /// <summary>Creates a session and lets it expire and be evicted, and returns its address: no session holds it now.</summary>
+    private async Task<ChannelAddress> ExpiredSessionAddressAsync(HttpClient client)
+    {
+        var expired = await GetSessionAsync(await CreateSessionAsync(client));
+        var sessions = _factory.Services.GetRequiredService<WebChatSessionManager>();
+        var later = Substitute.For<IClock>();
+        later.UtcNow.Returns(DateTimeOffset.UtcNow.AddMinutes(31));
+        await sessions.CleanupExpiredAsync(later);
+        (await sessions.GetSessionByVisitorAddressAsync(expired.CustomerAddress.Address)).Should().BeNull("the session expired and was evicted");
+        return expired.CustomerAddress;
+    }
+
+    /// <summary>Puts <paramref name="address"/> first on the contact of the conversation, as a returning contact holds its earlier session's address.</summary>
+    private async Task PutAddressFirstAsync(EntityId conversationId, ChannelAddress address)
+    {
+        var conversation = await _factory.Services.GetRequiredService<IConversationStore>()
+            .GetByIdAsync(VisitorTenant, conversationId, CancellationToken.None);
+        var contacts = _factory.Services.GetRequiredService<IContactStore>();
+        var contact = await contacts.GetByIdAsync(VisitorTenant, conversation!.ContactId, CancellationToken.None);
+        var rewritten = new Contact { ContactId = contact!.ContactId, TenantId = contact.TenantId, CreatedAt = contact.CreatedAt };
+        rewritten.AddAddress(address);
+        foreach (var held in contact.Addresses)
+            rewritten.AddAddress(held);
+        await contacts.SaveAsync(rewritten, CancellationToken.None);
+        rewritten.FindAddress(ChannelType.WebChat).Should().Be(address, "the contact's first WebChat address is now the earlier one");
+    }
+
+    private async Task<WebSocket> AttachSocketAsync(string sessionId, CancellationToken ct)
+    {
+        var socket = await _factory.Server.CreateWebSocketClient().ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), ct);
+        (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+        return socket;
+    }
+
+    private Task<Message> ReplyAsync(EntityId conversationId, EntityId agentId, string text) =>
+        _factory.Services.GetRequiredService<IConversationService>().SendMessageAsync(
+            conversationId, VisitorTenant, new MessageEnvelope([new TextBlock(text)]), agentId,
+            ConversationOwnerKind.Agent, CancellationToken.None);
+
+    private void AssertNoSendWasRefused() =>
+        _factory.CapturedLogs.RecordsContaining(WebChatConnector.SessionNotConnected)
+            .Should().BeEmpty("the reply goes to the live session, not to an earlier session's address");
+
+    [Fact]
+    public async Task AgentReply_ShouldReachLiveSession_WhenContactHoldsAnExpiredSessionAddressFirst()
+    {
+        using var client = _factory.CreateClient();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var expiredAddress = await ExpiredSessionAddressAsync(client);
+        var live = await GetSessionAsync(await CreateSessionAsync(client));
+        await PutAddressFirstAsync(live.ConversationId, expiredAddress);
+        var agentId = await GiveConversationToAgentAsync(live.ConversationId);
+        using var socket = await AttachSocketAsync(live.SessionId, timeout.Token);
+
+        var message = await ReplyAsync(live.ConversationId, agentId, "hello from the agent");
+
+        AssertNoSendWasRefused();
+        message.DeliveryStatus.Should().NotBe(MessageDeliveryStatus.Failed);
+        (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(3))).Should().Contain("hello from the agent");
+    }
+
+    [Fact]
+    public async Task AgentReply_ShouldReachSession_WhenAVisitorMessageOpenedTheConversation()
+    {
+        using var client = _factory.CreateClient();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var expiredAddress = await ExpiredSessionAddressAsync(client);
+        var live = await GetSessionAsync(await CreateSessionAsync(client));
+        var conversations = _factory.Services.GetRequiredService<IConversationStore>();
+        var first = await conversations.GetByIdAsync(VisitorTenant, live.ConversationId, CancellationToken.None);
+        first!.State = ConversationState.Closed;
+        first.ClosedAt = DateTimeOffset.UtcNow;
+        await conversations.SaveAsync(first, CancellationToken.None);
+
+        using var send = await client.PostAsJsonAsync($"/api/v1/webchat/sessions/{live.SessionId}/messages", new { text = "back again" });
+        send.StatusCode.Should().Be(HttpStatusCode.OK);
+        live.ConversationId.Should().NotBe(first.ConversationId, "the session's conversation ended, so the message opened a new one");
+
+        var opened = await conversations.GetByIdAsync(VisitorTenant, live.ConversationId, CancellationToken.None);
+        opened!.Metadata.Should().Contain(SessionAddressKey, live.CustomerAddress.Address);
+        await PutAddressFirstAsync(live.ConversationId, expiredAddress);
+        var agentId = await GiveConversationToAgentAsync(live.ConversationId);
+        using var socket = await AttachSocketAsync(live.SessionId, timeout.Token);
+
+        var message = await ReplyAsync(live.ConversationId, agentId, "hello again");
+
+        AssertNoSendWasRefused();
+        message.DeliveryStatus.Should().NotBe(MessageDeliveryStatus.Failed);
+        (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(3))).Should().Contain("hello again");
+    }
+
+    [Fact]
+    public async Task CreateSession_ShouldRecordSessionAddress_WhenItCreatesTheConversation()
+    {
+        using var client = _factory.CreateClient();
+        var session = await GetSessionAsync(await CreateSessionAsync(client));
+
+        var conversation = await _factory.Services.GetRequiredService<IConversationStore>()
+            .GetByIdAsync(VisitorTenant, session.ConversationId, CancellationToken.None);
+
+        conversation!.Metadata.Should().Contain(SessionAddressKey, session.CustomerAddress.Address);
+    }
+
+    [Fact]
+    public async Task AgentReply_ShouldUseContactAddress_WhenConversationRecordsNoSessionAddress()
+    {
+        // Spec "A conversation from before this change still replies".
+        using var client = _factory.CreateClient();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var session = await GetSessionAsync(await CreateSessionAsync(client));
+        var conversations = _factory.Services.GetRequiredService<IConversationStore>();
+        var conversation = await conversations.GetByIdAsync(VisitorTenant, session.ConversationId, CancellationToken.None);
+        conversation!.RemoveMetadata(SessionAddressKey);
+        await conversations.SaveAsync(conversation, CancellationToken.None);
+        var agentId = await GiveConversationToAgentAsync(session.ConversationId);
+        using var socket = await AttachSocketAsync(session.SessionId, timeout.Token);
+
+        var message = await ReplyAsync(session.ConversationId, agentId, "hello from before");
+
+        message.DeliveryStatus.Should().NotBe(MessageDeliveryStatus.Failed);
+        (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(3))).Should().Contain("hello from before");
+    }
+
+    [Fact]
+    public async Task AgentReply_ShouldSkipIdentityKey_WhenConversationRecordsNoSessionAddress()
+    {
+        // Spec "The key is skipped as a destination".
+        using var client = _factory.CreateClient();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var session = await GetSessionAsync(await CreateSessionAsync(client));
+        var conversations = _factory.Services.GetRequiredService<IConversationStore>();
+        var conversation = await conversations.GetByIdAsync(VisitorTenant, session.ConversationId, CancellationToken.None);
+        conversation!.RemoveMetadata(SessionAddressKey);
+        await conversations.SaveAsync(conversation, CancellationToken.None);
+        var contacts = _factory.Services.GetRequiredService<IContactStore>();
+        var contact = await contacts.GetByIdAsync(VisitorTenant, conversation.ContactId, CancellationToken.None);
+        var rewritten = new Contact { ContactId = contact!.ContactId, TenantId = contact.TenantId, CreatedAt = contact.CreatedAt };
+        rewritten.AddAddress(new ChannelAddress(ChannelType.WebChat, "webchat-visitor:rcfqwP4uUDSA6hgRqgUIE3hCFFsXvDuxhE3MgUu0Y1M"));
+        rewritten.AddAddress(session.CustomerAddress);
+        await contacts.SaveAsync(rewritten, CancellationToken.None);
+        var agentId = await GiveConversationToAgentAsync(session.ConversationId);
+        using var socket = await AttachSocketAsync(session.SessionId, timeout.Token);
+
+        var message = await ReplyAsync(session.ConversationId, agentId, "hello past the key");
+
+        message.DeliveryStatus.Should().NotBe(MessageDeliveryStatus.Failed);
+        (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(3))).Should().Contain("hello past the key");
     }
 
     [Fact]

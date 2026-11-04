@@ -124,6 +124,9 @@ public sealed class PostgresInboundPipelineRaceTests : IClassFixture<MessageCorr
             return conversation;
         }
 
+        public Task<Conversation> CreateForWebChatSessionAsync(TenantId tenantId, EntityId contactId, ChannelAddress sessionAddress, CancellationToken ct) =>
+            inner.CreateForWebChatSessionAsync(tenantId, contactId, sessionAddress, ct);
+
         public Task TransitionAsync(TenantId tenantId, EntityId conversationId, ConversationState newState, CancellationToken ct) =>
             inner.TransitionAsync(tenantId, conversationId, newState, ct);
 

@@ -151,7 +151,11 @@ internal sealed partial class DefaultConversationService : IConversationService
     {
         var tenantId = conversation.TenantId;
         var contact = await _contactStore.GetByIdAsync(tenantId, conversation.ContactId, ct).ConfigureAwait(false);
-        var address = contact?.FindAddress(conversation.Channel);
+
+        // WebChat: the session this conversation belongs to, since its contact can hold several sessions' addresses.
+        var address = contact is null
+            ? null
+            : WebChatConversationMetadata.SessionAddressOf(conversation) ?? contact.FindAddress(conversation.Channel);
 
         if (address is null)
         {

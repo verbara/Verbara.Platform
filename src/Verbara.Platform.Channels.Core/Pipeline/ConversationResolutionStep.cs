@@ -85,11 +85,18 @@ public sealed class ConversationResolutionStep : IPipelineStep
             }
         }
 
-        context.Conversation = await _lifecycleService.CreateAsync(
-            context.TenantId,
-            contact.ContactId,
-            context.Channel,
-            ct).ConfigureAwait(false);
+        // A WebChat message comes from its session's address, so the replies in the conversation it opens go to that session.
+        context.Conversation = context.Channel == ChannelType.WebChat
+            ? await _lifecycleService.CreateForWebChatSessionAsync(
+                context.TenantId,
+                contact.ContactId,
+                context.InboundMessage.From,
+                ct).ConfigureAwait(false)
+            : await _lifecycleService.CreateAsync(
+                context.TenantId,
+                contact.ContactId,
+                context.Channel,
+                ct).ConfigureAwait(false);
         context.IsNewConversation = true;
 
         return context;
