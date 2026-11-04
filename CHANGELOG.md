@@ -9,11 +9,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.38.1] - 2026-11-04
+
+Patch release. Platform moves to Verbara.Sdk.Pro `2.25.1-pro`, with no source change: a node whose owner is gone can be
+updated and deleted through the management API, a removed node's calls are kept for two minutes and then released
+instead of staying held until restart, a drain is no longer undone by the owner's health check, and a call reconstructed
+by a takeover ends when it hangs up. Four cluster-endpoint answers change (below, Dependencies).
+
 ### Dependencies
 
 - **Verbara.Sdk.Pro `2.25.0-pro` → `2.25.1-pro`**, the 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk stays `2.9.0`. The triple
   is **Sdk `2.9.0` × Pro `2.25.1-pro` × Platform `2.38.1`**. Pro moves no packed floor: across the 70
-  `project.assets.json`, only those 22 packages change version, and no package appears, drops or crosses a major.
+  `project.assets.json`, only those 22 packages change version, and no package appears, drops or crosses a major. (#537)
 - **Behaviour consumed from Pro 2.25.1-pro: cluster nodes are removed, drained and taken over cleanly** (Pro/ADR-0023,
   addendum 2026-11-04). No Platform source changes for it; read in the code, not covered by a Platform test against a
   real `ClusterManager`:
@@ -29,7 +36,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     a cancelled drain restores the state the node had before it instead of always `Healthy`. A drain issued on a replica
     that does not own the node is still routable in the owner's view.
   - A call reconstructed by a takeover now ends when it hangs up, and the voice conversation closes. Its EventStore row
-    is still not written when its tenant was never stamped (Pro follow-up).
+    is still not written when its tenant was never stamped (Pro follow-up). (#537)
 
 ## [2.38.0] - 2026-11-03
 
