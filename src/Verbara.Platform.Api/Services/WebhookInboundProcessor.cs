@@ -134,8 +134,20 @@ internal sealed partial class WebhookInboundProcessor
 
         // The message is published after the conversation is loaded, so its live-stream audience is the conversation's
         // owner or open-offer agent as it is now (contact-history-opens-by-assignment, design D17). A conversation that
-        // cannot be loaded still publishes it, with an empty audience: readers only (fail closed).
-        var conversation = await _conversationStore.GetByIdAsync(tenantId, stored.ConversationId, ct).ConfigureAwait(false);
+        // cannot be loaded, or whose read fails, still publishes it, with an empty audience: readers only (fail closed). The
+        // message is stored, so a provider retry would only find a duplicate (spec audit round 2, F3). Only this delivery's
+        // own cancellation propagates, as ConversationAudienceRead does.
+        Conversation? conversation = null;
+        try
+        {
+            conversation = await _conversationStore.GetByIdAsync(tenantId, stored.ConversationId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && !(ex is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            // The type only: a database error can quote the row.
+            LogConversationReadFailed(tenantId.Value, stored.ConversationId.Value, ex.GetType().Name);
+        }
+
         _eventBus.Publish(new ConversationMessageEvent(
             tenantId.Value, stored.ConversationId.Value, stored.MessageId.Value, "Inbound", channel.ToString())
         {
@@ -255,6 +267,12 @@ internal sealed partial class WebhookInboundProcessor
         Level = LogLevel.Error,
         Message = "Webhook side effects failed for tenant {TenantId} conversation {ConversationId} message {MessageId}; the message is stored and the rest of the delivery continues.")]
     private partial void LogDispatchFailed(Exception ex, string tenantId, string conversationId, string messageId);
+
+    [LoggerMessage(
+        EventId = 7414,
+        Level = LogLevel.Warning,
+        Message = "Webhook message of tenant {TenantId} conversation {ConversationId} is published to the readers only, and not routed: the conversation could not be read ({ExceptionType}). The next inbound message retries.")]
+    private partial void LogConversationReadFailed(string tenantId, string conversationId, string exceptionType);
 
     [LoggerMessage(
         EventId = 7413,

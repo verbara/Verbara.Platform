@@ -56,7 +56,7 @@
         "heldByCaller": false
       },
       {
-        "_example": "an old conversation closed before this change shipped: no queue was persisted then and cannot be backfilled (design D7), its owner was a queue (abandoned while queued, so no agent), it was never typified, and its last message was an image (preview is empty for a block without text). It is a pre-026-style row: migration 026 backfilled its conversations.last_message_at with its created_at (2026-09-02T18:00:00), yet lastMessageAt is 18:01:12 because the summary takes the newest activity message first (design D6). No system close reason, so durationSeconds = closedAt - createdAt = 1800.",
+        "_example": "an old conversation closed before this change shipped with no owner at all (queued and owner-less, the state a failed routing leaves, then abandoned, so no agent). Migration 027 backfills queue_id only for rows a queue owns (owner_kind = 3, design D7), so this row stays without one; a row a queue still owned would carry queueId, and queueName while that queue exists. It was never typified, and its last message was an image (preview is empty for a block without text). It is a pre-026-style row: migration 026 backfilled its conversations.last_message_at with its created_at (2026-09-02T18:00:00), yet lastMessageAt is 18:01:12 because the summary takes the newest activity message first (design D6). No system close reason, so durationSeconds = closedAt - createdAt = 1800.",
         "_storedLastMessageAt": "2026-09-02T18:00:00.000+00:00",
         "_omittedWhileNull": ["queueId", "queueName", "agentId", "agentDisplayName", "disposition", "closedReason"],
         "id": "0a9b8c7d6e5f40312233445566778899",

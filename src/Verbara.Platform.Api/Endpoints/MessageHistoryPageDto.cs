@@ -36,7 +36,9 @@ internal static class MessageHistoryCursorCodec
 
     /// <summary>
     /// Reads a cursor this codec wrote; <see langword="false"/> for any other value: not base64url, not UTF-8, no
-    /// colon, a tick part that is not plain ASCII digits or out of the <see cref="DateTime"/> range, or an empty id.
+    /// colon, a tick part that is not plain ASCII digits or out of the <see cref="DateTime"/> range, or an id that is
+    /// empty, only white space, or holds a NUL (no id is either, <see cref="EntityId.From"/> throws on white space and
+    /// Postgres refuses a NUL in text).
     /// </summary>
     public static bool TryDecode(string value, out MessageHistoryCursor cursor)
     {
@@ -59,7 +61,11 @@ internal static class MessageHistoryCursorCodec
         }
 
         var colon = text.IndexOf(':', StringComparison.Ordinal);
-        if (colon <= 0 || colon == text.Length - 1)
+        if (colon <= 0)
+            return false;
+
+        var messageId = text[(colon + 1)..];
+        if (!EntityId.IsValid(messageId) || messageId.Contains('\0', StringComparison.Ordinal))
             return false;
 
         // NumberStyles.None: ASCII digits only, no sign, no white space, no exponent.
@@ -67,7 +73,7 @@ internal static class MessageHistoryCursorCodec
             || ticks > DateTime.MaxValue.Ticks)
             return false;
 
-        cursor = new MessageHistoryCursor(new DateTimeOffset(ticks, TimeSpan.Zero), EntityId.From(text[(colon + 1)..]));
+        cursor = new MessageHistoryCursor(new DateTimeOffset(ticks, TimeSpan.Zero), EntityId.From(messageId));
         return true;
     }
 }

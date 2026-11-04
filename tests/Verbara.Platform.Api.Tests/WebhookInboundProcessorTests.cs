@@ -194,6 +194,58 @@ public sealed class WebhookInboundProcessorTests : IDisposable
         await _lifecycle.Received(1).CloseAsync(Tenant, second.ConversationId, Arg.Any<CancellationToken>());
     }
 
+    // ─── A conversation read that fails still publishes the stored message, to the readers only (design D17, spec audit F3) ───
+
+    private WebhookInboundProcessor CreateSutReadingFrom(IConversationStore conversations) =>
+        new(_pipeline, _router, _switchboard, _conversationService, conversations, _contacts, _bot, _lifecycle,
+            _statuses, _eventBus, Announcer(), NullLogger<WebhookInboundProcessor>.Instance);
+
+    public static TheoryData<Exception> FailedReads() => new()
+    {
+        new InvalidOperationException("database unavailable"),
+        new TaskCanceledException("a command timeout, not this delivery's token"),
+    };
+
+    [Theory]
+    [MemberData(nameof(FailedReads))]
+    public async Task ProcessAsync_ShouldPublishTheStoredMessageWithAnEmptyAudience_WhenReadingTheConversationThrows(Exception failure)
+    {
+        var conversation = await SeedBotOwnedAsync();
+        var inbound = Inbound("wamid.r1", conversation);
+        var conversations = Substitute.For<IConversationStore>();
+        conversations.GetByIdAsync(Tenant, conversation.ConversationId, Arg.Any<CancellationToken>()).ThrowsAsync(failure);
+        var published = new List<PlatformEvent>();
+        using var subscription = _eventBus.Events.Subscribe(published.Add);
+
+        var act = () => CreateSutReadingFrom(conversations).ProcessAsync(Tenant, ChannelType.WhatsApp, Delivery(inbound), CancellationToken.None);
+
+        await act.Should().NotThrowAsync("the message is stored: a provider retry would only find a duplicate");
+        var message = published.OfType<ConversationMessageEvent>().Should().ContainSingle().Subject;
+        message.ConversationId.Should().Be(conversation.ConversationId.Value);
+        message.Audience.Should().Be(ConversationAudience.None, "readers only: an unread conversation names no agent (fail closed)");
+        await _router.DidNotReceiveWithAnyArgs().RouteAsync(default!, default);
+        await _bot.DidNotReceiveWithAnyArgs().ProcessMessageAsync(default, default, default!, default);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ShouldPropagateAndPublishNothing_WhenTheDeliveryIsCancelledDuringTheRead()
+    {
+        var conversation = await SeedBotOwnedAsync();
+        var inbound = Inbound("wamid.r2", conversation);
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        var conversations = Substitute.For<IConversationStore>();
+        conversations.GetByIdAsync(Tenant, conversation.ConversationId, Arg.Any<CancellationToken>())
+            .ThrowsAsync(new OperationCanceledException(cancelled.Token));
+        var published = new List<PlatformEvent>();
+        using var subscription = _eventBus.Events.Subscribe(published.Add);
+
+        var act = () => CreateSutReadingFrom(conversations).ProcessAsync(Tenant, ChannelType.WhatsApp, Delivery(inbound), cancelled.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>("the delivery's own cancellation ends it, as on every other step");
+        published.OfType<ConversationMessageEvent>().Should().BeEmpty();
+    }
+
     [Fact]
     public async Task ProcessAsync_ShouldPropagate_WhenStoringAMessageFails()
     {

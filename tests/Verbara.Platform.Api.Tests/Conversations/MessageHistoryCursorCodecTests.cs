@@ -70,6 +70,11 @@ public sealed class MessageHistoryCursorCodecTests
         B64("1e5:m-1"),
         B64("99999999999999999999:m-1"),
         B64($"{(DateTime.MaxValue.Ticks + 1L).ToString(System.Globalization.CultureInfo.InvariantCulture)}:m-1"),
+        B64("12345:   "),
+        B64("12345:\t\r\n"),
+        B64("12345:\u00A0"),
+        B64("12345:\0"),
+        B64("12345:m-\0-1"),
     };
 
     [Theory]

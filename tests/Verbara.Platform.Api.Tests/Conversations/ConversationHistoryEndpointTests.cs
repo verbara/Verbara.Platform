@@ -283,6 +283,9 @@ public sealed class ConversationHistoryEndpointTests : IClassFixture<Conversatio
         Base64Url.EncodeToString(Encoding.UTF8.GetBytes("12345")),
         Base64Url.EncodeToString(Encoding.UTF8.GetBytes("12345:")),
         Base64Url.EncodeToString(Encoding.UTF8.GetBytes("-1:m-1")),
+        Base64Url.EncodeToString(Encoding.UTF8.GetBytes("12345:   ")),
+        Base64Url.EncodeToString(Encoding.UTF8.GetBytes("12345:\0")),
+        Base64Url.EncodeToString(Encoding.UTF8.GetBytes("12345:m-\0-1")),
     };
 
     [Theory]
