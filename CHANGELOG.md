@@ -9,6 +9,28 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Dependencies
+
+- **Verbara.Sdk.Pro `2.25.0-pro` → `2.25.1-pro`**, the 22 `Verbara.Sdk.Pro.*` pins; Verbara.Sdk stays `2.9.0`. The triple
+  is **Sdk `2.9.0` × Pro `2.25.1-pro` × Platform `2.38.1`**. Pro moves no packed floor: across the 70
+  `project.assets.json`, only those 22 packages change version, and no package appears, drops or crosses a major.
+- **Behaviour consumed from Pro 2.25.1-pro: cluster nodes are removed, drained and taken over cleanly** (Pro/ADR-0023,
+  addendum 2026-11-04). No Platform source changes for it; read in the code, not covered by a Platform test against a
+  real `ClusterManager`:
+  - `PUT` and `DELETE /api/v1/management/cluster/nodes/{id}` now reach a node whose owner is gone, instead of answering
+    404 on every live replica (#530). `POST` with such an id answers **409**: delete it, then add it again.
+    `GET /api/v1/management/cluster/status` lists those nodes, so a node that a replica stopped configuring is listed
+    again, as unserved. A node a live replica serves stays hidden on the others.
+  - `DELETE` of a node with calls up returns at once. Its calls are kept for two minutes, so a `POST` of the same id on
+    the same replica within that window records each call's real ending; otherwise they are released without an
+    ending (`CallReleasedEvent`, which no Platform subscriber handles). A re-add that lands on another replica does not
+    get the window. Drain first, as before, so endings are recorded.
+  - A drain sticks: the owner's health check no longer turns a `Draining` node back to `Healthy` within about 15 s, and
+    a cancelled drain restores the state the node had before it instead of always `Healthy`. A drain issued on a replica
+    that does not own the node is still routable in the owner's view.
+  - A call reconstructed by a takeover now ends when it hangs up, and the voice conversation closes. Its EventStore row
+    is still not written when its tenant was never stamped (Pro follow-up).
+
 ## [2.38.0] - 2026-11-03
 
 Minor release. An open digital conversation with no message for 72 hours closes by itself, a customer reply to a resolved
