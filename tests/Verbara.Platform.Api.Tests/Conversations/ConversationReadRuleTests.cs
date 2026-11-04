@@ -444,6 +444,27 @@ public sealed class ConversationReadRuleTests
         reader.OwnerRestrictionOf(world.K).Should().BeNull("a per-sender contact's list is not restricted");
     }
 
+    // Review round 1 (design D18): a voice contact a build before the fix resolved from Asterisk's "<unknown>" placeholder
+    // (or a carrier's "Restricted") holds many withheld callers, as the anonymous contact does. The rule must treat it as
+    // shared: holding one call of it opens neither another caller's call nor the unrestricted list.
+    [Theory]
+    [InlineData("<unknown>")]
+    [InlineData("Restricted")]
+    public async Task CanReadAsync_ShouldRefuseAnotherCallersCall_WhenTheVoiceContactIsAWithheldPlaceholder(string placeholder)
+    {
+        var world = new World();
+        var legacy = World.NewContact(Tenant, new ChannelAddress(ChannelType.Voice, placeholder));
+        await world.Contacts.SaveAsync(legacy, CancellationToken.None);
+        world.Save(legacy, ConversationOwner.ForAgent(world.AgentA), ConversationState.Active);
+        var others = world.Save(legacy, ConversationOwner.ForAgent(world.AgentB), ConversationState.Closed);
+        var reader = await world.ReaderAsync(CallerKind.HandleWithProfile);
+
+        (await reader.CanReadAsync(others, CancellationToken.None))
+            .Should().BeFalse("a withheld-caller-id contact is shared, so holding one call of it opens no other caller's call (D18)");
+        reader.OwnerRestrictionOf(legacy).Should().Be(world.AgentA,
+            "the list of a shared contact holds only the caller's own conversations (D5 step 3, D18)");
+    }
+
     // ── IsHeldByCaller (design D3) ───────────────────────────────────────────────
 
     [Theory]
