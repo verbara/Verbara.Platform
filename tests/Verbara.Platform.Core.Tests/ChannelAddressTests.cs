@@ -55,4 +55,23 @@ public class ChannelAddressTests
     [InlineData(ChannelType.Sms, "US.13491208655302741918", false)]
     public void IsWhatsAppBusinessScopedUserId_ShouldRecognizeMetaFormat_WhenAddressIsGiven(ChannelType channel, string address, bool expected) =>
         new ChannelAddress(channel, address).IsWhatsAppBusinessScopedUserId().Should().Be(expected);
+
+    [Theory]
+    [InlineData(ChannelType.WebChat, "webchat-visitor:abc", true, false)]
+    [InlineData(ChannelType.WebChat, "webchat-external:cust-48151623", false, true)]
+    [InlineData(ChannelType.WebChat, "webchat-6a7b8c9d0e1f42a3b4c5d6e7f8a9b0c1", false, false)]
+    [InlineData(ChannelType.WebChat, "WebChat-External:x", false, false)]
+    [InlineData(ChannelType.WebChat, "WEBCHAT-VISITOR:x", false, false)]
+    [InlineData(ChannelType.WebChat, "legacy-webchat-external:x", false, false)]
+    [InlineData(ChannelType.WhatsApp, "webchat-external:x", false, false)]
+    [InlineData(ChannelType.Email, "webchat-visitor:x", false, false)]
+    public void WebChatIdentityKey_ShouldMatchOrdinalPrefixOnWebChat_WhenAddressIsGiven(
+        ChannelType channel, string address, bool visitor, bool external)
+    {
+        var sut = new ChannelAddress(channel, address);
+
+        sut.IsWebChatVisitorKey().Should().Be(visitor);
+        sut.IsWebChatExternalKey().Should().Be(external);
+        sut.IsWebChatIdentityKey().Should().Be(visitor || external);
+    }
 }

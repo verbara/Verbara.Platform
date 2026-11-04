@@ -1,0 +1,124 @@
+{
+  "_comment": "The contact shape the agent console reads (GET /api/v1/contacts/{id}, the raw Contact entity, Verbara.Platform.Web src/core/api/hooks/use-contacts.ts) gains ONE computed member, `identityLevel`, derived from the contact's WebChat addresses with no stored column (design D10). Every other member keeps its name and meaning; null members stay ABSENT (WhenWritingNull). The console marks a contact from this member alone: `Unverified` -> \"identity not verified\" on the contact card, the conversation header and every row of the History tab; `Verified` -> a verified badge; `Anonymous` or absent -> no mark (design D11). Conversation shapes are UNCHANGED: every conversation of a contact shares its contact's level (no merge in this change, design D5), so ContactConversationSummaryDto of contact-history-opens-by-assignment (its fixtures/contact-conversation-history.v1.json) gains NO field and that change needs no follow-up for this one. The same section fixtures the refusal of a contact write that names a reserved WebChat identity key (design D12). Every child change's delta spec must cite these field names and codes VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "addressForms": {
+    "webchat-<32 lowercase hex>": "a SESSION address: one per WebChat session, the reply destination of that session's conversation (unchanged form)",
+    "webchat-visitor:<43 base64url chars>": "the LEVEL-1 key: base64url, unpadded, of SHA-256 over the UTF-8 bytes of the normalised visitorId (lowercase, hyphenated). Identity only: never a reply destination, never shown raw anywhere because it is never stored raw",
+    "webchat-external:<external_id>": "the LEVEL-2 key: the verified token's external_id verbatim. Identity only: never a reply destination",
+    "_rule": "all three are channel WebChat. The two `webchat-visitor:` / `webchat-external:` prefixes are RESERVED: only POST /webchat/sessions writes them. A WebChat address of either form typed through the contact routes before this change is renamed `legacy-<address>` by a one-shot data-only migration before the Api serves (design D14, round-1 audit F3): `legacy-webchat-external:x` is an ordinary address, reads Anonymous and is never found by a session. Every prefix test (reserved check, identityLevelRule, reply-destination skip) is ORDINAL and case-sensitive: `WebChat-External:x` is not a key, never reads Verified and is never found by a session (review P3, 2026-11-04). A contact keeps at most its 50 newest session addresses: a session create that would add a 51st drops the oldest (design D17)"
+  },
+  "identityLevelRule": [
+    "a WebChat address starting with `webchat-external:` -> \"Verified\"",
+    "else a WebChat address starting with `webchat-visitor:` -> \"Unverified\"",
+    "else a WebChat session address `webchat-<hex>` -> \"Anonymous\" (every contact created before this change, and every Anonymous session)",
+    "else (no WebChat address: a WhatsApp, Email, Voice... contact) -> absent"
+  ],
+  "examples": [
+    {
+      "case": "level 1: a returning visitor known by browser only, two sessions so far",
+      "request": { "method": "GET", "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d" },
+      "status": 200,
+      "body": {
+        "contactId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d",
+        "tenantId": "t-demo-0001",
+        "firstName": "Ana",
+        "doNotContact": false,
+        "addresses": [
+          { "channel": "WebChat", "address": "webchat-visitor:rcfqwP4uUDSA6hgRqgUIE3hCFFsXvDuxhE3MgUu0Y1M" },
+          { "channel": "WebChat", "address": "webchat-6a7b8c9d0e1f42a3b4c5d6e7f8a9b0c1" },
+          { "channel": "WebChat", "address": "webchat-8c1d2e3f4a5b46c7d8e9f0a1b2c3d4e5" }
+        ],
+        "customFields": { "webchatEmail": "ana@example.com" },
+        "channelConsent": {},
+        "createdAt": "2026-11-01T10:00:00.000+00:00",
+        "updatedAt": "2026-11-04T14:05:00.000+00:00",
+        "updatedBy": "system",
+        "fullName": "Ana",
+        "identityLevel": "Unverified"
+      }
+    },
+    {
+      "case": "level 2: a customer the tenant's site signed for",
+      "request": { "method": "GET", "path": "/api/v1/contacts/c0ffee00aa11bb22cc33dd44ee55ff66" },
+      "status": 200,
+      "body": {
+        "contactId": "c0ffee00aa11bb22cc33dd44ee55ff66",
+        "tenantId": "t-demo-0001",
+        "firstName": "Ana Pérez",
+        "doNotContact": false,
+        "addresses": [
+          { "channel": "WebChat", "address": "webchat-external:cust-48151623" },
+          { "channel": "WebChat", "address": "webchat-5b9e0c7a2d4f41e8a6c3b1d0e9f8a7b6" }
+        ],
+        "customFields": { "webchatEmail": "ana.perez@example.com" },
+        "channelConsent": {},
+        "createdAt": "2026-11-04T14:05:00.000+00:00",
+        "fullName": "Ana Pérez",
+        "identityLevel": "Verified"
+      }
+    },
+    {
+      "case": "Anonymous: a contact created before this change (or by a session with no usable visitorId)",
+      "request": { "method": "GET", "path": "/api/v1/contacts/e1f2a3b4c5d64e7f8a9b0c1d2e3f4a5b" },
+      "status": 200,
+      "body": {
+        "contactId": "e1f2a3b4c5d64e7f8a9b0c1d2e3f4a5b",
+        "tenantId": "t-demo-0001",
+        "doNotContact": false,
+        "addresses": [
+          { "channel": "WebChat", "address": "webchat-b2c3d4e5f6a748b9c0d1e2f3a4b5c6d7" }
+        ],
+        "customFields": {},
+        "channelConsent": {},
+        "createdAt": "2026-10-20T08:30:00.000+00:00",
+        "identityLevel": "Anonymous"
+      }
+    },
+    {
+      "case": "a contact with no WebChat address: identityLevel is absent",
+      "request": { "method": "GET", "path": "/api/v1/contacts/0b1c2d3e4f5a46b7c8d9e0f1a2b3c4d5" },
+      "status": 200,
+      "_omittedWhileNull": ["identityLevel"],
+      "body": {
+        "contactId": "0b1c2d3e4f5a46b7c8d9e0f1a2b3c4d5",
+        "tenantId": "t-demo-0001",
+        "firstName": "Luis",
+        "doNotContact": false,
+        "addresses": [
+          { "channel": "WhatsApp", "address": "5215512345678" }
+        ],
+        "customFields": {},
+        "channelConsent": {},
+        "createdAt": "2026-09-12T16:00:00.000+00:00",
+        "fullName": "Luis"
+      }
+    }
+  ],
+  "contactWriteRefusals": [
+    {
+      "case": "POST /contacts names a reserved WebChat identity key",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/contacts",
+        "body": { "firstName": "X", "addresses": [ { "channel": "WebChat", "address": "webchat-external:cust-48151623" } ] }
+      },
+      "status": 400,
+      "body": { "error": "reserved-contact-address", "details": ["webchat-external:cust-48151623"] }
+    },
+    {
+      "case": "PUT /contacts/{id} names a reserved WebChat identity key; nothing is written",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d",
+        "body": { "addresses": [ { "channel": "WebChat", "address": "webchat-visitor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } ] }
+      },
+      "status": 400,
+      "body": { "error": "reserved-contact-address", "details": ["webchat-visitor:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"] }
+    }
+  ],
+  "fields": {
+    "identityLevel": "string, `Verified` | `Unverified` | `Anonymous`, computed by identityLevelRule; ABSENT for a contact without any WebChat address. Read-only: POST/PUT /contacts ignore it in a body",
+    "customFields.webchatEmail": "string: the e-mail a WebChat session supplied (form field visitorEmail at level 1, token claim email at level 2), written only when the key is absent, by one targeted conditional update (never a full-row save; design D3). Display data: it never links contacts. It is matched by GET /contacts?search= so a GDPR export or purge can find the contact by e-mail (design D3)",
+    "addresses": "unchanged member; may now hold the reserved forms of addressForms, and at most 50 session addresses",
+    "error": "`reserved-contact-address` (ErrorDetailResponse), details = the offending addresses verbatim"
+  }
+}
