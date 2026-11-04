@@ -418,4 +418,35 @@ public sealed class ConversationReadScopeTests : IClassFixture<ConversationOwner
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await response.Content.ReadAsStringAsync()).Should().BeEmpty("a 404 keeps its empty body");
     }
+
+    // ═══ Task 2.7: the contact store reaches the rule through every conversation-keyed handler ═══
+
+    /// <summary>The three conversation-keyed reads the rule governs (design D1, D4, D10).</summary>
+    public static TheoryData<string> ConversationKeyedRoutes => new() { "", "/messages", "/history" };
+
+    [Theory]
+    [MemberData(nameof(ConversationKeyedRoutes))]
+    public async Task ConversationKeyedRead_ShouldAnswer200_WhenTheAgentHoldsAnOpenConversationOfTheSameContact(string suffix)
+    {
+        // Only the contact branch allows here (B neither owns nor is offered A's closed conversation), and that branch
+        // loads the contact through the IContactStore the handler passed to ConversationReadRule.ResolveAsync.
+        var (contact, _, closedOfA) = ContactWithAClosedConversation();
+        var (userB, agentB) = _factory.NewAgent("returning-route");
+        _factory.SeedConversation(
+            ConversationOwner.ForAgent(agentB.AgentId), ConversationState.Active, contactId: contact.ContactId);
+        using var clientB = _factory.ClientFor(userB);
+
+        await ShouldBeOkAsync(await clientB.GetAsync($"{ConversationRoute(closedOfA)}{suffix}"));
+    }
+
+    [Theory]
+    [MemberData(nameof(ConversationKeyedRoutes))]
+    public async Task ConversationKeyedRead_ShouldRefuseNotReadable_WhenTheAgentHoldsAnotherCallOfTheSharedAnonymousContact(string suffix)
+    {
+        // The shared-contact exclusion (D18) is decided on the contact the handler's IContactStore returns.
+        var (_, userB, _, callOfA) = TwoAnonymousCalls();
+        using var clientB = _factory.ClientFor(userB);
+
+        await ShouldBeNotReadableAsync(await clientB.GetAsync($"{ConversationRoute(callOfA)}{suffix}"));
+    }
 }
