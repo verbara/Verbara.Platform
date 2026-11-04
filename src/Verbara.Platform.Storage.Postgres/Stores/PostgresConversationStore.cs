@@ -366,35 +366,45 @@ internal sealed class PostgresConversationStore : IConversationStore
     public async Task<PagedResult<ContactConversationSummary>> ListContactSummariesAsync(
         TenantId tenantId, EntityId contactId, EntityId? ownedByAgentId, int page, int pageSize, CancellationToken ct)
     {
-        // Design D5 step 3, D18: a shared contact's list holds only the caller's own conversations, kind and id together.
-        var where = "c.tenant_id = @TenantId AND c.contact_id = @ContactId" +
-                    (ownedByAgentId.HasValue ? " AND c.owner_kind = @AgentOwnerKind AND c.owner_id = @OwnedByAgentId" : string.Empty);
-
-        void BindFilters(NpgsqlParameterCollection p)
-        {
-            p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
-            p.Add(new NpgsqlParameter("ContactId", NpgsqlDbType.Text) { Value = contactId.Value });
-            p.Add(new NpgsqlParameter("AgentOwnerKind", NpgsqlDbType.Integer) { Value = (int)ConversationOwnerKind.Agent });
-            if (ownedByAgentId is { } owner)
-                p.Add(new NpgsqlParameter("OwnedByAgentId", NpgsqlDbType.Text) { Value = owner.Value });
-        }
-
         var total = (int)(await _dataSource.ExecuteScalarAsync<long?>(
-            $"SELECT COUNT(*) FROM conversations c WHERE {where}", BindFilters, ct) ?? 0L);
+            $"SELECT COUNT(*) FROM conversations c WHERE {ContactSummaryFilter(ownedByAgentId.HasValue)}",
+            p => BindContactSummaryFilter(p, tenantId, contactId, ownedByAgentId), ct) ?? 0L);
 
         var rows = await _dataSource.QueryListAsync(
-            ContactSummarySelect + $"WHERE {where} " +
-            "ORDER BY c.created_at DESC, c.conversation_id COLLATE \"C\" DESC LIMIT @Limit OFFSET @Offset",
-            p =>
-            {
-                BindFilters(p);
-                p.Add(new NpgsqlParameter("Limit", NpgsqlDbType.Integer) { Value = pageSize });
-                p.Add(new NpgsqlParameter("Offset", NpgsqlDbType.Integer) { Value = (page - 1) * pageSize });
-            },
+            ContactSummariesPageSql(ownedByAgentId.HasValue),
+            p => BindContactSummariesPage(p, tenantId, contactId, ownedByAgentId, page, pageSize),
             ContactSummaryRow.Map, ct);
 
         return new PagedResult<ContactConversationSummary>(
             [.. rows.Select(r => r.ToSummary())], total, page, pageSize);
+    }
+
+    // Design D5 step 3, D18: a shared contact's list holds only the caller's own conversations, kind and id together.
+    private static string ContactSummaryFilter(bool ownedByAgent) =>
+        "c.tenant_id = @TenantId AND c.contact_id = @ContactId" +
+        (ownedByAgent ? " AND c.owner_kind = @AgentOwnerKind AND c.owner_id = @OwnedByAgentId" : string.Empty);
+
+    /// <summary>The page statement of <see cref="ListContactSummariesAsync"/> (design D6), exposed so its plan can be measured.</summary>
+    internal static string ContactSummariesPageSql(bool ownedByAgent) =>
+        ContactSummarySelect + $"WHERE {ContactSummaryFilter(ownedByAgent)} " +
+        "ORDER BY c.created_at DESC, c.conversation_id COLLATE \"C\" DESC LIMIT @Limit OFFSET @Offset";
+
+    /// <summary>Binds <see cref="ContactSummariesPageSql"/>'s parameters.</summary>
+    internal static void BindContactSummariesPage(
+        NpgsqlParameterCollection p, TenantId tenantId, EntityId contactId, EntityId? ownedByAgentId, int page, int pageSize)
+    {
+        BindContactSummaryFilter(p, tenantId, contactId, ownedByAgentId);
+        p.Add(new NpgsqlParameter("Limit", NpgsqlDbType.Integer) { Value = pageSize });
+        p.Add(new NpgsqlParameter("Offset", NpgsqlDbType.Integer) { Value = (page - 1) * pageSize });
+    }
+
+    private static void BindContactSummaryFilter(NpgsqlParameterCollection p, TenantId tenantId, EntityId contactId, EntityId? ownedByAgentId)
+    {
+        p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+        p.Add(new NpgsqlParameter("ContactId", NpgsqlDbType.Text) { Value = contactId.Value });
+        p.Add(new NpgsqlParameter("AgentOwnerKind", NpgsqlDbType.Integer) { Value = (int)ConversationOwnerKind.Agent });
+        if (ownedByAgentId is { } owner)
+            p.Add(new NpgsqlParameter("OwnedByAgentId", NpgsqlDbType.Text) { Value = owner.Value });
     }
 
     public async Task<bool> HoldsOpenConversationOfContactAsync(TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct)
