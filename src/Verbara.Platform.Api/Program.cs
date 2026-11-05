@@ -243,13 +243,13 @@ builder.Services.AddPlatformKnowledgeBase();
 builder.Services.AddPlatformSurveys();
 builder.Services.AddPlatformTypification();
 builder.Services.AddPlatformBilling();
-// P2c.2 (C3/C4) — platform-managed Typification LLM credit meter (records AiAnalysis/Tokens usage via
-// the Billing IMeteringService). Depends on IMeteringService (Billing) + IClock; registered here so
-// the suggestion handler can resolve ITypificationCreditMeter.
+// P2c.2 (C3/C4) — platform-managed Typification LLM credit meter (AiAnalysis/Tokens usage via the Billing
+// IMeteringService; depends on it + IClock), registered here so the suggestion handler resolves it.
 builder.Services.AddSingleton<Verbara.Platform.Typification.Ai.ITypificationCreditMeter,
     Verbara.Platform.Api.Services.BillingTypificationCreditMeter>();
 // Digital channels (WebChat + WhatsApp only) and the conditional Twilio SMS provider.
 builder.Services.AddDigitalChannels(builder.Configuration);
+builder.Services.AddSingleton<IContactOptOutService, ContactOptOutService>();  // contact opt-out (route + inbound callers)
 
 // ─── GDPR Services ──────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IGdprExportService, GdprExportService>();

@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Serialization;
+using Verbara.Platform.Api.Services;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
@@ -38,6 +39,12 @@ internal static class ContactEndpoints
     /// <summary>The permission <c>DELETE /contacts/{id}</c> requires (design D1, D4).</summary>
     internal const string DeletePermission = "contacts:contact:delete";
 
+    /// <summary>
+    /// The permission <c>POST /contacts/{id}/opt-out</c> requires (design D16): whoever handles a contact's
+    /// conversations can record that the contact asked not to be contacted.
+    /// </summary>
+    internal const string OptOutPermission = "contacts:conversation:handle";
+
     private const string ReservedAddressDescription =
         "A WebChat address that starts with `webchat-visitor:` or `webchat-external:` answers 400 `reserved-contact-address`, " +
         "with the offending addresses in `details`, and nothing is written. `identityLevel` in the body is ignored.";
@@ -46,6 +53,14 @@ internal static class ContactEndpoints
         "`channelConsent` keys are channel names as `GET` writes them (`Voice`, `WhatsApp`, ...), case-sensitive; each " +
         "named channel takes its value and the others keep theirs. Any other key answers 400 `unknown-consent-channel`, " +
         "with the offending keys in `details`, and nothing is written.";
+
+    private const string OptOutDescription =
+        "Records that the contact asked not to be contacted: `doNotContact: true` marks the contact do-not-contact and " +
+        "each of `channels` is recorded as `false` in `channelConsent`; channels not named keep their value. It never " +
+        "clears do-not-contact and never records `true` (that is `PUT /contacts/{id}`). Requires " +
+        "`contacts:conversation:handle` (403 `not-permitted`, evaluated first). `channels` are channel names as `GET` " +
+        "writes them, case-sensitive; any other value answers 400 `unknown-consent-channel` with the offending values in " +
+        "`details`, and nothing is written. A body that changes nothing answers 200 and writes nothing.";
 
     public static void MapContactEndpoints(this IEndpointRouteBuilder app)
     {
@@ -66,6 +81,10 @@ internal static class ContactEndpoints
             .WithDescription(ReservedAddressDescription + " " + ChannelConsentDescription)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapDelete("/{id}", DeleteContact)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
+        // Restrict-only, for whoever handles the contact (design D16); 400 and 404 are declared by the return type.
+        group.MapPost("/{id}/opt-out", OptOutContact)
+            .WithDescription(OptOutDescription)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
     }
 
@@ -284,6 +303,31 @@ internal static class ContactEndpoints
     }
 
     /// <summary>
+    /// <c>POST /contacts/{id}/opt-out</c> (design D16): the permission first, then the channel names (as D8 checks
+    /// <c>channelConsent</c> keys), then the contact's existence, then <see cref="IContactOptOutService"/> with the
+    /// caller as the actor.
+    /// </summary>
+    private static async Task<Results<Ok<Contact>, NotFound, BadRequest<ErrorDetailResponse>, JsonHttpResult<ErrorResponse>>> OptOutContact(
+        string id,
+        HttpContext context,
+        [FromBody] ContactOptOutRequest body,
+        [FromServices] IContactOptOutService optOut,
+        CancellationToken ct)
+    {
+        if (!await IsPermittedAsync(context, OptOutPermission))
+            return NotPermitted();
+
+        var unknownChannels = UnknownChannelNames(body.Channels);
+        if (unknownChannels.Count > 0)
+            return TypedResults.BadRequest(new ErrorDetailResponse(UnknownConsentChannelCode, unknownChannels));
+
+        List<ChannelType> channels = body.Channels is null ? [] : [.. body.Channels.Select(name => ChannelsByName[name])];
+        var contact = await optOut.OptOutAsync(
+            GetTenantId(context), EntityId.From(id), body.DoNotContact == true, channels, ContactActor.Of(context.User), ct);
+        return contact is null ? TypedResults.NotFound() : TypedResults.Ok(contact);
+    }
+
+    /// <summary>
     /// Whether the caller's roles hold <paramref name="permission"/>, through the <c>Permission:&lt;id&gt;</c> policy
     /// (design D2). Called before the body is validated and before the contact is read.
     /// </summary>
@@ -327,7 +371,7 @@ internal static class ContactEndpoints
     private static List<string> UnknownChannelNames(IEnumerable<string>? names) =>
         names is null
             ? []
-            : [.. names.Where(name => !ChannelsByName.ContainsKey(name)).Distinct(StringComparer.Ordinal)];
+            : [.. names.Where(name => name is null || !ChannelsByName.ContainsKey(name)).Distinct(StringComparer.Ordinal)];
 
     private static TenantId GetTenantId(HttpContext context)
     {

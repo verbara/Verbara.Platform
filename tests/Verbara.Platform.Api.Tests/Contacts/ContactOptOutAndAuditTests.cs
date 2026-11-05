@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
+using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
@@ -125,6 +126,27 @@ public sealed class ContactOptOutAndAuditTests : IClassFixture<ContactWritesApiF
         _factory.ContactAuditOf(contact.ContactId).Should().BeEmpty("a call that changes nothing records nothing");
     }
 
+    [Fact]
+    public async Task OptOut_ShouldAnswerTheContactAndWriteNothing_WhenEveryNamedValueIsAlreadyInPlace()
+    {
+        var contact = FixtureContact(_factory, doNotContact: true);
+        contact.SetConsent(ChannelType.Sms, false);
+        _factory.SaveContact(contact);
+        var before = _factory.LoadContact(contact.ContactId)!;
+        var (updatedAt, updatedBy) = (before.UpdatedAt, before.UpdatedBy);
+        using var agent = AgentClient(out _);
+
+        var body = await ShouldBeAsync(await agent.SendAsync(Request(OptOut["request"]!, contact.ContactId.Value)), 200);
+
+        body!["doNotContact"]!.GetValue<bool>().Should().BeTrue();
+        JsonNode.DeepEquals(body["channelConsent"], new JsonObject { ["Voice"] = true, ["Sms"] = false })
+            .Should().BeTrue(body.ToJsonString());
+        var stored = _factory.LoadContact(contact.ContactId)!;
+        stored.UpdatedAt.Should().Be(updatedAt, "a call that changes nothing writes nothing");
+        stored.UpdatedBy.Should().Be(updatedBy);
+        _factory.ContactAuditOf(contact.ContactId).Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("quality_analyst")]
     [InlineData("api")]
@@ -246,12 +268,23 @@ public sealed class ContactOptOutAndAuditTests : IClassFixture<ContactWritesApiF
     [Fact]
     public async Task OptOutService_ShouldRecordTheSystemActor_WhenCalledWithNoHttpCaller()
     {
-        // The service does not exist today; task 2.5 replaces this lookup with the typed call that records
-        // actorId `system`, actorType `system` and updatedBy `system` (fixture `audit.actorResolution.service`).
-        var serviceType = typeof(Program).Assembly.GetTypes().SingleOrDefault(t => t.Name == "IContactOptOutService");
-        serviceType.Should().NotBeNull("IContactOptOutService is the service the route wraps");
-        _factory.Services.GetService(serviceType!).Should().NotBeNull();
-        await Task.CompletedTask;
+        // fixture `audit.actorResolution.service`: no HTTP caller, so the actor is the platform itself.
+        var expected = Audit["actorResolution"]!["service"]!;
+        var contact = FixtureContact(_factory);
+        var service = _factory.Services.GetRequiredService<IContactOptOutService>();
+
+        var result = await service.OptOutAsync(
+            ContactWritesApiFactory.Tenant, contact.ContactId, doNotContact: true, [ChannelType.Sms], ContactActor.System, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        var stored = _factory.LoadContact(contact.ContactId)!;
+        stored.DoNotContact.Should().BeTrue();
+        stored.ChannelConsent.Should().Contain(ChannelType.Sms, false);
+        stored.UpdatedBy.Should().Be(expected["updatedBy"]!.GetValue<string>());
+        var entry = _factory.ContactAuditOf(contact.ContactId).Should().ContainSingle().Subject;
+        entry.Action.Should().Be(Audit["optOut"]!["action"]!.GetValue<string>());
+        entry.ActorId.Should().Be(expected["actorId"]!.GetValue<string>());
+        entry.ActorType.Should().Be(expected["actorType"]!.GetValue<string>());
     }
 
     // ─── the actor through real authentication (second spec audit F1) ────────
