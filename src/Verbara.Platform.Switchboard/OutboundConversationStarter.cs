@@ -104,6 +104,16 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
                 OutboundStartCodes.ConversationNotSendable, open.ConversationId, ConversationOwnerKind.Agent);
         }
 
+        // A new conversation is not started with a contact marked do-not-contact, nor on a channel whose consent the
+        // contact recorded as no. The caller's own open, sendable conversation is still reused: a message on that
+        // thread is accepted the same way when it is sent to the conversation directly. A channel with no recorded
+        // answer refuses nothing.
+        if (open is null && contact.DoNotContact)
+            return Refuse(request, OutboundStartCodes.ContactDoNotContact);
+
+        if (open is null && contact.ChannelConsent.TryGetValue(channel, out var consented) && !consented)
+            return Refuse(request, OutboundStartCodes.ContactConsentWithdrawn);
+
         if (channel == ChannelType.WhatsApp)
         {
             // Meta's customer-service window belongs to the user: any inbound message from this contact on WhatsApp

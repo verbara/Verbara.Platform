@@ -78,6 +78,8 @@ internal static class ConversationEndpoints
         group.MapPost("/{id}/unhold", UnholdConversation);
         // agent-started-conversations (D14): the 403 (not-an-agent), 500 (start-persist-failed) and 502
         // (channel-send-failed) bodies are written as JSON results, which declare no response metadata of their own.
+        // The 409 refusals, contact-do-not-contact and contact-consent-withdrawn included, come from the
+        // Conflict<ConversationStartRefusal> in the handler's return type.
         group.MapPost("/", CreateConversation)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
             .Produces<ConversationStartRefusal>(StatusCodes.Status500InternalServerError)
