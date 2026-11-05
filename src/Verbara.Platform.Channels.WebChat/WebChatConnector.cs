@@ -18,7 +18,7 @@ namespace Verbara.Platform.Channels.WebChat;
 /// send fails with <see cref="SessionNotConnected"/>, exactly as for a closed session. Cross-replica
 /// routing (a backplane) is deferred.
 /// </remarks>
-public sealed class WebChatConnector : IChannelConnector
+public sealed class WebChatConnector : IChannelConnector, IConnectedSessionDirectory
 {
     /// <summary>The error code of a send whose visitor has no connected session on this replica.</summary>
     public const string SessionNotConnected = "SESSION_NOT_CONNECTED";
@@ -65,6 +65,28 @@ public sealed class WebChatConnector : IChannelConnector
             ExternalMessageId: externalMessageId,
             ErrorCode: null,
             ErrorMessage: null);
+    }
+
+    /// <summary>
+    /// Connected means a socket is attached: a session counts as connected from its creation, before any socket, but a
+    /// send to it would find nothing to write to. The contact's address list runs oldest to newest. A session of another
+    /// tenant or contact never answers for an address it shares, so a typed address reaches no one else's visitor.
+    /// </summary>
+    public async Task<ChannelAddress?> FindNewestConnectedAddressAsync(Contact contact, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(contact);
+        foreach (var address in contact.Addresses.Where(a => a.IsWebChatSessionAddress()).Reverse())
+        {
+            var session = await _sessionManager.GetSessionByVisitorAddressAsync(address.Address).ConfigureAwait(false);
+            if (session is { IsConnected: true, AttachedSockets: > 0 }
+                && session.TenantId == contact.TenantId
+                && session.ContactId == contact.ContactId)
+            {
+                return address;
+            }
+        }
+
+        return null;
     }
 
     private static SendResult NotConnected(string reason) =>

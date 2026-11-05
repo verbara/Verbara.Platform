@@ -18,6 +18,7 @@ using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Switchboard;
 
 namespace Verbara.Platform.Api.Tests.Conversations;
 
@@ -354,6 +355,221 @@ public sealed class WebChatSessionBindingLiveDbTests
         Env.AssertAssignedToTheQueue(await env.ConversationAsync(k3));
     }
 
+    // ─── Review round: a conversation an agent starts belongs to the session it was sent to ───────────────────────────
+
+    // Finding 1. Level 1 on and off, and with or without an earlier visitor message: a session that never spoke has its
+    // first-message mark unused, and the answer must not hand the agent's conversation to a queue.
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task VisitorAnswer_ShouldJoinTheConversationTheAgentStarted_WhenTheSessionsConversationEnded(bool level1Enabled, bool spokeBefore)
+    {
+        await using var env = await Env.CreateAsync(_postgres, level1Enabled);
+        var session = await env.CreateSessionAsync(VisitorId);
+        var k1 = session.ConversationId;
+        var contactId = session.ContactId;
+        (await env.Contacts.GetByIdAsync(Env.Tenant, contactId, CancellationToken.None))!.IdentityLevel
+            .Should().Be(level1Enabled ? ContactIdentityLevel.Unverified : ContactIdentityLevel.Anonymous);
+        if (spokeBefore)
+            await env.PostAsync(session, "antes de cerrar");
+        await env.CloseAsync(k1);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var socket = await env.AttachSocketAsync(session, timeout.Token);
+
+        var started = await env.StartAsAgentAsync(contactId, "escribe el agente");
+
+        started.RefusalCode.Should().BeNull();
+        var kOut = started.Conversation!.ConversationId;
+        (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(3))).Should().Contain("escribe el agente");
+
+        await env.PostAsync(session, "contesta el visitante");
+
+        (await env.ConversationsHoldingAsync("contesta el visitante")).Should().Equal([kOut.Value], "the answer belongs to the agent's conversation");
+        session.ConversationId.Should().Be(kOut, "the session is rebound to it");
+        var after = await env.ConversationAsync(kOut);
+        after.State.Should().Be(ConversationState.Active);
+        after.Owner.Should().Be(ConversationOwner.ForAgent(Env.Agent), "the agent keeps it");
+        env.RoutingsOf(kOut).Should().Be(0, "nothing routes a conversation an agent holds");
+        after.Metadata.Should().Contain(SessionAddressKey, session.CustomerAddress.Address);
+        (await env.ConversationCountOfContactAsync(contactId)).Should().Be(2L, "no third conversation opens");
+
+        var reply = await env.ReplyAsync(kOut, "sigue el agente");
+        reply.DeliveryStatus.Should().NotBe(MessageDeliveryStatus.Failed);
+        (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(3))).Should().Contain("sigue el agente");
+    }
+
+    // Finding 1, the D8 rule on the conversation it finds: an agent-started conversation that was resolved closes on the
+    // visitor's return, and the message opens its own.
+    [Fact]
+    public async Task VisitorAnswer_ShouldCloseTheAgentsResolvedConversationAndOpenItsOwn_WhenTheSessionsConversationEnded()
+    {
+        await using var env = await Env.CreateAsync(_postgres);
+        var session = await env.CreateSessionAsync();
+        var k1 = session.ConversationId;
+        await env.CloseAsync(k1);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var socket = await env.AttachSocketAsync(session, timeout.Token);
+        var kOut = (await env.StartAsAgentAsync(session.ContactId, "escribe el agente")).Conversation!.ConversationId;
+        await env.ResolveAsync(kOut);
+
+        await env.PostAsync(session, "vuelvo");
+
+        var closed = await env.ConversationAsync(kOut);
+        closed.State.Should().Be(ConversationState.Closed);
+        closed.Metadata.Should().Contain(ConversationCloseReasons.MetadataKey, ConversationCloseReasons.CustomerReturned);
+        env.ReturnCloseEventsOf(kOut).Should().Be(1);
+        var k3 = EntityId.From((await env.ConversationsHoldingAsync("vuelvo")).Should().ContainSingle().Subject);
+        k3.Should().NotBe(kOut).And.NotBe(k1);
+        var opened = await env.ConversationAsync(k3);
+        opened.Metadata.Should().Contain(SessionAddressKey, session.CustomerAddress.Address);
+        Env.AssertAssignedToTheQueue(opened);
+    }
+
+    // Finding 2. The oldest session has no socket, the newest has one: today's start takes the oldest and is refused.
+    [Fact]
+    public async Task AgentStart_ShouldWriteToTheConnectedSession_WhenTheVerifiedContactsOldestSessionIsGone()
+    {
+        await using var env = await Env.CreateAsync(_postgres);
+        var (s1, s2) = await env.SeedVerifiedContactWithTwoSessionsAsync();
+        await env.CloseAsync(s1.ConversationId);
+        await env.CloseAsync(s2.ConversationId);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var s2Socket = await env.AttachSocketAsync(s2, timeout.Token);
+
+        var started = await env.StartAsAgentAsync(s2.ContactId, "para el segundo dispositivo");
+
+        started.RefusalCode.Should().BeNull();
+        (await ReceiveTextAsync(s2Socket, TimeSpan.FromSeconds(3))).Should().Contain("para el segundo dispositivo");
+        (await env.ConversationAsync(started.Conversation!.ConversationId)).Metadata
+            .Should().Contain(SessionAddressKey, s2.CustomerAddress.Address);
+    }
+
+    // Finding 2. Two devices connected: the newest takes it, and the replies follow it.
+    [Fact]
+    public async Task AgentStart_ShouldWriteToTheNewestSessionAndKeepReplyingThere_WhenTheVerifiedContactHasTwoConnected()
+    {
+        await using var env = await Env.CreateAsync(_postgres);
+        var (s1, s2) = await env.SeedVerifiedContactWithTwoSessionsAsync();
+        await env.CloseAsync(s1.ConversationId);
+        await env.CloseAsync(s2.ConversationId);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var s1Socket = await env.AttachSocketAsync(s1, timeout.Token);
+        using var s2Socket = await env.AttachSocketAsync(s2, timeout.Token);
+
+        var kOut = (await env.StartAsAgentAsync(s2.ContactId, "al mas nuevo")).Conversation!.ConversationId;
+        (await ReceiveTextAsync(s2Socket, TimeSpan.FromSeconds(3))).Should().Contain("al mas nuevo");
+        (await ReceiveTextAsync(s1Socket, TimeSpan.FromMilliseconds(500))).Should().BeNull("the older device is not the destination");
+
+        var reply = await env.ReplyAsync(kOut, "la respuesta sigue");
+        reply.DeliveryStatus.Should().NotBe(MessageDeliveryStatus.Failed);
+        (await ReceiveTextAsync(s2Socket, TimeSpan.FromSeconds(3))).Should().Contain("la respuesta sigue");
+        (await ReceiveTextAsync(s1Socket, TimeSpan.FromMilliseconds(500))).Should().BeNull();
+    }
+
+    // Preservation control, green before the fix: the oldest session is the connected one.
+    [Fact]
+    public async Task AgentStart_ShouldWriteToTheOldestSession_WhenItIsTheOnlyConnectedOne()
+    {
+        await using var env = await Env.CreateAsync(_postgres);
+        var (s1, s2) = await env.SeedVerifiedContactWithTwoSessionsAsync();
+        await env.CloseAsync(s1.ConversationId);
+        await env.CloseAsync(s2.ConversationId);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var s1Socket = await env.AttachSocketAsync(s1, timeout.Token);
+
+        var started = await env.StartAsAgentAsync(s1.ContactId, "al unico conectado");
+
+        started.RefusalCode.Should().BeNull();
+        (await ReceiveTextAsync(s1Socket, TimeSpan.FromSeconds(3))).Should().Contain("al unico conectado");
+    }
+
+    // Preservation control, green before the fix: no session connected keeps today's refusal, and nothing is stored.
+    [Fact]
+    public async Task AgentStart_ShouldBeRefusedAndStoreNothing_WhenNoSessionOfTheContactIsConnected()
+    {
+        await using var env = await Env.CreateAsync(_postgres);
+        var (s1, s2) = await env.SeedVerifiedContactWithTwoSessionsAsync();
+        await env.CloseAsync(s1.ConversationId);
+        await env.CloseAsync(s2.ConversationId);
+
+        var started = await env.StartAsAgentAsync(s1.ContactId, "nadie conectado");
+
+        started.RefusalCode.Should().Be(OutboundStartCodes.ChannelSendFailed);
+        (await env.ConversationCountOfContactAsync(s1.ContactId)).Should().Be(2L);
+    }
+
+    // Finding 2, the reuse branch: the caller's own open conversation goes to its own session, not to the contact's first.
+    [Fact]
+    public async Task AgentStart_ShouldWriteToTheSessionOfTheConversationItReuses_WhenAnOlderSessionIsConnected()
+    {
+        await using var env = await Env.CreateAsync(_postgres);
+        var (s1, s2) = await env.SeedVerifiedContactWithTwoSessionsAsync();
+        await env.CloseAsync(s1.ConversationId);
+        await env.GiveToAgentAsync(s2.ConversationId);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var s1Socket = await env.AttachSocketAsync(s1, timeout.Token);
+        using var s2Socket = await env.AttachSocketAsync(s2, timeout.Token);
+
+        var started = await env.StartAsAgentAsync(s2.ContactId, "en la misma conversacion");
+
+        started.RefusalCode.Should().BeNull();
+        started.Reused.Should().BeTrue();
+        (await ReceiveTextAsync(s2Socket, TimeSpan.FromSeconds(3))).Should().Contain("en la misma conversacion");
+        (await ReceiveTextAsync(s1Socket, TimeSpan.FromMilliseconds(500))).Should().BeNull();
+    }
+
+    // D9's point, held: the agent's conversation is out of reach of the contact's other session, whose message opens its own.
+    // The other half is the regression: the session it was sent to joins it.
+    [Fact]
+    public async Task VisitorMessage_ShouldStayOutOfTheAgentsConversation_WhenItWentToAnotherSessionOfTheContact()
+    {
+        await using var env = await Env.CreateAsync(_postgres);
+        var (s1, s2) = await env.SeedVerifiedContactWithTwoSessionsAsync();
+        var k1 = s1.ConversationId;
+        await env.CloseAsync(k1);
+        await env.CloseAsync(s2.ConversationId);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var s2Socket = await env.AttachSocketAsync(s2, timeout.Token);
+        var kOut = (await env.StartAsAgentAsync(s2.ContactId, "al segundo")).Conversation!.ConversationId;
+
+        await env.PostAsync(s1, "desde el primero");
+
+        var k3 = EntityId.From((await env.ConversationsHoldingAsync("desde el primero")).Should().ContainSingle().Subject);
+        k3.Should().NotBe(kOut, "another session's conversation stays out of reach").And.NotBe(k1);
+        (await env.InboundCountAsync(kOut)).Should().Be(0);
+        (await env.ConversationAsync(kOut)).Owner.Should().Be(ConversationOwner.ForAgent(Env.Agent));
+        Env.AssertAssignedToTheQueue(await env.ConversationAsync(k3));
+
+        await env.PostAsync(s2, "desde el segundo");
+
+        (await env.ConversationsHoldingAsync("desde el segundo")).Should().Equal([kOut.Value], "the session the agent wrote to joins it");
+        s2.ConversationId.Should().Be(kOut);
+    }
+
+    // Finding 2, the deprecated route: it records the connected session too, so the session's next message finds it.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DeprecatedStart_ShouldRecordTheConnectedSession_WhenTheContactHasOne(bool level1Enabled)
+    {
+        await using var env = await Env.CreateAsync(_postgres, level1Enabled);
+        var session = await env.CreateSessionAsync(VisitorId);
+        await env.CloseAsync(session.ConversationId);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var socket = await env.AttachSocketAsync(session, timeout.Token);
+
+        var kQueued = await env.PostConversationWithNoMessageAsync(session.ContactId);
+
+        await env.PostAsync(session, "contesto a la encolada");
+
+        (await env.ConversationsHoldingAsync("contesto a la encolada")).Should().Equal([kQueued.Value]);
+        var after = await env.ConversationAsync(kQueued);
+        after.Metadata.Should().Contain(SessionAddressKey, session.CustomerAddress.Address);
+        Env.AssertAssignedToTheQueue(after);
+    }
+
     private static async Task<string?> ReceiveTextAsync(WebSocket socket, TimeSpan wait)
     {
         using var cts = new CancellationTokenSource(wait);
@@ -370,7 +586,7 @@ public sealed class WebChatSessionBindingLiveDbTests
     }
 
     /// <summary>The real host over <paramref name="ConnectionString"/>; its conversation store is hooked so a test can fail one read.</summary>
-    private sealed class BoundHost(string ConnectionString) : AuthenticatedPlatformApiFactory
+    private sealed class BoundHost(string ConnectionString, bool Level1Enabled) : AuthenticatedPlatformApiFactory
     {
         public IAuditService Audit { get; } = Substitute.For<IAuditService>();
 
@@ -378,7 +594,7 @@ public sealed class WebChatSessionBindingLiveDbTests
         {
             base.ConfigureWebHost(builder);
             builder.UseSetting("ConnectionStrings:Postgres", ConnectionString);
-            builder.UseSetting("WebChat:VisitorIdentity:Level1Enabled", "true");
+            builder.UseSetting("WebChat:VisitorIdentity:Level1Enabled", Level1Enabled ? "true" : "false");
         }
 
         protected override IHost CreateHost(IHostBuilder builder)
@@ -403,7 +619,7 @@ public sealed class WebChatSessionBindingLiveDbTests
     {
         public static readonly TenantId Tenant = new(TenantValue);
         private static readonly EntityId Queue = EntityId.From("q-session-binding");
-        private static readonly EntityId Agent = EntityId.From("agent-session-binding");
+        public static readonly EntityId Agent = EntityId.From("agent-session-binding");
 
         private readonly BoundHost _host;
         private readonly HttpClient _client;
@@ -411,9 +627,9 @@ public sealed class WebChatSessionBindingLiveDbTests
         private readonly List<ConversationStateChangedEvent> _stateChanges = [];
         private readonly IDisposable _subscription;
 
-        private Env(string connectionString)
+        private Env(string connectionString, bool level1Enabled)
         {
-            _host = new BoundHost(connectionString);
+            _host = new BoundHost(connectionString, level1Enabled);
             _client = _host.CreateClient();
             _client.DefaultRequestHeaders.Add("Authorization", $"Bearer {AuthenticatedPlatformApiFactory.TestApiKey}");
             _client.DefaultRequestHeaders.Add("X-Tenant-Id", TenantValue);
@@ -430,18 +646,31 @@ public sealed class WebChatSessionBindingLiveDbTests
         private IConversationStore Conversations => Service<IConversationStore>();
         private T Service<T>() where T : notnull => _host.Services.GetRequiredService<T>();
 
-        public static async Task<Env> CreateAsync(ConversationClockReconcileLiveDbTests.PostgresContainer postgres)
+        public static async Task<Env> CreateAsync(ConversationClockReconcileLiveDbTests.PostgresContainer postgres, bool level1Enabled = true)
         {
             var name = $"bind_{Guid.NewGuid():N}";
             await using (var admin = NpgsqlDataSource.Create(postgres.ConnectionStringFor("postgres")))
             await using (var cmd = admin.CreateCommand($"CREATE DATABASE {name}"))
                 await cmd.ExecuteNonQueryAsync();
 
-            var env = new Env(postgres.ConnectionStringFor(name));
+            var env = new Env(postgres.ConnectionStringFor(name), level1Enabled);
             await env.Service<IQueueStore>().SaveAsync(
                 new Queue { QueueId = Queue, TenantId = Tenant, Name = "Session binding", CreatedAt = DateTimeOffset.UtcNow },
                 CancellationToken.None);
+            await env.InsertAgentAsync();
             return env;
+        }
+
+        // SaveAsync only updates an agent; creating one is the admin route's insert, with a ledger row, which these tests do not read.
+        private async Task InsertAgentAsync()
+        {
+            await using var cmd = _db.CreateCommand(
+                "INSERT INTO agents (agent_id, tenant_id, user_id, display_name, state, capacity, created_at) " +
+                "VALUES (@AgentId, @TenantId, @UserId, 'Session binding agent', 1, '{\"maxChat\":10,\"maxTotal\":10}'::jsonb, now())");
+            cmd.Parameters.Add(new NpgsqlParameter("AgentId", NpgsqlDbType.Text) { Value = Agent.Value });
+            cmd.Parameters.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = TenantValue });
+            cmd.Parameters.Add(new NpgsqlParameter("UserId", NpgsqlDbType.Text) { Value = "user-session-binding" });
+            await cmd.ExecuteNonQueryAsync();
         }
 
         /// <summary>A session through the real route: its own contact and conversation.</summary>
@@ -463,6 +692,44 @@ public sealed class WebChatSessionBindingLiveDbTests
             contact.AddAddress(secondAddress);
             await Contacts.SaveAsync(contact, CancellationToken.None);
             return (await SeedSessionAsync(contact.ContactId, firstAddress), await SeedSessionAsync(contact.ContactId, secondAddress));
+        }
+
+        /// <summary>As above, on a contact that also holds the customer's verified key.</summary>
+        public async Task<(WebChatSession First, WebChatSession Second)> SeedVerifiedContactWithTwoSessionsAsync()
+        {
+            var firstAddress = new ChannelAddress(ChannelType.WebChat, $"webchat-{Guid.NewGuid():N}");
+            var secondAddress = new ChannelAddress(ChannelType.WebChat, $"webchat-{Guid.NewGuid():N}");
+            var contact = new Contact { ContactId = EntityId.New(), TenantId = Tenant, CreatedAt = DateTimeOffset.UtcNow };
+            contact.AddAddress(new ChannelAddress(ChannelType.WebChat, ChannelAddress.WebChatExternalKeyPrefix + "cust-two-devices"));
+            contact.AddAddress(firstAddress);
+            contact.AddAddress(secondAddress);
+            await Contacts.SaveAsync(contact, CancellationToken.None);
+            contact.IdentityLevel.Should().Be(ContactIdentityLevel.Verified);
+            return (await SeedSessionAsync(contact.ContactId, firstAddress), await SeedSessionAsync(contact.ContactId, secondAddress));
+        }
+
+        /// <summary>What <c>POST /conversations</c> with a first message calls once it has the caller's agent.</summary>
+        public Task<OutboundStartOutcome> StartAsAgentAsync(EntityId contactId, string text) =>
+            Service<IOutboundConversationStarter>().StartAsync(
+                new OutboundStartRequest(
+                    Tenant, contactId, ChannelType.WebChat, Agent, "user-session-binding", new MessageEnvelope([new TextBlock(text)])),
+                CancellationToken.None);
+
+        /// <summary>The deprecated route: <c>POST /conversations</c> with no first message.</summary>
+        public async Task<EntityId> PostConversationWithNoMessageAsync(EntityId contactId)
+        {
+            using var response = await _client.PostAsJsonAsync(
+                "/api/v1/conversations", new { contactId = contactId.Value, channel = nameof(ChannelType.WebChat) });
+            response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+            return EntityId.From(response.Headers.Location!.ToString().Split('/')[^1]);
+        }
+
+        public async Task<long> ConversationCountOfContactAsync(EntityId contactId)
+        {
+            await using var cmd = _db.CreateCommand("SELECT count(*) FROM conversations WHERE tenant_id = @TenantId AND contact_id = @ContactId");
+            cmd.Parameters.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = TenantValue });
+            cmd.Parameters.Add(new NpgsqlParameter("ContactId", NpgsqlDbType.Text) { Value = contactId.Value });
+            return (long)(await cmd.ExecuteScalarAsync())!;
         }
 
         private async Task<WebChatSession> SeedSessionAsync(EntityId contactId, ChannelAddress address)

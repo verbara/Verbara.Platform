@@ -110,7 +110,10 @@ internal sealed partial class WebChatInboundRouter
         // delivery opened, or an earlier routing that found no queue) — the predicate the webhook path uses.
         var firstOfSession = _sessionManager.TryMarkRouted(sessionId);
         var conversation = await ReadForPublishAsync(tenantId, pipelineResult.ConversationId).ConfigureAwait(false);
-        if (!firstOfSession
+
+        // A session's first message can answer a conversation an agent started towards it: the agent keeps it.
+        var heldByAgent = conversation?.Owner?.Kind == ConversationOwnerKind.Agent;
+        if ((!firstOfSession || heldByAgent)
             && (conversation is null || !WebhookInboundProcessor.NeedsRouting(pipelineResult, conversation)))
         {
             // Every stored message is published, not only the one that routes (contact-history-opens-by-assignment,

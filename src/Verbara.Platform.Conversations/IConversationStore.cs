@@ -10,6 +10,12 @@ public interface IConversationStore
     Task<Conversation?> FindActiveByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct);
 
     /// <summary>
+    /// The contact's newest non-terminal WebChat conversation that records <paramref name="sessionAddress"/> as its session
+    /// address, or <c>null</c>. A conversation of another session of the contact is never returned.
+    /// </summary>
+    Task<Conversation?> FindOpenBySessionAddressAsync(TenantId tenantId, EntityId contactId, ChannelAddress sessionAddress, CancellationToken ct);
+
+    /// <summary>
     /// When the contact last wrote to the tenant on <paramref name="channel"/>: the creation time of the most recent
     /// inbound message in <b>any</b> of the contact's conversations on that channel, or <see langword="null"/> when
     /// there is none. WhatsApp's customer-service window belongs to the user, not to one conversation, so an agent

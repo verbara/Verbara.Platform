@@ -19,8 +19,10 @@ namespace Verbara.Platform.Channels.Core.Pipeline;
 /// </list>
 /// So a message never lands in a conversation the inactivity close closed or the retention purge deleted meanwhile.
 /// A WebChat session's message (<see cref="InboundMessage.SessionBinding"/>) applies these rules to its session's own
-/// conversation only, never to the contact's other conversations, and only while that conversation is the attributed
-/// contact's. Anything else opens a new conversation for the session.
+/// conversation only, and only while that conversation is the attributed contact's. When that one is over, they apply to
+/// the contact's open conversation that records this session's address, which is one an agent started towards this
+/// session. Another session's conversation of the same contact is never reached. Anything else opens a new conversation
+/// for the session.
 /// </summary>
 public sealed class ConversationResolutionStep : IPipelineStep
 {
@@ -115,9 +117,16 @@ public sealed class ConversationResolutionStep : IPipelineStep
         {
             var own = await _conversationStore.GetByIdAsync(context.TenantId, binding.ConversationId, ct).ConfigureAwait(false);
 
-            // Gone, ended, or left behind by a deleted contact: neither claimed nor closed, whatever its state.
+            // Gone, ended, or left behind by a deleted contact: neither claimed nor closed, whatever its state. The session
+            // may still have an open conversation, because an agent can start one towards it, or a concurrent message of the
+            // session can have opened one.
             if (own is null || own.ContactId != contact.ContactId || ConversationStateMachine.IsTerminal(own.State))
-                break;
+            {
+                own = await _conversationStore.FindOpenBySessionAddressAsync(
+                    context.TenantId, contact.ContactId, binding.SessionAddress, ct).ConfigureAwait(false);
+                if (own is null)
+                    break;
+            }
 
             var now = _clock.UtcNow;
 

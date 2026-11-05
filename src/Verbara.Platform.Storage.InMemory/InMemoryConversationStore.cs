@@ -97,6 +97,22 @@ internal sealed class InMemoryConversationStore : IConversationStore
         return Task.CompletedTask;
     }
 
+    public Task<Conversation?> FindOpenBySessionAddressAsync(TenantId tenantId, EntityId contactId, ChannelAddress sessionAddress, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sessionAddress);
+        var result = _items.Values
+            .Where(c => c.TenantId == tenantId
+                && c.ContactId == contactId
+                && c.Channel == ChannelType.WebChat
+                && !ConversationStateMachine.IsTerminal(c.State)
+                && c.Metadata.TryGetValue(WebChatConversationMetadata.SessionAddressKey, out var recorded)
+                && recorded == sessionAddress.Address)
+            .OrderByDescending(c => c.CreatedAt)
+            .FirstOrDefault();
+
+        return Task.FromResult(result);
+    }
+
     public Task<Conversation?> FindActiveByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
     {
         var result = _items.Values.FirstOrDefault(c =>

@@ -155,6 +155,7 @@ public sealed class PostgresInboundReturnPurgeRaceTests : IClassFixture<MessageC
         public Task<Conversation?> GetByIdAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct) => inner.GetByIdAsync(tenantId, conversationId, ct);
         public Task<PagedResult<Conversation>> ListAsync(TenantId tenantId, ConversationQuery query, CancellationToken ct) => inner.ListAsync(tenantId, query, ct);
         public Task SaveAsync(Conversation conversation, CancellationToken ct) => inner.SaveAsync(conversation, ct);
+        public Task<Conversation?> FindOpenBySessionAddressAsync(TenantId tenantId, EntityId contactId, ChannelAddress sessionAddress, CancellationToken ct) => inner.FindOpenBySessionAddressAsync(tenantId, contactId, sessionAddress, ct);
         public Task<int> CountOpenByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) => inner.CountOpenByContactAsync(tenantId, contactId, channel, ct);
         public Task<DateTimeOffset?> FindLastInboundAtAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) => inner.FindLastInboundAtAsync(tenantId, contactId, channel, ct);
         public Task<Conversation?> FindByVoiceLinkedIdAsync(TenantId tenantId, string voiceLinkedId, CancellationToken ct) => inner.FindByVoiceLinkedIdAsync(tenantId, voiceLinkedId, ct);
