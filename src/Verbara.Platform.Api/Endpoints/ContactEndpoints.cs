@@ -1,8 +1,10 @@
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Typification.Stores;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
@@ -26,6 +28,15 @@ internal static class ContactEndpoints
     /// </summary>
     internal const string UnknownConsentChannelCode = "unknown-consent-channel";
 
+    /// <summary>The permission <c>POST /contacts</c> requires (design D1).</summary>
+    internal const string CreatePermission = "contacts:contact:create";
+
+    /// <summary>The permission <c>PUT /contacts/{id}</c> requires, for every member of the body (design D1, D3).</summary>
+    internal const string EditPermission = "contacts:contact:edit";
+
+    /// <summary>The permission <c>DELETE /contacts/{id}</c> requires (design D1, D4).</summary>
+    internal const string DeletePermission = "contacts:contact:delete";
+
     private const string ReservedAddressDescription =
         "A WebChat address that starts with `webchat-visitor:` or `webchat-external:` answers 400 `reserved-contact-address`, " +
         "with the offending addresses in `details`, and nothing is written. `identityLevel` in the body is ignored.";
@@ -41,11 +52,15 @@ internal static class ContactEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound);
         group.MapGet("/", SearchContacts);
+        // Each write checks its permission first, in the handler, so a refusal carries a code (design D1, D2).
         group.MapPost("/", CreateContact)
-            .WithDescription(ReservedAddressDescription);
+            .WithDescription(ReservedAddressDescription)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapPut("/{id}", UpdateContact)
-            .WithDescription(ReservedAddressDescription);
-        group.MapDelete("/{id}", DeleteContact);
+            .WithDescription(ReservedAddressDescription)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
+        group.MapDelete("/{id}", DeleteContact)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
     }
 
     private static async Task<Results<Ok<Contact>, NotFound>> GetContact(
@@ -146,13 +161,16 @@ internal static class ContactEndpoints
         return TypedResults.Ok(result);
     }
 
-    private static async Task<Results<Created<Contact>, BadRequest<ErrorDetailResponse>>> CreateContact(
+    private static async Task<Results<Created<Contact>, BadRequest<ErrorDetailResponse>, JsonHttpResult<ErrorResponse>>> CreateContact(
         HttpContext context,
         [FromBody] CreateContactRequest body,
         [FromServices] IContactStore store,
         IClock clock,
         CancellationToken ct)
     {
+        if (!await IsPermittedAsync(context, CreatePermission))
+            return NotPermitted();
+
         var reserved = ReservedAddresses(body.Addresses);
         if (reserved.Count > 0)
             return TypedResults.BadRequest(new ErrorDetailResponse(ReservedContactAddressCode, reserved));
@@ -188,7 +206,7 @@ internal static class ContactEndpoints
         return TypedResults.Created($"/contacts/{contact.ContactId}", contact);
     }
 
-    private static async Task<Results<Ok<Contact>, NotFound, BadRequest<ErrorDetailResponse>>> UpdateContact(
+    private static async Task<Results<Ok<Contact>, NotFound, BadRequest<ErrorDetailResponse>, JsonHttpResult<ErrorResponse>>> UpdateContact(
         string id,
         HttpContext context,
         [FromBody] UpdateContactRequest body,
@@ -196,6 +214,9 @@ internal static class ContactEndpoints
         IClock clock,
         CancellationToken ct)
     {
+        if (!await IsPermittedAsync(context, EditPermission))
+            return NotPermitted();
+
         var reserved = ReservedAddresses(body.Addresses);
         if (reserved.Count > 0)
             return TypedResults.BadRequest(new ErrorDetailResponse(ReservedContactAddressCode, reserved));
@@ -231,16 +252,33 @@ internal static class ContactEndpoints
         return TypedResults.Ok(contact);
     }
 
-    private static async Task<IResult> DeleteContact(
+    private static async Task<Results<NoContent, JsonHttpResult<ErrorResponse>>> DeleteContact(
         string id,
         HttpContext context,
         [FromServices] IContactStore store,
         CancellationToken ct)
     {
+        if (!await IsPermittedAsync(context, DeletePermission))
+            return NotPermitted();
+
         var tenantId = GetTenantId(context);
         await store.DeleteAsync(tenantId, EntityId.From(id), ct);
-        return Results.NoContent();
+        return TypedResults.NoContent();
     }
+
+    /// <summary>
+    /// Whether the caller's roles hold <paramref name="permission"/>, through the <c>Permission:&lt;id&gt;</c> policy
+    /// (design D2). Called before the body is validated and before the contact is read.
+    /// </summary>
+    private static async Task<bool> IsPermittedAsync(HttpContext context, string permission)
+    {
+        var authorization = context.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(context.User, "Permission:" + permission)).Succeeded;
+    }
+
+    /// <summary>403 <c>{"error": "not-permitted"}</c>.</summary>
+    private static JsonHttpResult<ErrorResponse> NotPermitted() =>
+        TypedResults.Json(new ErrorResponse(NotPermittedCode), ApiJsonContext.Default.ErrorResponse, statusCode: StatusCodes.Status403Forbidden);
 
     /// <summary>
     /// The WebChat identity keys a write body names, each once and verbatim. A blank address is not one of them: it goes on
