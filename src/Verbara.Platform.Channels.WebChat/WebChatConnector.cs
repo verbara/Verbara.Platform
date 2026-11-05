@@ -70,7 +70,7 @@ public sealed class WebChatConnector : IChannelConnector, IConnectedSessionDirec
     /// <summary>
     /// Connected means a socket is attached: a session counts as connected from its creation, before any socket, but a
     /// send to it would find nothing to write to. The contact's address list runs oldest to newest. A session of another
-    /// tenant or contact never answers for an address it shares, so a typed address reaches no one else's visitor.
+    /// tenant or contact is not this contact's, so it is never the one chosen here.
     /// </summary>
     public async Task<ChannelAddress?> FindNewestConnectedAddressAsync(Contact contact, CancellationToken ct)
     {
