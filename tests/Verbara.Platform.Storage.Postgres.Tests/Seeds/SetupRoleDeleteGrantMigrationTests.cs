@@ -87,9 +87,8 @@ public sealed class SetupRoleDeleteGrantMigrationTests
             "SELECT permission_id FROM permissions p WHERE NOT EXISTS (SELECT 1 FROM role_template_permissions rtp " +
             "WHERE rtp.template_id = @Template AND rtp.permission_id = p.permission_id) ORDER BY permission_id LIMIT 1");
         cmd.Parameters.Add(new NpgsqlParameter("Template", templateId));
-        var custom = await cmd.ExecuteScalarAsync() as string;
-        custom.Should().NotBeNull($"the catalog holds an id the {templateId} template does not grant");
-        return custom!;
+        return await cmd.ExecuteScalarAsync() as string
+            ?? throw new InvalidOperationException($"the catalog holds no id the {templateId} template does not grant");
     }
 
     // A tenant role cloned from the template as a release before the change did: every template grant but delete, one

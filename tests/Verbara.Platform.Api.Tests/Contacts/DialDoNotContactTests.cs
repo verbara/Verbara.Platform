@@ -91,7 +91,8 @@ public sealed class DialDoNotContactTests
     {
         var outcome = await CreateService().DialAsync(TenantId, _agentId, toNumber, contactId, CancellationToken.None);
 
-        outcome.Accepted.Should().BeFalse($"a dial of {toNumber} naming {contactId?.Value ?? "no contact"} is refused");
+        var named = contactId is { } id ? id.Value : "no contact";
+        outcome.Accepted.Should().BeFalse($"a dial of {toNumber} naming {named} is refused");
         outcome.Error.Should().Be(error);
         _executor.Actions.Should().BeEmpty("a refused dial sends no Originate");
         await _resolver.DidNotReceive().ResolveAsync(Arg.Any<TenantId>(), Arg.Any<ChannelAddress>(), Arg.Any<CancellationToken>());

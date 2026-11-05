@@ -262,7 +262,7 @@ public sealed class ContactOptOutAndAuditTests : IClassFixture<ContactWritesApiF
         ShouldBeTheRecord(entry, expected, admin.UserId.Value, "user", contact);
         entry.Metadata.Should().BeEquivalentTo(
             expected["metadata"]!.AsObject().ToDictionary(kv => kv.Key, kv => kv.Value!.GetValue<string>()));
-        (entry.Changes?.Before?.ToString() + entry.Changes?.After?.ToString()).Should().NotContain("+15551234567");
+        $"{entry.Changes?.Before}{entry.Changes?.After}".Should().NotContain("+15551234567");
     }
 
     [Fact]

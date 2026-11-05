@@ -23,57 +23,44 @@ internal sealed class InMemoryContactAuditWriter : IContactAuditWriter
     }
 
     // The in-memory stores complete synchronously, so each call is drained inside the lock's scope; a Lock.Scope is a
-    // ref struct and cannot span an await, so these methods stay synchronous (as InMemoryTypificationCorrectionAuditWriter).
+    // ref struct and cannot span an await, so these methods stay synchronous and a failure is thrown from the call
+    // itself (as InMemoryTypificationCorrectionAuditWriter).
     public Task SaveAsync(Contact contact, AuditEntry auditEntry, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(contact);
         ArgumentNullException.ThrowIfNull(auditEntry);
 
-        try
+        using (_gate.EnterScope())
         {
-            using (_gate.EnterScope())
+            var kept = _contacts.GetByIdAsync(contact.TenantId, contact.ContactId, ct).GetAwaiter().GetResult();
+            _contacts.SaveAsync(contact, ct).GetAwaiter().GetResult();
+            RecordOrUndo(auditEntry, undo: () =>
             {
-                var kept = _contacts.GetByIdAsync(contact.TenantId, contact.ContactId, ct).GetAwaiter().GetResult();
-                _contacts.SaveAsync(contact, ct).GetAwaiter().GetResult();
-                RecordOrUndo(auditEntry, undo: () =>
-                {
-                    if (kept is null)
-                        _contacts.DeleteAsync(contact.TenantId, contact.ContactId, CancellationToken.None).GetAwaiter().GetResult();
-                    else
-                        _contacts.SaveAsync(kept, CancellationToken.None).GetAwaiter().GetResult();
-                }, ct);
-            }
+                if (kept is null)
+                    _contacts.DeleteAsync(contact.TenantId, contact.ContactId, CancellationToken.None).GetAwaiter().GetResult();
+                else
+                    _contacts.SaveAsync(kept, CancellationToken.None).GetAwaiter().GetResult();
+            }, ct);
+        }
 
-            return Task.CompletedTask;
-        }
-        catch (Exception ex)
-        {
-            return Task.FromException(ex);
-        }
+        return Task.CompletedTask;
     }
 
     public Task<bool> DeleteAsync(TenantId tenantId, EntityId contactId, AuditEntry auditEntry, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(auditEntry);
 
-        try
+        using (_gate.EnterScope())
         {
-            using (_gate.EnterScope())
-            {
-                var kept = _contacts.GetByIdAsync(tenantId, contactId, ct).GetAwaiter().GetResult();
-                if (kept is null)
-                    return Task.FromResult(false);
+            var kept = _contacts.GetByIdAsync(tenantId, contactId, ct).GetAwaiter().GetResult();
+            if (kept is null)
+                return Task.FromResult(false);
 
-                _contacts.DeleteAsync(tenantId, contactId, ct).GetAwaiter().GetResult();
-                RecordOrUndo(auditEntry, undo: () => _contacts.SaveAsync(kept, CancellationToken.None).GetAwaiter().GetResult(), ct);
-            }
+            _contacts.DeleteAsync(tenantId, contactId, ct).GetAwaiter().GetResult();
+            RecordOrUndo(auditEntry, undo: () => _contacts.SaveAsync(kept, CancellationToken.None).GetAwaiter().GetResult(), ct);
+        }
 
-            return Task.FromResult(true);
-        }
-        catch (Exception ex)
-        {
-            return Task.FromException<bool>(ex);
-        }
+        return Task.FromResult(true);
     }
 
     private void RecordOrUndo(AuditEntry auditEntry, Action undo, CancellationToken ct)
