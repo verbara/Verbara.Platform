@@ -31,6 +31,14 @@ second one is off until you turn it on: read **Upgrading**.
   that is not a random version-4 GUID, the nil GUID included, gives `Anonymous`. `visitorName` is cut at 200 characters and
   fills the first name of a contact with none. `visitorEmail` over 320 characters is dropped, and otherwise is stored as the
   custom field `webchatEmail` of a contact with none. Neither finds a contact, and `pageContext` is accepted and not stored.
+  Both are stored on an `Anonymous` contact too, so with level 1 off a visitor's name and e-mail are now kept and the contact
+  search finds them. When `identityToken` verifies, neither is used: a `Verified` contact takes its name and e-mail only from
+  the token's `name` and `email`, and a token without them leaves them empty.
+- **A WebChat conversation an agent starts belongs to one session.** `POST /api/v1/conversations` with a first message goes
+  to the contact's session that is connected now, newest first, and the conversation records that session, so its replies go
+  there and the visitor's answer lands in it, with the agent still holding it. With no session connected the start is refused
+  as before (502 `channel-send-failed`). The queued path, with no first message, records the connected session as well. The
+  contact's other sessions never reach that conversation.
 - **A site can sign who its logged-in customer is.** `identityToken` is a compact JWT signed with HS256 with the tenant's
   `identityTokenSecret`, with the claims `external_id`, `aud`, `iat`, `exp` and optionally `name` and `email`, a lifetime of at
   most 3600 s and 300 s of clock skew. A refusal is one of `identity-token-not-configured`, `identity-token-malformed`,
@@ -160,9 +168,15 @@ second one is off until you turn it on: read **Upgrading**.
   2. Deploy the Web release that renders `data-identity-level`.
   3. Have every agent reload the console, for example at the next shift change. A tab left open from before step 2 runs
      the old console and shows linked history without the mark.
-  4. Set `WebChat__VisitorIdentity__Level1Enabled=true` and restart the Api. It is read once at start-up.
+  4. Measure what a session create costs on your contacts table, as below.
+  5. Set `WebChat__VisitorIdentity__Level1Enabled=true` and restart the Api. It is read once at start-up.
 
-  If you upgrade both images together, do steps 2 to 4 at once. Turning the setting off again stops new linking at once,
+  With the setting on, every session create with a `visitorId` looks the contact up by its identity key, and so does every
+  session with a verified token, setting on or off. That lookup reads every contact of the tenant: no index serves it, and it
+  holds a database connection and a lock on that key while it runs. On a table of many contacts, run `EXPLAIN (ANALYZE, BUFFERS)`
+  of the lookup against a copy of your data before you turn the setting on, and judge the result against your session rate.
+
+  If you upgrade both images together, do steps 2 to 5 at once. Turning the setting off again stops new linking at once,
   and contacts already linked keep their keys and read `Unverified`. That is no rollback of the console: rolling the Web
   back below the release with the mark while level-1 contacts exist shows their linked history unmarked again.
   `docker/docker-compose.full.yml` sets the variable to `true`, because the Web E2E specs run against that stack.

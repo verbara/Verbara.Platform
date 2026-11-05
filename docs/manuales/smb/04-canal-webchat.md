@@ -277,7 +277,8 @@ Cada `POST /api/v1/webchat/sessions` responde `identityLevel`, y el contacto (`G
 | `Unverified` | El navegador manda un `visitorId` que es un GUID versión 4 y el host activó el nivel 1 (§8.1) | Uno por navegador. Tiene la dirección `webchat-visitor:<hash>`; el `visitorId` nunca se guarda tal cual. |
 | `Anonymous` | Ninguno de los dos | Uno por sesión, como siempre. |
 
-- **El formulario no identifica.** `visitorName` y `visitorEmail` sólo completan datos: el nombre si el contacto no tiene, y `visitorEmail` como campo `webchatEmail` si no tiene uno. Nunca encuentran ni unen contactos, y `visitorEmail` nunca es una dirección del canal Email. Dos navegadores con el mismo email son dos contactos. `GET /api/v1/contacts?search=` encuentra el contacto por `webchatEmail`.
+- **El formulario no identifica.** `visitorName` y `visitorEmail` sólo completan datos: el nombre si el contacto no tiene, y `visitorEmail` como campo `webchatEmail` si no tiene uno. Nunca encuentran ni unen contactos, y `visitorEmail` nunca es una dirección del canal Email. Dos navegadores con el mismo email son dos contactos. `GET /api/v1/contacts?search=` encuentra el contacto por `webchatEmail`. Se guardan también en un contacto `Anonymous`, con el nivel 1 apagado incluido. Cuando `identityToken` verifica no se usan: un contacto `Verified` toma el nombre y el email sólo del token, y si el token no los trae quedan vacíos.
+- **Una conversación que inicia un agente es de una sesión.** Va a la sesión del contacto que está conectada en ese momento, la más nueva primero, y las respuestas y la contestación del visitante quedan en esa sesión. Si no hay ninguna conectada, el inicio se rechaza con `502 channel-send-failed`.
 - **Los niveles no se fusionan.** Si alguien chatea sin login y después inicia sesión en tu sitio, queda con dos contactos: el del navegador y el verificado.
 - **Las direcciones de identidad son de Verbara.** `POST` y `PUT /api/v1/contacts` rechazan una dirección WebChat que empiece con `webchat-visitor:` o `webchat-external:` con `400 reserved-contact-address`.
 
@@ -292,7 +293,7 @@ Se prende en el contenedor `api` y se lee una sola vez al arranque:
       WebChat__VisitorIdentity__Level1Enabled: "true"
 ```
 
-> ⚠️ **Prendelo sólo con la consola que marca al contacto no verificado ya desplegada.** Un contacto `Unverified` muestra al agente el historial del navegador, y la consola tiene que avisarle que esa identidad no está verificada. El orden está en `CHANGELOG.md`, sección *Upgrading*: desplegar la Platform, desplegar la release Web que renderiza `data-identity-level`, hacer que cada agente recargue la consola, y recién ahí setear la variable y reiniciar el `api`. Apagarla de nuevo corta los enlaces nuevos al instante; los contactos ya enlazados conservan su dirección y siguen leyendo `Unverified`.
+> ⚠️ **Prendelo sólo con la consola que marca al contacto no verificado ya desplegada.** Un contacto `Unverified` muestra al agente el historial del navegador, y la consola tiene que avisarle que esa identidad no está verificada. El orden está en `CHANGELOG.md`, sección *Upgrading*: desplegar la Platform, desplegar la release Web que renderiza `data-identity-level`, hacer que cada agente recargue la consola, medir lo que cuesta crear una sesión con tu tabla de contactos, y recién ahí setear la variable y reiniciar el `api`. Crear una sesión con `visitorId` busca el contacto por su clave, y esa búsqueda lee todos los contactos del tenant: ningún índice la sirve. Con muchos contactos, corré `EXPLAIN (ANALYZE, BUFFERS)` de esa búsqueda sobre una copia de tus datos antes de prenderlo. Apagarla de nuevo corta los enlaces nuevos al instante; los contactos ya enlazados conservan su dirección y siguen leyendo `Unverified`.
 
 Es un dato del navegador, no una prueba de quién es la persona: dos personas que comparten el navegador comparten el contacto. Si tu sitio tiene login, usá el nivel 2.
 
@@ -324,8 +325,8 @@ El header es `{ "alg": "HS256", "typ": "JWT" }`. `alg` tiene que ser exactamente
 | `aud` | string o array | Sí | El id del tenant de Verbara. Un string igual al `tenantId` del pedido, o un array no vacío de strings, todos iguales a ese `tenantId`. |
 | `iat` | integer | Sí | Segundos Unix: cuándo lo firmaste. |
 | `exp` | integer | Sí | Segundos Unix. `exp` > `iat` y `exp` - `iat` <= 3600. |
-| `name` | string | No | Hasta 200 caracteres. Completa el nombre del contacto sólo si no tiene. |
-| `email` | string | No | Hasta 320 caracteres. Se guarda como campo `webchatEmail`. Nunca es una dirección del canal Email ni une contactos. |
+| `name` | string | No | Hasta 200 caracteres. Completa el nombre del contacto sólo si no tiene. Es la única fuente del nombre de un contacto `Verified`. |
+| `email` | string | No | Hasta 320 caracteres. Se guarda como campo `webchatEmail`. Nunca es una dirección del canal Email ni une contactos. Es la única fuente del email de un contacto `Verified`. |
 
 El reloj tolera 300 segundos de diferencia: se rechaza si `iat` > ahora + 300 o si ahora > `exp` + 300. Un token no es de un solo uso (dos pestañas o una recarga lo presentan de nuevo), por eso su vida máxima es de 3600 segundos.
 
