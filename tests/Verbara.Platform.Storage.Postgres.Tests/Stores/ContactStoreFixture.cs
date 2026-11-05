@@ -8,7 +8,9 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 /// Testcontainers-backed Postgres fixture for <see cref="PostgresContactStoreFindByAddressTests"/>.
 /// Spins up <c>postgres:18-alpine</c> (the production major) with the <c>contacts</c> DDL
 /// mirrored from migration <c>001_Baseline.sql</c>, so <c>addresses</c> is a real JSONB column
-/// and the address lookup runs against the same SQL engine it does in production.
+/// and the address lookup runs against the same SQL engine it does in production. It also holds
+/// <c>audit_entries</c> in its migrated shape, then the embedded migration that admits the
+/// <c>contact</c> category, for <see cref="PostgresContactAuditWriterTests"/>.
 /// </summary>
 public sealed class ContactStoreFixture : IAsyncLifetime
 {
@@ -39,9 +41,12 @@ public sealed class ContactStoreFixture : IAsyncLifetime
 
         await using var conn = await DataSource.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = SchemaSql;
+        cmd.CommandText = SchemaSql + AuditEntriesSql + ConversationClockFixture.MigrationSql(AuditContactCategoryMigration);
         await cmd.ExecuteNonQueryAsync();
     }
+
+    /// <summary>The migration that admits the audit category <c>contact</c> (contacts-writes-follow-their-permissions D17).</summary>
+    public const string AuditContactCategoryMigration = "029_AuditContactCategory.sql";
 
     public async Task DisposeAsync()
     {
@@ -49,12 +54,12 @@ public sealed class ContactStoreFixture : IAsyncLifetime
         if (_container is not null) await _container.DisposeAsync();
     }
 
-    /// <summary>Truncate the table between tests for isolation.</summary>
+    /// <summary>Truncate the tables between tests for isolation.</summary>
     public async Task ResetAsync()
     {
         await using var conn = await DataSource.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "TRUNCATE contacts";
+        cmd.CommandText = "TRUNCATE contacts, audit_entries";
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -80,6 +85,34 @@ public sealed class ContactStoreFixture : IAsyncLifetime
             created_by TEXT,
             updated_by TEXT,
             PRIMARY KEY (tenant_id, contact_id)
+        );
+        """;
+
+    // audit_entries in the shape every migration before 029 leaves it (001_Baseline.sql, then 006's 'ai' actor and
+    // 014's retain_until and nullable entity_id), as TypificationCorrectionAuditFixture declares it.
+    private const string AuditEntriesSql = """
+        CREATE TABLE IF NOT EXISTS audit_entries (
+            entry_id TEXT NOT NULL PRIMARY KEY,
+            tenant_id TEXT NOT NULL, action TEXT NOT NULL,
+            entity_type TEXT NOT NULL, entity_id TEXT,
+            performed_by TEXT, details JSONB, occurred_at TIMESTAMPTZ NOT NULL,
+            impersonator_id TEXT,
+            category TEXT NOT NULL DEFAULT 'config',
+            severity TEXT NOT NULL DEFAULT 'info',
+            actor_type TEXT NOT NULL DEFAULT 'system',
+            before_json JSONB,
+            after_json JSONB,
+            integrity_hash TEXT,
+            retain_until TIMESTAMPTZ NULL,
+            CONSTRAINT audit_entries_severity_check
+                CHECK (severity IN ('info', 'warn', 'warning', 'error', 'critical')),
+            CONSTRAINT audit_entries_category_check
+                CHECK (category IN ('auth', 'billing', 'config', 'tenant', 'security',
+                                    'impersonation', 'retention', 'data', 'rbac',
+                                    'data_access', 'admin', 'conversations', 'queues',
+                                    'reports', 'operational', 'license')),
+            CONSTRAINT audit_entries_actor_type_check
+                CHECK (actor_type IN ('user', 'system', 'impersonator', 'service-account', 'api_key', 'ai'))
         );
         """;
 }

@@ -144,6 +144,8 @@ public static class ServiceCollectionExtensions
 
         // Audit
         services.AddSingleton<IAuditStore, InMemoryAuditStore>();
+        // contacts-writes-follow-their-permissions (D17): a contact change and its audit record, together.
+        services.AddSingleton<IContactAuditWriter, InMemoryContactAuditWriter>();
 
         // Billing
         services.AddSingleton<IUsageRecordStore, InMemoryUsageRecordStore>();

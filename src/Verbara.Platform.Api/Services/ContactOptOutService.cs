@@ -52,8 +52,9 @@ internal interface IContactOptOutService
     /// <summary>
     /// Marks the contact do-not-contact when <paramref name="doNotContact"/> is <see langword="true"/> and records
     /// <c>false</c> for each of <paramref name="channels"/>; a channel not named keeps its value. When something
-    /// changes, sets <see cref="Contact.UpdatedAt"/> and <see cref="Contact.UpdatedBy"/> (the actor's id) and saves the
-    /// contact; when nothing would change, writes nothing.
+    /// changes, sets <see cref="Contact.UpdatedAt"/> and <see cref="Contact.UpdatedBy"/> (the actor's id) and writes the
+    /// contact together with one <c>contact.opted_out</c> audit record attributed to the actor (design D17); a failure
+    /// of either write leaves both unwritten and throws. When nothing would change, writes nothing.
     /// </summary>
     /// <returns>The contact as it now stands, or <see langword="null"/> when the tenant has no contact with that id.</returns>
     Task<Contact?> OptOutAsync(
@@ -66,7 +67,7 @@ internal interface IContactOptOutService
 }
 
 /// <inheritdoc />
-internal sealed class ContactOptOutService(IContactStore contacts, IClock clock) : IContactOptOutService
+internal sealed class ContactOptOutService(IContactStore contacts, IContactAuditWriter writer, IClock clock) : IContactOptOutService
 {
     /// <inheritdoc />
     public async Task<Contact?> OptOutAsync(
@@ -92,13 +93,17 @@ internal sealed class ContactOptOutService(IContactStore contacts, IClock clock)
         if (!markDoNotContact && recordNo.Count == 0)
             return contact;
 
+        var before = ContactAuditRecord.StateOf(contact);
         if (markDoNotContact)
             contact.DoNotContact = true;
         foreach (var channel in recordNo)
             contact.SetConsent(channel, false);
-        contact.UpdatedAt = clock.UtcNow;
+        var now = clock.UtcNow;
+        contact.UpdatedAt = now;
         contact.UpdatedBy = actor.ActorId;
-        await contacts.SaveAsync(contact, ct);
+        var record = ContactAuditRecord.Change(
+            tenantId, ContactAuditRecord.OptedOutAction, actor, contact.ContactId, before, ContactAuditRecord.StateOf(contact), now);
+        await writer.SaveAsync(contact, record, ct);
         return contact;
     }
 }

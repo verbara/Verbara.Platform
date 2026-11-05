@@ -12,10 +12,13 @@ internal sealed class InMemoryContactStore : IContactStore
     // before or wholly after it, never in between. Reads stay lock-free.
     private readonly Lock _writeGate = new();
 
+    // A copy, as Postgres reads a new row: a caller that changes the contact it read changes nothing stored until it
+    // saves, so a write that fails leaves the stored contact as it was (contacts-writes-follow-their-permissions D17).
+    // Taken under the write gate, so it never sees a write half applied.
     public Task<Contact?> GetByIdAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
-        _items.TryGetValue((tenantId, contactId), out var item);
-        return Task.FromResult(item);
+        lock (_writeGate)
+            return Task.FromResult(_items.TryGetValue((tenantId, contactId), out var item) ? Copy(item) : null);
     }
 
     public Task<Contact?> FindByAddressAsync(TenantId tenantId, ChannelAddress address, CancellationToken ct)

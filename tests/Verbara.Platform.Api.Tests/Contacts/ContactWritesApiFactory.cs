@@ -130,6 +130,12 @@ public class ContactWritesApiFactory : ConversationOwnershipApiFactory
             : service == typeof(IAuditStore) && Interlocked.Exchange(ref _auditSave, 0) == 1;
     }
 
+    /// <summary>
+    /// The fault an armed store raises: a store failure as a database driver raises it, which the host answers 500.
+    /// Never an <see cref="InvalidOperationException"/>, which the error middleware answers 400 as a caller error.
+    /// </summary>
+    public sealed class InjectedStoreFaultException(string message) : Exception(message);
+
     /// <summary>Forwards every call to the real store, except one method that throws once when its fault is armed.</summary>
     public class FaultProxy<T> : DispatchProxy
         where T : class
@@ -153,7 +159,7 @@ public class ContactWritesApiFactory : ConversationOwnershipApiFactory
         {
             ArgumentNullException.ThrowIfNull(targetMethod);
             if (targetMethod.Name == _faultedMethod && _faults.Consume(typeof(T)))
-                return Task.FromException(new InvalidOperationException($"Injected fault: {typeof(T).Name}.{_faultedMethod}"));
+                return Task.FromException(new InjectedStoreFaultException($"Injected fault: {typeof(T).Name}.{_faultedMethod}"));
 
             try
             {

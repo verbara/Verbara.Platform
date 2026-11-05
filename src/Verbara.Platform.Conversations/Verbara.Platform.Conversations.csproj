@@ -11,6 +11,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Verbara.Platform.Core\Verbara.Platform.Core.csproj" />
+    <!-- IContactAuditWriter writes a contact change together with its AuditEntry. -->
+    <ProjectReference Include="..\Verbara.Platform.Audit\Verbara.Platform.Audit.csproj" />
   </ItemGroup>
 
   <ItemGroup>

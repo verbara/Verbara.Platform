@@ -236,6 +236,7 @@ internal static class ContactEndpoints
         HttpContext context,
         [FromBody] UpdateContactRequest body,
         [FromServices] IContactStore store,
+        [FromServices] IContactAuditWriter writer,
         IClock clock,
         CancellationToken ct)
     {
@@ -255,6 +256,7 @@ internal static class ContactEndpoints
         if (contact is null)
             return TypedResults.NotFound();
 
+        var before = ContactAuditRecord.StateOf(contact);
         if (body.FirstName is not null) contact.FirstName = body.FirstName;
         if (body.LastName is not null) contact.LastName = body.LastName;
         if (body.Company is not null) contact.Company = body.Company;
@@ -283,8 +285,22 @@ internal static class ContactEndpoints
                 contact.SetConsent(ChannelsByName[name], consented);
         }
 
-        contact.UpdatedAt = clock.UtcNow;
-        await store.SaveAsync(contact, ct);
+        var now = clock.UtcNow;
+        contact.UpdatedAt = now;
+
+        // A change of do-not-contact or of a consent value is written with its audit record, attributed to the caller,
+        // or not at all (design D17). Any other update is a plain save and records nothing.
+        var after = ContactAuditRecord.StateOf(contact);
+        if (ContactAuditRecord.Same(before, after))
+        {
+            await store.SaveAsync(contact, ct);
+            return TypedResults.Ok(contact);
+        }
+
+        var actor = ContactActor.Of(context.User);
+        contact.UpdatedBy = actor.ActorId;
+        await writer.SaveAsync(
+            contact, ContactAuditRecord.Change(tenantId, ContactAuditRecord.ConsentChangedAction, actor, contact.ContactId, before, after, now), ct);
         return TypedResults.Ok(contact);
     }
 
@@ -292,13 +308,23 @@ internal static class ContactEndpoints
         string id,
         HttpContext context,
         [FromServices] IContactStore store,
+        [FromServices] IContactAuditWriter writer,
+        IClock clock,
         CancellationToken ct)
     {
         if (!await IsPermittedAsync(context, DeletePermission))
             return NotPermitted();
 
+        // The delete and its audit record are written together (design D17). An unknown id deletes nothing and records
+        // nothing, and still answers 204.
         var tenantId = GetTenantId(context);
-        await store.DeleteAsync(tenantId, EntityId.From(id), ct);
+        var contact = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
+        if (contact is not null)
+        {
+            var record = ContactAuditRecord.Deleted(tenantId, ContactActor.Of(context.User), contact, clock.UtcNow);
+            await writer.DeleteAsync(tenantId, contact.ContactId, record, ct);
+        }
+
         return TypedResults.NoContent();
     }
 

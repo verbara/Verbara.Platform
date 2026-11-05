@@ -41,7 +41,8 @@ internal sealed class PostgresContactStore : IContactStore
         "(first_name ILIKE @Term OR last_name ILIKE @Term OR company ILIKE @Term " +
         "OR custom_fields->>'" + Contact.WebChatEmailField + "' ILIKE @Term)";
 
-    private const string SaveSql =
+    // Shared with PostgresContactAuditWriter, which runs the same statement inside its transaction.
+    internal const string SaveSql =
         "INSERT INTO contacts (contact_id, tenant_id, first_name, last_name, company, segment, preferred_channel, " +
         "preferred_language, timezone, do_not_contact, addresses, custom_fields, channel_consent, created_at, updated_at, created_by, updated_by) " +
         "VALUES (@ContactId, @TenantId, @FirstName, @LastName, @Company, @Segment, @PreferredChannel, " +
@@ -54,6 +55,8 @@ internal sealed class PostgresContactStore : IContactStore
         "  do_not_contact = EXCLUDED.do_not_contact, addresses = EXCLUDED.addresses, " +
         "  custom_fields = EXCLUDED.custom_fields, channel_consent = EXCLUDED.channel_consent, " +
         "  updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by";
+
+    internal const string DeleteSql = "DELETE FROM contacts WHERE tenant_id = @TenantId AND contact_id = @ContactId";
 
     private readonly NpgsqlDataSource _dataSource;
 
@@ -154,7 +157,7 @@ internal sealed class PostgresContactStore : IContactStore
         await _dataSource.ExecuteAsync(SaveSql, p => AddSaveParameters(p, contact), ct);
     }
 
-    private static void AddSaveParameters(NpgsqlParameterCollection p, Contact contact)
+    internal static void AddSaveParameters(NpgsqlParameterCollection p, Contact contact)
     {
         var addressesJson = JsonSerializer.Serialize(
             contact.Addresses,
@@ -361,10 +364,13 @@ internal sealed class PostgresContactStore : IContactStore
 
     public async Task DeleteAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
-        await _dataSource.ExecuteAsync(
-            "DELETE FROM contacts WHERE tenant_id = @TenantId AND contact_id = @ContactId",
-            p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("ContactId", contactId.Value)); },
-            ct);
+        await _dataSource.ExecuteAsync(DeleteSql, p => AddDeleteParameters(p, tenantId, contactId), ct);
+    }
+
+    internal static void AddDeleteParameters(NpgsqlParameterCollection p, TenantId tenantId, EntityId contactId)
+    {
+        p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+        p.Add(new NpgsqlParameter("ContactId", NpgsqlDbType.Text) { Value = contactId.Value });
     }
 
     private sealed class ContactRow

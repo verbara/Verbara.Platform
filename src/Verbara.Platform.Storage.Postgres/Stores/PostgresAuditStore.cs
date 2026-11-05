@@ -14,7 +14,21 @@ internal sealed class PostgresAuditStore : IAuditStore
 
     public PostgresAuditStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
 
+    // Shared with PostgresContactAuditWriter, which runs the same insert inside its transaction.
+    internal const string InsertSql =
+        "INSERT INTO audit_entries (entry_id, tenant_id, action, entity_type, entity_id, " +
+        "performed_by, details, occurred_at, impersonator_id, " +
+        "category, severity, actor_type, before_json, after_json, integrity_hash, retain_until) " +
+        "VALUES (@EntryId, @TenantId, @Action, @EntityType, @EntityId, " +
+        "@PerformedBy, @Details::jsonb, @OccurredAt, @ImpersonatorId, " +
+        "@Category, @Severity, @ActorType, @BeforeJson::jsonb, @AfterJson::jsonb, @IntegrityHash, @RetainUntil)";
+
     public async Task SaveAsync(AuditEntry entry, CancellationToken ct)
+    {
+        await _dataSource.ExecuteAsync(InsertSql, p => AddInsertParameters(p, entry), ct);
+    }
+
+    internal static void AddInsertParameters(NpgsqlParameterCollection p, AuditEntry entry)
     {
         var metadataJson = entry.Metadata != null
             ? JsonSerializer.Serialize(entry.Metadata, PostgresJson.Ctx.IReadOnlyDictionaryStringString)
@@ -23,33 +37,22 @@ internal sealed class PostgresAuditStore : IAuditStore
         var beforeJson = SerializeChange(entry.Changes?.Before);
         var afterJson = SerializeChange(entry.Changes?.After);
 
-        await _dataSource.ExecuteAsync(
-            "INSERT INTO audit_entries (entry_id, tenant_id, action, entity_type, entity_id, " +
-            "performed_by, details, occurred_at, impersonator_id, " +
-            "category, severity, actor_type, before_json, after_json, integrity_hash, retain_until) " +
-            "VALUES (@EntryId, @TenantId, @Action, @EntityType, @EntityId, " +
-            "@PerformedBy, @Details::jsonb, @OccurredAt, @ImpersonatorId, " +
-            "@Category, @Severity, @ActorType, @BeforeJson::jsonb, @AfterJson::jsonb, @IntegrityHash, @RetainUntil)",
-            p =>
-            {
-                p.Add(new NpgsqlParameter("EntryId", entry.EntryId.Value));
-                p.Add(new NpgsqlParameter("TenantId", entry.TenantId.Value));
-                p.Add(new NpgsqlParameter("Action", entry.Action));
-                p.Add(new NpgsqlParameter("EntityType", NpgsqlDbType.Text) { Value = (object?)entry.TargetType ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("EntityId", NpgsqlDbType.Text) { Value = (object?)entry.TargetId ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("PerformedBy", NpgsqlDbType.Text) { Value = (object?)entry.ActorId ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("Details", (object?)metadataJson ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("OccurredAt", entry.OccurredAt));
-                p.Add(new NpgsqlParameter("ImpersonatorId", NpgsqlDbType.Text) { Value = (object?)entry.ImpersonatorId ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("Category", NpgsqlDbType.Text) { Value = (object?)entry.Category ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("Severity", NpgsqlDbType.Text) { Value = (object?)entry.Severity ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("ActorType", NpgsqlDbType.Text) { Value = (object?)entry.ActorType ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("BeforeJson", (object?)beforeJson ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("AfterJson", (object?)afterJson ?? DBNull.Value));
-                p.Add(new NpgsqlParameter("IntegrityHash", NpgsqlDbType.Text) { Value = (object?)entry.IntegrityHash ?? DBNull.Value });
-                p.Add(new NpgsqlParameter("RetainUntil", NpgsqlDbType.TimestampTz) { Value = (object?)entry.RetainUntil?.UtcDateTime ?? DBNull.Value });
-            },
-            ct);
+        p.Add(new NpgsqlParameter("EntryId", entry.EntryId.Value));
+        p.Add(new NpgsqlParameter("TenantId", entry.TenantId.Value));
+        p.Add(new NpgsqlParameter("Action", entry.Action));
+        p.Add(new NpgsqlParameter("EntityType", NpgsqlDbType.Text) { Value = (object?)entry.TargetType ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("EntityId", NpgsqlDbType.Text) { Value = (object?)entry.TargetId ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("PerformedBy", NpgsqlDbType.Text) { Value = (object?)entry.ActorId ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("Details", (object?)metadataJson ?? DBNull.Value));
+        p.Add(new NpgsqlParameter("OccurredAt", entry.OccurredAt));
+        p.Add(new NpgsqlParameter("ImpersonatorId", NpgsqlDbType.Text) { Value = (object?)entry.ImpersonatorId ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("Category", NpgsqlDbType.Text) { Value = (object?)entry.Category ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("Severity", NpgsqlDbType.Text) { Value = (object?)entry.Severity ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("ActorType", NpgsqlDbType.Text) { Value = (object?)entry.ActorType ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("BeforeJson", (object?)beforeJson ?? DBNull.Value));
+        p.Add(new NpgsqlParameter("AfterJson", (object?)afterJson ?? DBNull.Value));
+        p.Add(new NpgsqlParameter("IntegrityHash", NpgsqlDbType.Text) { Value = (object?)entry.IntegrityHash ?? DBNull.Value });
+        p.Add(new NpgsqlParameter("RetainUntil", NpgsqlDbType.TimestampTz) { Value = (object?)entry.RetainUntil?.UtcDateTime ?? DBNull.Value });
     }
 
     public async Task<long> CountByActorAsync(TenantId tenantId, string actorId, CancellationToken ct)
