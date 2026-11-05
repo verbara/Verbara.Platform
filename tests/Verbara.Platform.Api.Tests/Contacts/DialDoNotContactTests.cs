@@ -56,14 +56,13 @@ public sealed class DialDoNotContactTests
             .Returns(new Tenant { TenantId = Tenant, Name = "Acme", Options = new TenantOptions() });
     }
 
-    // Task 2.3 gives the service the contact store; until then it is built as the unfixed code builds it.
     private AgentOutboundDialService CreateService()
     {
         var leader = Substitute.For<IClusterLeader>();
         leader.IsLeader.Returns(true);
         leader.Resource.Returns(VoiceLeaderResources.AmiOwner);
         return new AgentOutboundDialService(
-            _conversations, _capacity, _resolver, _agents, _tenants, _executor, Resolver(null, _trunks, "pstn-default"),
+            _conversations, _capacity, _resolver, _store, _agents, _tenants, _executor, Resolver(null, _trunks, "pstn-default"),
             null, leader, _clock, NullLogger<AgentOutboundDialService>.Instance);
     }
 

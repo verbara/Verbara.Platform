@@ -1125,13 +1125,13 @@ if (!string.IsNullOrEmpty(clusterConn))
                     // (AgentOutboundDialService click-to-dial + the W5b CallbackOriginator) inherit
                     // spend-point enforcement — the two paths that had NO license check before.
                     sp.GetService<Verbara.Sdk.Pro.Licensing.ILicenseGuard>()));
-            // The DNC checker registers only with the full dialer Postgres storage, so it is optional here
-            // (GetService): a voice-only tenant fails DNC open.
+            // The DNC checker registers only with the dialer Postgres storage (GetService): a voice-only tenant fails DNC open.
             builder.Services.AddSingleton<Verbara.Platform.Api.Services.IAgentOutboundDialService>(sp =>
                 new Verbara.Platform.Api.Services.AgentOutboundDialService(
                     sp.GetRequiredService<Verbara.Platform.Conversations.IConversationStore>(),
                     sp.GetRequiredService<IAgentCapacityService>(),
                     sp.GetRequiredService<Verbara.Platform.Conversations.Services.IContactIdentityResolver>(),
+                    sp.GetRequiredService<Verbara.Platform.Conversations.IContactStore>(),
                     sp.GetRequiredService<Verbara.Platform.Queues.IAgentStore>(),
                     sp.GetRequiredService<Verbara.Sdk.Pro.MultiTenant.ITenantStore>(),
                     sp.GetRequiredService<Verbara.Sdk.Pro.Dialer.Execution.OriginateExecutorBase>(),

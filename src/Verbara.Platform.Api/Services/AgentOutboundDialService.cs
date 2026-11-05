@@ -71,9 +71,16 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
     private const string PrimaryNode = "primary";
     private const long OriginateTimeoutMs = 30_000;
 
+    /// <summary>
+    /// The most contacts the number side reads. Restricted contacts sort first, so a shorter list never drops one that
+    /// changes the answer (design D10).
+    /// </summary>
+    internal const int NumberMatchLimit = 50;
+
     private readonly IConversationStore _conversations;
     private readonly IAgentCapacityService _capacity;
     private readonly IContactIdentityResolver _contacts;
+    private readonly IContactStore _contactStore;
     private readonly IAgentStore _agents;
     private readonly ITenantStore _tenants;
     private readonly OriginateExecutorBase _originate;
@@ -87,6 +94,7 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
         IConversationStore conversations,
         IAgentCapacityService capacity,
         IContactIdentityResolver contacts,
+        IContactStore contactStore,
         IAgentStore agents,
         ITenantStore tenants,
         OriginateExecutorBase originate,
@@ -99,6 +107,7 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
         _conversations = conversations;
         _capacity = capacity;
         _contacts = contacts;
+        _contactStore = contactStore;
         _agents = agents;
         _tenants = tenants;
         _originate = originate;
@@ -139,6 +148,12 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
                 LogDncFailed(number, ex.Message);
             }
         }
+
+        // A contact who asked not to be contacted, or who said no to calls, is not rung: the contact the dial names and
+        // every contact holding the dialed number are checked. Nothing is created, and a store error fails the dial.
+        var restriction = await ContactRestrictionAsync(tenantId, number, contactId, ct).ConfigureAwait(false);
+        if (restriction is not null)
+            return new VoiceDialOutcome(false, null, restriction);
 
         // The tenant's outbound route trunk, else the default trunk by name; refused before any leg rings when
         // the trunk names no host.
@@ -226,6 +241,31 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
 
         LogDial(conversationId.Value, agentId.Value, number);
         return new VoiceDialOutcome(true, conversationId.Value, null);
+    }
+
+    /// <summary>
+    /// <see cref="AgentDialCodes.ContactDoNotContact"/> when any checked contact is marked do-not-contact, else
+    /// <see cref="AgentDialCodes.ContactConsentWithdrawn"/> when any records its Voice consent as <c>false</c>, else
+    /// <c>null</c>. An absent Voice answer or a recorded <c>true</c> refuses nothing. Store errors are not caught.
+    /// </summary>
+    private async Task<string?> ContactRestrictionAsync(
+        TenantId tenantId, string number, EntityId? contactId, CancellationToken ct)
+    {
+        var named = contactId is null
+            ? null
+            : await _contactStore.GetByIdAsync(tenantId, contactId.Value, ct).ConfigureAwait(false);
+        var holders = await _contactStore.FindAllByVoiceNumberAsync(tenantId, number, NumberMatchLimit, ct).ConfigureAwait(false);
+
+        var consentWithdrawn = false;
+        foreach (var contact in named is null ? holders : holders.Prepend(named))
+        {
+            if (contact.DoNotContact)
+                return AgentDialCodes.ContactDoNotContact;
+            if (contact.ChannelConsent.TryGetValue(ChannelType.Voice, out var consented) && !consented)
+                consentWithdrawn = true;
+        }
+
+        return consentWithdrawn ? AgentDialCodes.ContactConsentWithdrawn : null;
     }
 
     /// <summary>Best-effort: the Originate already succeeded, so a capacity failure is logged, never thrown.</summary>

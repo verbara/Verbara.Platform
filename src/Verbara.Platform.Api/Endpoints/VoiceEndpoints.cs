@@ -139,7 +139,7 @@ internal static class VoiceEndpoints
         var outcome = await dialService.DialAsync(tenantId, agent.AgentId, number, contactId, ct);
         if (outcome.Accepted)
             return TypedResults.Ok(new VoiceDialResponse(true, outcome.CorrelationId, null));
-        if (outcome.Error == TrunkNotDialable)
+        if (outcome.Error is TrunkNotDialable or AgentDialCodes.ContactDoNotContact or AgentDialCodes.ContactConsentWithdrawn)
         {
             return TypedResults.Json(
                 new VoiceDialResponse(false, null, outcome.Error, outcome.TrunkId),
@@ -185,7 +185,8 @@ internal sealed record VoiceDialRequest(string? ToNumber, string? ContactId);
 
 /// <summary>
 /// <c>CorrelationId</c> is the tracked outbound Conversation id on success; <c>Error</c> a stable code otherwise
-/// (<c>voice-unavailable</c> on 503).
+/// (<c>voice-unavailable</c> on 503; <c>trunk-not-dialable</c>, <c>contact-do-not-contact</c> and
+/// <c>contact-consent-withdrawn</c> on 409).
 /// <c>TrunkId</c> is always written: the resolved trunk's id on 409 <c>trunk-not-dialable</c>, null otherwise.
 /// </summary>
 internal sealed record VoiceDialResponse(
