@@ -1,0 +1,133 @@
+{
+  "_comment": "How an agent-started contact attempt refuses a contact whose `doNotContact` is true or whose consent on the attempt's channel is recorded `false` (design D10, D11, D13). Written 2026-11-05 from Platform main a1fc0481 by reading the code; nothing here was run. Revised 2026-11-05 with the operator's answers and the judge's ruling on Q2-Q5 and the spec audit's F1, and again with the third spec audit's F1 (canonical-form match) and F2 (every contact sharing the dialed number); the wire shapes did not change, only cases were added at the end. Today neither route reads Contact.DoNotContact or Contact.ChannelConsent (VoiceEndpoints.cs:101-150, AgentOutboundDialService.cs:113-149, OutboundConversationStarter.cs:79-129). After this change both refuse with TWO codes, each status 409, before any carrier or provider request and before anything is stored: `contact-do-not-contact` (the contact's `doNotContact` is true) and `contact-consent-withdrawn` (the contact's `channelConsent` holds the attempt's channel with the value `false`; Voice for the dial). When both hold, `contact-do-not-contact` is the answer. A channel ABSENT from `channelConsent` (no recorded answer) refuses nothing, and a recorded `true` refuses nothing: `HasConsent` is not read. Each route keeps its own existing refusal body: VoiceDialResponse for the dial (`accepted`, `error`, `trunkId` always written, `correlationId` absent when null; shape of archived outbound-calls-reach-the-trunk fixture voice-dial-transfer.v1.json) and ConversationStartRefusal for the start (`error`; `conversationId` and `ownerKind` absent, as for every refusal that names no open conversation). The DNC LIST check by number (`dnc-blocked`, 400) is unchanged and runs before these on the dial. Not covered: the rescue callback (it returns a call the customer was having, CallbackOriginator.cs:46-47), campaigns and customer-requested callbacks (Pro dialer), POST /conversations without `initialMessage` (sends nothing), and POST /conversations/{id}/messages (an open thread). Every child change's delta spec must cite these field names and codes VERBATIM.",
+  "dial": {
+    "case": "the agent console's contact card calls a contact marked do-not-contact",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/voice/dial",
+      "body": { "toNumber": "+15551234567", "contactId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d" }
+    },
+    "status": 409,
+    "body": { "accepted": false, "error": "contact-do-not-contact", "trunkId": null },
+    "_contact": "TWO contacts are checked, and the dial is refused when EITHER is marked or has Voice consent recorded `false`: the contact `contactId` names (IContactStore.GetByIdAsync) and EVERY contact of the tenant whose stored Voice address matches the dialed number in canonical form (a new read-only store method returning all matches, restricted ones first, bounded; it creates nothing; third spec audit F2). Canonical form = DialNumber.Normalize applied to both sides: the ASCII digits, with `+` kept only when the first non-blank character is `+`; no country, trunk or international prefix is added or removed, so `+1 (555) 123-4567` matches a dial of `+15551234567` and `15551234567` does not (third spec audit F1; see `dialStoredFormattedAddress` and `dialCanonicalFormResidual`). A `contactId` that names no contact is not an error, and the number is still checked. A store error is not caught: the request fails and nothing rings (fail closed, unlike the DNC-list check). Checked before the Originate, so no leg rings"
+  },
+  "dialNumberOfMarkedContactWithUnrelatedContactId": {
+    "case": "a caller pairs the number of a contact marked do-not-contact with the contactId of another, unmarked contact (spec audit F1)",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/voice/dial",
+      "body": { "toNumber": "+15551234567", "contactId": "0b9d8c7e6f5a4b3c2d1e0f9a8b7c6d5e" }
+    },
+    "status": 409,
+    "body": { "accepted": false, "error": "contact-do-not-contact", "trunkId": null },
+    "_contact": "+15551234567 is the Voice address of 7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d, which is marked; 0b9d8c7e6f5a4b3c2d1e0f9a8b7c6d5e is a contact of the same tenant that is not marked"
+  },
+  "dialNumberOfMarkedContactWithUnknownContactId": {
+    "case": "a caller pairs the number of a contact marked do-not-contact with a contactId no contact of the tenant has (spec audit F1)",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/voice/dial",
+      "body": { "toNumber": "+15551234567", "contactId": "ffffffffffffffffffffffffffffffff" }
+    },
+    "status": 409,
+    "body": { "accepted": false, "error": "contact-do-not-contact", "trunkId": null }
+  },
+  "dialConsentWithdrawn": {
+    "case": "the agent calls a contact that is not marked do-not-contact but whose Voice consent is recorded false",
+    "contactChannelConsent": { "Voice": false, "Email": true },
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/voice/dial",
+      "body": { "toNumber": "+15551234567", "contactId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d" }
+    },
+    "status": 409,
+    "body": { "accepted": false, "error": "contact-consent-withdrawn", "trunkId": null }
+  },
+  "start": {
+    "case": "an agent starts a WhatsApp conversation with a first message to a contact marked do-not-contact, with no open conversation on WhatsApp",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/conversations",
+      "body": { "contactId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d", "channel": "WhatsApp", "initialMessage": "Hello" }
+    },
+    "status": 409,
+    "body": { "error": "contact-do-not-contact" },
+    "_order": "decided after the open-conversation lookup and its two refusals (`conversation-open-elsewhere`, `conversation-not-sendable`) and before the WhatsApp window (`whatsapp-template-required`), only when there is NO open conversation (OutboundConversationStarter.cs:87-105 then 107): nothing is sent, stored or reserved. `contact-has-no-address` and `channel-not-available` are still decided before it"
+  },
+  "startConsentWithdrawn": {
+    "case": "an agent starts a WhatsApp conversation with a first message to a contact whose WhatsApp consent is recorded false, with no open conversation on WhatsApp",
+    "contactChannelConsent": { "WhatsApp": false },
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/conversations",
+      "body": { "contactId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d", "channel": "WhatsApp", "initialMessage": "Hello" }
+    },
+    "status": 409,
+    "body": { "error": "contact-consent-withdrawn" }
+  },
+  "startReusesOwnOpenConversation": {
+    "case": "the contact is marked do-not-contact (and its WhatsApp consent is recorded false), but the calling agent owns a sendable open WhatsApp conversation with it: the start reuses that conversation and is NOT refused",
+    "contactChannelConsent": { "WhatsApp": false },
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/conversations",
+      "body": { "contactId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d", "channel": "WhatsApp", "initialMessage": "Hello" }
+    },
+    "status": 201,
+    "_body": "the open conversation (the Conversation read model, unchanged), whose `conversationId` is the open one's; no `error` member. As POST /conversations/{id}/messages on the same thread, which checks neither member (route ConversationEndpoints.cs:53, its send at :325)"
+  },
+  "notRefused": {
+    "case": "a channel with no recorded answer, or a recorded true, refuses nothing",
+    "examples": [
+      { "contactChannelConsent": {}, "channel": "WhatsApp", "refused": false },
+      { "contactChannelConsent": { "WhatsApp": true }, "channel": "WhatsApp", "refused": false },
+      { "contactChannelConsent": { "Sms": false }, "channel": "WhatsApp", "refused": false }
+    ]
+  },
+  "dialSharedNumberDoNotContact": {
+    "case": "two contacts of the tenant hold the same Voice address +15551234567; 7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d is marked do-not-contact and 3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f is not; the caller names the unmarked one, or no contact (third spec audit F2)",
+    "contacts": [
+      { "contactId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d", "doNotContact": true, "addresses": [{ "channel": "Voice", "address": "+15551234567" }] },
+      { "contactId": "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f", "doNotContact": false, "addresses": [{ "channel": "Voice", "address": "+15551234567" }] }
+    ],
+    "requests": [
+      { "method": "POST", "path": "/api/v1/voice/dial", "body": { "toNumber": "+15551234567", "contactId": "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f" } },
+      { "method": "POST", "path": "/api/v1/voice/dial", "body": { "toNumber": "+15551234567" } }
+    ],
+    "status": 409,
+    "body": { "accepted": false, "error": "contact-do-not-contact", "trunkId": null },
+    "_rule": "every matching contact is read, and the dial is refused when ANY is restricted, whichever row a heap scan meets first; no Originate"
+  },
+  "dialSharedNumberConsentWithdrawn": {
+    "case": "two contacts of the tenant hold the same Voice address +15551234567; neither is marked; 7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d records Voice consent false and 3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f records nothing; the caller names the second one, or no contact (third spec audit F2)",
+    "contacts": [
+      { "contactId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d", "doNotContact": false, "channelConsent": { "Voice": false }, "addresses": [{ "channel": "Voice", "address": "+15551234567" }] },
+      { "contactId": "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f", "doNotContact": false, "channelConsent": {}, "addresses": [{ "channel": "Voice", "address": "+15551234567" }] }
+    ],
+    "requests": [
+      { "method": "POST", "path": "/api/v1/voice/dial", "body": { "toNumber": "+15551234567", "contactId": "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f" } },
+      { "method": "POST", "path": "/api/v1/voice/dial", "body": { "toNumber": "+15551234567" } }
+    ],
+    "status": 409,
+    "body": { "accepted": false, "error": "contact-consent-withdrawn", "trunkId": null }
+  },
+  "dialStoredFormattedAddress": {
+    "case": "a contact marked do-not-contact whose Voice address was stored as typed; the caller dials a differently written form of the same canonical number, by number only or with the unrelated unmarked contactId 0b9d8c7e6f5a4b3c2d1e0f9a8b7c6d5e (third spec audit F1)",
+    "examples": [
+      { "storedAddress": "+1 (555) 123-4567", "toNumber": "+15551234567", "canonical": "+15551234567", "status": 409, "error": "contact-do-not-contact" },
+      { "storedAddress": "+1 (555) 123-4567", "toNumber": "+1 555-123-4567", "canonical": "+15551234567", "status": 409, "error": "contact-do-not-contact" },
+      { "storedAddress": "15551234567", "toNumber": "15551234567", "canonical": "15551234567", "status": 409, "error": "contact-do-not-contact" },
+      { "storedAddress": "15551234567", "toNumber": "1 (555) 123-4567", "canonical": "15551234567", "status": 409, "error": "contact-do-not-contact" }
+    ],
+    "body": { "accepted": false, "error": "contact-do-not-contact", "trunkId": null }
+  },
+  "dialCanonicalFormResidual": {
+    "case": "the canonical form keeps a leading + and adds no country code, so a number stored without + and dialed in E.164 (or the reverse) is NOT matched by the number-side check; a recorded residual and follow-up, not a guarantee",
+    "examples": [
+      { "storedAddress": "15551234567", "toNumber": "+15551234567", "refusedByNumberSideCheck": false },
+      { "storedAddress": "+1 (555) 123-4567", "toNumber": "15551234567", "refusedByNumberSideCheck": false },
+      { "storedAddress": "5551234567", "toNumber": "+15551234567", "refusedByNumberSideCheck": false }
+    ],
+    "_note": "the contact `contactId` names is still checked by id (the console's card always sends it), so a dial that names the marked contact is refused whatever its address spelling"
+  }
+}

@@ -13,6 +13,19 @@ internal static class ContactEndpoints
     /// <summary>A contact write named a WebChat identity key, which only <c>POST /webchat/sessions</c> writes (design D12).</summary>
     internal const string ReservedContactAddressCode = "reserved-contact-address";
 
+    /// <summary>
+    /// 403: the caller's roles do not hold the permission of the contact write (<c>contacts:contact:create</c>,
+    /// <c>:edit</c>, <c>:delete</c>) or of the opt-out (<c>contacts:conversation:handle</c>). Evaluated first, so the
+    /// answer says nothing about the contact or the body. The code the supervisor listen routes already answer.
+    /// </summary>
+    internal const string NotPermittedCode = SupervisorListenRefusal.NotPermitted;
+
+    /// <summary>
+    /// 400: a <c>channelConsent</c> key of an update, or a <c>channels</c> value of an opt-out, is not a channel name as
+    /// <c>GET</c> writes it (compared ordinally); <c>details</c> lists each such value once. Nothing is written.
+    /// </summary>
+    internal const string UnknownConsentChannelCode = "unknown-consent-channel";
+
     private const string ReservedAddressDescription =
         "A WebChat address that starts with `webchat-visitor:` or `webchat-external:` answers 400 `reserved-contact-address`, " +
         "with the offending addresses in `details`, and nothing is written. `identityLevel` in the body is ignored.";
@@ -276,6 +289,21 @@ internal sealed record UpdateContactRequest(
     string? Timezone = null,
     bool? DoNotContact = null,
     IReadOnlyList<ChannelAddressDto>? Addresses = null,
-    IReadOnlyDictionary<string, string>? CustomFields = null);
+    IReadOnlyDictionary<string, string>? CustomFields = null,
+    IReadOnlyDictionary<string, bool>? ChannelConsent = null);
 
 internal sealed record ChannelAddressDto(ChannelType Channel, string Address);
+
+/// <summary>
+/// The body of <c>POST /contacts/{id}/opt-out</c>: <see cref="DoNotContact"/> <see langword="true"/> sets the contact's
+/// do-not-contact, and each of <see cref="Channels"/> (channel names as <c>GET</c> writes them) records <c>false</c> for
+/// that channel. Both members are optional; the route never clears do-not-contact and never records <c>true</c>.
+/// </summary>
+internal sealed record ContactOptOutRequest(bool? DoNotContact = null, IReadOnlyList<string>? Channels = null);
+
+/// <summary>
+/// The before or after of a contact's do-not-contact and consent in a contact audit record (design D17): those two
+/// members only, never a name or an address. Serialized to JSON through <c>ApiJsonContext</c> before it reaches the
+/// audit store, whose own serializer has no context for it.
+/// </summary>
+internal sealed record ContactConsentAuditState(bool DoNotContact, IReadOnlyDictionary<string, bool> ChannelConsent);

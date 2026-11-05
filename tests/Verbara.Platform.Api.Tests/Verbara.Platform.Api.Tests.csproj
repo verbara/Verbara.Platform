@@ -64,6 +64,10 @@
     <!-- agent-console-contract-debt: the transfer request, the transfer-target pickers, the available-channels list and the start,
          copied verbatim from the change's cross-repo contract fixtures. -->
     <None Include="Conversations/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- contacts-writes-follow-their-permissions: the contact-write refusals, the channel consent of an update, the
+         opt-out and its audit record, the dial and start refusals and the token permissions, copied verbatim from the
+         change's cross-repo contract fixtures. -->
+    <None Include="Contacts/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

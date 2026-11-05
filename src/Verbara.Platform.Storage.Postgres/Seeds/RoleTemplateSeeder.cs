@@ -320,6 +320,10 @@ public static class RoleTemplateSeeder
                 "analytics:cdr:view",
                 "analytics:cdr:export",
                 "contacts:contact:view",
+                // contacts-writes-follow-their-permissions (design D5): an integration bound to an Api user keeps
+                // creating and updating contacts; it does not delete them.
+                "contacts:contact:create",
+                "contacts:contact:edit",
                 // contact-history-opens-by-assignment (design D16): an integration bound to an Api user reads every
                 // conversation; a key bound to no user carries no role and stays refused.
                 "contacts:conversation:read",
@@ -369,7 +373,7 @@ public static class RoleTemplateSeeder
             "contacts:conversation:monitor", "contacts:conversation:barge",
             "contacts:conversation:whisper", "contacts:conversation:read",
             "contacts:contact:view",
-            "contacts:contact:edit", "contacts:contact:create",
+            "contacts:contact:edit", "contacts:contact:create", "contacts:contact:delete",
             "queues:queue:view", "queues:queue:create",
             "queues:queue:edit", "queues:queue:delete",
             "queues:member:assign", "queues:member:view",

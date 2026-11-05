@@ -21,6 +21,22 @@ internal sealed class PostgresContactStore : IContactStore
         "  AND EXISTS (SELECT 1 FROM jsonb_array_elements(addresses) AS a " +
         "              WHERE a->>'channel' IN (@ChannelName, @ChannelOrdinal) AND a->>'address' = @Address)";
 
+    // contacts-writes-follow-their-permissions (design D10): VoiceNumber.Canonical in SQL, on each Voice element of
+    // either channel form. The blank class is written out as the four ASCII characters C# skips, never \s (which
+    // follows the database's locale). A stored address with no digit matches nothing, so it never reduces to a lone +.
+    // The order puts every restricted contact ahead of every unrestricted one, so the bound drops only rows that cannot
+    // change a refusal. '0' is Voice's ordinal, the only key form SaveAsync writes into channel_consent.
+    private const string FindAllByVoiceNumberSql =
+        "SELECT " + ReturnedColumns + " " +
+        "FROM contacts WHERE tenant_id = @TenantId " +
+        "  AND EXISTS (SELECT 1 FROM jsonb_array_elements(addresses) AS a " +
+        "              WHERE a->>'channel' IN ('Voice', '0') " +
+        "                AND regexp_replace(a->>'address', '[^0-9]', '', 'g') <> '' " +
+        "                AND (CASE WHEN a->>'address' ~ '^[ \\t\\r\\n]*\\+' THEN '+' ELSE '' END) " +
+        "                    || regexp_replace(a->>'address', '[^0-9]', '', 'g') = @Number) " +
+        "ORDER BY do_not_contact DESC, COALESCE(channel_consent->'0' = 'false'::jsonb, false) DESC, contact_id " +
+        "LIMIT @Limit";
+
     private const string SearchPredicate =
         "(first_name ILIKE @Term OR last_name ILIKE @Term OR company ILIKE @Term " +
         "OR custom_fields->>'" + Contact.WebChatEmailField + "' ILIKE @Term)";
@@ -66,6 +82,22 @@ internal sealed class PostgresContactStore : IContactStore
             p => AddFindParameters(p, tenantId, address),
             ContactRow.Map, ct);
         return rows.Select(r => r.ToContact()).FirstOrDefault();
+    }
+
+    public async Task<IReadOnlyList<Contact>> FindAllByVoiceNumberAsync(
+        TenantId tenantId, string canonicalNumber, int limit, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(canonicalNumber);
+        var rows = await _dataSource.QueryListAsync(
+            FindAllByVoiceNumberSql,
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("Number", NpgsqlDbType.Text) { Value = canonicalNumber });
+                p.Add(new NpgsqlParameter("Limit", NpgsqlDbType.Integer) { Value = Math.Max(0, limit) });
+            },
+            ContactRow.Map, ct);
+        return [.. rows.Select(r => r.ToContact())];
     }
 
     private static void AddFindParameters(NpgsqlParameterCollection p, TenantId tenantId, ChannelAddress address)

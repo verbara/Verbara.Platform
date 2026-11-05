@@ -27,6 +27,26 @@ internal sealed class InMemoryContactStore : IContactStore
         return Task.FromResult(result);
     }
 
+    public Task<IReadOnlyList<Contact>> FindAllByVoiceNumberAsync(
+        TenantId tenantId, string canonicalNumber, int limit, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(canonicalNumber);
+        IReadOnlyList<Contact> result = _items.Values
+            .Where(c => c.TenantId == tenantId && c.Addresses.Any(a => a.Channel == ChannelType.Voice && Matches(a.Address)))
+            .OrderByDescending(c => c.DoNotContact)
+            .ThenByDescending(c => c.ChannelConsent.TryGetValue(ChannelType.Voice, out var voice) && !voice)
+            .ThenBy(c => c.ContactId.Value, StringComparer.Ordinal)
+            .Take(Math.Max(0, limit))
+            .ToList();
+        return Task.FromResult(result);
+
+        bool Matches(string address)
+        {
+            var canonical = VoiceNumber.Canonical(address);
+            return canonical.Length > 0 && string.Equals(canonical, canonicalNumber, StringComparison.Ordinal);
+        }
+    }
+
     public Task<PagedResult<Contact>> SearchAsync(TenantId tenantId, string? searchTerm, PagedQuery query, CancellationToken ct)
     {
         var filtered = _items.Values

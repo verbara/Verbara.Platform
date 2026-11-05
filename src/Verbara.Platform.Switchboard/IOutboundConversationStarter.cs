@@ -66,6 +66,18 @@ public static class OutboundStartCodes
     /// reconciliation.
     /// </summary>
     public const string StartPersistFailed = "start-persist-failed";
+
+    /// <summary>
+    /// The contact is marked do-not-contact and no open conversation of the caller is reused (409). Nothing is sent,
+    /// stored or reserved.
+    /// </summary>
+    public const string ContactDoNotContact = "contact-do-not-contact";
+
+    /// <summary>
+    /// The contact's consent on the channel is recorded <c>false</c> and no open conversation of the caller is reused
+    /// (409). A channel with no recorded answer, or a recorded <c>true</c>, refuses nothing.
+    /// </summary>
+    public const string ContactConsentWithdrawn = "contact-consent-withdrawn";
 }
 
 /// <summary>

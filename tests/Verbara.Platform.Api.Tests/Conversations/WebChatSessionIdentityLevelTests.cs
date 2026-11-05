@@ -118,6 +118,7 @@ public sealed class WebChatSessionIdentityLevelTests : IDisposable
 
         public Task<Contact?> GetByIdAsync(TenantId tenantId, EntityId contactId, CancellationToken ct) => inner.GetByIdAsync(tenantId, contactId, ct);
         public Task<Contact?> FindByAddressAsync(TenantId tenantId, ChannelAddress address, CancellationToken ct) => inner.FindByAddressAsync(tenantId, address, ct);
+        public Task<IReadOnlyList<Contact>> FindAllByVoiceNumberAsync(TenantId tenantId, string canonicalNumber, int limit, CancellationToken ct) => inner.FindAllByVoiceNumberAsync(tenantId, canonicalNumber, limit, ct);
         public Task<PagedResult<Contact>> SearchAsync(TenantId tenantId, string? searchTerm, PagedQuery query, CancellationToken ct) => inner.SearchAsync(tenantId, searchTerm, query, ct);
         public Task SaveAsync(Contact contact, CancellationToken ct) => inner.SaveAsync(contact, ct);
         public Task DeleteAsync(TenantId tenantId, EntityId contactId, CancellationToken ct) => inner.DeleteAsync(tenantId, contactId, ct);

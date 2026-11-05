@@ -1,0 +1,64 @@
+{
+  "_comment": "The `channelConsent` member of PUT /api/v1/contacts/{id} (design D8) and what GET returns. Written 2026-11-05 from Platform main a1fc0481 by reading the code and by one local probe of System.Text.Json with ApiJsonContext's options (camelCase, UseStringEnumConverter, WhenWritingNull); the running host was NOT called (tasks 0.2 measures it). Today UpdateContactRequest (ContactEndpoints.cs:269-279) has no `channelConsent` member, so the member the console sends is dropped and nothing is stored. Contact.ChannelConsent is IReadOnlyDictionary<ChannelType,bool> (Contact.cs:30-31), so GET writes each key as the ChannelType NAME, PascalCase, exactly as `preferredChannel` and `addresses[].channel` are written: `Voice`, `WhatsApp`, `Sms`, `WebChat`, `Email`, `Messenger`, `Instagram`, `Telegram`, `Twitter`, `Video`, `Rcs` (ChannelType.cs). The console's consent page reads and writes lowercase keys (`voice`, `email`, `sms`, `whatsapp`, `webchat`), so it never finds a recorded consent; the Web child moves it to these names. After this change PUT accepts the member with the SAME names, compared ordinally (case-sensitive); a name that is not a defined ChannelType name (a number such as `0` included) refuses the whole write. Merge semantics: a key present sets that channel; a channel absent from the member keeps its stored value; an absent or null member changes nothing. A value is a JSON boolean. Requires contacts:contact:edit (contact-write-refusals.v1.json). Storage is unchanged: contacts.channel_consent, jsonb keyed by the channel's integer (PostgresContactStore.cs:134-149). Every child change's delta spec must cite these field names and codes VERBATIM.",
+  "update": {
+    "case": "the consent page records consent on Voice and Email and refusal on WhatsApp, and sets do-not-contact off",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d",
+      "body": {
+        "doNotContact": false,
+        "channelConsent": { "Voice": true, "Email": true, "WhatsApp": false }
+      }
+    },
+    "requestFields": {
+      "channelConsent": "object, optional: keys are ChannelType names as GET writes them (case-sensitive), values are booleans. Merged into the stored map",
+      "doNotContact": "boolean, optional: unchanged member; absent or null keeps the stored value"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "contactId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d",
+        "tenantId": "t-demo-0001",
+        "firstName": "Ana",
+        "lastName": "Ruiz",
+        "doNotContact": false,
+        "addresses": [ { "channel": "Voice", "address": "+15551234567" }, { "channel": "Email", "address": "ana@example.com" } ],
+        "customFields": {},
+        "channelConsent": { "Voice": true, "Email": true, "WhatsApp": false },
+        "createdAt": "2026-11-01T10:00:00.000+00:00",
+        "updatedAt": "2026-11-05T09:30:00.000+00:00",
+        "fullName": "Ana Ruiz"
+      },
+      "_note": "the Contact read model, unchanged in shape; `channelConsent` now reflects what PUT sent. Members not shown (company, segment, preferredChannel, preferredLanguage, timezone, createdBy, updatedBy, identityLevel) are absent when null, as today"
+    }
+  },
+  "merge": {
+    "case": "a later PUT names only Sms: Voice, Email and WhatsApp keep their values",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d",
+      "body": { "channelConsent": { "Sms": true } }
+    },
+    "responseChannelConsent": { "Voice": true, "Email": true, "WhatsApp": false, "Sms": true }
+  },
+  "read": {
+    "case": "GET /api/v1/contacts/{id} after the two writes",
+    "request": { "method": "GET", "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d" },
+    "status": 200,
+    "bodyChannelConsent": { "Voice": true, "Email": true, "WhatsApp": false, "Sms": true },
+    "_neverRecorded": "a contact with no recorded consent answers `channelConsent`: {} (an empty object, never absent: the dictionary is never null). A channel absent from the object has no recorded answer; it is not the same as false"
+  },
+  "refusals": [
+    {
+      "case": "a key that is not a ChannelType name as GET writes it: lowercase, a number, or unknown. Nothing is written, `doNotContact` included",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d",
+        "body": { "doNotContact": true, "channelConsent": { "voice": true, "0": true, "Fax": false, "Email": true } }
+      },
+      "status": 400,
+      "body": { "error": "unknown-consent-channel", "details": ["voice", "0", "Fax"] },
+      "_details": "the offending keys, each once, in the order the body names them; the existing ErrorDetailResponse shape (Endpoints/Shared/ErrorResponse.cs), as `reserved-contact-address` uses it"
+    }
+  ]
+}

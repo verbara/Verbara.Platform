@@ -18,6 +18,20 @@ namespace Verbara.Platform.Api.Services;
 /// </summary>
 internal sealed record VoiceDialOutcome(bool Accepted, string? CorrelationId, string? Error, long? TrunkId = null);
 
+/// <summary>The click-to-dial refusals of a restricted contact (contacts-writes-follow-their-permissions, design D10).</summary>
+internal static class AgentDialCodes
+{
+    /// <summary>
+    /// 409: the contact the dial names, or a contact holding the dialed number, is marked do-not-contact. No leg rings.
+    /// </summary>
+    public const string ContactDoNotContact = "contact-do-not-contact";
+
+    /// <summary>
+    /// 409: no such contact is marked, but one records its Voice consent as <c>false</c>. No leg rings.
+    /// </summary>
+    public const string ContactConsentWithdrawn = "contact-consent-withdrawn";
+}
+
 internal interface IAgentOutboundDialService
 {
     Task<VoiceDialOutcome> DialAsync(

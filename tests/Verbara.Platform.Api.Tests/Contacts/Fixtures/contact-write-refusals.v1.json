@@ -1,0 +1,67 @@
+{
+  "_comment": "How the three contact writes refuse a caller that lacks their permission (design D1, D2, D7). Written 2026-11-05 from Platform main a1fc0481 by reading the code; nothing here was run. The permission is evaluated IN THE HANDLER, first, through IAuthorizationService with the policy `Permission:<id>` (the SupervisorListenEndpoints pattern), so the refusal carries the existing ErrorResponse body (Endpoints/Shared/ErrorResponse.cs: `{\"error\": <code>}`) and never a bare policy 403 or server prose (Verbara.Platform.Web/ADR-0013). ONE code for every contact-write refusal: `not-permitted` (the code SupervisorListenRefusal.NotPermitted already puts on the wire). It is answered before the body is validated and before the contact is looked up, so a refused caller learns neither whether the id exists nor whether its body was valid, and nothing is written. The Admin and SystemAdmin role claims pass every permission (PermissionAuthorizationHandler.cs:32), so a management key and a key bound to an Admin user are never refused. A tenant API key bound to no user resolves no role and is refused on all three (Platform/ADR-0047, consequences). The reads (GET /contacts, GET /contacts/{id}) are unchanged and keep `Authenticated`. ApiJsonContext: camelCase, enums as PascalCase strings, null members absent. Every child change's delta spec must cite these field names and codes VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "permissionByRoute": [
+    { "method": "POST", "path": "/api/v1/contacts", "permission": "contacts:contact:create" },
+    { "method": "PUT", "path": "/api/v1/contacts/{id}", "permission": "contacts:contact:edit", "_covers": "every member of the body, `doNotContact` and `channelConsent` included (design D3)" },
+    { "method": "DELETE", "path": "/api/v1/contacts/{id}", "permission": "contacts:contact:delete", "_new": "catalogued by this change (design D4)" }
+  ],
+  "evaluationOrder": [
+    "1. permission of the route -> 403 not-permitted",
+    "2. body validation -> 400 reserved-contact-address (POST, PUT) or 400 unknown-consent-channel (PUT)",
+    "3. PUT only: no contact of the tenant has that id -> 404, no body",
+    "4. the write"
+  ],
+  "refusals": [
+    {
+      "case": "a user whose roles hold no contacts:contact:create (for example the agent template) creates a contact",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/contacts",
+        "body": { "firstName": "Ana", "addresses": [ { "channel": "Voice", "address": "+15551234567" } ] }
+      },
+      "status": 403,
+      "body": { "error": "not-permitted" }
+    },
+    {
+      "case": "a user whose roles hold no contacts:contact:edit (for example the agent template) sets do-not-contact",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d",
+        "body": { "doNotContact": true }
+      },
+      "status": 403,
+      "body": { "error": "not-permitted" }
+    },
+    {
+      "case": "the same caller, on an id no contact of the tenant has: still 403, the permission runs before the lookup",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v1/contacts/ffffffffffffffffffffffffffffffff",
+        "body": { "firstName": "Ana" }
+      },
+      "status": 403,
+      "body": { "error": "not-permitted" }
+    },
+    {
+      "case": "a user whose roles hold no contacts:contact:delete (every seeded template except the admin family, design D4) deletes a contact",
+      "request": { "method": "DELETE", "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d" },
+      "status": 403,
+      "body": { "error": "not-permitted" }
+    },
+    {
+      "case": "a tenant API key bound to no user, on any of the three writes",
+      "request": { "method": "DELETE", "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d", "headers": { "Authorization": "Bearer <tenant key bound to no user>" } },
+      "status": 403,
+      "body": { "error": "not-permitted" },
+      "_auth": "the key travels as `Authorization: Bearer <key>`, the only header the API-key scheme reads (ApiKeyAuthenticationHandler.cs:38 and TryReadBearerCredential at 130-142; AuthSchemeConfiguration.cs:42 forwards a request to that scheme). Nothing inbound reads `X-Api-Key`: a request carrying only that header is unauthenticated (401), never this 403. The regression uses the real authentication handler with a valid tenant key bound to no user (spec audit 2026-11-05, F2)"
+    }
+  ],
+  "allowed": [
+    {
+      "case": "a caller holding contacts:contact:delete deletes a contact; unchanged answer, with or without a contact of that id",
+      "request": { "method": "DELETE", "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d" },
+      "status": 204,
+      "_noBody": true
+    }
+  ]
+}

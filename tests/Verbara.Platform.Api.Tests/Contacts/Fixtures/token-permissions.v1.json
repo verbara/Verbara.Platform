@@ -1,0 +1,22 @@
+{
+  "_comment": "The `permissions` member of TokenResponse (AuthEndpoints.cs:1390-1397), which the console stores as a string[] (auth-store.ts) and reads with useHasPermission. Its shape is unchanged; this change adds one catalogued id, `contacts:contact:delete`, that can now appear in it, and the console's existing PermissionButton requires=\"contacts:contact:delete\" on the contact card (contact-info.tsx) starts showing for its holders. Written 2026-11-05 by reading the code; nothing was run. The values are the effective permissions of the caller: its resolved tenant-role rows, or the RoleDefaultPermissions fallback of its role when it resolves none (AuthEndpoints.cs:544). Excerpts list only the contacts:contact:* ids per seeded template after this change (design D4, D5); every other id is unchanged and elided. quality_analyst holds no contacts:contact:* id today (RoleTemplateSeeder.cs:239-254, only contacts:conversation:read) and gains none, so its excerpt is empty (second spec audit F3).",
+  "member": "permissions",
+  "excerptsByTemplate": {
+    "admin": ["contacts:contact:view", "contacts:contact:edit", "contacts:contact:create", "contacts:contact:delete"],
+    "system_admin": ["contacts:contact:view", "contacts:contact:edit", "contacts:contact:create", "contacts:contact:delete"],
+    "platform_admin": ["contacts:contact:view", "contacts:contact:edit", "contacts:contact:create", "contacts:contact:delete"],
+    "manager": ["contacts:contact:view", "contacts:contact:edit"],
+    "supervisor": ["contacts:contact:view", "contacts:contact:edit"],
+    "quality_analyst": [],
+    "agent": ["contacts:contact:view"],
+    "api": ["contacts:contact:view", "contacts:contact:edit", "contacts:contact:create"]
+  },
+  "fallbackAdmin": {
+    "_note": "RoleDefaultPermissions.Admin mirrors the admin template (living spec rbac-permission-vocabulary), so it gains `contacts:contact:delete` too",
+    "excerpt": ["contacts:contact:view", "contacts:contact:edit", "contacts:contact:create", "contacts:contact:delete"]
+  },
+  "example": {
+    "case": "the token response of an Admin user, excerpt",
+    "body": { "permissions": ["contacts:conversation:read", "contacts:contact:view", "contacts:contact:edit", "contacts:contact:create", "contacts:contact:delete"] }
+  }
+}

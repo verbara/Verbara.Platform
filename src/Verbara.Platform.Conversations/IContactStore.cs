@@ -6,6 +6,14 @@ public interface IContactStore
 {
     Task<Contact?> GetByIdAsync(TenantId tenantId, EntityId contactId, CancellationToken ct);
     Task<Contact?> FindByAddressAsync(TenantId tenantId, ChannelAddress address, CancellationToken ct);
+
+    /// <summary>
+    /// Every contact of the tenant holding a Voice address whose canonical form (<see cref="VoiceNumber.Canonical"/>)
+    /// equals <paramref name="canonicalNumber"/>, restricted ones first (do-not-contact, then Voice consent recorded
+    /// <c>false</c>, then contact id), at most <paramref name="limit"/> rows. An address with no digit matches nothing.
+    /// Creates and changes nothing.
+    /// </summary>
+    Task<IReadOnlyList<Contact>> FindAllByVoiceNumberAsync(TenantId tenantId, string canonicalNumber, int limit, CancellationToken ct);
     Task<PagedResult<Contact>> SearchAsync(TenantId tenantId, string? searchTerm, PagedQuery query, CancellationToken ct);
     Task SaveAsync(Contact contact, CancellationToken ct);
     Task DeleteAsync(TenantId tenantId, EntityId contactId, CancellationToken ct);
