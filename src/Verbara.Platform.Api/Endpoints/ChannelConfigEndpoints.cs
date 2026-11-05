@@ -15,7 +15,15 @@ internal static class ChannelConfigEndpoints
 
         group.MapGet("/", ListChannelConfigs);
         group.MapGet("/{channel}", GetChannelConfig);
-        group.MapPut("/{channel}", UpdateChannelConfig);
+        group.MapPut("/{channel}", UpdateChannelConfig)
+            .WithSummary("Update a channel's configuration")
+            .WithDescription(
+                "Merges with what is stored, key by key: an omitted or blank key keeps its value, a value replaces it, `null` " +
+                "removes it. A key outside the channel's schema answers 400 `unknown-credential-key`. On WebChat, a new " +
+                "`identityTokenSecret` (32 to 512 characters, else 400 `weak-identity-token-secret`) moves the old one to " +
+                "`identityTokenSecretPrevious`, which verifies for 24 hours from `identityTokenSecretReplacedAt`. " +
+                "`identityTokenSecretPrevious` accepts only `null`, which ends that time at once, and " +
+                "`identityTokenSecretReplacedAt` cannot be named at all: both answer 400 `server-managed-credential-key` otherwise.");
         group.MapPost("/{channel}/test", TestChannelConfig);
 
         // agent-console-contract-debt (C7): the gate of POST /conversations, so anyone who may start can see what on.

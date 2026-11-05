@@ -20,9 +20,10 @@ El canal WebChat permite que un visitante anónimo del sitio web del cliente ini
    carga lazy un iframe aislado en /webchat/embed/
          │
          │  (2) el visitante completa el formulario inicial (nombre + email) y,
-         │      al enviarlo, el iframe POST /api/v1/webchat/sessions  { "tenantId": "<customer>" }
+         │      al enviarlo, el iframe POST /api/v1/webchat/sessions  { "tenantId": "<customer>", … }
          │      → { "sessionId", "wsUrl": "/ws/webchat/{sessionId}",
-         │          "visitorAddress": "webchat-…", "contactId", "conversationId" }   (anónimo, sin auth)
+         │          "visitorAddress": "webchat-…", "contactId", "conversationId",
+         │          "identityLevel" }   (sin auth; el nivel de identidad está en §8)
          │
          │  (3) abre WebSocket  wss://verbara.tu-dominio.com/ws/webchat/{sessionId}
          ▼
@@ -39,7 +40,7 @@ El canal WebChat permite que un visitante anónimo del sitio web del cliente ini
    Agente la ve aparecer en /agent → Aceptar → responde → el visitante recibe
 ```
 
-> 💡 Cada sesión es **un contacto y una conversación**: al crearla, Verbara crea el contacto anónimo con la dirección `webchat-…` (`visitorAddress`) y su conversación, y todos los mensajes del visitante caen en esa conversación mientras siga abierta; si se cerró, el siguiente mensaje abre una conversación nueva del mismo contacto y entra a la cola. La respuesta del agente se entrega por la dirección del visitante al WebSocket de la sesión (también si el visitante recargó la página o tiene dos pestañas abiertas), y sólo queda como enviada si un WebSocket la recibió.
+> 💡 Cada sesión tiene **su propia dirección y su propia conversación**: al crearla, Verbara genera la dirección `webchat-…` (`visitorAddress`) y una conversación nueva, y todos los mensajes del visitante caen en esa conversación mientras siga abierta; si se cerró, el siguiente mensaje abre una conversación nueva del mismo contacto y entra a la cola. Sin identidad (`Anonymous`), cada sesión es además un contacto propio; un visitante identificado (§8) junta sus sesiones en un solo contacto. La respuesta del agente se entrega por la dirección de la sesión de esa conversación al WebSocket (también si el visitante recargó la página o tiene dos pestañas abiertas), y sólo queda como enviada si un WebSocket la recibió.
 >
 > ⚠️ **Las respuestas del agente sólo se entregan de forma fiable con una única réplica del API.** Las sesiones y los WebSockets viven en el proceso del API, y la respuesta se entrega dentro de la propia petición del agente: sólo llega al visitante si esa petición cae en la réplica que tiene su WebSocket. En otra réplica queda guardada como fallida (`SESSION_NOT_CONNECTED`), igual que si el visitante se hubiera ido. Las sticky sessions no lo resuelven, porque fijan las peticiones del agente por la afinidad del agente, no la del visitante.
 >
@@ -120,7 +121,7 @@ Atributos **que el SDK realmente lee** (`dataset`):
 
 | Atributo | Valor | Notas |
 |---|---|---|
-| `data-tenant-id` | id del tenant **Customer** que recibe las conversaciones | **Obligatorio.** Es el mismo `$CUSTOMER_TENANT_ID`. No es secreto (la sesión es anónima). |
+| `data-tenant-id` | id del tenant **Customer** que recibe las conversaciones | **Obligatorio.** Es el mismo `$CUSTOMER_TENANT_ID`. No es secreto (la sesión se abre sin autenticación). |
 | `data-locale` | `auto` / `es-419` / `pt-BR` / `en-US` | `auto` detecta del navegador del visitante. |
 | `data-position` | `bottom-right` / `bottom-left` | Posición de la burbuja flotante. Default: `bottom-right`. No hay posiciones arriba (`top-…`). |
 | `data-greeting` | texto | Mensaje de bienvenida del panel. |
@@ -265,6 +266,121 @@ $ curl -sS -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $CUSTOMER_TENANT_I
 
 - **CDR / intervalos:** `/api/v1/analytics/cdr`, `/api/v1/analytics/intervals` (agregados por agente/queue, incluyen el tráfico de WebChat).
 - **Métricas de queue en vivo:** los wallboards de operaciones consumen las métricas por queue, que reflejan los WebChat encolados/atendidos.
+
+## 8. Identidad del visitante
+
+Cada `POST /api/v1/webchat/sessions` responde `identityLevel`, y el contacto (`GET /api/v1/contacts/{id}`) lleva el mismo dato calculado de sus direcciones:
+
+| `identityLevel` | Cuándo | El contacto |
+|---|---|---|
+| `Verified` | `identityToken` verificó (§8.2) | Uno por `external_id`, en todas las sesiones y dispositivos. Tiene la dirección `webchat-external:<external_id>`. |
+| `Unverified` | El navegador manda un `visitorId` que es un GUID versión 4 y el host activó el nivel 1 (§8.1) | Uno por navegador. Tiene la dirección `webchat-visitor:<hash>`; el `visitorId` nunca se guarda tal cual. |
+| `Anonymous` | Ninguno de los dos | Uno por sesión, como siempre. |
+
+- **El formulario no identifica.** `visitorName` y `visitorEmail` sólo completan datos: el nombre si el contacto no tiene, y `visitorEmail` como campo `webchatEmail` si no tiene uno. Nunca encuentran ni unen contactos, y `visitorEmail` nunca es una dirección del canal Email. Dos navegadores con el mismo email son dos contactos. `GET /api/v1/contacts?search=` encuentra el contacto por `webchatEmail`.
+- **Los niveles no se fusionan.** Si alguien chatea sin login y después inicia sesión en tu sitio, queda con dos contactos: el del navegador y el verificado.
+- **Las direcciones de identidad son de Verbara.** `POST` y `PUT /api/v1/contacts` rechazan una dirección WebChat que empiece con `webchat-visitor:` o `webchat-external:` con `400 reserved-contact-address`.
+
+### 8.1 Nivel 1: el visitante que vuelve
+
+Está **apagado por default**. Mientras esté apagado, Verbara trata todo `visitorId` como ausente: cada sesión es `Anonymous` y ningún contacto recibe una dirección `webchat-visitor:`. El nivel 2 no depende de esto.
+
+Se prende en el contenedor `api` y se lee una sola vez al arranque:
+
+```yaml
+    environment:
+      WebChat__VisitorIdentity__Level1Enabled: "true"
+```
+
+> ⚠️ **Prendelo sólo con la consola que marca al contacto no verificado ya desplegada.** Un contacto `Unverified` muestra al agente el historial del navegador, y la consola tiene que avisarle que esa identidad no está verificada. El orden está en `CHANGELOG.md`, sección *Upgrading*: desplegar la Platform, desplegar la release Web que renderiza `data-identity-level`, hacer que cada agente recargue la consola, y recién ahí setear la variable y reiniciar el `api`. Apagarla de nuevo corta los enlaces nuevos al instante; los contactos ya enlazados conservan su dirección y siguen leyendo `Unverified`.
+
+Es un dato del navegador, no una prueba de quién es la persona: dos personas que comparten el navegador comparten el contacto. Si tu sitio tiene login, usá el nivel 2.
+
+Dos límites: un contacto `Unverified` con 5 conversaciones WebChat abiertas no recibe más sesiones (cada sesión nueva cae en un contacto `Anonymous` propio, y el `api` registra una advertencia por tenant por hora, `webchat-visitor-key-saturated`), y todo contacto conserva sus 50 direcciones de sesión más nuevas. Una sesión viva sigue funcionando aunque su dirección se haya descartado.
+
+### 8.2 Nivel 2: el token que firma tu sitio
+
+**1. Configurá el secreto** del tenant:
+
+```bash
+$ openssl rand -base64 32 | tr '+/' '-_' | tr -d '='   # 43 caracteres
+
+$ curl -sS -X PUT http://{server-ip}/api/v1/admin/channels/WebChat \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "X-Tenant-Id: $CUSTOMER_TENANT_ID" \
+    -H "Content-Type: application/json" \
+    -d '{ "isActive": true, "credentials": { "identityTokenSecret": "<secreto>" } }' | jq
+```
+
+Tiene que tener entre 32 y 512 caracteres. La clave HMAC son los bytes UTF-8 de ese texto, tal cual: no lo decodifiques antes de firmar. Verbara nunca lo devuelve (la respuesta sólo dice `isSet`) y la auditoría registra sólo el nombre de las claves, así que guardalo vos en el backend de tu sitio.
+
+**2. Firmá un token en tu backend**, nunca en el navegador: el secreto no puede salir de tu servidor. Es un JWT compacto, `base64url(header).base64url(payload).base64url(firma)`, de hasta 4096 caracteres, con HMAC-SHA256 sobre los bytes ASCII de `base64url(header).base64url(payload)`. Sirve cualquier librería JWT.
+
+El header es `{ "alg": "HS256", "typ": "JWT" }`. `alg` tiene que ser exactamente `HS256`; `typ` es opcional y, si está, tiene que ser `JWT`; `kid` es opcional y se ignora.
+
+| Claim | Tipo | Obligatorio | Regla |
+|---|---|---|---|
+| `external_id` | string | Sí | 1 a 256 caracteres después de recortar espacios. El id estable de tu cliente en tu sitio. Usá un id opaco, nunca un email ni un documento: se guarda y los agentes lo ven en las direcciones del contacto. |
+| `aud` | string o array | Sí | El id del tenant de Verbara. Un string igual al `tenantId` del pedido, o un array no vacío de strings, todos iguales a ese `tenantId`. |
+| `iat` | integer | Sí | Segundos Unix: cuándo lo firmaste. |
+| `exp` | integer | Sí | Segundos Unix. `exp` > `iat` y `exp` - `iat` <= 3600. |
+| `name` | string | No | Hasta 200 caracteres. Completa el nombre del contacto sólo si no tiene. |
+| `email` | string | No | Hasta 320 caracteres. Se guarda como campo `webchatEmail`. Nunca es una dirección del canal Email ni une contactos. |
+
+El reloj tolera 300 segundos de diferencia: se rechaza si `iat` > ahora + 300 o si ahora > `exp` + 300. Un token no es de un solo uso (dos pestañas o una recarga lo presentan de nuevo), por eso su vida máxima es de 3600 segundos.
+
+```js
+// Node.js, en tu backend.
+const { createHmac } = require('node:crypto');
+const b64url = (text) => Buffer.from(text).toString('base64url');
+
+function signIdentityToken(customer, tenantId, secret) {
+  const iat = Math.floor(Date.now() / 1000);
+  const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payload = b64url(JSON.stringify({
+    external_id: customer.id,
+    aud: tenantId,
+    iat,
+    exp: iat + 1800,
+    name: customer.name,
+    email: customer.email,
+  }));
+  const signature = createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url');
+  return `${header}.${payload}.${signature}`;
+}
+```
+
+**3. Entregá el token.** Viaja como `identityToken` en `POST /api/v1/webchat/sessions`. Cuando verifica, el `visitorId` del mismo pedido no se usa. La forma de dárselo al widget llega con su release Web. Verbara no guarda el token, no lo registra en logs ni lo devuelve.
+
+**Un token rechazado no rechaza la sesión.** La sesión abre en el nivel que permita el resto del pedido, y `identityTokenRefusal` dice por qué. Se evalúa en este orden, y el `api` registra sólo el tenant y el código:
+
+| `identityTokenRefusal` | Cuándo |
+|---|---|
+| `identity-token-not-configured` | El tenant no tiene `identityTokenSecret`. |
+| `identity-token-malformed` | La estructura, el largo, el base64url, el JSON del header o `alg`. Después de la firma, también un claim obligatorio ausente, mal tipado o fuera de sus límites. |
+| `identity-token-signature-invalid` | La firma no verifica con el secreto actual ni con el anterior dentro de su período de gracia. |
+| `identity-token-wrong-tenant` | `aud` no es el `tenantId` del pedido, o un array de `aud` incluye otro tenant. |
+| `identity-token-lifetime-too-long` | `exp` <= `iat`, o `exp` - `iat` > 3600. |
+| `identity-token-not-yet-valid` | `iat` > ahora + 300. |
+| `identity-token-expired` | Ahora > `exp` + 300. |
+
+### 8.3 Rotar y revocar el secreto
+
+Todo pasa por el mismo `PUT /api/v1/admin/channels/WebChat`, en `credentials`:
+
+| Qué querés hacer | `credentials` | Qué pasa |
+|---|---|---|
+| Rotar | `{ "identityTokenSecret": "<nuevo>" }` | El secreto viejo pasa a `identityTokenSecretPrevious` y Verbara estampa `identityTokenSecretReplacedAt`. El anterior sigue verificando **24 horas** desde ese momento, para que despliegues el nuevo en tu sitio. Mandar el mismo valor no rota nada. |
+| Revocar el anterior | `{ "identityTokenSecretPrevious": null }` | Se termina esa gracia al instante. Usalo si el secreto viejo quedó expuesto. |
+| Apagar el nivel 2 | `{ "identityTokenSecret": null, "identityTokenSecretPrevious": null }` | Todo token siguiente responde `identity-token-not-configured`, y las sesiones caen al nivel 1 o a `Anonymous`. Borrar sólo `identityTokenSecret` tampoco deja gracia. |
+
+`identityTokenSecretReplacedAt` lo escribe sólo el servidor. Los rechazos, con `details` nombrando las claves:
+
+| Código | Cuándo |
+|---|---|
+| `400 weak-identity-token-secret` | `identityTokenSecret` con menos de 32 o más de 512 caracteres. |
+| `400 server-managed-credential-key` | Un valor para `identityTokenSecretPrevious`, o `identityTokenSecretReplacedAt` nombrada de cualquier forma, `null` incluido. |
+| `400 unknown-credential-key` | Una clave fuera de `defaultQueueId`, `identityTokenSecret`, `identityTokenSecretPrevious` e `identityTokenSecretReplacedAt`. |
 
 ## Próximo paso
 

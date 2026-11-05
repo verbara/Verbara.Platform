@@ -53,4 +53,44 @@ public sealed class WebChatSessionOpenApiCaptureTests
         responseSchema["required"]!.AsArray().Select(n => n!.GetValue<string>())
             .Should().NotContain("identityTokenRefusal", "the member is absent unless a token was refused");
     }
+
+    [Theory]
+    [InlineData("CreateSessionRequest", "visitorId", "version-4")]
+    [InlineData("CreateSessionRequest", "identityToken", "HS256")]
+    [InlineData("CreateSessionResponse", "identityLevel", "Unverified")]
+    [InlineData("CreateSessionResponse", "identityTokenRefusal", "identity-token-expired")]
+    public async Task SessionMember_ShouldCarryItsDescription_WhenTheDocumentIsEmitted(string schema, string member, string expected)
+    {
+        await using var factory = new CaptureFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync(new Uri("/openapi/v1.json", UriKind.Relative));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var schemas = JsonNode.Parse(await response.Content.ReadAsStringAsync())!["components"]!["schemas"]!;
+        var description = schemas[schema]!["properties"]![member]!["description"]?.GetValue<string>();
+        description.Should().NotBeNull();
+        description.Should().Contain(expected);
+    }
+
+    [Theory]
+    [InlineData("/api/v{version}/webchat/sessions", "post",
+        new[] { "visitorId", "identityToken", "identityLevel", "identityTokenRefusal", "WebChat:VisitorIdentity:Level1Enabled" })]
+    [InlineData("/api/v{version}/admin/channels/{channel}", "put",
+        new[] { "identityTokenSecret", "identityTokenSecretPrevious", "identityTokenSecretReplacedAt", "weak-identity-token-secret", "server-managed-credential-key", "unknown-credential-key" })]
+    [InlineData("/api/v{version}/contacts", "post", new[] { "reserved-contact-address" })]
+    [InlineData("/api/v{version}/contacts/{id}", "put", new[] { "reserved-contact-address" })]
+    public async Task Operation_ShouldDescribeTheIdentityNames_WhenTheDocumentIsEmitted(string route, string verb, string[] names)
+    {
+        await using var factory = new CaptureFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync(new Uri("/openapi/v1.json", UriKind.Relative));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var text = await response.Content.ReadAsStringAsync();
+        var description = JsonNode.Parse(text)!["paths"]![route]![verb]!["description"]?.GetValue<string>();
+        description.Should().NotBeNull();
+        description.Should().ContainAll(names);
+    }
 }

@@ -23,6 +23,22 @@ internal static partial class WebChatEndpoints
     /// form data, which never find a contact, <c>pageContext</c> is accepted and not stored, and <c>identityToken</c> is
     /// the token the tenant's site signs for its logged-in customer.
     /// </summary>
+    /// <param name="TenantId">The tenant the session belongs to.</param>
+    /// <param name="VisitorId">
+    /// The widget's per-browser id. It finds a contact only when it is a random version-4 GUID and the host sets
+    /// <c>WebChat:VisitorIdentity:Level1Enabled</c>; otherwise it counts as absent. It is not used when
+    /// <c>identityToken</c> verifies.
+    /// </param>
+    /// <param name="VisitorName">Form data, at most 200 characters (longer is cut). Fills the contact's first name when it has none.</param>
+    /// <param name="VisitorEmail">
+    /// Form data, at most 320 characters (longer is dropped). Stored as the contact custom field <c>webchatEmail</c> when
+    /// the contact has none. It is never an Email channel address.
+    /// </param>
+    /// <param name="PageContext">Accepted and not stored.</param>
+    /// <param name="IdentityToken">
+    /// The compact JWT, HS256, that the tenant's site signs with its <c>identityTokenSecret</c>. When it verifies, the
+    /// session is <c>Verified</c>. A refused token does not refuse the session.
+    /// </param>
     internal sealed record CreateSessionRequest(
         string TenantId,
         string? VisitorId = null,
@@ -40,6 +56,20 @@ internal static partial class WebChatEndpoints
     /// far the contact's identity is known. <c>identityTokenRefusal</c> names why a token that was sent was not honoured;
     /// the session still opens (spec <c>webchat-visitor-identity</c>).
     /// </summary>
+    /// <param name="SessionId">The session's id.</param>
+    /// <param name="WsUrl">The path of the session's WebSocket.</param>
+    /// <param name="VisitorAddress">This session's own address, <c>webchat-</c> and 32 hex digits, new on every session. It is the conversation's reply destination.</param>
+    /// <param name="ContactId">The contact carrying the session's address. Every session of one identity key returns the same contact.</param>
+    /// <param name="ConversationId">The conversation this session created. It is always a new one.</param>
+    /// <param name="IdentityLevel">
+    /// <c>Verified</c> when <c>identityToken</c> verified, <c>Unverified</c> when <c>visitorId</c> found or created the
+    /// contact, <c>Anonymous</c> for a contact of this session alone.
+    /// </param>
+    /// <param name="IdentityTokenRefusal">
+    /// Present only when a non-blank <c>identityToken</c> was refused: <c>identity-token-not-configured</c>,
+    /// <c>identity-token-malformed</c>, <c>identity-token-signature-invalid</c>, <c>identity-token-wrong-tenant</c>,
+    /// <c>identity-token-lifetime-too-long</c>, <c>identity-token-not-yet-valid</c> or <c>identity-token-expired</c>.
+    /// </param>
     internal sealed record CreateSessionResponse(
         string SessionId,
         string WsUrl,
@@ -57,6 +87,13 @@ internal static partial class WebChatEndpoints
             .AllowAnonymous();
 
         webchat.MapPost("/sessions", CreateSession)
+            .WithSummary("Open a WebChat session for a visitor")
+            .WithDescription(
+                "Creates the session and a new conversation, and resolves its contact by identity level. An `identityToken` " +
+                "that verifies gives `identityLevel` `Verified`. Otherwise a version-4 `visitorId` gives `Unverified`, when the " +
+                "host sets `WebChat:VisitorIdentity:Level1Enabled`. Anything else gives `Anonymous`, a contact of this session " +
+                "alone. A refused token does not refuse the session: it opens at the level the rest of the request allows, and " +
+                "`identityTokenRefusal` names the code.")
             .RequireWebChatRateLimit(WebChatRateLimitPolicy.SessionsPolicy, WebChatRateLimitPolicy.SessionsLimitKey,
                 WebChatRateLimitPolicy.DefaultSessionsPerMinutePerIp, ResolveSessionCreateTenantAsync);
         webchat.MapPost("/sessions/{sessionId}/messages", SendRestMessage)

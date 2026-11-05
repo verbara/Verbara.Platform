@@ -13,6 +13,10 @@ internal static class ContactEndpoints
     /// <summary>A contact write named a WebChat identity key, which only <c>POST /webchat/sessions</c> writes (design D12).</summary>
     internal const string ReservedContactAddressCode = "reserved-contact-address";
 
+    private const string ReservedAddressDescription =
+        "A WebChat address that starts with `webchat-visitor:` or `webchat-external:` answers 400 `reserved-contact-address`, " +
+        "with the offending addresses in `details`, and nothing is written. `identityLevel` in the body is ignored.";
+
     public static void MapContactEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/contacts").RequireAuthorization("Authenticated").RequireOperationalTenant();
@@ -24,8 +28,10 @@ internal static class ContactEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound);
         group.MapGet("/", SearchContacts);
-        group.MapPost("/", CreateContact);
-        group.MapPut("/{id}", UpdateContact);
+        group.MapPost("/", CreateContact)
+            .WithDescription(ReservedAddressDescription);
+        group.MapPut("/{id}", UpdateContact)
+            .WithDescription(ReservedAddressDescription);
         group.MapDelete("/{id}", DeleteContact);
     }
 
