@@ -186,6 +186,7 @@ internal sealed partial class WebChatIdentityTokenVerifier(ILogger<WebChatIdenti
 
         if (read is not { ExternalId: { } externalId, Audience: { } audience, IssuedAt: not null, ExpiresAt: not null }
             || externalId.AsSpan().Trim().Length is 0 or > MaxExternalIdLength
+            || externalId.Contains('\0', StringComparison.Ordinal)
             || read.Name is { Length: > MaxNameLength }
             || read.Email is { Length: > MaxEmailLength }
             || !IsWellTypedAudience(audience))

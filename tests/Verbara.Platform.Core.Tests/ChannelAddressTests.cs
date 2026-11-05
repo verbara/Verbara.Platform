@@ -74,4 +74,18 @@ public class ChannelAddressTests
         sut.IsWebChatExternalKey().Should().Be(external);
         sut.IsWebChatIdentityKey().Should().Be(visitor || external);
     }
+
+    [Theory]
+    [InlineData(ChannelType.WebChat, "webchat-5b9e0c7a2d4f41e8a6c3b1d0e9f8a7b6", true)]
+    [InlineData(ChannelType.WebChat, "webchat-5B9E0C7A2D4F41E8A6C3B1D0E9F8A7B6", false)]
+    [InlineData(ChannelType.WebChat, "webchat-5b9e0c7a2d4f41e8a6c3b1d0e9f8a7b", false)]
+    [InlineData(ChannelType.WebChat, "webchat-5b9e0c7a2d4f41e8a6c3b1d0e9f8a7b6a", false)]
+    [InlineData(ChannelType.WebChat, "webchat-5b9e0c7a2d4f41e8a6c3b1d0e9f8a7bg", false)]
+    [InlineData(ChannelType.WebChat, "webchat-visitor:rcfqwP4uUDSA6hgRqgUIE3hCFFs", false)]
+    [InlineData(ChannelType.WhatsApp, "webchat-5b9e0c7a2d4f41e8a6c3b1d0e9f8a7b6", false)]
+    public void IsWebChatSessionAddress_ShouldMatchOnlyTheSessionForm_WhenAddressIsGiven(
+        ChannelType channel, string address, bool expected)
+    {
+        new ChannelAddress(channel, address).IsWebChatSessionAddress().Should().Be(expected);
+    }
 }

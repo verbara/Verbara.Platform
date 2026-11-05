@@ -4,6 +4,12 @@ namespace Verbara.Platform.Conversations;
 
 public sealed class Contact : ITenantScoped, IAuditable
 {
+    /// <summary>The custom field holding the e-mail a WebChat visitor gave. It is never an Email channel address.</summary>
+    public const string WebChatEmailField = "webchatEmail";
+
+    /// <summary>How many WebChat session addresses a contact keeps: the newest ones.</summary>
+    public const int MaxWebChatSessionAddresses = 50;
+
     public required EntityId ContactId { get; init; }
     public required TenantId TenantId { get; init; }
     public string? FirstName { get; set; }

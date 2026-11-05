@@ -574,6 +574,7 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(List<CannedResponseEndpoints.CannedResponseDto>))]
 // WebChat
 [JsonSerializable(typeof(WebChatEndpoints.CreateSessionRequest))]
+[JsonSerializable(typeof(WebChatEndpoints.CreateSessionPageContext))]
 [JsonSerializable(typeof(WebChatEndpoints.CreateSessionResponse))]
 [JsonSerializable(typeof(WebChatEndpoints.WebChatMessageRequest))]
 // Onboarding

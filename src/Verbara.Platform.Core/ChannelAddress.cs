@@ -44,6 +44,30 @@ public sealed record ChannelAddress
     /// </summary>
     public bool IsWebChatIdentityKey() => IsWebChatVisitorKey() || IsWebChatExternalKey();
 
+    /// <summary>
+    /// True when this is the address of one WebChat session: <c>webchat-</c> and 32 lowercase hex digits. A contact
+    /// keeps a bounded number of these. Any other WebChat address is the contact's own and is never dropped.
+    /// </summary>
+    public bool IsWebChatSessionAddress()
+    {
+        const string prefix = "webchat-";
+        const int hexDigits = 32;
+        if (Channel != ChannelType.WebChat
+            || Address.Length != prefix.Length + hexDigits
+            || !Address.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var c in Address.AsSpan(prefix.Length))
+        {
+            if (!char.IsAsciiHexDigitLower(c))
+                return false;
+        }
+
+        return true;
+    }
+
     private bool HasWebChatPrefix(string prefix) =>
         Channel == ChannelType.WebChat && Address.StartsWith(prefix, StringComparison.Ordinal);
 

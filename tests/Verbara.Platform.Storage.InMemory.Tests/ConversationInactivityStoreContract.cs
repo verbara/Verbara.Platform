@@ -50,6 +50,41 @@ public abstract class ConversationInactivityStoreContract
     private static async Task<Conversation> LoadAsync(IConversationStore store, Conversation conversation) =>
         (await store.GetByIdAsync(Tenant, conversation.ConversationId, CancellationToken.None))!;
 
+    // ── CountOpenByContactAsync (webchat-visitor-identity-two-levels, design D17) ─────────────
+
+    [Fact]
+    public async Task CountOpenByContactAsync_ShouldCountOnlyThatContactsNonTerminalRowsOnTheChannel_WhenOthersExist()
+    {
+        var store = await NewStoreAsync();
+        var contactId = EntityId.From($"contact-{Guid.NewGuid():N}");
+
+        async Task SeedOfContactAsync(ConversationState state, ChannelType channel = ChannelType.WebChat) =>
+            await store.SaveAsync(
+                new Conversation
+                {
+                    ConversationId = EntityId.From($"c-{Guid.NewGuid():N}"),
+                    TenantId = Tenant,
+                    ContactId = contactId,
+                    Channel = channel,
+                    State = state,
+                    Owner = ConversationOwner.ForAgent(AgentA),
+                    CreatedAt = Now,
+                    LastMessageAt = Now,
+                },
+                CancellationToken.None);
+
+        await SeedOfContactAsync(ConversationState.Queued);
+        await SeedOfContactAsync(ConversationState.Active);
+        await SeedOfContactAsync(ConversationState.Resolved);
+        await SeedOfContactAsync(ConversationState.Closed);
+        await SeedOfContactAsync(ConversationState.Abandoned);
+        await SeedOfContactAsync(ConversationState.Active, ChannelType.WhatsApp);
+        await SeedAsync(store, ConversationState.Active, Now, ChannelType.WebChat);
+
+        (await store.CountOpenByContactAsync(Tenant, contactId, ChannelType.WebChat, CancellationToken.None)).Should().Be(3);
+        (await store.CountOpenByContactAsync(Tenant, EntityId.New(), ChannelType.WebChat, CancellationToken.None)).Should().Be(0);
+    }
+
     // ── ListInactiveAsync ──────────────────────────────────────────────────────
 
     [Fact]

@@ -108,6 +108,13 @@ internal sealed class InMemoryConversationStore : IConversationStore
         return Task.FromResult(result);
     }
 
+    public Task<int> CountOpenByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) =>
+        Task.FromResult(_items.Values.Count(c =>
+            c.TenantId == tenantId &&
+            c.ContactId == contactId &&
+            c.Channel == channel &&
+            !ConversationStateMachine.IsTerminal(c.State)));
+
     public Task<DateTimeOffset?> FindLastInboundAtAsync(
         TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
     {

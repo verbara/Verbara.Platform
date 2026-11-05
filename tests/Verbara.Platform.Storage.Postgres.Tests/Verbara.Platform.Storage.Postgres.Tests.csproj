@@ -15,6 +15,8 @@
     <!-- whatsapp-accepts-business-scoped-user-ids: the resolver write-back contract on both stores. -->
     <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\InterleaveAfterLookupContactStore.cs" Link="Stores\InterleaveAfterLookupContactStore.cs" />
     <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\ContactResolverWriteBackContract.cs" Link="Stores\ContactResolverWriteBackContract.cs" />
+    <!-- webchat-visitor-identity-two-levels 2.3: the targeted contact writes of a session create on both stores. -->
+    <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\ContactIdentityKeyStoreContract.cs" Link="Stores\ContactIdentityKeyStoreContract.cs" />
     <!-- conversations-close-after-inactivity 1.5: the inactivity close and claim contract on both stores. -->
     <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\ConversationInactivityStoreContract.cs" Link="Stores\ConversationInactivityStoreContract.cs" />
     <!-- conversations-close-after-inactivity 2.8: the clock reconcile contract on both stores. -->

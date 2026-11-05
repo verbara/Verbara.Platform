@@ -18,6 +18,12 @@ public interface IConversationStore
     Task<DateTimeOffset?> FindLastInboundAtAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct);
 
     /// <summary>
+    /// How many of the contact's conversations on <paramref name="channel"/> are open, that is, not in a terminal state
+    /// (<see cref="ConversationStateMachine.TerminalStates"/>). <c>Resolved</c> counts as open.
+    /// </summary>
+    Task<int> CountOpenByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct);
+
+    /// <summary>
     /// Returns the voice conversation correlated to an Asterisk call <paramref name="voiceLinkedId"/>,
     /// or <see langword="null"/> if none exists. The per-call idempotency lookup the voice bridge
     /// uses to avoid creating a duplicate Conversation for the same physical call.

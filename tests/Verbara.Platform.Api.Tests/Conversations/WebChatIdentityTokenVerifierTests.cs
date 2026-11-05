@@ -64,6 +64,13 @@ public sealed class WebChatIdentityTokenVerifierTests
         return $$"""{"external_id":{{externalId}},"aud":{{aud}},"iat":{{issued}},"exp":{{expires}}{{extra}}}""";
     }
 
+    // PostgreSQL's jsonb refuses U+0000, and external_id becomes an address verbatim, so it could never be stored.
+    [Fact]
+    public void Verify_ShouldAnswerMalformed_WhenExternalIdCarriesTheNulCharacter()
+    {
+        Verify(Sign(Claims(externalId: "\"cust\\u0000-1\""))).RefusalCode.Should().Be(WebChatIdentityTokenRefusal.Malformed);
+    }
+
     private static string ValidPreviousToken =>
         Vector["accepted"]!.AsArray().Single(a => a!["case"]!.GetValue<string>().Contains("previous secret"))!["token"]!.GetValue<string>();
 

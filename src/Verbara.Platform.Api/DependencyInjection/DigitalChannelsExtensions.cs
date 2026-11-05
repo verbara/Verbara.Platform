@@ -34,6 +34,7 @@ public static class DigitalChannelsExtensions
 
         // Verifies the identity token a tenant's site signs. Each tenant's secret comes from its WebChat configuration.
         services.AddSingleton<WebChatIdentityTokenVerifier>();
+        services.AddSingleton<WebChatSessionIdentityResolver>();
 
         // Every WhatsApp credential is per tenant (TenantChannelConfig, keys in WhatsAppCredentialKeys):
         // no process-wide credential exists, so a tenant without its own AppSecret is ignored (fail-closed).

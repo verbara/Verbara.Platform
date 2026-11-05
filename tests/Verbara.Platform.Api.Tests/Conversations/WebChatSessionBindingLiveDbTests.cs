@@ -33,6 +33,7 @@ public sealed class WebChatSessionBindingLiveDbTests
 {
     private const string TenantValue = AuthenticatedPlatformApiFactory.TestTenantId;
     private const string SessionAddressKey = "_webchatSessionAddress";
+    private const string VisitorId = "3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b";
     private static readonly TenantId Tenant = new(TenantValue);
     private static readonly EntityId Queue = EntityId.From("q-session-binding");
     private static readonly EntityId Agent = EntityId.From("agent-session-binding");
@@ -108,6 +109,63 @@ public sealed class WebChatSessionBindingLiveDbTests
         reply.DeliveryStatus.Should().NotBe(MessageDeliveryStatus.Failed);
         (await ReceiveTextAsync(s1Socket, TimeSpan.FromSeconds(3))).Should().Contain("respuesta para la primera");
         (await ReceiveTextAsync(s2Socket, TimeSpan.FromMilliseconds(500))).Should().BeNull("the reply belongs to S1's session");
+    }
+
+    // Case 2 as a level-1 contact really comes to exist: two browsers, one visitorId, through the route.
+    [Fact]
+    public async Task VisitorMessage_ShouldOpenAConversationForItsSession_WhenBothSessionsCameThroughTheRouteWithOneVisitorId()
+    {
+        await using var env = await Env.CreateAsync(_postgres);
+        var s1 = await env.CreateSessionAsync(VisitorId);
+        var s2 = await env.CreateSessionAsync(VisitorId);
+        s2.ContactId.Should().Be(s1.ContactId, "one visitorId resolves one contact");
+        var k1 = s1.ConversationId;
+        var k2 = s2.ConversationId;
+        k2.Should().NotBe(k1);
+        await env.GiveToAgentAsync(k2);
+        await env.CloseAsync(k1);
+        var k2Before = await env.SignatureAsync(k2);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var s1Socket = await env.AttachSocketAsync(s1, timeout.Token);
+        using var s2Socket = await env.AttachSocketAsync(s2, timeout.Token);
+
+        await env.PostAsync(s1, "volvi con la misma clave");
+
+        var holding = await env.ConversationsHoldingAsync("volvi con la misma clave");
+        var k3 = EntityId.From(holding.Should().ContainSingle().Subject);
+        k3.Should().NotBe(k1).And.NotBe(k2);
+        var opened = await env.ConversationAsync(k3);
+        opened.ContactId.Should().Be(s1.ContactId);
+        opened.Metadata.Should().Contain(SessionAddressKey, s1.CustomerAddress.Address);
+        Env.AssertAssignedToTheQueue(opened);
+        (await env.SignatureAsync(k2)).Should().Be(k2Before, "the other session's conversation is unchanged");
+
+        await env.GiveToAgentAsync(k3);
+        var reply = await env.ReplyAsync(k3, "para la primera pestana");
+
+        reply.DeliveryStatus.Should().NotBe(MessageDeliveryStatus.Failed);
+        (await ReceiveTextAsync(s1Socket, TimeSpan.FromSeconds(3))).Should().Contain("para la primera pestana");
+        (await ReceiveTextAsync(s2Socket, TimeSpan.FromMilliseconds(500))).Should().BeNull("the reply belongs to S1's session");
+    }
+
+    // Spec "Two tabs open at once", through the real store. Repeated so the two creates
+    // overlap on some round: every round starts from a key the tenant has never seen.
+    [Fact]
+    public async Task CreateSession_ShouldResolveOneContact_WhenTwoTabsOpenAtOnce()
+    {
+        await using var env = await Env.CreateAsync(_postgres);
+        var rounds = 6;
+        for (var round = 0; round < rounds; round++)
+        {
+            var visitorId = Guid.NewGuid().ToString();
+            var tabs = await Task.WhenAll(env.CreateSessionAsync(visitorId), env.CreateSessionAsync(visitorId));
+
+            tabs[0].ContactId.Should().Be(tabs[1].ContactId, "the two tabs resolve one contact");
+            var contact = await env.Contacts.GetByIdAsync(Tenant, tabs[0].ContactId, CancellationToken.None);
+            contact!.Addresses.Should().Contain([tabs[0].CustomerAddress, tabs[1].CustomerAddress]);
+        }
+
+        (await env.ContactCountAsync()).Should().Be(rounds);
     }
 
     // Case 3. S1's conversation is Resolved while S2's is open.
@@ -323,6 +381,7 @@ public sealed class WebChatSessionBindingLiveDbTests
         {
             base.ConfigureWebHost(builder);
             builder.UseSetting("ConnectionStrings:Postgres", ConnectionString);
+            builder.UseSetting("WebChat:VisitorIdentity:Level1Enabled", "true");
         }
 
         protected override IHost CreateHost(IHostBuilder builder)
@@ -385,9 +444,9 @@ public sealed class WebChatSessionBindingLiveDbTests
         }
 
         /// <summary>A session through the real route: its own contact and conversation.</summary>
-        public async Task<WebChatSession> CreateSessionAsync()
+        public async Task<WebChatSession> CreateSessionAsync(string? visitorId = null)
         {
-            using var response = await _client.PostAsJsonAsync("/api/v1/webchat/sessions", new { tenantId = TenantValue });
+            using var response = await _client.PostAsJsonAsync("/api/v1/webchat/sessions", new { tenantId = TenantValue, visitorId });
             response.StatusCode.Should().Be(HttpStatusCode.OK);
             using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             return (await Service<WebChatSessionManager>().GetSessionAsync(body.RootElement.GetProperty("sessionId").GetString()!))!;

@@ -46,6 +46,8 @@ internal sealed class DoubleSaveConversationStore(IConversationStore inner) : IC
     }
     public Task<Conversation?> FindActiveByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) =>
         inner.FindActiveByContactAsync(tenantId, contactId, channel, ct);
+    public Task<int> CountOpenByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) =>
+        inner.CountOpenByContactAsync(tenantId, contactId, channel, ct);
     public Task<DateTimeOffset?> FindLastInboundAtAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) =>
         inner.FindLastInboundAtAsync(tenantId, contactId, channel, ct);
     public Task<Conversation?> FindByVoiceLinkedIdAsync(TenantId tenantId, string voiceLinkedId, CancellationToken ct) =>

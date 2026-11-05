@@ -1,0 +1,116 @@
+{
+  "_comment": "POST /api/v1/webchat/sessions after this change (design D1-D3, D7, D9). Anonymous route, unchanged rate limits and unchanged 404 for an unknown tenant or an inactive WebChat channel (living spec webchat-visitor-identity). The request gains the fields the widget already sends (Verbara.Platform.Web src/webchat/embed/transport/session-api.ts:34-39) plus the optional `identityToken`; the response keeps its five fields with their meaning and gains `identityLevel` and, only when a token was sent and refused, `identityTokenRefusal`. A refused token NEVER refuses the session: the session falls back to level 1 (or to Anonymous), so a site with a broken signer degrades to unverified instead of losing its chat (design D7). Serialization: camelCase, a null member is ABSENT (WhenWritingNull), types registered in ApiJsonContext. `visitorAddress` stays a per-session `webchat-<32 hex>` value: the session index is keyed on it and must not collide between two sessions of one browser (design D2). Every child change's delta spec must cite these field names VERBATIM (verbatim-fixture-citation rule, /xr:propagate).",
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/webchat/sessions",
+    "headers": { "Content-Type": "application/json" },
+    "body": {
+      "tenantId": "t-demo-0001",
+      "visitorId": "3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b",
+      "visitorName": "Ana",
+      "visitorEmail": "ana@example.com",
+      "pageContext": {
+        "url": "https://shop.example.com/orders/123",
+        "title": "Order 123",
+        "referrer": "https://shop.example.com/"
+      },
+      "identityToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6ImN1c3QtNDgxNTE2MjMiLCJhdWQiOiJ0LWRlbW8tMDAwMSIsImlhdCI6MTc5MzgwMDgwMCwiZXhwIjoxNzkzODAyNjAwLCJuYW1lIjoiQW5hIFBcdTAwZTlyZXoiLCJlbWFpbCI6ImFuYS5wZXJlekBleGFtcGxlLmNvbSJ9.7i5YprN-i4Q8vRfkXtSuGLH7fanAIFXTFCAyFOC0_-I"
+    }
+  },
+  "requestFields": {
+    "tenantId": "string, required (unchanged)",
+    "visitorId": "string, optional: the widget's per-browser id (crypto.randomUUID, Web src/webchat/sdk/visitor-storage.ts:9-17). Used only when it parses as a GUID (any case, with or without hyphens; normalised to lowercase hyphenated `D` format before hashing) that is a random RFC 9562 version-4 GUID (version nibble 4, variant 8, 9, a or b). Absent, blank, not a GUID, the nil GUID, the max GUID or any other non-version-4 value -> the session is Anonymous (today's per-session contact; review P2, 2026-11-04). Never stored raw: the level-1 key is `webchat-visitor:` + base64url(SHA-256(normalised visitorId)) (design D2, fixtures/contact-identity-level.v1.json)",
+    "visitorName": "string, optional, at most 200 characters (longer is cut): form data. Fills the contact's first name only when the contact has no name; never used to find a contact (design D3)",
+    "visitorEmail": "string, optional, at most 320 characters (longer is dropped): form data. Stored as the contact custom field `webchatEmail` only when the contact has none; NEVER an Email channel address, never used to find a contact (design D3)",
+    "pageContext": "object {url, title, referrer}, optional: accepted and ignored in this change (no field is stored); a later change may record it on the conversation",
+    "identityToken": "string, optional: the site-signed token of fixtures/webchat-identity-token.v1.json. When it verifies, the session is Verified and visitorId is not used at all (no key is added, no level-1 contact is touched; design D5)"
+  },
+  "responses": [
+    {
+      "case": "level 2: identityToken verifies (the request above, at 2026-11-04T14:05:00Z)",
+      "status": 200,
+      "body": {
+        "sessionId": "0d6f4f2b8e1a4c3b9a7e5d4c3b2a1f0e",
+        "wsUrl": "/ws/webchat/0d6f4f2b8e1a4c3b9a7e5d4c3b2a1f0e",
+        "visitorAddress": "webchat-5b9e0c7a2d4f41e8a6c3b1d0e9f8a7b6",
+        "contactId": "c0ffee00aa11bb22cc33dd44ee55ff66",
+        "conversationId": "9a8b7c6d5e4f40312a3b4c5d6e7f8091",
+        "identityLevel": "Verified"
+      }
+    },
+    {
+      "case": "level 1: a GUID visitorId and no identityToken. The returning visitor resolves to the contact already holding `webchat-visitor:rcfqwP4uUDSA6hgRqgUIE3hCFFsXvDuxhE3MgUu0Y1M`; a new session address and a new conversation are created for it",
+      "status": 200,
+      "body": {
+        "sessionId": "1e2d3c4b5a6948372615a4b3c2d1e0f9",
+        "wsUrl": "/ws/webchat/1e2d3c4b5a6948372615a4b3c2d1e0f9",
+        "visitorAddress": "webchat-8c1d2e3f4a5b46c7d8e9f0a1b2c3d4e5",
+        "contactId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d",
+        "conversationId": "2b3c4d5e6f7a48b9c0d1e2f3a4b5c6d7",
+        "identityLevel": "Unverified"
+      }
+    },
+    {
+      "case": "a token was sent and refused (here: expired): the session falls back to level 1 on the visitorId and says why",
+      "status": 200,
+      "body": {
+        "sessionId": "2f3e4d5c6b7a48190a1b2c3d4e5f6a7b",
+        "wsUrl": "/ws/webchat/2f3e4d5c6b7a48190a1b2c3d4e5f6a7b",
+        "visitorAddress": "webchat-a1b2c3d4e5f647a8b9c0d1e2f3a4b5c6",
+        "contactId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d",
+        "conversationId": "3c4d5e6f7a8b49c0d1e2f3a4b5c6d7e8",
+        "identityLevel": "Unverified",
+        "identityTokenRefusal": "identity-token-expired"
+      }
+    },
+    {
+      "case": "Anonymous: no visitorId (or one that is not a version-4 GUID, the nil GUID included) and no token; today's behaviour, one contact per session",
+      "status": 200,
+      "body": {
+        "sessionId": "3a4b5c6d7e8f49a0b1c2d3e4f5a6b7c8",
+        "wsUrl": "/ws/webchat/3a4b5c6d7e8f49a0b1c2d3e4f5a6b7c8",
+        "visitorAddress": "webchat-b2c3d4e5f6a748b9c0d1e2f3a4b5c6d7",
+        "contactId": "e1f2a3b4c5d64e7f8a9b0c1d2e3f4a5b",
+        "conversationId": "4d5e6f7a8b9c40d1e2f3a4b5c6d7e8f9",
+        "identityLevel": "Anonymous"
+      }
+    },
+    {
+      "case": "level 1 would land on a saturated key: the contact already holds 5 open WebChat conversations (cardinality guard, review P2): a new Anonymous contact of this session alone, nothing added to the found contact, one warning per tenant",
+      "status": 200,
+      "body": {
+        "sessionId": "5c6d7e8f9a0b41c2d3e4f5a6b7c8d9e0",
+        "wsUrl": "/ws/webchat/5c6d7e8f9a0b41c2d3e4f5a6b7c8d9e0",
+        "visitorAddress": "webchat-d4e5f6a7b8c94ad0e1f2a3b4c5d6e7f8",
+        "contactId": "a3b4c5d6e7f84a9b0c1d2e3f4a5b6c7d",
+        "conversationId": "6f7a8b9c0d1e42f3a4b5c6d7e8f9a0b1",
+        "identityLevel": "Anonymous"
+      }
+    },
+    {
+      "case": "level 1 would land on a contact that holds a verified key (an address put there by hand before this change refused it): fail closed to Anonymous, never Verified, never that contact",
+      "status": 200,
+      "body": {
+        "sessionId": "4b5c6d7e8f9a40b1c2d3e4f5a6b7c8d9",
+        "wsUrl": "/ws/webchat/4b5c6d7e8f9a40b1c2d3e4f5a6b7c8d9",
+        "visitorAddress": "webchat-c3d4e5f6a7b849c0d1e2f3a4b5c6d7e8",
+        "contactId": "f2a3b4c5d6e74f8a9b0c1d2e3f4a5b6c",
+        "conversationId": "5e6f7a8b9c0d41e2f3a4b5c6d7e8f9a0",
+        "identityLevel": "Anonymous"
+      }
+    }
+  ],
+  "unchangedRefusals": [
+    { "case": "unknown tenant, or WebChat channel missing or inactive", "status": 404, "body": { "error": "Tenant not found" } },
+    { "case": "session rate limit spent", "status": 429, "headers": { "Retry-After": "<seconds>" } }
+  ],
+  "fields": {
+    "sessionId": "string, unchanged",
+    "wsUrl": "string, unchanged",
+    "visitorAddress": "string, unchanged meaning: this session's own WebChat address `webchat-<32 hex>`, new on every session, the address the visitor's messages are attributed to and the conversation's reply destination (design D9). It is never the level-1 or level-2 key",
+    "contactId": "string, unchanged meaning: the contact carrying visitorAddress. Level 1 and level 2 return the SAME contactId on every session of the same key",
+    "conversationId": "string, unchanged: the conversation this session created. Always a NEW conversation, at every level: an open WebChat conversation the resolved contact already has is neither reused nor closed by the session create (design D16)",
+    "identityLevel": "string, always present: `Verified` (level 2, identityToken verified), `Unverified` (level 1, resolved by visitorId), or `Anonymous` (no usable visitorId and no verified token: a contact of this session alone)",
+    "identityTokenRefusal": "string, present ONLY when identityToken was sent, non-blank, and refused: one of the refusalCodes of fixtures/webchat-identity-token.v1.json. Absent when no token was sent or it verified"
+  }
+}

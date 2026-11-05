@@ -101,6 +101,7 @@ internal sealed class ProbeConversationStore(IConversationStore inner, bool deta
     public Task<IReadOnlyList<Conversation>> ListInactiveAsync(TenantId tenantId, IReadOnlyCollection<ConversationState> states, DateTimeOffset cutoff, int limit, CancellationToken ct) =>
         OutAll(inner.ListInactiveAsync(tenantId, states, cutoff, limit, ct));
 
+    public Task<int> CountOpenByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) => inner.CountOpenByContactAsync(tenantId, contactId, channel, ct);
     public Task<DateTimeOffset?> FindLastInboundAtAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) => inner.FindLastInboundAtAsync(tenantId, contactId, channel, ct);
     public Task<int> DeleteByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct) => inner.DeleteByContactAsync(tenantId, contactId, ct);
     public Task<bool> DeleteIfNoMessagesAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct) => inner.DeleteIfNoMessagesAsync(tenantId, conversationId, ct);

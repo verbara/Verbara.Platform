@@ -254,6 +254,22 @@ internal sealed class PostgresConversationStore : IConversationStore
         return affected == 1;
     }
 
+    public async Task<int> CountOpenByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
+    {
+        var open = await _dataSource.ExecuteScalarAsync<long?>(
+            "SELECT COUNT(*) FROM conversations " +
+            "WHERE tenant_id = @TenantId AND contact_id = @ContactId AND channel = @Channel AND state <> ALL(@TerminalStates)",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("ContactId", NpgsqlDbType.Text) { Value = contactId.Value });
+                p.Add(new NpgsqlParameter("Channel", NpgsqlDbType.Integer) { Value = (int)channel });
+                p.Add(new NpgsqlParameter("TerminalStates", NpgsqlDbType.Array | NpgsqlDbType.Integer) { Value = s_terminalStateValues });
+            },
+            ct);
+        return (int)(open ?? 0L);
+    }
+
     public async Task<Conversation?> FindActiveByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
     {
         // Terminal states: Closed = 3, Abandoned = 4 (check ConversationStateMachine)
