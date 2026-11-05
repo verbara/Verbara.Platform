@@ -179,7 +179,7 @@ public sealed class DefaultConversationServiceTests : IDisposable
         // A reply in a conversation whose contact was deleted behaves as it did before the address was recorded (design D9).
         _conversationStore.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
             .Returns(BuildWebChatConversation(LiveSession));
-        _contactStore.GetByIdAsync(_tenantId, _contactId, Arg.Any<CancellationToken>()).Returns((Contact?)null);
+        _contactStore.GetByIdAsync(_tenantId, _contactId, Arg.Any<CancellationToken>()).Returns(default(Contact));
 
         var message = await CreateSut().SendMessageAsync(
             _conversationId, _tenantId, _envelope, _agentId, ConversationOwnerKind.Agent, CancellationToken.None);

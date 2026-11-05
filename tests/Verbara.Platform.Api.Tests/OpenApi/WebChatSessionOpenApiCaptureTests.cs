@@ -68,8 +68,7 @@ public sealed class WebChatSessionOpenApiCaptureTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var schemas = JsonNode.Parse(await response.Content.ReadAsStringAsync())!["components"]!["schemas"]!;
-        var description = schemas[schema]!["properties"]![member]!["description"]?.GetValue<string>();
-        description.Should().NotBeNull();
+        var description = schemas[schema]!["properties"]![member]!["description"]?.GetValue<string>() ?? string.Empty;
         description.Should().Contain(expected);
     }
 
@@ -89,8 +88,7 @@ public sealed class WebChatSessionOpenApiCaptureTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var text = await response.Content.ReadAsStringAsync();
-        var description = JsonNode.Parse(text)!["paths"]![route]![verb]!["description"]?.GetValue<string>();
-        description.Should().NotBeNull();
+        var description = JsonNode.Parse(text)!["paths"]![route]![verb]!["description"]?.GetValue<string>() ?? string.Empty;
         description.Should().ContainAll(names);
     }
 }

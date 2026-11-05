@@ -82,7 +82,7 @@ public class InboundMessagePipelineTests
         var opened = MakeConversation(contact.ContactId);
         _contactResolver.ResolveAsync(TenantId, Arg.Any<ContactIdentity>(), Arg.Any<CancellationToken>()).Returns(contact);
         _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, ChannelType.WebChat, Arg.Any<CancellationToken>())
-            .Returns((Conversation?)null);
+            .Returns(default(Conversation));
         _lifecycleService.CreateForWebChatSessionAsync(TenantId, contact.ContactId, sessionAddress, Arg.Any<CancellationToken>())
             .Returns(opened);
 
@@ -472,7 +472,7 @@ public class InboundMessagePipelineTests
     {
         var replacement = MakeContact();
         var gone = EntityId.New();
-        _contactResolver.FindByIdAsync(TenantId, gone, Arg.Any<CancellationToken>()).Returns((Contact?)null);
+        _contactResolver.FindByIdAsync(TenantId, gone, Arg.Any<CancellationToken>()).Returns(default(Contact));
         _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == SessionAddress), Arg.Any<CancellationToken>()).Returns(replacement);
         var context = new PipelineContext
         {
@@ -609,7 +609,7 @@ public class InboundMessagePipelineTests
     {
         var contact = MakeContact();
         var gone = EntityId.New();
-        _conversationStore.GetByIdAsync(TenantId, gone, Arg.Any<CancellationToken>()).Returns((Conversation?)null);
+        _conversationStore.GetByIdAsync(TenantId, gone, Arg.Any<CancellationToken>()).Returns(default(Conversation));
         var created = GivenTheSessionOpensANewConversation(contact);
 
         var result = await ResolveBoundAsync(contact, gone);

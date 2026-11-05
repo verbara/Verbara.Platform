@@ -34,9 +34,6 @@ public sealed class WebChatSessionBindingLiveDbTests
     private const string TenantValue = AuthenticatedPlatformApiFactory.TestTenantId;
     private const string SessionAddressKey = "_webchatSessionAddress";
     private const string VisitorId = "3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b";
-    private static readonly TenantId Tenant = new(TenantValue);
-    private static readonly EntityId Queue = EntityId.From("q-session-binding");
-    private static readonly EntityId Agent = EntityId.From("agent-session-binding");
 
     private readonly ConversationClockReconcileLiveDbTests.PostgresContainer _postgres;
 
@@ -161,7 +158,7 @@ public sealed class WebChatSessionBindingLiveDbTests
             var tabs = await Task.WhenAll(env.CreateSessionAsync(visitorId), env.CreateSessionAsync(visitorId));
 
             tabs[0].ContactId.Should().Be(tabs[1].ContactId, "the two tabs resolve one contact");
-            var contact = await env.Contacts.GetByIdAsync(Tenant, tabs[0].ContactId, CancellationToken.None);
+            var contact = await env.Contacts.GetByIdAsync(Env.Tenant, tabs[0].ContactId, CancellationToken.None);
             contact!.Addresses.Should().Contain([tabs[0].CustomerAddress, tabs[1].CustomerAddress]);
         }
 
@@ -244,16 +241,16 @@ public sealed class WebChatSessionBindingLiveDbTests
         await using var env = await Env.CreateAsync(_postgres);
         var session = await env.CreateSessionAsync();
         var c1 = (await env.ConversationAsync(session.ConversationId)).ContactId;
-        await env.Contacts.DeleteAsync(Tenant, c1, CancellationToken.None);
+        await env.Contacts.DeleteAsync(Env.Tenant, c1, CancellationToken.None);
 
         await env.PostAsync(session, "tras el borrado");
 
         (await env.ContactCountAsync()).Should().Be(1L);
-        (await env.Contacts.GetByIdAsync(Tenant, c1, CancellationToken.None)).Should().BeNull("the deleted contact is not brought back");
+        (await env.Contacts.GetByIdAsync(Env.Tenant, c1, CancellationToken.None)).Should().BeNull("the deleted contact is not brought back");
         var holding = await env.ConversationsHoldingAsync("tras el borrado");
         var c2 = (await env.ConversationAsync(EntityId.From(holding.Should().ContainSingle().Subject))).ContactId;
         c2.Should().NotBe(c1);
-        (await env.Contacts.GetByIdAsync(Tenant, c2, CancellationToken.None))!.Addresses.Should().Equal([session.CustomerAddress]);
+        (await env.Contacts.GetByIdAsync(Env.Tenant, c2, CancellationToken.None))!.Addresses.Should().Equal([session.CustomerAddress]);
     }
 
     // Case 6, preservation control with one assertion of task 2.1's: green before the fix. The bound path is what could
@@ -274,7 +271,7 @@ public sealed class WebChatSessionBindingLiveDbTests
         var k1State = (await env.ConversationAsync(k1)).State;
 
         await env.DeleteContactThroughTheRouteAsync(c1);
-        (await env.Contacts.GetByIdAsync(Tenant, c1, CancellationToken.None)).Should().BeNull();
+        (await env.Contacts.GetByIdAsync(Env.Tenant, c1, CancellationToken.None)).Should().BeNull();
         ConversationStateMachine.IsTerminal((await env.ConversationAsync(k1)).State).Should().BeFalse("the delete leaves K1 open");
         (await env.ConversationAsync(k1)).ContactId.Should().Be(c1, "the delete leaves K1 naming the deleted contact");
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -288,7 +285,7 @@ public sealed class WebChatSessionBindingLiveDbTests
         var opened = await env.ConversationAsync(k3);
         var c2 = opened.ContactId;
         c2.Should().NotBe(c1);
-        (await env.Contacts.GetByIdAsync(Tenant, c2, CancellationToken.None))!.Addresses.Should().Equal([session.CustomerAddress]);
+        (await env.Contacts.GetByIdAsync(Env.Tenant, c2, CancellationToken.None))!.Addresses.Should().Equal([session.CustomerAddress]);
         (await env.ContactCountAsync()).Should().Be(1L);
         Env.AssertAssignedToTheQueue(opened);
         env.RoutingsOf(k3).Should().Be(1, "routed once");
@@ -404,6 +401,10 @@ public sealed class WebChatSessionBindingLiveDbTests
     /// <summary>A fresh database, the host over it, and the reads a test makes of the stores and of Postgres itself.</summary>
     private sealed class Env : IAsyncDisposable
     {
+        public static readonly TenantId Tenant = new(TenantValue);
+        private static readonly EntityId Queue = EntityId.From("q-session-binding");
+        private static readonly EntityId Agent = EntityId.From("agent-session-binding");
+
         private readonly BoundHost _host;
         private readonly HttpClient _client;
         private readonly NpgsqlDataSource _db;
