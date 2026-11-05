@@ -10,6 +10,9 @@ namespace Verbara.Platform.Api.Endpoints;
 
 internal static class ContactEndpoints
 {
+    /// <summary>A contact write named a WebChat identity key, which only <c>POST /webchat/sessions</c> writes (design D12).</summary>
+    internal const string ReservedContactAddressCode = "reserved-contact-address";
+
     public static void MapContactEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/contacts").RequireAuthorization("Authenticated").RequireOperationalTenant();
@@ -124,13 +127,17 @@ internal static class ContactEndpoints
         return TypedResults.Ok(result);
     }
 
-    private static async Task<IResult> CreateContact(
+    private static async Task<Results<Created<Contact>, BadRequest<ErrorDetailResponse>>> CreateContact(
         HttpContext context,
         [FromBody] CreateContactRequest body,
         [FromServices] IContactStore store,
         IClock clock,
         CancellationToken ct)
     {
+        var reserved = ReservedAddresses(body.Addresses);
+        if (reserved.Count > 0)
+            return TypedResults.BadRequest(new ErrorDetailResponse(ReservedContactAddressCode, reserved));
+
         var tenantId = GetTenantId(context);
         var contact = new Contact
         {
@@ -159,10 +166,10 @@ internal static class ContactEndpoints
         }
 
         await store.SaveAsync(contact, ct);
-        return Results.Created($"/contacts/{contact.ContactId}", contact);
+        return TypedResults.Created($"/contacts/{contact.ContactId}", contact);
     }
 
-    private static async Task<Results<Ok<Contact>, NotFound>> UpdateContact(
+    private static async Task<Results<Ok<Contact>, NotFound, BadRequest<ErrorDetailResponse>>> UpdateContact(
         string id,
         HttpContext context,
         [FromBody] UpdateContactRequest body,
@@ -170,6 +177,10 @@ internal static class ContactEndpoints
         IClock clock,
         CancellationToken ct)
     {
+        var reserved = ReservedAddresses(body.Addresses);
+        if (reserved.Count > 0)
+            return TypedResults.BadRequest(new ErrorDetailResponse(ReservedContactAddressCode, reserved));
+
         var tenantId = GetTenantId(context);
         var contact = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (contact is null)
@@ -211,6 +222,21 @@ internal static class ContactEndpoints
         await store.DeleteAsync(tenantId, EntityId.From(id), ct);
         return Results.NoContent();
     }
+
+    /// <summary>
+    /// The WebChat identity keys a write body names, each once and verbatim. A blank address is not one of them: it goes on
+    /// to the <see cref="ChannelAddress"/> constructor, as any other blank address does.
+    /// </summary>
+    private static List<string> ReservedAddresses(IReadOnlyList<ChannelAddressDto>? addresses) =>
+        addresses is null
+            ? []
+            :
+            [
+                .. addresses
+                    .Where(a => !string.IsNullOrWhiteSpace(a.Address) && new ChannelAddress(a.Channel, a.Address).IsWebChatIdentityKey())
+                    .Select(a => a.Address)
+                    .Distinct(StringComparer.Ordinal),
+            ];
 
     private static TenantId GetTenantId(HttpContext context)
     {

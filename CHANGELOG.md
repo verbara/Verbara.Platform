@@ -101,6 +101,17 @@ tenant API keys bound to no user, roles without a conversation permission and ag
 
 ### Upgrading
 
+- **Migration `028` renames WebChat addresses in the identity key forms.** A WebChat address that starts with
+  `webchat-visitor:` or `webchat-external:` now identifies a visitor, only `POST /api/v1/webchat/sessions` writes one, and
+  `POST` and `PUT /api/v1/contacts` refuse it with 400 `reserved-contact-address`. At start-up, an address of those forms
+  that a contact already holds gets the prefix `legacy-` (`legacy-webchat-external:x`) and stays an ordinary address of
+  that contact. Nothing else of the contact changes, and no audit entry is written. To list the affected contacts before
+  you deploy, run this read-only query:
+
+  ```sql
+  SELECT c.tenant_id, c.contact_id, a->>'address' AS address FROM contacts c CROSS JOIN LATERAL jsonb_array_elements(c.addresses) AS a WHERE a->>'channel' IN ('WebChat', '3') AND (starts_with(a->>'address', 'webchat-visitor:') OR starts_with(a->>'address', 'webchat-external:'));
+  ```
+
 - **An integration on a tenant API key bound to no user now gets 403 `not-readable`** on the conversation reads and the
   contact's history. To keep it working, bind the key to a user whose role is `Api` (that role now holds
   `contacts:conversation:read`), or use a management key. Check also every other role your integrations or users rely
