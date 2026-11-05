@@ -29,10 +29,14 @@ internal static partial class WebChatEndpoints
     /// <c>WebChat:VisitorIdentity:Level1Enabled</c>; otherwise it counts as absent. It is not used when
     /// <c>identityToken</c> verifies.
     /// </param>
-    /// <param name="VisitorName">Form data, at most 200 characters (longer is cut). Fills the contact's first name when it has none.</param>
+    /// <param name="VisitorName">
+    /// Form data, at most 200 characters (longer is cut). Fills the contact's first name when it has none. Not used when
+    /// <c>identityToken</c> verifies: a verified contact takes its name from the token.
+    /// </param>
     /// <param name="VisitorEmail">
     /// Form data, at most 320 characters (longer is dropped). Stored as the contact custom field <c>webchatEmail</c> when
-    /// the contact has none. It is never an Email channel address.
+    /// the contact has none. It is never an Email channel address. Not used when <c>identityToken</c> verifies: a verified
+    /// contact takes its e-mail from the token.
     /// </param>
     /// <param name="PageContext">Accepted and not stored.</param>
     /// <param name="IdentityToken">

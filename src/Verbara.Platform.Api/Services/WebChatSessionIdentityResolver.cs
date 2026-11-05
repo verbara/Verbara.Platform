@@ -12,7 +12,8 @@ internal sealed record WebChatSessionIdentity(Contact Contact, ContactIdentityLe
 /// Resolves the one contact of a new WebChat session: by the customer id a verified token names (<c>Verified</c>), else
 /// by the browser's key (<c>Unverified</c>), else a new contact of this session alone (<c>Anonymous</c>). A found
 /// contact is written only by targeted updates, so an edit made after it was read survives and a contact erased since
-/// then stays erased. Form data and a token's profile claims only fill display data: they never find a contact.
+/// then stays erased. Form data and a token's profile claims only fill display data: they never find a contact. A verified
+/// contact takes its name and e-mail from the token alone, because the form is whatever the visitor typed.
 /// </summary>
 internal sealed partial class WebChatSessionIdentityResolver(
     IContactStore contacts,
@@ -57,7 +58,7 @@ internal sealed partial class WebChatSessionIdentityResolver(
         {
             var key = new ChannelAddress(ChannelType.WebChat, ChannelAddress.WebChatExternalKeyPrefix + claims.ExternalId);
             var verified = await ResolveByKeyAsync(
-                tenantId, key, sessionAddress, CleanName(claims.Name) ?? name, CleanEmail(claims.Email) ?? email, isLevel1: false, ct);
+                tenantId, key, sessionAddress, CleanName(claims.Name), CleanEmail(claims.Email), isLevel1: false, ct);
             if (verified is not null)
                 return new WebChatSessionIdentity(verified, ContactIdentityLevel.Verified);
         }

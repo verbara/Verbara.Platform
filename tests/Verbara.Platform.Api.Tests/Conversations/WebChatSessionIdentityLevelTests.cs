@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Buffers.Text;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -220,6 +222,18 @@ public sealed class WebChatSessionIdentityLevelTests : IDisposable
         created.VisitorAddress.Should().MatchRegex("^webchat-[0-9a-f]{32}$", "the session address is never an identity key");
     }
 
+    // A token of the fixture's customer, signed with the fixture's secret, without the named claims.
+    private static string TokenWithout(params string[] claims)
+    {
+        var payload = TokenFixture["testVector"]!["payload"]!.DeepClone().AsObject();
+        foreach (var claim in claims)
+            payload.Remove(claim);
+        var unsigned = Base64Url.EncodeToString("""{"alg":"HS256","typ":"JWT"}"""u8) + "."
+            + Base64Url.EncodeToString(Encoding.UTF8.GetBytes(payload.ToJsonString()));
+        var signature = HMACSHA256.HashData(Encoding.UTF8.GetBytes(CurrentSecret), Encoding.UTF8.GetBytes(unsigned));
+        return unsigned + "." + Base64Url.EncodeToString(signature);
+    }
+
     private async Task<Contact> SeedOpenConversationsAsync(string visitorId, int openConversations)
     {
         var first = await CreateAsync(visitorId);
@@ -244,6 +258,56 @@ public sealed class WebChatSessionIdentityLevelTests : IDisposable
 
     private List<string> SaturationWarnings() =>
         [.. _factory.CapturedLogs.RecordsContaining(SaturatedCode).Where(r => r.Level == LogLevel.Warning).Select(r => r.Message)];
+
+    // ─── Review round: a verified contact's name and e-mail come only from the token ─────────────────────────────────
+
+    [Fact]
+    public async Task CreateSession_ShouldStoreNoFormData_WhenTheVerifiedTokenOmitsNameAndEmail()
+    {
+        var created = await CreateAsync(token: TokenWithout("name", "email"), name: "Escrito en el formulario", email: "form@example.com");
+
+        created.IdentityLevel.Should().Be(nameof(ContactIdentityLevel.Verified));
+        var contact = await ContactAsync(created.ContactId);
+        contact.FirstName.Should().BeNull("a verified contact takes its name only from the token");
+        contact.CustomFields.Should().NotContainKey(Contact.WebChatEmailField);
+    }
+
+    [Fact]
+    public async Task CreateSession_ShouldNotFillAVerifiedContactFromTheForm_WhenTheContactAlreadyExists()
+    {
+        var first = await CreateAsync(token: TokenWithout("name", "email"));
+
+        var second = await CreateAsync(token: TokenWithout("name", "email"), name: "Escrito en el formulario", email: "form@example.com");
+
+        second.ContactId.Should().Be(first.ContactId);
+        var contact = await ContactAsync(second.ContactId);
+        contact.FirstName.Should().BeNull();
+        contact.CustomFields.Should().NotContainKey(Contact.WebChatEmailField);
+    }
+
+    [Fact]
+    public async Task CreateSession_ShouldTakeOnlyTheClaimTheTokenCarries_WhenTheFormGivesBoth()
+    {
+        var created = await CreateAsync(token: TokenWithout("email"), name: "Escrito en el formulario", email: "form@example.com");
+
+        var contact = await ContactAsync(created.ContactId);
+        contact.FirstName.Should().Be("Ana Pérez");
+        contact.CustomFields.Should().NotContainKey(Contact.WebChatEmailField);
+    }
+
+    // Preservation control, green before the fix: a refused token leaves the session at the level the rest proves, and
+    // that contact is not Verified, so the form still fills it.
+    [Fact]
+    public async Task CreateSession_ShouldKeepTheFormData_WhenTheTokenIsRefusedAndTheContactIsNotVerified()
+    {
+        var created = await CreateAsync(
+            visitorId: VisitorId, token: RefusedToken("identity-token-expired"), name: "Escrito en el formulario", email: "form@example.com");
+
+        created.IdentityLevel.Should().Be(nameof(ContactIdentityLevel.Unverified));
+        var contact = await ContactAsync(created.ContactId);
+        contact.FirstName.Should().Be("Escrito en el formulario");
+        contact.CustomFields.Should().Contain(Contact.WebChatEmailField, "form@example.com");
+    }
 
     // ─── responses[] of the fixture ──────────────────────────────────────────────────────────────────────────────────
 
