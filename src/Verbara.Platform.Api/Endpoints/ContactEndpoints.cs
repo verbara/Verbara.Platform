@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Conversations;
@@ -41,6 +42,11 @@ internal static class ContactEndpoints
         "A WebChat address that starts with `webchat-visitor:` or `webchat-external:` answers 400 `reserved-contact-address`, " +
         "with the offending addresses in `details`, and nothing is written. `identityLevel` in the body is ignored.";
 
+    private const string ChannelConsentDescription =
+        "`channelConsent` keys are channel names as `GET` writes them (`Voice`, `WhatsApp`, ...), case-sensitive; each " +
+        "named channel takes its value and the others keep theirs. Any other key answers 400 `unknown-consent-channel`, " +
+        "with the offending keys in `details`, and nothing is written.";
+
     public static void MapContactEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/contacts").RequireAuthorization("Authenticated").RequireOperationalTenant();
@@ -57,7 +63,7 @@ internal static class ContactEndpoints
             .WithDescription(ReservedAddressDescription)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapPut("/{id}", UpdateContact)
-            .WithDescription(ReservedAddressDescription)
+            .WithDescription(ReservedAddressDescription + " " + ChannelConsentDescription)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapDelete("/{id}", DeleteContact)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
@@ -221,6 +227,10 @@ internal static class ContactEndpoints
         if (reserved.Count > 0)
             return TypedResults.BadRequest(new ErrorDetailResponse(ReservedContactAddressCode, reserved));
 
+        var unknownChannels = UnknownChannelNames(body.ChannelConsent?.Keys);
+        if (unknownChannels.Count > 0)
+            return TypedResults.BadRequest(new ErrorDetailResponse(UnknownConsentChannelCode, unknownChannels));
+
         var tenantId = GetTenantId(context);
         var contact = await store.GetByIdAsync(tenantId, EntityId.From(id), ct);
         if (contact is null)
@@ -245,6 +255,13 @@ internal static class ContactEndpoints
         {
             foreach (var (key, value) in fields)
                 contact.SetCustomField(key, value);
+        }
+
+        // Merged: a channel the member names takes its value, every other channel keeps the stored one (design D8).
+        if (body.ChannelConsent is { } consent)
+        {
+            foreach (var (name, consented) in consent)
+                contact.SetConsent(ChannelsByName[name], consented);
         }
 
         contact.UpdatedAt = clock.UtcNow;
@@ -294,6 +311,23 @@ internal static class ContactEndpoints
                     .Select(a => a.Address)
                     .Distinct(StringComparer.Ordinal),
             ];
+
+    /// <summary>
+    /// Each defined channel by its name exactly as <c>GET</c> writes it (<c>Voice</c>, <c>WhatsApp</c>, ...), compared
+    /// ordinally. Built from the enum's names, never through <see cref="Enum.TryParse{TEnum}(string, out TEnum)"/>, which
+    /// would also accept other casings, numbers and comma-joined names.
+    /// </summary>
+    private static readonly FrozenDictionary<string, ChannelType> ChannelsByName =
+        Enum.GetValues<ChannelType>().ToFrozenDictionary(channel => channel.ToString(), StringComparer.Ordinal);
+
+    /// <summary>
+    /// The values of <paramref name="names"/> that are not a channel name as <c>GET</c> writes it, each once, in the
+    /// order given (design D8). Empty when every value is a channel name or there are none.
+    /// </summary>
+    private static List<string> UnknownChannelNames(IEnumerable<string>? names) =>
+        names is null
+            ? []
+            : [.. names.Where(name => !ChannelsByName.ContainsKey(name)).Distinct(StringComparer.Ordinal)];
 
     private static TenantId GetTenantId(HttpContext context)
     {
