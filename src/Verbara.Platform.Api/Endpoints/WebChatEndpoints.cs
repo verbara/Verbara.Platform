@@ -105,6 +105,7 @@ internal static partial class WebChatEndpoints
         [FromServices] WebChatSessionIdentityResolver identityResolver,
         [FromServices] WebChatSessionManager sessionManager,
         [FromServices] IClock clock,
+        [FromServices] IOptions<WebChatOptions> options,
         CancellationToken ct)
     {
         var tid = new TenantId(request.TenantId);
@@ -127,8 +128,10 @@ internal static partial class WebChatEndpoints
             (claims, tokenRefusal) = tokenVerifier.Verify(request.IdentityToken, request.TenantId, channelConfig.Credentials, clock.UtcNow);
 
         var visitorAddress = new ChannelAddress(ChannelType.WebChat, $"webchat-{Guid.NewGuid():N}");
+        // While level 1 is off for this host, a visitorId counts as absent: it finds no contact and writes no key.
+        var visitorId = options.Value.VisitorLevel1Enabled ? request.VisitorId : null;
         var (contact, identityLevel) = await identityResolver.ResolveAsync(
-            tid, visitorAddress, claims, request.VisitorId, request.VisitorName, request.VisitorEmail, ct);
+            tid, visitorAddress, claims, visitorId, request.VisitorName, request.VisitorEmail, ct);
 
         // Every session opens its own conversation: an open one of the same contact is neither reused nor closed.
         var conversation = await lifecycleService.CreateForWebChatSessionAsync(

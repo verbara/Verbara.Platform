@@ -101,6 +101,22 @@ tenant API keys bound to no user, roles without a conversation permission and ag
 
 ### Upgrading
 
+- **A returning WebChat visitor stays unlinked until you turn it on.** `WebChat:VisitorIdentity:Level1Enabled` defaults to
+  `false`. While it is off, `POST /api/v1/webchat/sessions` treats every `visitorId` as absent: the session gets a contact
+  of its own at `Anonymous` and no contact gains a `webchat-visitor:` address. A verified identity token works either way.
+  A linked contact's history must show the console's unverified mark, so turn it on in this order:
+
+  1. Deploy this Platform image. Level 1 is off.
+  2. Deploy the Web release that renders `data-identity-level`.
+  3. Have every agent reload the console, for example at the next shift change. A tab left open from before step 2 runs
+     the old console and shows linked history without the mark.
+  4. Set `WebChat__VisitorIdentity__Level1Enabled=true` and restart the Api. It is read once at start-up.
+
+  If you upgrade both images together, do steps 2 to 4 at once. Turning the setting off again stops new linking at once,
+  and contacts already linked keep their keys and read `Unverified`. That is no rollback of the console: rolling the Web
+  back below the release with the mark while level-1 contacts exist shows their linked history unmarked again.
+  `docker/docker-compose.full.yml` sets the variable to `true`, because the Web E2E specs run against that stack.
+
 - **Migration `028` renames WebChat addresses in the identity key forms.** A WebChat address that starts with
   `webchat-visitor:` or `webchat-external:` now identifies a visitor, only `POST /api/v1/webchat/sessions` writes one, and
   `POST` and `PUT /api/v1/contacts` refuse it with 400 `reserved-contact-address`. At start-up, an address of those forms

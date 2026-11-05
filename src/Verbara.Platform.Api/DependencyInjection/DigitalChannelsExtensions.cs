@@ -30,7 +30,8 @@ public static class DigitalChannelsExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.AddWebChat();
+        // Read here and not in Program.cs, which is at its LOC budget (ADR-0012 gate #9).
+        services.AddWebChat(o => o.VisitorLevel1Enabled = configuration.GetValue<bool>(WebChatOptions.VisitorLevel1EnabledKey));
 
         // Verifies the identity token a tenant's site signs. Each tenant's secret comes from its WebChat configuration.
         services.AddSingleton<WebChatIdentityTokenVerifier>();
