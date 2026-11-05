@@ -416,10 +416,20 @@ public sealed class WebChatInboundRoutingTests
         var h = await BuildWithStubbedStoresAsync();
         using var subscription = h.Subscription;
         var agentId = EntityId.From("agent-wc-1");
+        var offered = new Conversation
+        {
+            ConversationId = ConvId,
+            TenantId = Tenant,
+            ContactId = ContactId,
+            Channel = ChannelType.WebChat,
+            State = ConversationState.Offered,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        offered.SetMetadata(ConversationOffer.OfferedToKey, agentId.Value);
         h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).Returns(call =>
         {
             call.Arg<CancellationToken>().ThrowIfCancellationRequested();
-            return OwnedBy(agentId);
+            return offered;
         });
         h.Contacts.GetByIdAsync(Tenant, ContactId, Arg.Any<CancellationToken>()).Returns(call =>
         {
@@ -433,7 +443,24 @@ public sealed class WebChatInboundRoutingTests
 
         await act.Should().ThrowAsync<OperationCanceledException>("the first message goes on to the contact read, which does take the request's token");
         h.Published.OfType<ConversationMessageEvent>().Should().ContainSingle("the publish happens before the cancellation can end the flow")
+            .Which.Audience.Should().Be(new ConversationAudience(null, agentId.Value));
+        await h.Router.DidNotReceiveWithAnyArgs().RouteAsync(default!, default);
+    }
+
+    // A session's first message can answer a conversation an agent started towards it (design D9): the agent keeps it.
+    [Fact]
+    public async Task RouteFirstInboundAsync_ShouldPublishAndNotRoute_WhenTheFirstMessageAnswersAConversationAnAgentHolds()
+    {
+        var h = await BuildWithStubbedStoresAsync();
+        using var subscription = h.Subscription;
+        var agentId = EntityId.From("agent-wc-1");
+        h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).Returns(OwnedBy(agentId));
+
+        await h.Sut.RouteFirstInboundAsync(h.SessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+
+        h.Published.OfType<ConversationMessageEvent>().Should().ContainSingle()
             .Which.Audience.Should().Be(new ConversationAudience(agentId.Value, null));
+        h.Published.OfType<ConversationStateChangedEvent>().Should().BeEmpty();
         await h.Router.DidNotReceiveWithAnyArgs().RouteAsync(default!, default);
     }
 
