@@ -151,7 +151,11 @@ internal sealed partial class DefaultConversationService : IConversationService
     {
         var tenantId = conversation.TenantId;
         var contact = await _contactStore.GetByIdAsync(tenantId, conversation.ContactId, ct).ConfigureAwait(false);
-        var address = contact?.FindAddress(conversation.Channel);
+
+        // WebChat: the session this conversation belongs to, since its contact can hold several sessions' addresses.
+        var address = contact is null
+            ? null
+            : WebChatConversationMetadata.SessionAddressOf(conversation) ?? contact.FindAddress(conversation.Channel);
 
         if (address is null)
         {
@@ -194,6 +198,18 @@ internal sealed partial class DefaultConversationService : IConversationService
         var existing = await _conversationStore.FindActiveByContactAsync(tenantId, contactId, channel, ct).ConfigureAwait(false);
         if (existing is not null)
             return existing;
+
+        // As an agent's start: a WebChat conversation records the contact's connected session, newest first, so its replies
+        // and the visitor's next message stay with that session. With none connected it records nothing and replies use the
+        // contact's address.
+        if (channel == ChannelType.WebChat
+            && _channelRegistry.AvailableChannels.Contains(channel)
+            && _channelRegistry.GetConnector(channel) is IConnectedSessionDirectory directory
+            && await _contactStore.GetByIdAsync(tenantId, contactId, ct).ConfigureAwait(false) is { } contact
+            && await directory.FindNewestConnectedAddressAsync(contact, ct).ConfigureAwait(false) is { } connected)
+        {
+            return await _lifecycleService.CreateForWebChatSessionAsync(tenantId, contactId, connected, ct).ConfigureAwait(false);
+        }
 
         return await _lifecycleService.CreateAsync(tenantId, contactId, channel, ct).ConfigureAwait(false);
     }

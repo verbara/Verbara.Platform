@@ -12,6 +12,13 @@ public interface IContactIdentityResolver
     /// </summary>
     Task<Contact> ResolveAsync(TenantId tenantId, ContactIdentity identity, CancellationToken ct) =>
         ResolveAsync(tenantId, identity.Address, ct);
+
+    /// <summary>
+    /// The contact with this id, read and not written, or <c>null</c> when it no longer exists: how a WebChat session's
+    /// message finds the contact the session is bound to. The default finds none, so the caller resolves by address.
+    /// </summary>
+    Task<Contact?> FindByIdAsync(TenantId tenantId, EntityId contactId, CancellationToken ct) =>
+        Task.FromResult<Contact?>(null);
 }
 
 /// <summary>What an inbound delivery says about its sender.</summary>

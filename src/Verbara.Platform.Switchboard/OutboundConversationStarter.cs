@@ -13,7 +13,9 @@ namespace Verbara.Platform.Switchboard;
 /// <b>first</b>, and only a successful send persists anything: the message is stored
 /// <see cref="MessageDeliveryStatus.Sent"/> with the provider's id, and a new conversation is born
 /// <see cref="ConversationState.Active"/>, owned by the agent, and saved through the conversation store.
-/// A failed send stores nothing — no conversation, message, capacity or ledger row.
+/// A failed send stores nothing — no conversation, message, capacity or ledger row. On WebChat a new conversation goes to
+/// the contact's session that is connected now, newest first, and records that session in its insert, so its replies and
+/// the visitor's answer stay with that session; a reused one goes to the session it records.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -126,6 +128,8 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
                 OutboundStartCodes.ConversationNotSendable, open.ConversationId, ConversationOwnerKind.Agent);
         }
 
+        var destination = await DestinationAsync(contact, open, address, channel, ct).ConfigureAwait(false);
+
         // A new conversation takes one unit of the agent's capacity before the send, atomically; it is given back
         // if the start does not end with a stored conversation. A reuse adds no load.
         var reserved = false;
@@ -141,7 +145,7 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
         try
         {
             // ── Send first: nothing is persisted unless the provider accepted the message ───────────
-            sent = await SendAsync(request, address, conversationId, ct).ConfigureAwait(false);
+            sent = await SendAsync(request, destination, conversationId, ct).ConfigureAwait(false);
         }
         catch
         {
@@ -173,7 +177,7 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
             CreatedAt = now,
             CreatedBy = request.ActorUserId,
         };
-        var conversation = open ?? BornActive(request, conversationId, now);
+        var conversation = open ?? BornActive(request, conversationId, destination, now);
 
         try
         {
@@ -209,6 +213,22 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
         });
 
         return OutboundStartOutcome.Started(conversation, message, reused: open is not null);
+    }
+
+    // A contact can hold several WebChat sessions. No connected session keeps the contact's own address, whose send is
+    // then refused as it always was; every other channel has one destination.
+    private async Task<ChannelAddress> DestinationAsync(
+        Contact contact, Conversation? open, ChannelAddress contactAddress, ChannelType channel, CancellationToken ct)
+    {
+        if (channel != ChannelType.WebChat)
+            return contactAddress;
+
+        if (open is not null)
+            return WebChatConversationMetadata.SessionAddressOf(open) ?? contactAddress;
+
+        return _channels.GetConnector(channel) is IConnectedSessionDirectory directory
+            ? await directory.FindNewestConnectedAddressAsync(contact, ct).ConfigureAwait(false) ?? contactAddress
+            : contactAddress;
     }
 
     // The provider send. A rejection or a connector fault returns null: the caller persists nothing.
@@ -250,21 +270,28 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
         }
     }
 
-    private static Conversation BornActive(OutboundStartRequest request, EntityId conversationId, DateTimeOffset now) => new()
+    private static Conversation BornActive(
+        OutboundStartRequest request, EntityId conversationId, ChannelAddress destination, DateTimeOffset now)
     {
-        ConversationId = conversationId,
-        TenantId = request.TenantId,
-        ContactId = request.ContactId,
-        Channel = request.Channel,
-        State = ConversationState.Active,
-        Owner = ConversationOwner.ForAgent(request.AgentId),
-        CreatedAt = now,
-        UpdatedAt = now,
-        // Born with its first message: the store's INSERT keeps it (COALESCE(@LastMessageAt, @CreatedAt), design D2).
-        LastMessageAt = now,
-        CreatedBy = request.ActorUserId,
-        UpdatedBy = request.ActorUserId,
-    };
+        var conversation = new Conversation
+        {
+            ConversationId = conversationId,
+            TenantId = request.TenantId,
+            ContactId = request.ContactId,
+            Channel = request.Channel,
+            State = ConversationState.Active,
+            Owner = ConversationOwner.ForAgent(request.AgentId),
+            CreatedAt = now,
+            UpdatedAt = now,
+            // Born with its first message: the store's INSERT keeps it (COALESCE(@LastMessageAt, @CreatedAt), design D2).
+            LastMessageAt = now,
+            CreatedBy = request.ActorUserId,
+            UpdatedBy = request.ActorUserId,
+        };
+        if (request.Channel == ChannelType.WebChat)
+            conversation.SetMetadata(WebChatConversationMetadata.SessionAddressKey, destination.Address);
+        return conversation;
+    }
 
     // A template goes out instead of the free text (the connector sends only its name and language), so the stored
     // message names the template: the transcript shows what the contact received.

@@ -18,18 +18,70 @@ namespace Verbara.Platform.Api.Endpoints;
 
 internal static partial class WebChatEndpoints
 {
-    internal sealed record CreateSessionRequest(string TenantId);
+    /// <summary>
+    /// A session request. <c>visitorId</c> is the widget's per-browser id, <c>visitorName</c> and <c>visitorEmail</c> are
+    /// form data, which never find a contact, <c>pageContext</c> is accepted and not stored, and <c>identityToken</c> is
+    /// the token the tenant's site signs for its logged-in customer.
+    /// </summary>
+    /// <param name="TenantId">The tenant the session belongs to.</param>
+    /// <param name="VisitorId">
+    /// The widget's per-browser id. It finds a contact only when it is a random version-4 GUID and the host sets
+    /// <c>WebChat:VisitorIdentity:Level1Enabled</c>; otherwise it counts as absent. It is not used when
+    /// <c>identityToken</c> verifies.
+    /// </param>
+    /// <param name="VisitorName">
+    /// Form data, at most 200 characters (longer is cut). Fills the contact's first name when it has none. Not used when
+    /// <c>identityToken</c> verifies: a verified contact takes its name from the token.
+    /// </param>
+    /// <param name="VisitorEmail">
+    /// Form data, at most 320 characters (longer is dropped). Stored as the contact custom field <c>webchatEmail</c> when
+    /// the contact has none. It is never an Email channel address. Not used when <c>identityToken</c> verifies: a verified
+    /// contact takes its e-mail from the token.
+    /// </param>
+    /// <param name="PageContext">Accepted and not stored.</param>
+    /// <param name="IdentityToken">
+    /// The compact JWT, HS256, that the tenant's site signs with its <c>identityTokenSecret</c>. When it verifies, the
+    /// session is <c>Verified</c>. A refused token does not refuse the session.
+    /// </param>
+    internal sealed record CreateSessionRequest(
+        string TenantId,
+        string? VisitorId = null,
+        string? VisitorName = null,
+        string? VisitorEmail = null,
+        CreateSessionPageContext? PageContext = null,
+        string? IdentityToken = null);
+
+    /// <summary>The page a session request came from. Accepted and not stored.</summary>
+    internal sealed record CreateSessionPageContext(string? Url = null, string? Title = null, string? Referrer = null);
+
     /// <summary>
     /// A created WebChat session: its transport handle (<c>sessionId</c>, <c>wsUrl</c>) and the visitor's
-    /// identity — its <c>webchat-</c> visitor address, the contact carrying it and that contact's
-    /// conversation (spec <c>webchat-visitor-identity</c>; the last three are additive in 2.28.0).
+    /// identity — its <c>webchat-</c> visitor address, the contact carrying it, that contact's new conversation and how
+    /// far the contact's identity is known. <c>identityTokenRefusal</c> names why a token that was sent was not honoured;
+    /// the session still opens (spec <c>webchat-visitor-identity</c>).
     /// </summary>
+    /// <param name="SessionId">The session's id.</param>
+    /// <param name="WsUrl">The path of the session's WebSocket.</param>
+    /// <param name="VisitorAddress">This session's own address, <c>webchat-</c> and 32 hex digits, new on every session. It is the conversation's reply destination.</param>
+    /// <param name="ContactId">The contact carrying the session's address. Every session of one identity key returns the same contact.</param>
+    /// <param name="ConversationId">The conversation this session created. It is always a new one.</param>
+    /// <param name="IdentityLevel">
+    /// <c>Verified</c> when <c>identityToken</c> verified, <c>Unverified</c> when <c>visitorId</c> found or created the
+    /// contact, <c>Anonymous</c> for a contact of this session alone.
+    /// </param>
+    /// <param name="IdentityTokenRefusal">
+    /// Present only when a non-blank <c>identityToken</c> was refused: <c>identity-token-not-configured</c>,
+    /// <c>identity-token-malformed</c>, <c>identity-token-signature-invalid</c>, <c>identity-token-wrong-tenant</c>,
+    /// <c>identity-token-lifetime-too-long</c>, <c>identity-token-not-yet-valid</c> or <c>identity-token-expired</c>.
+    /// </param>
     internal sealed record CreateSessionResponse(
         string SessionId,
         string WsUrl,
         string VisitorAddress,
         string ContactId,
-        string ConversationId);
+        string ConversationId,
+        ContactIdentityLevel IdentityLevel,
+        string? IdentityTokenRefusal = null);
     internal sealed record WebChatMessageRequest(string Text);
 
     internal static RouteGroupBuilder MapWebChatEndpoints(this RouteGroupBuilder group)
@@ -39,6 +91,13 @@ internal static partial class WebChatEndpoints
             .AllowAnonymous();
 
         webchat.MapPost("/sessions", CreateSession)
+            .WithSummary("Open a WebChat session for a visitor")
+            .WithDescription(
+                "Creates the session and a new conversation, and resolves its contact by identity level. An `identityToken` " +
+                "that verifies gives `identityLevel` `Verified`. Otherwise a version-4 `visitorId` gives `Unverified`, when the " +
+                "host sets `WebChat:VisitorIdentity:Level1Enabled`. Anything else gives `Anonymous`, a contact of this session " +
+                "alone. A refused token does not refuse the session: it opens at the level the rest of the request allows, and " +
+                "`identityTokenRefusal` names the code.")
             .RequireWebChatRateLimit(WebChatRateLimitPolicy.SessionsPolicy, WebChatRateLimitPolicy.SessionsLimitKey,
                 WebChatRateLimitPolicy.DefaultSessionsPerMinutePerIp, ResolveSessionCreateTenantAsync);
         webchat.MapPost("/sessions/{sessionId}/messages", SendRestMessage)
@@ -83,9 +142,11 @@ internal static partial class WebChatEndpoints
         [FromServices] ITenantStore tenantStore,
         [FromServices] ITenantChannelConfigStore channelConfigStore,
         [FromServices] IConversationLifecycleService lifecycleService,
-        [FromServices] IContactStore contactStore,
+        [FromServices] WebChatIdentityTokenVerifier tokenVerifier,
+        [FromServices] WebChatSessionIdentityResolver identityResolver,
         [FromServices] WebChatSessionManager sessionManager,
         [FromServices] IClock clock,
+        [FromServices] IOptions<WebChatOptions> options,
         CancellationToken ct)
     {
         var tid = new TenantId(request.TenantId);
@@ -100,30 +161,34 @@ internal static partial class WebChatEndpoints
         if (channelConfig is null || !channelConfig.IsActive)
             return TenantNotFound();
 
-        // Create anonymous contact for this WebChat visitor
-        var visitorAddress = new ChannelAddress(ChannelType.WebChat, $"webchat-{Guid.NewGuid():N}");
-        var contact = new Contact
-        {
-            ContactId = EntityId.New(),
-            TenantId = tid,
-            CreatedAt = clock.UtcNow,
-        };
-        contact.AddAddress(visitorAddress);
-        await contactStore.SaveAsync(contact, ct);
+        // A refused token never refuses the session: it opens at the level the rest of the request allows and names
+        // why, so a broken signer on the tenant's site degrades its chat instead of taking it down.
+        WebChatIdentityClaims? claims = null;
+        string? tokenRefusal = null;
+        if (!string.IsNullOrWhiteSpace(request.IdentityToken))
+            (claims, tokenRefusal) = tokenVerifier.Verify(request.IdentityToken, request.TenantId, channelConfig.Credentials, clock.UtcNow);
 
-        // Create conversation
-        var conversation = await lifecycleService.CreateAsync(
-            tid, contact.ContactId, ChannelType.WebChat, ct);
+        var visitorAddress = new ChannelAddress(ChannelType.WebChat, $"webchat-{Guid.NewGuid():N}");
+        // While level 1 is off for this host, a visitorId counts as absent: it finds no contact and writes no key.
+        var visitorId = options.Value.VisitorLevel1Enabled ? request.VisitorId : null;
+        var (contact, identityLevel) = await identityResolver.ResolveAsync(
+            tid, visitorAddress, claims, visitorId, request.VisitorName, request.VisitorEmail, ct);
+
+        // Every session opens its own conversation: an open one of the same contact is neither reused nor closed.
+        var conversation = await lifecycleService.CreateForWebChatSessionAsync(
+            tid, contact.ContactId, visitorAddress, ct);
 
         var sessionId = await sessionManager.ConnectAsync(
-            tid, conversation.ConversationId, visitorAddress, clock);
+            tid, contact.ContactId, conversation.ConversationId, visitorAddress, clock);
 
         return TypedResults.Ok(new CreateSessionResponse(
             sessionId,
             $"/ws/webchat/{sessionId}",
             visitorAddress.Address,
             contact.ContactId.Value,
-            conversation.ConversationId.Value));
+            conversation.ConversationId.Value,
+            identityLevel,
+            tokenRefusal));
     }
 
     private static NotFound<ErrorResponse> TenantNotFound() => TypedResults.NotFound(new ErrorResponse("Tenant not found"));

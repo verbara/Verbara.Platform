@@ -48,6 +48,29 @@ internal sealed class InterleaveAfterLookupContactStore(IContactStore inner, Fun
         CancellationToken ct) =>
         inner.AddIdentityAsync(tenantId, contactId, addresses, firstNameIfUnnamed, updatedAt, updatedBy, ct);
 
+    public Task<Contact> FindOrInsertByAddressAsync(TenantId tenantId, ChannelAddress key, Contact newContact, CancellationToken ct) =>
+        inner.FindOrInsertByAddressAsync(tenantId, key, newContact, ct);
+
+    public Task<Contact?> AttachWebChatSessionAsync(
+        TenantId tenantId,
+        EntityId contactId,
+        ChannelAddress sessionAddress,
+        string? firstNameIfUnnamed,
+        DateTimeOffset updatedAt,
+        string updatedBy,
+        CancellationToken ct) =>
+        inner.AttachWebChatSessionAsync(tenantId, contactId, sessionAddress, firstNameIfUnnamed, updatedAt, updatedBy, ct);
+
+    public Task<Contact?> SetCustomFieldIfAbsentAsync(
+        TenantId tenantId,
+        EntityId contactId,
+        string key,
+        string value,
+        DateTimeOffset updatedAt,
+        string updatedBy,
+        CancellationToken ct) =>
+        inner.SetCustomFieldIfAbsentAsync(tenantId, contactId, key, value, updatedAt, updatedBy, ct);
+
     /// <summary>A detached copy of <paramref name="source"/>, the object an agent's edit would write.</summary>
     public static Contact Copy(Contact source)
     {

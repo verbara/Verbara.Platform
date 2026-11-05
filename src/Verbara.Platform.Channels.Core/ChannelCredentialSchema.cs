@@ -50,6 +50,15 @@ public static class ChannelCredentialSchemas
     /// </summary>
     public const string DefaultQueueIdKey = "defaultQueueId";
 
+    /// <summary>The secret a tenant's site signs WebChat identity tokens with. Write-only for an administrator.</summary>
+    public const string IdentityTokenSecretKey = "identityTokenSecret";
+
+    /// <summary>The secret just replaced, which still verifies during the rotation grace. Written by the server.</summary>
+    public const string IdentityTokenSecretPreviousKey = "identityTokenSecretPrevious";
+
+    /// <summary>When the secret was last replaced, an ISO 8601 instant in UTC. Written by the server.</summary>
+    public const string IdentityTokenSecretReplacedAtKey = "identityTokenSecretReplacedAt";
+
     /// <summary>
     /// WhatsApp (Meta Cloud API). The Meta names equal the constants of <c>WhatsAppCredentialKeys</c> — a test
     /// in the WhatsApp module pins the two together — plus the routing key <see cref="DefaultQueueIdKey"/>.
@@ -66,10 +75,26 @@ public static class ChannelCredentialSchemas
             new(DefaultQueueIdKey, IsSecret: false),
         ]);
 
+    /// <summary>
+    /// WebChat. All four keys are secret so they keep the one at-rest form WebChat has always had: before this schema
+    /// every WebChat key was wrapped, and the store unwraps only keys the schema calls secret. A stored
+    /// <see cref="DefaultQueueIdKey"/> declared non-secret would read back as ciphertext. The stamp is not sensitive; it
+    /// is secret so an image that treats every WebChat key as secret reads it back unchanged after a rollback.
+    /// </summary>
+    public static ChannelCredentialSchema WebChat { get; } = new(
+        ChannelType.WebChat,
+        [
+            new(DefaultQueueIdKey, IsSecret: true),
+            new(IdentityTokenSecretKey, IsSecret: true),
+            new(IdentityTokenSecretPreviousKey, IsSecret: true),
+            new(IdentityTokenSecretReplacedAtKey, IsSecret: true),
+        ]);
+
     /// <summary>The declared schema of <paramref name="channel"/>, or <see langword="null"/> when it has none.</summary>
     public static ChannelCredentialSchema? For(ChannelType channel) => channel switch
     {
         ChannelType.WhatsApp => WhatsApp,
+        ChannelType.WebChat => WebChat,
         _ => null,
     };
 

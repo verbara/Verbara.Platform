@@ -18,6 +18,12 @@ public sealed class WebChatSession
     /// </summary>
     public required EntityId ConversationId { get; set; }
 
+    /// <summary>
+    /// The contact the visitor's messages are attributed to: the one the session resolved, until it is erased and a
+    /// visitor message opens a new one holding the session address (spec <c>webchat-visitor-identity</c>).
+    /// </summary>
+    public required EntityId ContactId { get; set; }
+
     public required TenantId TenantId { get; init; }
     public required ChannelAddress CustomerAddress { get; init; }
     public bool IsConnected { get; set; } = true;

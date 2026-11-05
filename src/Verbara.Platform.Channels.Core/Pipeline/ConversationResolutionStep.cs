@@ -18,6 +18,11 @@ namespace Verbara.Platform.Channels.Core.Pipeline;
 ///   <item><description><b>None:</b> a new conversation, whose clock starts at its creation.</description></item>
 /// </list>
 /// So a message never lands in a conversation the inactivity close closed or the retention purge deleted meanwhile.
+/// A WebChat session's message (<see cref="InboundMessage.SessionBinding"/>) applies these rules to its session's own
+/// conversation only, and only while that conversation is the attributed contact's. When that one is over, they apply to
+/// the contact's open conversation that records this session's address, which is one an agent started towards this
+/// session. Another session's conversation of the same contact is never reached. Anything else opens a new conversation
+/// for the session.
 /// </summary>
 public sealed class ConversationResolutionStep : IPipelineStep
 {
@@ -45,6 +50,9 @@ public sealed class ConversationResolutionStep : IPipelineStep
     {
         var contact = context.Contact
             ?? throw new InvalidOperationException("Contact must be resolved before conversation resolution.");
+
+        if (context.InboundMessage.SessionBinding is { } binding)
+            return await ResolveForSessionAsync(context, contact, binding, ct).ConfigureAwait(false);
 
         for (var attempt = 0; attempt < MaxResolveAttempts; attempt++)
         {
@@ -85,11 +93,68 @@ public sealed class ConversationResolutionStep : IPipelineStep
             }
         }
 
-        context.Conversation = await _lifecycleService.CreateAsync(
-            context.TenantId,
-            contact.ContactId,
-            context.Channel,
-            ct).ConfigureAwait(false);
+        // A WebChat message comes from its session's address, so the replies in the conversation it opens go to that session.
+        context.Conversation = context.Channel == ChannelType.WebChat
+            ? await _lifecycleService.CreateForWebChatSessionAsync(
+                context.TenantId,
+                contact.ContactId,
+                context.InboundMessage.From,
+                ct).ConfigureAwait(false)
+            : await _lifecycleService.CreateAsync(
+                context.TenantId,
+                contact.ContactId,
+                context.Channel,
+                ct).ConfigureAwait(false);
+        context.IsNewConversation = true;
+
+        return context;
+    }
+
+    private async Task<PipelineContext> ResolveForSessionAsync(
+        PipelineContext context, Contact contact, InboundSessionBinding binding, CancellationToken ct)
+    {
+        for (var attempt = 0; attempt < MaxResolveAttempts; attempt++)
+        {
+            var own = await _conversationStore.GetByIdAsync(context.TenantId, binding.ConversationId, ct).ConfigureAwait(false);
+
+            // Gone, ended, or left behind by a deleted contact: neither claimed nor closed, whatever its state. The session
+            // may still have an open conversation, because an agent can start one towards it, or a concurrent message of the
+            // session can have opened one.
+            if (own is null || own.ContactId != contact.ContactId || ConversationStateMachine.IsTerminal(own.State))
+            {
+                own = await _conversationStore.FindOpenBySessionAddressAsync(
+                    context.TenantId, contact.ContactId, binding.SessionAddress, ct).ConfigureAwait(false);
+                if (own is null)
+                    break;
+            }
+
+            var now = _clock.UtcNow;
+
+            if (own.State == ConversationState.Resolved)
+            {
+                if (context.ClosedOnReturnId is not null)
+                    break;
+
+                if (await _conversationStore.TryCloseResolvedForReplyAsync(
+                        context.TenantId, own.ConversationId, now, ct).ConfigureAwait(false))
+                {
+                    context.ClosedOnReturnId = own.ConversationId;
+                }
+
+                continue;
+            }
+
+            if (await _conversationStore.TryClaimForInboundAsync(
+                    context.TenantId, own.ConversationId, now, ct).ConfigureAwait(false))
+            {
+                context.Conversation = own;
+                context.IsNewConversation = false;
+                return context;
+            }
+        }
+
+        context.Conversation = await _lifecycleService.CreateForWebChatSessionAsync(
+            context.TenantId, contact.ContactId, binding.SessionAddress, ct).ConfigureAwait(false);
         context.IsNewConversation = true;
 
         return context;

@@ -97,10 +97,11 @@ internal sealed partial class WebChatInboundRouter
         if (pipelineResult.IsDuplicate)
             return;
 
-        // Typing indicators and later lookups follow the conversation the visitor is now in.
-        if (await _sessionManager.GetSessionAsync(sessionId).ConfigureAwait(false) is { } session
-            && session.ConversationId != pipelineResult.ConversationId)
+        // The session follows the visitor: its next message, its typing indicators and later lookups use the contact and
+        // the conversation this message was stored under. Both change when the contact was erased and replaced.
+        if (await _sessionManager.GetSessionAsync(sessionId).ConfigureAwait(false) is { } session)
         {
+            session.ContactId = pipelineResult.ContactId;
             session.ConversationId = pipelineResult.ConversationId;
         }
 
@@ -109,7 +110,10 @@ internal sealed partial class WebChatInboundRouter
         // delivery opened, or an earlier routing that found no queue) — the predicate the webhook path uses.
         var firstOfSession = _sessionManager.TryMarkRouted(sessionId);
         var conversation = await ReadForPublishAsync(tenantId, pipelineResult.ConversationId).ConfigureAwait(false);
-        if (!firstOfSession
+
+        // A session's first message can answer a conversation an agent started towards it: the agent keeps it.
+        var heldByAgent = conversation?.Owner?.Kind == ConversationOwnerKind.Agent;
+        if ((!firstOfSession || heldByAgent)
             && (conversation is null || !WebhookInboundProcessor.NeedsRouting(pipelineResult, conversation)))
         {
             // Every stored message is published, not only the one that routes (contact-history-opens-by-assignment,

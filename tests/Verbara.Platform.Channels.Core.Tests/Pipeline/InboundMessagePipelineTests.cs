@@ -70,6 +70,30 @@ public class InboundMessagePipelineTests
         };
 
     // -------------------------------------------------------------------------
+    // A WebChat session message that opens a conversation records its session address (design D9)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Pipeline_ShouldOpenConversationForTheSessionAddress_WhenWebChatMessageFindsNoConversation()
+    {
+        var sessionAddress = new ChannelAddress(ChannelType.WebChat, "webchat-7c9e6679f2a54d0b8e1a3b5c7d9f1e2a");
+        var inbound = new InboundMessage(sessionAddress, new MessageEnvelope([]), "ext-webchat", DateTimeOffset.UtcNow);
+        var contact = MakeContact();
+        var opened = MakeConversation(contact.ContactId);
+        _contactResolver.ResolveAsync(TenantId, Arg.Any<ContactIdentity>(), Arg.Any<CancellationToken>()).Returns(contact);
+        _conversationStore.FindActiveByContactAsync(TenantId, contact.ContactId, ChannelType.WebChat, Arg.Any<CancellationToken>())
+            .Returns(default(Conversation));
+        _lifecycleService.CreateForWebChatSessionAsync(TenantId, contact.ContactId, sessionAddress, Arg.Any<CancellationToken>())
+            .Returns(opened);
+
+        var result = await _pipeline.ProcessAsync(inbound, TenantId, ChannelType.WebChat, CancellationToken.None);
+
+        result.ConversationId.Should().Be(opened.ConversationId);
+        result.IsNewConversation.Should().BeTrue();
+        await _lifecycleService.DidNotReceiveWithAnyArgs().CreateAsync(default, default, default, default);
+    }
+
+    // -------------------------------------------------------------------------
     // Full pipeline: new contact + new conversation
     // -------------------------------------------------------------------------
 
@@ -381,6 +405,217 @@ public class InboundMessagePipelineTests
         var result = await new ContactResolutionStep(_contactResolver).ExecuteAsync(context, CancellationToken.None);
 
         result.Contact.Should().BeSameAs(contact);
+    }
+
+    // ─── A WebChat session's message (design D9) ───
+
+    private static readonly ChannelAddress SessionAddress = new(ChannelType.WebChat, "webchat-session");
+
+    private static InboundMessage MakeBoundMessage(EntityId contactId, EntityId conversationId) =>
+        new(SessionAddress, new MessageEnvelope([]), "ext-bound", DateTimeOffset.UtcNow)
+        {
+            SessionBinding = new InboundSessionBinding(contactId, conversationId, SessionAddress),
+        };
+
+    private static Conversation MakeWebChatConversation(EntityId contactId, ConversationState state = ConversationState.Queued) =>
+        new()
+        {
+            ConversationId = EntityId.New(),
+            TenantId = TenantId,
+            ContactId = contactId,
+            Channel = ChannelType.WebChat,
+            State = state,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+    private Task<PipelineContext> ResolveBoundAsync(Contact contact, EntityId conversationId) =>
+        new ConversationResolutionStep(_conversationStore, _lifecycleService, _clock).ExecuteAsync(
+            new PipelineContext
+            {
+                InboundMessage = MakeBoundMessage(contact.ContactId, conversationId),
+                TenantId = TenantId,
+                Channel = ChannelType.WebChat,
+                Contact = contact,
+            },
+            CancellationToken.None);
+
+    private Conversation GivenTheSessionOpensANewConversation(Contact contact)
+    {
+        var created = MakeWebChatConversation(contact.ContactId);
+        _lifecycleService.CreateForWebChatSessionAsync(TenantId, contact.ContactId, SessionAddress, Arg.Any<CancellationToken>()).Returns(created);
+        return created;
+    }
+
+    private async Task AssertNoContactWideReadAsync() =>
+        await _conversationStore.DidNotReceiveWithAnyArgs().FindActiveByContactAsync(default, default, default, default);
+
+    [Fact]
+    public async Task ContactResolutionStep_ShouldReadTheBoundContactById_WhenTheMessageIsBound()
+    {
+        var contact = MakeContact();
+        _contactResolver.FindByIdAsync(TenantId, contact.ContactId, Arg.Any<CancellationToken>()).Returns(contact);
+        var context = new PipelineContext
+        {
+            InboundMessage = MakeBoundMessage(contact.ContactId, EntityId.New()),
+            TenantId = TenantId,
+            Channel = ChannelType.WebChat,
+        };
+
+        var result = await new ContactResolutionStep(_contactResolver).ExecuteAsync(context, CancellationToken.None);
+
+        result.Contact.Should().BeSameAs(contact);
+        await _contactResolver.DidNotReceive().ResolveAsync(TenantId, Arg.Any<ContactIdentity>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ContactResolutionStep_ShouldResolveByAddress_WhenTheBoundContactIsGone()
+    {
+        var replacement = MakeContact();
+        var gone = EntityId.New();
+        _contactResolver.FindByIdAsync(TenantId, gone, Arg.Any<CancellationToken>()).Returns(default(Contact));
+        _contactResolver.ResolveAsync(TenantId, Arg.Is<ContactIdentity>(i => i.Address == SessionAddress), Arg.Any<CancellationToken>()).Returns(replacement);
+        var context = new PipelineContext
+        {
+            InboundMessage = MakeBoundMessage(gone, EntityId.New()),
+            TenantId = TenantId,
+            Channel = ChannelType.WebChat,
+        };
+
+        var result = await new ContactResolutionStep(_contactResolver).ExecuteAsync(context, CancellationToken.None);
+
+        result.Contact.Should().BeSameAs(replacement);
+    }
+
+    [Fact]
+    public async Task ConversationResolutionStep_ShouldClaimTheSessionsConversation_WhenItIsOpen()
+    {
+        var contact = MakeContact();
+        var own = MakeWebChatConversation(contact.ContactId);
+        _conversationStore.GetByIdAsync(TenantId, own.ConversationId, Arg.Any<CancellationToken>()).Returns(own);
+
+        var result = await ResolveBoundAsync(contact, own.ConversationId);
+
+        result.Conversation.Should().BeSameAs(own);
+        result.IsNewConversation.Should().BeFalse();
+        await AssertNoContactWideReadAsync();
+    }
+
+    [Fact]
+    public async Task ConversationResolutionStep_ShouldRereadTheSameConversationOnly_WhenItsClaimIsLost()
+    {
+        var contact = MakeContact();
+        var own = MakeWebChatConversation(contact.ContactId);
+        var closedSince = MakeWebChatConversation(contact.ContactId, ConversationState.Closed);
+        _conversationStore.GetByIdAsync(TenantId, own.ConversationId, Arg.Any<CancellationToken>()).Returns(own, closedSince);
+        _conversationStore.TryClaimForInboundAsync(TenantId, own.ConversationId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(false);
+        var created = GivenTheSessionOpensANewConversation(contact);
+
+        var result = await ResolveBoundAsync(contact, own.ConversationId);
+
+        result.Conversation.Should().BeSameAs(created);
+        result.IsNewConversation.Should().BeTrue();
+        await _conversationStore.Received(2).GetByIdAsync(TenantId, own.ConversationId, Arg.Any<CancellationToken>());
+        await AssertNoContactWideReadAsync();
+    }
+
+    [Fact]
+    public async Task ConversationResolutionStep_ShouldOpenANewConversation_WhenClaimsAreLostUntilTheLimit()
+    {
+        var contact = MakeContact();
+        var own = MakeWebChatConversation(contact.ContactId);
+        _conversationStore.GetByIdAsync(TenantId, own.ConversationId, Arg.Any<CancellationToken>()).Returns(own);
+        _conversationStore.TryClaimForInboundAsync(TenantId, own.ConversationId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(false);
+        var created = GivenTheSessionOpensANewConversation(contact);
+
+        var result = await ResolveBoundAsync(contact, own.ConversationId);
+
+        result.Conversation.Should().BeSameAs(created);
+        await _conversationStore.Received(ConversationResolutionStep.MaxResolveAttempts).TryClaimForInboundAsync(
+            TenantId, own.ConversationId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ConversationResolutionStep_ShouldCloseAndOpenANewConversation_WhenTheSessionsConversationIsResolved()
+    {
+        var contact = MakeContact();
+        var own = MakeWebChatConversation(contact.ContactId, ConversationState.Resolved);
+        var closed = MakeWebChatConversation(contact.ContactId, ConversationState.Closed);
+        _conversationStore.GetByIdAsync(TenantId, own.ConversationId, Arg.Any<CancellationToken>()).Returns(own, closed);
+        _conversationStore.TryCloseResolvedForReplyAsync(TenantId, own.ConversationId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(true);
+        var created = GivenTheSessionOpensANewConversation(contact);
+
+        var result = await ResolveBoundAsync(contact, own.ConversationId);
+
+        result.ClosedOnReturnId.Should().Be(own.ConversationId);
+        result.Conversation.Should().BeSameAs(created);
+        result.IsNewConversation.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ConversationResolutionStep_ShouldNotCountTheClose_WhenAnotherDeliveryWonIt()
+    {
+        var contact = MakeContact();
+        var own = MakeWebChatConversation(contact.ContactId, ConversationState.Resolved);
+        var closed = MakeWebChatConversation(contact.ContactId, ConversationState.Closed);
+        _conversationStore.GetByIdAsync(TenantId, own.ConversationId, Arg.Any<CancellationToken>()).Returns(own, closed);
+        _conversationStore.TryCloseResolvedForReplyAsync(TenantId, own.ConversationId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(false);
+        var created = GivenTheSessionOpensANewConversation(contact);
+
+        var result = await ResolveBoundAsync(contact, own.ConversationId);
+
+        result.ClosedOnReturnId.Should().BeNull("only the delivery that won the close announces it");
+        result.Conversation.Should().BeSameAs(created);
+    }
+
+    [Theory]
+    [InlineData(ConversationState.Queued)]
+    [InlineData(ConversationState.Active)]
+    [InlineData(ConversationState.Resolved)]
+    public async Task ConversationResolutionStep_ShouldNeitherClaimNorClose_WhenTheConversationIsAnotherContacts(ConversationState state)
+    {
+        var contact = MakeContact();
+        var leftBehind = MakeWebChatConversation(EntityId.New(), state);
+        _conversationStore.GetByIdAsync(TenantId, leftBehind.ConversationId, Arg.Any<CancellationToken>()).Returns(leftBehind);
+        var created = GivenTheSessionOpensANewConversation(contact);
+
+        var result = await ResolveBoundAsync(contact, leftBehind.ConversationId);
+
+        result.Conversation.Should().BeSameAs(created);
+        result.IsNewConversation.Should().BeTrue();
+        result.ClosedOnReturnId.Should().BeNull();
+        await _conversationStore.DidNotReceiveWithAnyArgs().TryClaimForInboundAsync(default, default, default, default);
+        await _conversationStore.DidNotReceiveWithAnyArgs().TryCloseResolvedForReplyAsync(default, default, default, default);
+    }
+
+    [Theory]
+    [InlineData(ConversationState.Closed)]
+    [InlineData(ConversationState.Abandoned)]
+    public async Task ConversationResolutionStep_ShouldOpenANewConversation_WhenTheSessionsConversationEnded(ConversationState state)
+    {
+        var contact = MakeContact();
+        var ended = MakeWebChatConversation(contact.ContactId, state);
+        _conversationStore.GetByIdAsync(TenantId, ended.ConversationId, Arg.Any<CancellationToken>()).Returns(ended);
+        var created = GivenTheSessionOpensANewConversation(contact);
+
+        var result = await ResolveBoundAsync(contact, ended.ConversationId);
+
+        result.Conversation.Should().BeSameAs(created);
+        result.ClosedOnReturnId.Should().BeNull();
+        await AssertNoContactWideReadAsync();
+    }
+
+    [Fact]
+    public async Task ConversationResolutionStep_ShouldOpenANewConversation_WhenTheSessionsConversationIsGone()
+    {
+        var contact = MakeContact();
+        var gone = EntityId.New();
+        _conversationStore.GetByIdAsync(TenantId, gone, Arg.Any<CancellationToken>()).Returns(default(Conversation));
+        var created = GivenTheSessionOpensANewConversation(contact);
+
+        var result = await ResolveBoundAsync(contact, gone);
+
+        result.Conversation.Should().BeSameAs(created);
+        await AssertNoContactWideReadAsync();
     }
 
     [Fact]

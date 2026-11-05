@@ -70,7 +70,7 @@ public sealed class WebChatInboundRoutingTests
 
         var sessionManager = new WebChatSessionManager(Options.Create(new WebChatOptions()));
         var sessionId = sessionManager.ConnectAsync(
-            Tenant, ConvId, visitorAddress, clock).GetAwaiter().GetResult();
+            Tenant, ContactId, ConvId, visitorAddress, clock).GetAwaiter().GetResult();
 
         var sut = new WebChatInboundRouter(router, switchboard, store, contactStore, eventBus, sessionManager, Announcer(eventBus), NullLogger<WebChatInboundRouter>.Instance);
         return (sut, store, sessionId, switchboard, eventBus);
@@ -145,6 +145,38 @@ public sealed class WebChatInboundRoutingTests
     }
 
     [Fact]
+    public async Task RouteFirstInboundAsync_ShouldRebindBothIds_WhenTheMessageWasStoredUnderANewContact()
+    {
+        var h = await BuildWithStubbedStoresAsync();
+        using var subscription = h.Subscription;
+        var replacement = EntityId.From("contact-wc-2");
+        var opened = EntityId.From("conv-wc-3");
+
+        await h.Sut.RouteFirstInboundAsync(
+            h.SessionId, Tenant, new PipelineResult(opened, replacement, EntityId.From("msg-3"), IsNewConversation: true), Content(), CancellationToken.None);
+
+        var session = await h.Sessions.GetSessionAsync(h.SessionId);
+        session!.ContactId.Should().Be(replacement);
+        session.ConversationId.Should().Be(opened);
+    }
+
+    [Fact]
+    public async Task RouteFirstInboundAsync_ShouldKeepTheBinding_WhenTheResultIsADuplicate()
+    {
+        var h = await BuildWithStubbedStoresAsync();
+        using var subscription = h.Subscription;
+
+        await h.Sut.RouteFirstInboundAsync(
+            h.SessionId, Tenant,
+            new PipelineResult(EntityId.From("conv-wc-3"), EntityId.From("contact-wc-2"), EntityId.From("msg-3"), IsNewConversation: false, IsDuplicate: true),
+            Content(), CancellationToken.None);
+
+        var session = await h.Sessions.GetSessionAsync(h.SessionId);
+        session!.ContactId.Should().Be(ContactId);
+        session.ConversationId.Should().Be(ConvId);
+    }
+
+    [Fact]
     public async Task RouteFirstInboundAsync_ShouldStampRouteMetadata_WhenPresent()
     {
         // C5 (implicit): WebChat does NOT run the bot, so only the router's metadata (e.g. the
@@ -194,7 +226,7 @@ public sealed class WebChatInboundRoutingTests
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         var sessionManager = new WebChatSessionManager(Options.Create(new WebChatOptions()));
-        var sessionId = await sessionManager.ConnectAsync(Tenant, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-y"), clock);
+        var sessionId = await sessionManager.ConnectAsync(Tenant, ContactId, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-y"), clock);
         var bus = new PlatformEventBus();
         var sut = new WebChatInboundRouter(router, switchboard, convStore, contactStore, bus, sessionManager, Announcer(bus), NullLogger<WebChatInboundRouter>.Instance);
 
@@ -221,7 +253,7 @@ public sealed class WebChatInboundRoutingTests
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         var sessionManager = new WebChatSessionManager(Options.Create(new WebChatOptions()));
-        var sessionId = await sessionManager.ConnectAsync(Tenant, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-z"), clock);
+        var sessionId = await sessionManager.ConnectAsync(Tenant, ContactId, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-z"), clock);
         var bus = new PlatformEventBus();
         var sut = new WebChatInboundRouter(router, switchboard, convStore, contactStore, bus, sessionManager, Announcer(bus), NullLogger<WebChatInboundRouter>.Instance);
 
@@ -241,7 +273,8 @@ public sealed class WebChatInboundRoutingTests
         IInboundRouter Router,
         IConversationSwitchboard Switchboard,
         List<PlatformEvent> Published,
-        IDisposable Subscription);
+        IDisposable Subscription,
+        WebChatSessionManager Sessions);
 
     private static async Task<ReadFailureHarness> BuildWithStubbedStoresAsync(ILogger<WebChatInboundRouter>? logger = null)
     {
@@ -255,12 +288,12 @@ public sealed class WebChatInboundRoutingTests
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         var sessionManager = new WebChatSessionManager(Options.Create(new WebChatOptions()));
-        var sessionId = await sessionManager.ConnectAsync(Tenant, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-r"), clock);
+        var sessionId = await sessionManager.ConnectAsync(Tenant, ContactId, ConvId, new ChannelAddress(ChannelType.WebChat, "webchat-r"), clock);
         var bus = new PlatformEventBus();
         var published = new List<PlatformEvent>();
         var subscription = bus.Events.Subscribe(published.Add);
         var sut = new WebChatInboundRouter(router, switchboard, conversations, contacts, bus, sessionManager, Announcer(bus), logger ?? NullLogger<WebChatInboundRouter>.Instance);
-        return new ReadFailureHarness(sut, sessionId, conversations, contacts, router, switchboard, published, subscription);
+        return new ReadFailureHarness(sut, sessionId, conversations, contacts, router, switchboard, published, subscription, sessionManager);
     }
 
     private static Conversation QueuedOwnerless() => new()
@@ -383,10 +416,20 @@ public sealed class WebChatInboundRoutingTests
         var h = await BuildWithStubbedStoresAsync();
         using var subscription = h.Subscription;
         var agentId = EntityId.From("agent-wc-1");
+        var offered = new Conversation
+        {
+            ConversationId = ConvId,
+            TenantId = Tenant,
+            ContactId = ContactId,
+            Channel = ChannelType.WebChat,
+            State = ConversationState.Offered,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        offered.SetMetadata(ConversationOffer.OfferedToKey, agentId.Value);
         h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).Returns(call =>
         {
             call.Arg<CancellationToken>().ThrowIfCancellationRequested();
-            return OwnedBy(agentId);
+            return offered;
         });
         h.Contacts.GetByIdAsync(Tenant, ContactId, Arg.Any<CancellationToken>()).Returns(call =>
         {
@@ -400,7 +443,24 @@ public sealed class WebChatInboundRoutingTests
 
         await act.Should().ThrowAsync<OperationCanceledException>("the first message goes on to the contact read, which does take the request's token");
         h.Published.OfType<ConversationMessageEvent>().Should().ContainSingle("the publish happens before the cancellation can end the flow")
+            .Which.Audience.Should().Be(new ConversationAudience(null, agentId.Value));
+        await h.Router.DidNotReceiveWithAnyArgs().RouteAsync(default!, default);
+    }
+
+    // A session's first message can answer a conversation an agent started towards it (design D9): the agent keeps it.
+    [Fact]
+    public async Task RouteFirstInboundAsync_ShouldPublishAndNotRoute_WhenTheFirstMessageAnswersAConversationAnAgentHolds()
+    {
+        var h = await BuildWithStubbedStoresAsync();
+        using var subscription = h.Subscription;
+        var agentId = EntityId.From("agent-wc-1");
+        h.Conversations.GetByIdAsync(Tenant, ConvId, Arg.Any<CancellationToken>()).Returns(OwnedBy(agentId));
+
+        await h.Sut.RouteFirstInboundAsync(h.SessionId, Tenant, FirstMessageResult(), Content(), CancellationToken.None);
+
+        h.Published.OfType<ConversationMessageEvent>().Should().ContainSingle()
             .Which.Audience.Should().Be(new ConversationAudience(agentId.Value, null));
+        h.Published.OfType<ConversationStateChangedEvent>().Should().BeEmpty();
         await h.Router.DidNotReceiveWithAnyArgs().RouteAsync(default!, default);
     }
 

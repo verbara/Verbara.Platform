@@ -20,7 +20,7 @@ public class WebChatEndpointTests
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
 
         var sessionId = await manager.ConnectAsync(
-            new TenantId("tenant-1"),
+            new TenantId("tenant-1"), EntityId.From("contact-1"),
             EntityId.From("conv-1"),
             new ChannelAddress(ChannelType.WebChat, "visitor-1"),
             clock);
@@ -43,7 +43,7 @@ public class WebChatEndpointTests
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
 
         var sessionId = await manager.ConnectAsync(
-            new TenantId("t1"), EntityId.From("c1"),
+            new TenantId("t1"), EntityId.From("contact-1"), EntityId.From("c1"),
             new ChannelAddress(ChannelType.WebChat, "v1"), clock);
         await manager.DisconnectAsync(sessionId);
 
@@ -79,6 +79,7 @@ public class WebChatEndpointTests
         var session = new WebChatSession
         {
             SessionId = "sess-1",
+            ContactId = EntityId.From("contact-1"),
             ConversationId = EntityId.From("conv-1"),
             TenantId = new TenantId("tenant-1"),
             CustomerAddress = new ChannelAddress(ChannelType.WebChat, "webchat-visitor-1"),

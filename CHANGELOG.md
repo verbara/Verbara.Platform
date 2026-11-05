@@ -16,7 +16,47 @@ Conversation content on the live stream reaches only its readers. Read **Changed
 tenant API keys bound to no user, roles without a conversation permission and agents outside a conversation now get
 403 `not-readable`, and `GET /api/v1/contacts/{id}/conversations` answers a new item shape.
 
+A WebChat visitor now has an identity level. A site can sign a token for its logged-in customer (`Verified`), and a host
+can let a returning browser find its contact (`Unverified`). Without either, a session stays `Anonymous`, as it was. The
+second one is off until you turn it on: read **Upgrading**.
+
 ### Added
+
+- **`POST /api/v1/webchat/sessions` resolves its contact by identity level.** The request gains `identityToken`, and
+  `visitorId`, `visitorName`, `visitorEmail` and `pageContext` get a meaning. The response gains `identityLevel`, always
+  present: `Verified` (`identityToken` verified), `Unverified` (a version-4 `visitorId` found or created the contact) or
+  `Anonymous` (a contact of this session alone). `identityTokenRefusal` is present only when a token was sent and refused,
+  and the session still opens at the level the rest of the request allows. Every session opens a new conversation and has
+  its own `webchat-<32 hex>` address; an open conversation of the same contact is neither reused nor closed. A `visitorId`
+  that is not a random version-4 GUID, the nil GUID included, gives `Anonymous`. `visitorName` is cut at 200 characters and
+  fills the first name of a contact with none. `visitorEmail` over 320 characters is dropped, and otherwise is stored as the
+  custom field `webchatEmail` of a contact with none. Neither finds a contact, and `pageContext` is accepted and not stored.
+  Both are stored on an `Anonymous` contact too, so with level 1 off a visitor's name and e-mail are now kept and the contact
+  search finds them. When `identityToken` verifies, neither is used: a `Verified` contact takes its name and e-mail only from
+  the token's `name` and `email`, and a token without them leaves them empty.
+- **A WebChat conversation an agent starts belongs to one session.** `POST /api/v1/conversations` with a first message goes
+  to the contact's session that is connected now, newest first, and the conversation records that session, so its replies go
+  there and the visitor's answer lands in it, with the agent still holding it. With no session connected the start is refused
+  as before (502 `channel-send-failed`). The queued path, with no first message, records the connected session as well. The
+  contact's other sessions never reach that conversation.
+- **A site can sign who its logged-in customer is.** `identityToken` is a compact JWT signed with HS256 with the tenant's
+  `identityTokenSecret`, with the claims `external_id`, `aud`, `iat`, `exp` and optionally `name` and `email`, a lifetime of at
+  most 3600 s and 300 s of clock skew. A refusal is one of `identity-token-not-configured`, `identity-token-malformed`,
+  `identity-token-signature-invalid`, `identity-token-wrong-tenant`, `identity-token-lifetime-too-long`,
+  `identity-token-not-yet-valid` or `identity-token-expired`. `docs/manuales/smb/04-canal-webchat.md` §8 is the integration
+  guide.
+- **The WebChat credential `identityTokenSecret`, with rotation.** Through `PUT /api/v1/admin/channels/WebChat`, 32 to 512
+  characters. Replacing it moves the old value to `identityTokenSecretPrevious`, which keeps verifying for 24 hours from
+  `identityTokenSecretReplacedAt`. Sending `identityTokenSecretPrevious: null` ends that time at once. The new refusals are
+  400 `weak-identity-token-secret` and 400 `server-managed-credential-key`.
+- **The contact's computed `identityLevel`**, on the `Contact` shape: `Verified`, `Unverified` or `Anonymous`, derived from its
+  WebChat addresses and absent for a contact with none. Nothing stores it, and a value in a write body is ignored.
+- **`GET /api/v1/contacts?search=` also matches the custom field `webchatEmail`.**
+- **Bounds on a WebChat identity key.** A contact keeps its newest 50 session addresses, and its keys are never dropped. A
+  `visitorId` whose contact already holds 5 open WebChat conversations gets a new `Anonymous` contact and adds nothing to
+  the found one, and the host logs one warning per tenant per hour, `webchat-visitor-key-saturated`. The count is read
+  before the conversation is created, so concurrent creates can go past 5. Two tabs opening at once with a new key resolve
+  one contact.
 
 - **`GET /api/v1/conversations/{id}/history` reads a conversation's messages newest first, a page at a time.** It answers
   `MessageHistoryPageDto`: `items` (the same `Message` items as `/messages`), `hasMore`, and `nextBefore`, an opaque
@@ -42,6 +82,15 @@ tenant API keys bound to no user, roles without a conversation permission and ag
 
 ### Changed — BREAKING
 
+- **`POST` and `PUT /api/v1/contacts` refuse the WebChat identity key forms.** A WebChat address that starts with
+  `webchat-visitor:` or `webchat-external:`, compared by exact case, answers 400 `reserved-contact-address`, with the
+  addresses in `details`, and nothing is written. That refusal comes before the contact is read, so a `PUT` on an unknown id
+  naming one answers 400 instead of 404. Another case, another channel and a `webchat-<hex>` session address are accepted
+  as before. See **Upgrading** for the addresses already stored.
+- **`PUT /api/v1/admin/channels/WebChat` refuses a key outside its schema**, 400 `unknown-credential-key`. WebChat had no
+  schema and took any key. It now takes `defaultQueueId`, `identityTokenSecret`, `identityTokenSecretPrevious` (only `null`)
+  and `identityTokenSecretReplacedAt` (never), and `GET` lists those four in that order, then any stored key outside the
+  schema.
 - **The conversation reads follow one read rule** (`GET /api/v1/conversations/{id}`, `/{id}/messages`, `/{id}/history`
   and `GET /api/v1/contacts/{id}/conversations`). A refusal is 403 `{"error":"not-readable"}`, which does not say why;
   a missing id still answers an empty 404, before the rule. A caller reads every conversation of its tenant when it
@@ -89,6 +138,15 @@ tenant API keys bound to no user, roles without a conversation permission and ag
 
 ### Fixed
 
+- **An agent's reply reaches the session its conversation belongs to.** A reply went to the first WebChat address of the
+  contact, which for a contact with several sessions could be one that had ended, and it was marked failed with
+  `SESSION_NOT_CONNECTED`. A conversation now records its session's address and replies through it. A conversation from
+  before this version replies as it did.
+- **A visitor's message stays in its own session's conversation.** A message went to the contact's newest open
+  conversation, whichever session opened it. A session now holds on to its contact and its conversation: it claims that
+  conversation while it is open, closes it with `customer-returned` if it is `Resolved`, and otherwise opens a new one for
+  this session, leaving another session's conversation untouched. If the session's contact was deleted, the next message
+  creates one contact holding only the session's address.
 - **Every stored WebChat customer message is published on the live stream as `conversation.message`.** Only the message
   that routed the session was published; the later messages of an offered or active WebChat conversation were stored
   but never reached the agent's console live. The routing message is still published once, after
@@ -100,6 +158,39 @@ tenant API keys bound to no user, roles without a conversation permission and ag
   the contact, after the conversation was read, still fails the WebChat request of a message already stored and published. (#539)
 
 ### Upgrading
+
+- **A returning WebChat visitor stays unlinked until you turn it on.** `WebChat:VisitorIdentity:Level1Enabled` defaults to
+  `false`. While it is off, `POST /api/v1/webchat/sessions` treats every `visitorId` as absent: the session gets a contact
+  of its own at `Anonymous` and no contact gains a `webchat-visitor:` address. A verified identity token works either way.
+  A linked contact's history must show the console's unverified mark, so turn it on in this order:
+
+  1. Deploy this Platform image. Level 1 is off.
+  2. Deploy the Web release that renders `data-identity-level`.
+  3. Have every agent reload the console, for example at the next shift change. A tab left open from before step 2 runs
+     the old console and shows linked history without the mark.
+  4. Measure what a session create costs on your contacts table, as below.
+  5. Set `WebChat__VisitorIdentity__Level1Enabled=true` and restart the Api. It is read once at start-up.
+
+  With the setting on, every session create with a `visitorId` looks the contact up by its identity key, and so does every
+  session with a verified token, setting on or off. That lookup reads every contact of the tenant: no index serves it, and it
+  holds a database connection and a lock on that key while it runs. On a table of many contacts, run `EXPLAIN (ANALYZE, BUFFERS)`
+  of the lookup against a copy of your data before you turn the setting on, and judge the result against your session rate.
+
+  If you upgrade both images together, do steps 2 to 5 at once. Turning the setting off again stops new linking at once,
+  and contacts already linked keep their keys and read `Unverified`. That is no rollback of the console: rolling the Web
+  back below the release with the mark while level-1 contacts exist shows their linked history unmarked again.
+  `docker/docker-compose.full.yml` sets the variable to `true`, because the Web E2E specs run against that stack.
+
+- **Migration `028` renames WebChat addresses in the identity key forms.** A WebChat address that starts with
+  `webchat-visitor:` or `webchat-external:` now identifies a visitor, only `POST /api/v1/webchat/sessions` writes one, and
+  `POST` and `PUT /api/v1/contacts` refuse it with 400 `reserved-contact-address`. At start-up, an address of those forms
+  that a contact already holds gets the prefix `legacy-` (`legacy-webchat-external:x`) and stays an ordinary address of
+  that contact. Nothing else of the contact changes, and no audit entry is written. To list the affected contacts before
+  you deploy, run this read-only query:
+
+  ```sql
+  SELECT c.tenant_id, c.contact_id, a->>'address' AS address FROM contacts c CROSS JOIN LATERAL jsonb_array_elements(c.addresses) AS a WHERE a->>'channel' IN ('WebChat', '3') AND (starts_with(a->>'address', 'webchat-visitor:') OR starts_with(a->>'address', 'webchat-external:'));
+  ```
 
 - **An integration on a tenant API key bound to no user now gets 403 `not-readable`** on the conversation reads and the
   contact's history. To keep it working, bind the key to a user whose role is `Api` (that role now holds

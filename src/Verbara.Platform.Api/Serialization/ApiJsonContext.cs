@@ -140,6 +140,7 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(Conversation))]
 [JsonSerializable(typeof(Message))]
 [JsonSerializable(typeof(Contact))]
+[JsonSerializable(typeof(ContactIdentityLevel))]
 [JsonSerializable(typeof(FlowDefinition))]
 // FlowEndpoints.ListFlows returns IFlowStore.ListAsync's result verbatim (no DTO projection), so
 // the COLLECTION is a root serializable type too. Registering only the element type compiles and
@@ -573,6 +574,7 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(List<CannedResponseEndpoints.CannedResponseDto>))]
 // WebChat
 [JsonSerializable(typeof(WebChatEndpoints.CreateSessionRequest))]
+[JsonSerializable(typeof(WebChatEndpoints.CreateSessionPageContext))]
 [JsonSerializable(typeof(WebChatEndpoints.CreateSessionResponse))]
 [JsonSerializable(typeof(WebChatEndpoints.WebChatMessageRequest))]
 // Onboarding

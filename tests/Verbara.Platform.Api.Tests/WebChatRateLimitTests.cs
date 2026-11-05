@@ -65,6 +65,41 @@ public sealed class WebChatRateLimitTests : IClassFixture<WebChatRateLimitTests.
         return request;
     }
 
+    // Control for webchat-visitor-identity-two-levels: the request that now carries identity members meets the same limit.
+    [Fact]
+    public async Task CreateSession_ShouldReturn429WithRetryAfter_WhenTheRequestCarriesIdentityMembers()
+    {
+        var client = _factory.CreateClient();
+        HttpRequestMessage Request()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/webchat/sessions")
+            {
+                Content = JsonContent.Create(new
+                {
+                    tenantId = AuthenticatedPlatformApiFactory.TestTenantId,
+                    visitorId = "3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b",
+                    visitorName = "Ana",
+                    visitorEmail = "ana@example.com",
+                    identityToken = "not-a-token",
+                }),
+            };
+            request.Headers.Add("X-Forwarded-For", "203.0.113.77");
+            return request;
+        }
+
+        for (var i = 0; i < Limit; i++)
+        {
+            using var request = Request();
+            using var ok = await client.SendAsync(request);
+            ok.StatusCode.Should().Be(HttpStatusCode.OK, "request {0} is within the limit", i + 1);
+        }
+
+        using var last = Request();
+        using var rejected = await client.SendAsync(last);
+        rejected.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+        rejected.Headers.Contains("Retry-After").Should().BeTrue();
+    }
+
     [Fact]
     public async Task CreateSession_ShouldReturn429WithRetryAfter_WhenOneClientExceedsTheLimit()
     {

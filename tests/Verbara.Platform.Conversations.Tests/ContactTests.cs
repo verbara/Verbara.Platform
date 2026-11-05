@@ -155,4 +155,78 @@ public class ContactTests
 
         contact.FindAddress(ChannelType.WhatsApp).Should().BeNull("the Cloud API cannot send to a BSUID yet");
     }
+
+    private static Contact WithAddresses(params (ChannelType Channel, string Address)[] addresses)
+    {
+        var contact = new Contact
+        {
+            ContactId = EntityId.From("c-001"),
+            TenantId = new TenantId("t1"),
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        foreach (var (channel, address) in addresses)
+            contact.AddAddress(new ChannelAddress(channel, address));
+        return contact;
+    }
+
+    [Fact]
+    public void FindAddress_ShouldSkipIdentityKeys_WhenContactHoldsThemFirst()
+    {
+        var contact = WithAddresses(
+            (ChannelType.WebChat, "webchat-visitor:rcfqwP4uUDSA6hgRqgUIE3hCFFsXvDuxhE3MgUu0Y1M"),
+            (ChannelType.WebChat, "webchat-external:cust-48151623"),
+            (ChannelType.WebChat, "webchat-6a7b8c9d0e1f42a3b4c5d6e7f8a9b0c1"));
+
+        contact.FindAddress(ChannelType.WebChat)!.Address.Should().Be("webchat-6a7b8c9d0e1f42a3b4c5d6e7f8a9b0c1");
+    }
+
+    [Fact]
+    public void FindAddress_ShouldReturnNull_WhenContactHoldsOnlyIdentityKeys()
+    {
+        var contact = WithAddresses(
+            (ChannelType.WebChat, "webchat-visitor:abc"),
+            (ChannelType.WebChat, "webchat-external:cust-48151623"));
+
+        contact.FindAddress(ChannelType.WebChat).Should().BeNull();
+    }
+
+    [Fact]
+    public void FindAddress_ShouldReturnAddress_WhenPrefixDiffersInCase()
+    {
+        var contact = WithAddresses((ChannelType.WebChat, "WebChat-External:x"));
+
+        contact.FindAddress(ChannelType.WebChat)!.Address.Should().Be("WebChat-External:x");
+        contact.IdentityLevel.Should().Be(ContactIdentityLevel.Anonymous);
+    }
+
+    [Fact]
+    public void FindAddress_ShouldReturnAddress_WhenReservedPrefixIsOnAnotherChannel()
+    {
+        var contact = WithAddresses((ChannelType.Sms, "webchat-external:x"));
+
+        contact.FindAddress(ChannelType.Sms)!.Address.Should().Be("webchat-external:x");
+        contact.IdentityLevel.Should().BeNull();
+    }
+
+    [Fact]
+    public void IdentityLevel_ShouldPreferVerified_WhenContactHoldsBothKeys()
+    {
+        var contact = WithAddresses(
+            (ChannelType.WebChat, "webchat-visitor:abc"),
+            (ChannelType.WebChat, "webchat-external:x"));
+
+        contact.IdentityLevel.Should().Be(ContactIdentityLevel.Verified);
+    }
+
+    [Fact]
+    public void IdentityLevel_ShouldFollowAddresses_WhenAddressIsRemoved()
+    {
+        var contact = WithAddresses(
+            (ChannelType.WebChat, "webchat-external:x"),
+            (ChannelType.WebChat, "webchat-6a7b8c9d0e1f42a3b4c5d6e7f8a9b0c1"));
+
+        contact.RemoveAddress(new ChannelAddress(ChannelType.WebChat, "webchat-external:x"));
+
+        contact.IdentityLevel.Should().Be(ContactIdentityLevel.Anonymous, "the level is computed, never stored");
+    }
 }

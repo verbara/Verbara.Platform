@@ -25,6 +25,52 @@ public sealed record ChannelAddress
         && char.IsAsciiLetter(Address[1])
         && Address[2] == '.';
 
+    /// <summary>The prefix of a WebChat level-1 key, which recognises a browser and proves nothing.</summary>
+    public const string WebChatVisitorKeyPrefix = "webchat-visitor:";
+
+    /// <summary>The prefix of a WebChat level-2 key, the customer id a site signed for.</summary>
+    public const string WebChatExternalKeyPrefix = "webchat-external:";
+
+    /// <summary>True when this is a WebChat level-1 key. The test is ordinal and case-sensitive.</summary>
+    public bool IsWebChatVisitorKey() => HasWebChatPrefix(WebChatVisitorKeyPrefix);
+
+    /// <summary>True when this is a WebChat level-2 key. The test is ordinal and case-sensitive.</summary>
+    public bool IsWebChatExternalKey() => HasWebChatPrefix(WebChatExternalKeyPrefix);
+
+    /// <summary>
+    /// True when this WebChat address identifies a contact rather than a session. An identity key is never a
+    /// destination. The contact's identity level, the reply destination and the check on contact writes all use
+    /// this one test, so they cannot disagree: <c>WebChat-External:x</c> is an ordinary address for all three.
+    /// </summary>
+    public bool IsWebChatIdentityKey() => IsWebChatVisitorKey() || IsWebChatExternalKey();
+
+    /// <summary>
+    /// True when this is the address of one WebChat session: <c>webchat-</c> and 32 lowercase hex digits. A contact
+    /// keeps a bounded number of these. Any other WebChat address is the contact's own and is never dropped.
+    /// </summary>
+    public bool IsWebChatSessionAddress()
+    {
+        const string prefix = "webchat-";
+        const int hexDigits = 32;
+        if (Channel != ChannelType.WebChat
+            || Address.Length != prefix.Length + hexDigits
+            || !Address.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var c in Address.AsSpan(prefix.Length))
+        {
+            if (!char.IsAsciiHexDigitLower(c))
+                return false;
+        }
+
+        return true;
+    }
+
+    private bool HasWebChatPrefix(string prefix) =>
+        Channel == ChannelType.WebChat && Address.StartsWith(prefix, StringComparison.Ordinal);
+
     public override string ToString() =>
         $"{Channel.ToString().ToLowerInvariant()}:{Address}";
 }

@@ -26,4 +26,39 @@ public interface IContactStore
         DateTimeOffset updatedAt,
         string updatedBy,
         CancellationToken ct);
+
+    /// <summary>
+    /// Returns the contact holding <paramref name="key"/>, or inserts <paramref name="newContact"/> when none does. The
+    /// find and the insert are one step per tenant and key, so concurrent callers with one new key resolve one contact.
+    /// The caller tells the two outcomes apart by comparing the returned id with <paramref name="newContact"/>'s.
+    /// </summary>
+    Task<Contact> FindOrInsertByAddressAsync(TenantId tenantId, ChannelAddress key, Contact newContact, CancellationToken ct);
+
+    /// <summary>
+    /// Adds a WebChat session address to an existing contact, drops the oldest session addresses beyond the newest 50
+    /// in the same write, and fills the first name when the contact has neither a first nor a last name. Every other
+    /// address and field is left as stored. Never inserts: <see langword="null"/> when the contact no longer exists.
+    /// </summary>
+    Task<Contact?> AttachWebChatSessionAsync(
+        TenantId tenantId,
+        EntityId contactId,
+        ChannelAddress sessionAddress,
+        string? firstNameIfUnnamed,
+        DateTimeOffset updatedAt,
+        string updatedBy,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Sets the custom field <paramref name="key"/> only while the contact does not hold it, touching nothing else of
+    /// the row. Never inserts: <see langword="null"/> when no row matched (no contact, or the key already set);
+    /// otherwise the contact as stored after the write.
+    /// </summary>
+    Task<Contact?> SetCustomFieldIfAbsentAsync(
+        TenantId tenantId,
+        EntityId contactId,
+        string key,
+        string value,
+        DateTimeOffset updatedAt,
+        string updatedBy,
+        CancellationToken ct);
 }

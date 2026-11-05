@@ -254,6 +254,45 @@ internal sealed class PostgresConversationStore : IConversationStore
         return affected == 1;
     }
 
+    public async Task<int> CountOpenByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
+    {
+        var open = await _dataSource.ExecuteScalarAsync<long?>(
+            "SELECT COUNT(*) FROM conversations " +
+            "WHERE tenant_id = @TenantId AND contact_id = @ContactId AND channel = @Channel AND state <> ALL(@TerminalStates)",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("ContactId", NpgsqlDbType.Text) { Value = contactId.Value });
+                p.Add(new NpgsqlParameter("Channel", NpgsqlDbType.Integer) { Value = (int)channel });
+                p.Add(new NpgsqlParameter("TerminalStates", NpgsqlDbType.Array | NpgsqlDbType.Integer) { Value = s_terminalStateValues });
+            },
+            ct);
+        return (int)(open ?? 0L);
+    }
+
+    public async Task<Conversation?> FindOpenBySessionAddressAsync(TenantId tenantId, EntityId contactId, ChannelAddress sessionAddress, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sessionAddress);
+        var row = await _dataSource.QueryFirstOrDefaultAsync(
+            "SELECT conversation_id, tenant_id, contact_id, channel, state, owner_kind, owner_id, case_id, " +
+            "metadata, created_at, closed_at, updated_at, created_by, updated_by, voice_linked_id, queue_priority, last_message_at, queue_id " +
+            "FROM conversations " +
+            "WHERE tenant_id = @TenantId AND contact_id = @ContactId AND channel = @Channel " +
+            "  AND state <> ALL(@TerminalStates) AND metadata->>@Key = @Address " +
+            "ORDER BY created_at DESC LIMIT 1",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("ContactId", NpgsqlDbType.Text) { Value = contactId.Value });
+                p.Add(new NpgsqlParameter("Channel", NpgsqlDbType.Integer) { Value = (int)ChannelType.WebChat });
+                p.Add(new NpgsqlParameter("TerminalStates", NpgsqlDbType.Array | NpgsqlDbType.Integer) { Value = s_terminalStateValues });
+                p.Add(new NpgsqlParameter("Key", NpgsqlDbType.Text) { Value = WebChatConversationMetadata.SessionAddressKey });
+                p.Add(new NpgsqlParameter("Address", NpgsqlDbType.Text) { Value = sessionAddress.Address });
+            },
+            ConversationRow.Map, ct);
+        return row?.ToConversation();
+    }
+
     public async Task<Conversation?> FindActiveByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct)
     {
         // Terminal states: Closed = 3, Abandoned = 4 (check ConversationStateMachine)

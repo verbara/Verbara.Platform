@@ -65,6 +65,41 @@ public sealed class PostgresTenantChannelConfigStoreEncryptionTests
     }
 
     [Fact]
+    public async Task SaveAsync_ShouldProtectAllFourKeys_WhenChannelIsWebChat()
+    {
+        var credentials = new Dictionary<string, string>
+        {
+            [ChannelCredentialSchemas.DefaultQueueIdKey] = $"queue-{Guid.NewGuid():N}",
+            [ChannelCredentialSchemas.IdentityTokenSecretKey] = $"current-{Guid.NewGuid():N}",
+            [ChannelCredentialSchemas.IdentityTokenSecretPreviousKey] = $"previous-{Guid.NewGuid():N}",
+            [ChannelCredentialSchemas.IdentityTokenSecretReplacedAtKey] = "2026-11-04T09:00:00.000+00:00",
+        };
+
+        await _sut.SaveAsync(Config(ChannelType.WebChat, credentials), CancellationToken.None);
+
+        var raw = await _fixture.ReadRawCredentialsAsync(_tenantId, (int)ChannelType.WebChat);
+        foreach (var value in credentials.Values)
+            raw.Should().NotContain(value, "all four keys share one at-rest form, so an image that treats every WebChat key as secret reads them back");
+        (await _sut.GetAsync(new TenantId(_tenantId), ChannelType.WebChat, CancellationToken.None))!
+            .Credentials.Should().Equal(credentials);
+    }
+
+    [Fact]
+    public async Task GetAsync_ShouldUnwrapDefaultQueueId_WhenItWasWrappedBeforeTheSchemaExisted()
+    {
+        var queueId = $"queue-{Guid.NewGuid():N}";
+        var protector = _fixture.DataProtection.CreateProtector(PostgresTenantChannelConfigStore.CredentialsProtectorPurpose);
+        await _fixture.WriteRawAsync(
+            _tenantId,
+            (int)ChannelType.WebChat,
+            Json(new Dictionary<string, string> { [ChannelCredentialSchemas.DefaultQueueIdKey] = protector.Protect(queueId) }));
+
+        var loaded = await _sut.GetAsync(new TenantId(_tenantId), ChannelType.WebChat, CancellationToken.None);
+
+        loaded!.Credentials[ChannelCredentialSchemas.DefaultQueueIdKey].Should().Be(queueId);
+    }
+
+    [Fact]
     public async Task GetAsync_ShouldReturnLegacyValueVerbatim_WhenNotYetWrapped()
     {
         var secrets = Secrets();

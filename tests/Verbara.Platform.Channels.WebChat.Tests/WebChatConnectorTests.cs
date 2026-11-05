@@ -36,7 +36,7 @@ public class WebChatConnectorTests
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         var manager = CreateManager();
         var sessionId = await manager.ConnectAsync(
-            new TenantId("tenant-1"),
+            new TenantId("tenant-1"), EntityId.From("contact-1"),
             EntityId.From("conv-1"),
             new ChannelAddress(ChannelType.WebChat, VisitorAddress),
             clock);
@@ -60,7 +60,7 @@ public class WebChatConnectorTests
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         var manager = CreateManager();
         var sessionId = await manager.ConnectAsync(
-            new TenantId("tenant-1"),
+            new TenantId("tenant-1"), EntityId.From("contact-1"),
             EntityId.From("conv-1"),
             new ChannelAddress(ChannelType.WebChat, VisitorAddress),
             clock);
@@ -101,7 +101,7 @@ public class WebChatConnectorTests
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         var manager = CreateManager();
         var sessionId = await manager.ConnectAsync(
-            new TenantId("tenant-1"),
+            new TenantId("tenant-1"), EntityId.From("contact-1"),
             EntityId.From("conv-1"),
             new ChannelAddress(ChannelType.WebChat, VisitorAddress),
             clock);
@@ -124,7 +124,7 @@ public class WebChatConnectorTests
         clock.UtcNow.Returns(start);
         var manager = CreateManager(new WebChatOptions { SessionTimeout = TimeSpan.FromMinutes(30) });
         await manager.ConnectAsync(
-            new TenantId("tenant-1"),
+            new TenantId("tenant-1"), EntityId.From("contact-1"),
             EntityId.From("conv-1"),
             new ChannelAddress(ChannelType.WebChat, VisitorAddress),
             clock);
@@ -239,7 +239,7 @@ public class WebChatConnectorTests
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(DateTimeOffset.UtcNow);
         return manager.ConnectAsync(
-            new TenantId("tenant-1"),
+            new TenantId("tenant-1"), EntityId.From("contact-1"),
             EntityId.From("conv-1"),
             new ChannelAddress(ChannelType.WebChat, VisitorAddress),
             clock);

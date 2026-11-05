@@ -348,6 +348,12 @@ public sealed class CollectReasonNodeHandlerTests
             TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) =>
             Task.FromResult<Conversation?>(null);
 
+        public Task<int> CountOpenByContactAsync(TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) =>
+            Task.FromResult(0);
+
+        public Task<Conversation?> FindOpenBySessionAddressAsync(TenantId tenantId, EntityId contactId, ChannelAddress sessionAddress, CancellationToken ct) =>
+            Task.FromResult<Conversation?>(null);
+
         public Task<DateTimeOffset?> FindLastInboundAtAsync(
             TenantId tenantId, EntityId contactId, ChannelType channel, CancellationToken ct) =>
             Task.FromResult<DateTimeOffset?>(null);

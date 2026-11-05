@@ -30,7 +30,7 @@ public sealed class WebChatSessionManager
         _options = options.Value;
     }
 
-    public async Task<string> ConnectAsync(TenantId tenantId, EntityId conversationId, ChannelAddress customerAddress, IClock clock)
+    public async Task<string> ConnectAsync(TenantId tenantId, EntityId contactId, EntityId conversationId, ChannelAddress customerAddress, IClock clock)
     {
         ArgumentNullException.ThrowIfNull(clock);
         var sessionId = Guid.NewGuid().ToString("N");
@@ -39,6 +39,7 @@ public sealed class WebChatSessionManager
         var session = new WebChatSession
         {
             SessionId = sessionId,
+            ContactId = contactId,
             ConversationId = conversationId,
             TenantId = tenantId,
             CustomerAddress = customerAddress,

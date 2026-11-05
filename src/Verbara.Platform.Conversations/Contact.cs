@@ -4,6 +4,12 @@ namespace Verbara.Platform.Conversations;
 
 public sealed class Contact : ITenantScoped, IAuditable
 {
+    /// <summary>The custom field holding the e-mail a WebChat visitor gave. It is never an Email channel address.</summary>
+    public const string WebChatEmailField = "webchatEmail";
+
+    /// <summary>How many WebChat session addresses a contact keeps: the newest ones.</summary>
+    public const int MaxWebChatSessionAddresses = 50;
+
     public required EntityId ContactId { get; init; }
     public required TenantId TenantId { get; init; }
     public string? FirstName { get; set; }
@@ -41,10 +47,11 @@ public sealed class Contact : ITenantScoped, IAuditable
     /// <summary>
     /// The address a message to this contact on <paramref name="channel"/> is sent to. A WhatsApp
     /// business-scoped user id is an identity, not a destination (the Cloud API cannot send to it yet), so it is
-    /// never returned: a contact known only by one has no WhatsApp address to send to.
+    /// never returned: a contact known only by one has no WhatsApp address to send to. A WebChat identity key is
+    /// skipped for the same reason.
     /// </summary>
     public ChannelAddress? FindAddress(ChannelType channel) =>
-        _addresses.Find(a => a.Channel == channel && !a.IsWhatsAppBusinessScopedUserId());
+        _addresses.Find(a => a.Channel == channel && !a.IsWhatsAppBusinessScopedUserId() && !a.IsWebChatIdentityKey());
 
     public void SetCustomField(string key, string value) =>
         _customFields[key] = value;
@@ -63,4 +70,27 @@ public sealed class Contact : ITenantScoped, IAuditable
             (null, not null) => LastName,
             _ => null,
         };
+
+    /// <summary>
+    /// The contact's WebChat identity level, computed from its addresses, so it cannot drift from the keys that
+    /// produce it. <see langword="null"/> for a contact with no WebChat address.
+    /// </summary>
+    public ContactIdentityLevel? IdentityLevel
+    {
+        get
+        {
+            ContactIdentityLevel? level = null;
+            foreach (var address in _addresses)
+            {
+                if (address.IsWebChatExternalKey())
+                    return ContactIdentityLevel.Verified;
+                if (address.IsWebChatVisitorKey())
+                    level = ContactIdentityLevel.Unverified;
+                else if (address.Channel == ChannelType.WebChat)
+                    level ??= ContactIdentityLevel.Anonymous;
+            }
+
+            return level;
+        }
+    }
 }

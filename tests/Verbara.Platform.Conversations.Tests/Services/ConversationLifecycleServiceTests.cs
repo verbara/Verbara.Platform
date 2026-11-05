@@ -21,6 +21,25 @@ public class ConversationLifecycleServiceTests
     }
 
     [Fact]
+    public async Task CreateForWebChatSessionAsync_ShouldRecordTheAddressInTheOneInsert_WhenCreated()
+    {
+        const string address = "webchat-7c9e6679f2a54d0b8e1a3b5c7d9f1e2a";
+        string? recordedWhenSaved = null;
+        await _conversationStore.SaveAsync(
+            Arg.Do<Conversation>(c => recordedWhenSaved = c.Metadata.GetValueOrDefault("_webchatSessionAddress")),
+            Arg.Any<CancellationToken>());
+
+        var result = await _sut.CreateForWebChatSessionAsync(
+            Tenant, ContactId, new ChannelAddress(ChannelType.WebChat, address), CancellationToken.None);
+
+        recordedWhenSaved.Should().Be(address);
+        await _conversationStore.Received(1).SaveAsync(result, Arg.Any<CancellationToken>());
+        result.State.Should().Be(ConversationState.Queued);
+        result.Channel.Should().Be(ChannelType.WebChat);
+        result.ContactId.Should().Be(ContactId);
+    }
+
+    [Fact]
     public async Task CreateAsync_ShouldCreateConversation_WithQueuedState()
     {
         var result = await _sut.CreateAsync(Tenant, ContactId, ChannelType.WhatsApp, CancellationToken.None);

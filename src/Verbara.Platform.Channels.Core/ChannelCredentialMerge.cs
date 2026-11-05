@@ -1,3 +1,4 @@
+using System.Globalization;
 using Verbara.Platform.Core;
 
 namespace Verbara.Platform.Channels.Core;
@@ -31,6 +32,103 @@ public static class ChannelCredentialMerge
             .Select(kv => kv.Key)
             .Order(StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>The shortest WebChat identity token secret an administrator can set.</summary>
+    public const int MinIdentityTokenSecretLength = 32;
+
+    /// <summary>The longest WebChat identity token secret an administrator can set.</summary>
+    public const int MaxIdentityTokenSecretLength = 512;
+
+    /// <summary>
+    /// The keys of <paramref name="requested"/> only the server may write, in ordinal order: a value for the previous
+    /// WebChat secret (a <see langword="null"/> is the revoke, and a blank keeps what is stored, as for every key), and
+    /// the rotation stamp whenever it is named at all, because only a rotation sets it and only a revoke clears it.
+    /// </summary>
+    public static IReadOnlyList<string> ServerManagedKeys(ChannelType channel, IReadOnlyDictionary<string, string?>? requested)
+    {
+        if (requested is null || channel != ChannelType.WebChat)
+            return [];
+
+        var keys = new List<string>();
+        if (requested.TryGetValue(ChannelCredentialSchemas.IdentityTokenSecretPreviousKey, out var previous)
+            && !string.IsNullOrWhiteSpace(previous))
+        {
+            keys.Add(ChannelCredentialSchemas.IdentityTokenSecretPreviousKey);
+        }
+
+        if (requested.ContainsKey(ChannelCredentialSchemas.IdentityTokenSecretReplacedAtKey))
+            keys.Add(ChannelCredentialSchemas.IdentityTokenSecretReplacedAtKey);
+
+        return keys;
+    }
+
+    /// <summary>The WebChat secret of <paramref name="requested"/> when its value is outside the allowed length.</summary>
+    public static IReadOnlyList<string> WeakSecretKeys(ChannelType channel, IReadOnlyDictionary<string, string?>? requested)
+    {
+        if (requested is null
+            || channel != ChannelType.WebChat
+            || !requested.TryGetValue(ChannelCredentialSchemas.IdentityTokenSecretKey, out var secret)
+            || string.IsNullOrWhiteSpace(secret))
+        {
+            return [];
+        }
+
+        return secret.Length is < MinIdentityTokenSecretLength or > MaxIdentityTokenSecretLength
+            ? [ChannelCredentialSchemas.IdentityTokenSecretKey]
+            : [];
+    }
+
+    /// <summary>
+    /// Applies <paramref name="requested"/> to <paramref name="stored"/> for <paramref name="channel"/>. On WebChat,
+    /// replacing the identity token secret also keeps the old one as the previous secret, stamped with
+    /// <paramref name="now"/>, so a site has a grace to deploy the new one. Removing the current or the previous secret
+    /// ends that grace: a previous secret never outlives its stamp or verifies on its own, so a request that replaces
+    /// the secret and removes the previous one keeps no grace at all.
+    /// </summary>
+    public static Result Apply(
+        ChannelType channel,
+        IReadOnlyDictionary<string, string>? stored,
+        IReadOnlyDictionary<string, string?>? requested,
+        DateTimeOffset now)
+    {
+        var plain = Apply(stored, requested);
+        if (channel != ChannelType.WebChat || requested is null)
+            return plain;
+
+        const string Current = ChannelCredentialSchemas.IdentityTokenSecretKey;
+        const string Previous = ChannelCredentialSchemas.IdentityTokenSecretPreviousKey;
+        const string ReplacedAt = ChannelCredentialSchemas.IdentityTokenSecretReplacedAtKey;
+
+        var merged = new Dictionary<string, string>(plain.Credentials, StringComparer.Ordinal);
+        var removed = (requested.TryGetValue(Current, out var current) && current is null)
+                      || (requested.TryGetValue(Previous, out var previous) && previous is null);
+        if (removed)
+        {
+            merged.Remove(Previous);
+            merged.Remove(ReplacedAt);
+        }
+        else if (stored is not null
+                 && stored.TryGetValue(Current, out var replaced)
+                 && !string.IsNullOrWhiteSpace(replaced)
+                 && !string.IsNullOrWhiteSpace(current)
+                 && !string.Equals(replaced, current, StringComparison.Ordinal))
+        {
+            merged[Previous] = replaced;
+            merged[ReplacedAt] = now.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fffzzz", CultureInfo.InvariantCulture);
+        }
+
+        var changed = new SortedSet<string>(plain.ChangedKeys, StringComparer.Ordinal);
+        foreach (var key in new[] { Previous, ReplacedAt })
+        {
+            string? before = null;
+            stored?.TryGetValue(key, out before);
+            merged.TryGetValue(key, out var after);
+            if (!string.Equals(before, after, StringComparison.Ordinal))
+                changed.Add(key);
+        }
+
+        return new Result(merged, changed.ToList());
     }
 
     /// <summary>Applies <paramref name="requested"/> to <paramref name="stored"/> (either may be null).</summary>

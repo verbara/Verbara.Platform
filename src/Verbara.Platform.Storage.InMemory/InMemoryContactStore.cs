@@ -8,9 +8,8 @@ internal sealed class InMemoryContactStore : IContactStore
 {
     private readonly ConcurrentDictionary<(TenantId, EntityId), Contact> _items = new();
 
-    // Serialises every write (SaveAsync, AddIdentityAsync, DeleteAsync), so AddIdentityAsync's lookup and its change
-    // are one step: a delete or a replacing save lands wholly before or wholly after it, never in between. Reads stay
-    // lock-free.
+    // Serialises every write, so a write's lookup and its change are one step: a delete or a replacing save lands wholly
+    // before or wholly after it, never in between. Reads stay lock-free.
     private readonly Lock _writeGate = new();
 
     public Task<Contact?> GetByIdAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
@@ -35,7 +34,8 @@ internal sealed class InMemoryContactStore : IContactStore
             .Where(c => searchTerm == null ||
                 (c.FirstName != null && c.FirstName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) ||
                 (c.LastName != null && c.LastName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) ||
-                (c.Company != null && c.Company.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)))
+                (c.Company != null && c.Company.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) ||
+                (c.CustomFields.TryGetValue(Contact.WebChatEmailField, out var email) && email.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
         var totalCount = filtered.Count;
@@ -77,10 +77,105 @@ internal sealed class InMemoryContactStore : IContactStore
         }
     }
 
+    public Task<Contact> FindOrInsertByAddressAsync(TenantId tenantId, ChannelAddress key, Contact newContact, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(newContact);
+        lock (_writeGate)
+        {
+            var held = _items.Values.FirstOrDefault(c => c.TenantId == tenantId && c.Addresses.Contains(key));
+            if (held is not null)
+                return Task.FromResult(held);
+
+            _items[(tenantId, newContact.ContactId)] = newContact;
+            return Task.FromResult(newContact);
+        }
+    }
+
+    public Task<Contact?> AttachWebChatSessionAsync(
+        TenantId tenantId,
+        EntityId contactId,
+        ChannelAddress sessionAddress,
+        string? firstNameIfUnnamed,
+        DateTimeOffset updatedAt,
+        string updatedBy,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sessionAddress);
+        lock (_writeGate)
+        {
+            if (!_items.TryGetValue((tenantId, contactId), out var stored))
+                return Task.FromResult<Contact?>(null);
+
+            // A new row, as on Postgres: whoever read the contact holds a snapshot, enumerated outside this lock.
+            var contact = Copy(stored);
+            contact.AddAddress(sessionAddress);
+            var sessions = contact.Addresses.Where(a => a.IsWebChatSessionAddress()).ToList();
+            foreach (var oldest in sessions.Take(sessions.Count - Contact.MaxWebChatSessionAddresses))
+                contact.RemoveAddress(oldest);
+            if (contact.FirstName is null && contact.LastName is null)
+                contact.FirstName = firstNameIfUnnamed;
+            contact.UpdatedAt = updatedAt;
+            contact.UpdatedBy = updatedBy;
+            _items[(tenantId, contactId)] = contact;
+            return Task.FromResult<Contact?>(contact);
+        }
+    }
+
+    public Task<Contact?> SetCustomFieldIfAbsentAsync(
+        TenantId tenantId,
+        EntityId contactId,
+        string key,
+        string value,
+        DateTimeOffset updatedAt,
+        string updatedBy,
+        CancellationToken ct)
+    {
+        lock (_writeGate)
+        {
+            if (!_items.TryGetValue((tenantId, contactId), out var stored) || stored.CustomFields.ContainsKey(key))
+                return Task.FromResult<Contact?>(null);
+
+            var contact = Copy(stored);
+            contact.SetCustomField(key, value);
+            contact.UpdatedAt = updatedAt;
+            contact.UpdatedBy = updatedBy;
+            _items[(tenantId, contactId)] = contact;
+            return Task.FromResult<Contact?>(contact);
+        }
+    }
+
     public Task DeleteAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
         lock (_writeGate)
             _items.TryRemove((tenantId, contactId), out _);
         return Task.CompletedTask;
+    }
+
+    private static Contact Copy(Contact source)
+    {
+        var copy = new Contact
+        {
+            ContactId = source.ContactId,
+            TenantId = source.TenantId,
+            FirstName = source.FirstName,
+            LastName = source.LastName,
+            Company = source.Company,
+            Segment = source.Segment,
+            PreferredChannel = source.PreferredChannel,
+            PreferredLanguage = source.PreferredLanguage,
+            Timezone = source.Timezone,
+            DoNotContact = source.DoNotContact,
+            CreatedAt = source.CreatedAt,
+            UpdatedAt = source.UpdatedAt,
+            CreatedBy = source.CreatedBy,
+            UpdatedBy = source.UpdatedBy,
+        };
+        foreach (var address in source.Addresses)
+            copy.AddAddress(address);
+        foreach (var field in source.CustomFields)
+            copy.SetCustomField(field.Key, field.Value);
+        foreach (var consent in source.ChannelConsent)
+            copy.SetConsent(consent.Key, consent.Value);
+        return copy;
     }
 }

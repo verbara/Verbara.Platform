@@ -84,6 +84,10 @@ services:
       # links and the OIDC redirect_uri are built from it, never from a request's Host.
       # Left empty, the API uses CORS_ORIGINS above, which names exactly one origin.
       Platform__PublicBaseUrl: ${PUBLIC_BASE_URL:-}
+      # A returning WebChat visitor finds its contact by the widget's id. Off by default on any other host: turn it on
+      # only after the console that marks an unverified contact is deployed (CHANGELOG, Upgrading). On here because the
+      # Web E2E specs run against this stack.
+      WebChat__VisitorIdentity__Level1Enabled: "true"
       # The gateway (and any proxy in front of it) puts the visitor's address in X-Forwarded-For;
       # the API believes it only from these networks. Without it every visitor shares the gateway's
       # address, and the per-visitor limits (WebChat) become one shared bucket.

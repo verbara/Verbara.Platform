@@ -42,6 +42,9 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
 
     private static readonly string s_hashedKey = HashKey(TestApiKey);
 
+    /// <summary>The tenant the test API key and its user belong to; set before the host is built.</summary>
+    internal string ApiKeyTenantId { get; init; } = TestTenantId;
+
     /// <summary>When set before the host is built, every log record of the host is kept in <see cref="CapturedLogs"/>.</summary>
     internal bool CaptureLogs { get; init; }
 
@@ -57,7 +60,7 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
         builder.ConfigureServices(services =>
         {
             // ── Auth (API key + admin user) ──────────────────────────────────
-            SetupTestAuth(services, s_hashedKey, TestTenantId, TestUserId);
+            SetupTestAuth(services, s_hashedKey, ApiKeyTenantId, TestUserId);
 
             // ── Asterisk SDK stubs (no real AMI/ARI connections in tests) ────
             StubVerbaraHostedServices(services);

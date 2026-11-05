@@ -50,6 +50,89 @@ public abstract class ConversationInactivityStoreContract
     private static async Task<Conversation> LoadAsync(IConversationStore store, Conversation conversation) =>
         (await store.GetByIdAsync(Tenant, conversation.ConversationId, CancellationToken.None))!;
 
+    // ── FindOpenBySessionAddressAsync (webchat-visitor-identity-two-levels, design D9) ─────────────
+
+    [Fact]
+    public async Task FindOpenBySessionAddressAsync_ShouldReturnTheNewestOpenRowOfThatContactAndSession_WhenOthersExist()
+    {
+        var store = await NewStoreAsync();
+        var contactId = EntityId.From($"contact-{Guid.NewGuid():N}");
+        const string Session = "webchat-11111111111111111111111111111111";
+        var address = new ChannelAddress(ChannelType.WebChat, Session);
+
+        async Task<Conversation> SeedOfAsync(
+            ConversationState state, DateTimeOffset createdAt, string? recorded = Session, EntityId? contact = null, ChannelType channel = ChannelType.WebChat)
+        {
+            var conversation = new Conversation
+            {
+                ConversationId = EntityId.From($"c-{Guid.NewGuid():N}"),
+                TenantId = Tenant,
+                ContactId = contact ?? contactId,
+                Channel = channel,
+                State = state,
+                Owner = ConversationOwner.ForAgent(AgentA),
+                CreatedAt = createdAt,
+                LastMessageAt = createdAt,
+            };
+            if (recorded is not null)
+                conversation.SetMetadata(WebChatConversationMetadata.SessionAddressKey, recorded);
+            await store.SaveAsync(conversation, CancellationToken.None);
+            return conversation;
+        }
+
+        (await store.FindOpenBySessionAddressAsync(Tenant, contactId, address, CancellationToken.None)).Should().BeNull();
+
+        await SeedOfAsync(ConversationState.Active, Now.AddHours(-3));
+        var newest = await SeedOfAsync(ConversationState.Resolved, Now.AddHours(-2));
+        await SeedOfAsync(ConversationState.Closed, Now.AddHours(-1));
+        await SeedOfAsync(ConversationState.Abandoned, Now.AddHours(-1));
+        await SeedOfAsync(ConversationState.Active, Now, recorded: "webchat-22222222222222222222222222222222");
+        await SeedOfAsync(ConversationState.Active, Now, recorded: null);
+        await SeedOfAsync(ConversationState.Active, Now, contact: EntityId.From($"contact-{Guid.NewGuid():N}"));
+        await SeedOfAsync(ConversationState.Active, Now, channel: ChannelType.WhatsApp);
+
+        var found = await store.FindOpenBySessionAddressAsync(Tenant, contactId, address, CancellationToken.None);
+
+        found.Should().NotBeNull();
+        found!.ConversationId.Should().Be(newest.ConversationId);
+        (await store.FindOpenBySessionAddressAsync(new TenantId("t-other"), contactId, address, CancellationToken.None)).Should().BeNull();
+    }
+
+    // ── CountOpenByContactAsync (webchat-visitor-identity-two-levels, design D17) ─────────────
+
+    [Fact]
+    public async Task CountOpenByContactAsync_ShouldCountOnlyThatContactsNonTerminalRowsOnTheChannel_WhenOthersExist()
+    {
+        var store = await NewStoreAsync();
+        var contactId = EntityId.From($"contact-{Guid.NewGuid():N}");
+
+        async Task SeedOfContactAsync(ConversationState state, ChannelType channel = ChannelType.WebChat) =>
+            await store.SaveAsync(
+                new Conversation
+                {
+                    ConversationId = EntityId.From($"c-{Guid.NewGuid():N}"),
+                    TenantId = Tenant,
+                    ContactId = contactId,
+                    Channel = channel,
+                    State = state,
+                    Owner = ConversationOwner.ForAgent(AgentA),
+                    CreatedAt = Now,
+                    LastMessageAt = Now,
+                },
+                CancellationToken.None);
+
+        await SeedOfContactAsync(ConversationState.Queued);
+        await SeedOfContactAsync(ConversationState.Active);
+        await SeedOfContactAsync(ConversationState.Resolved);
+        await SeedOfContactAsync(ConversationState.Closed);
+        await SeedOfContactAsync(ConversationState.Abandoned);
+        await SeedOfContactAsync(ConversationState.Active, ChannelType.WhatsApp);
+        await SeedAsync(store, ConversationState.Active, Now, ChannelType.WebChat);
+
+        (await store.CountOpenByContactAsync(Tenant, contactId, ChannelType.WebChat, CancellationToken.None)).Should().Be(3);
+        (await store.CountOpenByContactAsync(Tenant, EntityId.New(), ChannelType.WebChat, CancellationToken.None)).Should().Be(0);
+    }
+
     // ── ListInactiveAsync ──────────────────────────────────────────────────────
 
     [Fact]

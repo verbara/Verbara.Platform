@@ -77,6 +77,117 @@ public sealed class DefaultConversationServiceTests : IDisposable
     private static ChannelAddress WhatsAppAddress() =>
         new(ChannelType.WhatsApp, "+1234567890");
 
+    // ─── The WebChat reply destination (design D9) ───
+
+    private const string SessionAddressKey = "_webchatSessionAddress";
+    private const string EarlierSession = "webchat-11111111111111111111111111111111";
+    private const string LiveSession = "webchat-22222222222222222222222222222222";
+
+    private Conversation BuildWebChatConversation(string? recordedAddress)
+    {
+        var conversation = new Conversation
+        {
+            ConversationId = _conversationId,
+            TenantId = _tenantId,
+            ContactId = _contactId,
+            Channel = ChannelType.WebChat,
+            State = ConversationState.Active,
+            Owner = ConversationOwner.ForAgent(_agentId),
+            CreatedAt = _now,
+        };
+        if (recordedAddress is not null)
+            conversation.SetMetadata(SessionAddressKey, recordedAddress);
+        return conversation;
+    }
+
+    private Contact BuildWebChatContact(params string[] addresses)
+    {
+        var contact = BuildContact();
+        foreach (var address in addresses)
+            contact.AddAddress(new ChannelAddress(ChannelType.WebChat, address));
+        return contact;
+    }
+
+    private async Task<string> SendAndReadDestinationAsync(Conversation conversation, Contact contact)
+    {
+        _conversationStore.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>()).Returns(conversation);
+        _contactStore.GetByIdAsync(_tenantId, _contactId, Arg.Any<CancellationToken>()).Returns(contact);
+
+        await CreateSut().SendMessageAsync(
+            _conversationId, _tenantId, _envelope, _agentId, ConversationOwnerKind.Agent, CancellationToken.None);
+
+        var call = _connector.ReceivedCalls().Single(c => c.GetMethodInfo().Name == nameof(IChannelConnector.SendAsync));
+        return ((OutboundMessage)call.GetArguments()[0]!).To.Address;
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldSendToRecordedSessionAddress_WhenContactHoldsAnEarlierOne()
+    {
+        var destination = await SendAndReadDestinationAsync(
+            BuildWebChatConversation(LiveSession), BuildWebChatContact(EarlierSession, LiveSession));
+
+        destination.Should().Be(LiveSession);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldSendToRecordedSessionAddress_WhenContactNoLongerHoldsIt()
+    {
+        // A contact keeps a bounded number of session addresses (design D17), and a live session whose address was
+        // dropped still gets its replies.
+        var destination = await SendAndReadDestinationAsync(
+            BuildWebChatConversation(EarlierSession), BuildWebChatContact(LiveSession));
+
+        destination.Should().Be(EarlierSession);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldSendToContactAddress_WhenConversationRecordsNone()
+    {
+        var destination = await SendAndReadDestinationAsync(
+            BuildWebChatConversation(null), BuildWebChatContact(EarlierSession));
+
+        destination.Should().Be(EarlierSession);
+    }
+
+    [Theory]
+    [InlineData("webchat-visitor:rcfqwP4uUDSA6hgRqgUIE3hCFFsXvDuxhE3MgUu0Y1M")]
+    [InlineData("webchat-external:cust-48151623")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task SendMessageAsync_ShouldSendToContactAddress_WhenRecordedValueIsNoSessionAddress(string recorded)
+    {
+        var destination = await SendAndReadDestinationAsync(
+            BuildWebChatConversation(recorded), BuildWebChatContact(LiveSession));
+
+        destination.Should().Be(LiveSession);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldIgnoreRecordedSessionAddress_WhenChannelIsNotWebChat()
+    {
+        var conversation = BuildConversation(owner: ConversationOwner.ForAgent(_agentId));
+        conversation.SetMetadata(SessionAddressKey, LiveSession);
+
+        var destination = await SendAndReadDestinationAsync(conversation, BuildContact(WhatsAppAddress()));
+
+        destination.Should().Be(WhatsAppAddress().Address);
+    }
+
+    [Fact]
+    public async Task SendMessageAsync_ShouldMarkFailedAndNotSend_WhenContactOfTheConversationIsGone()
+    {
+        // A reply in a conversation whose contact was deleted behaves as it did before the address was recorded (design D9).
+        _conversationStore.GetByIdAsync(_tenantId, _conversationId, Arg.Any<CancellationToken>())
+            .Returns(BuildWebChatConversation(LiveSession));
+        _contactStore.GetByIdAsync(_tenantId, _contactId, Arg.Any<CancellationToken>()).Returns(default(Contact));
+
+        var message = await CreateSut().SendMessageAsync(
+            _conversationId, _tenantId, _envelope, _agentId, ConversationOwnerKind.Agent, CancellationToken.None);
+
+        message.DeliveryStatus.Should().Be(MessageDeliveryStatus.Failed);
+        await _connector.DidNotReceiveWithAnyArgs().SendAsync(default!, default);
+    }
+
     // ─── contact-history-opens-by-assignment task 2.8 (design D17): the published message's audience ───
 
     [Fact]
