@@ -58,6 +58,28 @@ public sealed class VoiceEndpointsTrunkNotDialableTests : IClassFixture<VoiceEnd
         await AssertBodyAsync(response, "dialAccepted");
     }
 
+    /// <summary>
+    /// contacts-writes-follow-their-permissions (design D10): a dial the service refuses because the contact is marked
+    /// do-not-contact, or recorded no to calls, answers 409 and exactly the body of
+    /// <c>do-not-contact-refusals.v1.json</c>; the outcome's code is read from that fixture.
+    /// </summary>
+    [Theory]
+    [InlineData("dial")]
+    [InlineData("dialConsentWithdrawn")]
+    public async Task Dial_ShouldAnswer409WithTheFixtureBody_WhenTheServiceRefusesForTheContact(string key)
+    {
+        var entry = Contacts.ContactWritesApiFactory.Fixture("do-not-contact-refusals.v1.json")[key]!.AsObject();
+        var body = entry["body"]!.AsObject();
+        _factory.Dial.Outcome = new VoiceDialOutcome(false, null, body["error"]!.GetValue<string>());
+        using var client = _factory.CreateSupervisorClient();
+
+        var response = await client.PostAsJsonAsync(
+            entry["request"]!["path"]!.GetValue<string>(), entry["request"]!["body"]!.AsObject());
+
+        ((int)response.StatusCode).Should().Be(entry["status"]!.GetValue<int>(), key);
+        SupervisorListenTestKit.AssertSame(body, JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject());
+    }
+
     [Fact]
     public async Task Dial_ShouldKeepItsOtherRefusalsAt400()
     {
