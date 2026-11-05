@@ -821,7 +821,8 @@
           "updatedAt",
           "createdBy",
           "updatedBy",
-          "fullName"
+          "fullName",
+          "identityLevel"
         ],
         "ContactConversationSummaryDto": [
           "id",
@@ -878,7 +879,9 @@
           "wsUrl",
           "visitorAddress",
           "contactId",
-          "conversationId"
+          "conversationId",
+          "identityLevel",
+          "identityTokenRefusal"
         ],
         "KeywordRuleDto": [
           "ruleId",
