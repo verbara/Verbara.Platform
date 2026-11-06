@@ -43,11 +43,17 @@ public sealed class ConversationSchemaOpenApiTests
         "/api/v{version}/conversations",
         "/api/v{version}/conversations/{id}",
         "/api/v{version}/conversations/{id}/messages",
+        "/api/v{version}/supervisor/conversations/{id}/messages",
+        "/api/v{version}/supervisor/conversations",
+        "/api/v{version}/supervisor/conversations/stuck",
+        "/api/v{version}/supervisor/sessions/active",
     };
 
     /// <summary>
     /// Task 2.2 (design D13, D14): every route the read rule governs declares its 403 <c>ErrorResponse</c>
-    /// (<c>not-readable</c>); the two by-id routes also declare their empty 404.
+    /// (<c>not-readable</c>); the by-id routes also declare their empty 404. Change
+    /// supervisor-conversation-reads-follow-the-read-rule (design D4) adds the four supervisor reads: the schema
+    /// checks read only <c>components.schemas</c>, so only this per-route theory notices a dropped response.
     /// </summary>
     [Theory]
     [MemberData(nameof(GovernedConversationRoutes))]

@@ -155,6 +155,36 @@ public class ConversationOwnershipApiFactory : ImpersonationApiFactory
         return client;
     }
 
+    /// <summary>
+    /// A client authenticated by a standard API key of the customer tenant bound to <paramref name="user"/>: the
+    /// key acts as its owner, carrying the owner's role and <c>user_id</c> claims as
+    /// <c>ApiKeyAuthenticationHandler</c> adds them, so the owner's permissions follow it.
+    /// </summary>
+    public HttpClient ApiKeyClientBoundTo(User user)
+    {
+        var rawKey = $"test-bound-key-{Guid.NewGuid():N}";
+        using (var scope = Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<IApiKeyStore>().SaveAsync(
+                new ApiKey
+                {
+                    KeyId = EntityId.From($"test-bound-key-id-{Guid.NewGuid():N}"),
+                    TenantId = Tenant,
+                    Name = "User-bound integration key",
+                    HashedKey = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(rawKey))),
+                    Scopes = ["*"],
+                    UserId = user.UserId,
+                    KeyType = ApiKeyType.Standard,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                },
+                CancellationToken.None).GetAwaiter().GetResult();
+        }
+
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", rawKey);
+        return client;
+    }
+
     // ─── Work ─────────────────────────────────────────────────────────────────
 
     /// <summary>A conversation of the customer tenant in <paramref name="state"/>, owned by <paramref name="owner"/>.</summary>
