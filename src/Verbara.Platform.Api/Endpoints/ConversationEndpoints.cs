@@ -236,7 +236,25 @@ internal static class ConversationEndpoints
         [FromServices] IContactStore contacts,
         int limit = 50,
         int offset = 0,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        await ReadTranscriptAsync(id, context, store, conversations, agents, contacts, limit, offset, ct);
+
+    /// <summary>
+    /// The one transcript read behind <c>GET /conversations/{id}/messages</c> and
+    /// <c>GET /supervisor/conversations/{id}/messages</c>, so the two routes cannot drift
+    /// (supervisor-conversation-reads-follow-the-read-rule, design D1): 404 for a conversation missing from the
+    /// tenant, then the read rule (403 <c>not-readable</c>), and only then the page, oldest first.
+    /// </summary>
+    internal static async Task<Results<Ok<IReadOnlyList<Message>>, NotFound, JsonHttpResult<ErrorResponse>>> ReadTranscriptAsync(
+        string id,
+        HttpContext context,
+        IMessageStore store,
+        IConversationStore conversations,
+        IAgentStore agents,
+        IContactStore contacts,
+        int limit,
+        int offset,
+        CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         var conversation = await conversations.GetByIdAsync(tenantId, EntityId.From(id), ct);

@@ -331,4 +331,49 @@ public sealed class SupervisorReadScopeTests : IClassFixture<ConversationOwnersh
 
         transcript.Should().ContainSingle();
     }
+
+    // ═══ Task 2.1: the two transcript routes run one read (design D1) ═════════
+
+    [Theory]
+    [InlineData("monitor-supervisor", HttpStatusCode.OK)]
+    [InlineData("owner-without-monitor", HttpStatusCode.OK)]
+    [InlineData("supervisor-holding-nothing", HttpStatusCode.Forbidden)]
+    public async Task SupervisorAndConversationTranscripts_ShouldAnswerTheSame_ForTheSameCallerAndConversation(
+        string caller, HttpStatusCode expected)
+    {
+        User user;
+        Conversation conversation;
+        switch (caller)
+        {
+            case "monitor-supervisor":
+                user = _factory.NewUser(UserRole.Supervisor, caller);
+                conversation = ConversationOfAgentA();
+                break;
+            case "owner-without-monitor":
+                (user, conversation) = SupervisorWithoutMonitorOwningWork(caller);
+                break;
+            default:
+                user = SupervisorWithoutMonitor(caller);
+                conversation = ConversationOfAgentA();
+                break;
+        }
+
+        var first = DateTimeOffset.UtcNow.AddMinutes(-5);
+        SeedMessage(conversation, "first", first);
+        SeedMessage(conversation, "second", first.AddMinutes(1));
+        using var client = _factory.ClientFor(user);
+
+        var supervisor = await client.GetAsync(SupervisorMessagesRoute(conversation));
+        var conversations = await client.GetAsync(
+            $"/api/v1/conversations/{conversation.ConversationId.Value}/messages?limit=50&offset=0");
+        var supervisorBody = await supervisor.Content.ReadAsStringAsync();
+        var conversationsBody = await conversations.Content.ReadAsStringAsync();
+
+        supervisor.StatusCode.Should().Be(expected, because: $"the supervisor route answered {supervisorBody}");
+        conversations.StatusCode.Should().Be(supervisor.StatusCode, because: $"the conversation route answered {conversationsBody}");
+        JsonNode.DeepEquals(JsonNode.Parse(supervisorBody), JsonNode.Parse(conversationsBody))
+            .Should().BeTrue(because: $"both routes answer the same body: {supervisorBody} vs {conversationsBody}");
+        if (expected == HttpStatusCode.Forbidden)
+            await ShouldBeNotReadableAsync(supervisor);
+    }
 }

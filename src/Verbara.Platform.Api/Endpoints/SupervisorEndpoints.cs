@@ -30,7 +30,9 @@ internal static class SupervisorEndpoints
 
         // Digital conversations
         group.MapGet("/conversations", ListDigitalConversations);
-        group.MapGet("/conversations/{id}/messages", GetConversationMessages);
+        group.MapGet("/conversations/{id}/messages", GetConversationMessages)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound);
         group.MapPost("/conversations/{id}/takeover", TakeoverConversation);
         group.MapPost("/conversations/{id}/close", ForceCloseConversation);
         group.MapPost("/conversations/{id}/note", SendCoachingNote);
@@ -162,19 +164,19 @@ internal static class SupervisorEndpoints
         return TypedResults.Ok(result);
     }
 
-    private static async Task<Ok<IReadOnlyList<Message>>> GetConversationMessages(
+    // design D1: the same transcript read as GET /conversations/{id}/messages — 404 for an id missing from the
+    // tenant, then the conversation read rule (403 not-readable), then the page, oldest first.
+    private static Task<Results<Ok<IReadOnlyList<Message>>, NotFound, JsonHttpResult<ErrorResponse>>> GetConversationMessages(
         string id,
         HttpContext context,
         [FromServices] IMessageStore messageStore,
+        [FromServices] IConversationStore conversations,
+        [FromServices] IAgentStore agents,
+        [FromServices] IContactStore contacts,
         [FromQuery] int limit = 50,
         [FromQuery] int offset = 0,
-        CancellationToken ct = default)
-    {
-        var tenantId = GetTenantId(context);
-        var messages = await messageStore.GetConversationMessagesAsync(
-            tenantId, EntityId.From(id), limit, offset, ct);
-        return TypedResults.Ok(messages);
-    }
+        CancellationToken ct = default) =>
+        ConversationEndpoints.ReadTranscriptAsync(id, context, messageStore, conversations, agents, contacts, limit, offset, ct);
 
     // The supervisor's own Agent profile becomes the owner, as for any owner: a supervisor without one
     // cannot own a conversation. The switchboard announces the assignment; the takeover is audited.
