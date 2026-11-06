@@ -136,6 +136,60 @@ public sealed class ContactWritePermissionTests : IClassFixture<ContactWritesApi
         Snapshot(_factory.LoadContact(contact.ContactId)).Should().Be(before);
     }
 
+    // ─── review round: the permission is decided before the body is read ─────
+
+    /// <summary>
+    /// Bodies the write cannot read: an unknown channel name in an enum member, a value of the wrong type, and malformed
+    /// JSON. Before the review round these never reached the handler's permission check.
+    /// </summary>
+    public static TheoryData<string, string> UnreadableBodies() => new()
+    {
+        { "POST", """{"firstName":"Ana","addresses":[{"channel":"Fax","address":"+15551234567"}]}""" },
+        { "POST", """{"preferredChannel":"Fax"}""" },
+        { "POST", """{"firstName":""" },
+        { "PUT", """{"preferredChannel":"Fax"}""" },
+        { "PUT", """{"doNotContact":"yes"}""" },
+        { "PUT", """{"channelConsent":{"Voice":"yes"}}""" },
+        { "PUT", """{"doNotContact":""" },
+    };
+
+    [Theory]
+    [MemberData(nameof(UnreadableBodies))]
+    public async Task ContactWrites_ShouldRefuseNotPermitted_WhenTheCallerLacksThePermissionAndTheBodyCannotBeRead(string method, string json)
+    {
+        var expected = method == "POST" ? Refusal(0) : Refusal(1);
+        var contact = SeedNamedContact();
+        var before = Snapshot(_factory.LoadContact(contact.ContactId));
+        using var agent = AgentTemplateClient();
+        var path = method == "POST" ? "/api/v1/contacts" : $"/api/v1/contacts/{contact.ContactId.Value}";
+
+        var response = await agent.SendAsync(new HttpRequestMessage(new HttpMethod(method), path)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        });
+
+        await ShouldMatchAsync(response, expected);
+        Snapshot(_factory.LoadContact(contact.ContactId)).Should().Be(before);
+    }
+
+    [Theory]
+    [MemberData(nameof(UnreadableBodies))]
+    public async Task ContactWrites_ShouldAnswer400AndWriteNothing_WhenAPermittedCallersBodyCannotBeRead(string method, string json)
+    {
+        var contact = SeedNamedContact();
+        var before = Snapshot(_factory.LoadContact(contact.ContactId));
+        using var admin = _factory.ClientFor(_factory.NewUser(UserRole.Admin, "unreadable-admin"));
+        var path = method == "POST" ? "/api/v1/contacts" : $"/api/v1/contacts/{contact.ContactId.Value}";
+
+        var response = await admin.SendAsync(new HttpRequestMessage(new HttpMethod(method), path)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        });
+
+        ((int)response.StatusCode).Should().Be(400, await response.Content.ReadAsStringAsync());
+        Snapshot(_factory.LoadContact(contact.ContactId)).Should().Be(before);
+    }
+
     [Fact]
     public async Task UpdateContact_ShouldStoreChannelConsentAndReadItBack_WhenTheCallerMayEdit()
     {

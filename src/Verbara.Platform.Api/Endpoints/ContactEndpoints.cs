@@ -1,4 +1,6 @@
 using System.Collections.Frozen;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Api.Services;
@@ -7,8 +9,11 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Typification.Stores;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using HttpJsonOptions = Microsoft.AspNetCore.Http.Json.JsonOptions;
 
 namespace Verbara.Platform.Api.Endpoints;
 
@@ -19,8 +24,9 @@ internal static class ContactEndpoints
 
     /// <summary>
     /// 403: the caller's roles do not hold the permission of the contact write (<c>contacts:contact:create</c>,
-    /// <c>:edit</c>, <c>:delete</c>) or of the opt-out (<c>contacts:conversation:handle</c>). Evaluated first, so the
-    /// answer says nothing about the contact or the body. The code the supervisor listen routes already answer.
+    /// <c>:edit</c>, <c>:delete</c>) or of the opt-out (<c>contacts:conversation:handle</c>). Evaluated first, before the
+    /// body is even read, so the answer says nothing about the contact or the body. The code the supervisor listen routes
+    /// already answer.
     /// </summary>
     internal const string NotPermittedCode = SupervisorListenRefusal.NotPermitted;
 
@@ -60,7 +66,7 @@ internal static class ContactEndpoints
         "clears do-not-contact and never records `true` (that is `PUT /contacts/{id}`). Requires " +
         "`contacts:conversation:handle` (403 `not-permitted`, evaluated first). `channels` are channel names as `GET` " +
         "writes them, case-sensitive; any other value answers 400 `unknown-consent-channel` with the offending values in " +
-        "`details`, and nothing is written. A body that changes nothing answers 200 and writes nothing.";
+        "`details`, and nothing is written. A body that changes nothing, or no body at all, answers 200 and writes nothing.";
 
     public static void MapContactEndpoints(this IEndpointRouteBuilder app)
     {
@@ -73,17 +79,21 @@ internal static class ContactEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound);
         group.MapGet("/", SearchContacts);
-        // Each write checks its permission first, in the handler, so a refusal carries a code (design D1, D2).
+        // Each write checks its permission first, in the handler, so a refusal carries a code (design D1, D2). The body is
+        // read after that check (ReadBodyAsync), never bound before the handler runs, so `Accepts` declares it.
         group.MapPost("/", CreateContact)
+            .Accepts<CreateContactRequest>("application/json")
             .WithDescription(ReservedAddressDescription)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapPut("/{id}", UpdateContact)
+            .Accepts<UpdateContactRequest>("application/json")
             .WithDescription(ReservedAddressDescription + " " + ChannelConsentDescription)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapDelete("/{id}", DeleteContact)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         // Restrict-only, for whoever handles the contact (design D16); 400 and 404 are declared by the return type.
         group.MapPost("/{id}/opt-out", OptOutContact)
+            .Accepts<ContactOptOutRequest>(isOptional: true, "application/json")
             .WithDescription(OptOutDescription)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
     }
@@ -186,15 +196,18 @@ internal static class ContactEndpoints
         return TypedResults.Ok(result);
     }
 
-    private static async Task<Results<Created<Contact>, BadRequest<ErrorDetailResponse>, JsonHttpResult<ErrorResponse>>> CreateContact(
+    private static async Task<Results<Created<Contact>, BadRequest<ErrorDetailResponse>, JsonHttpResult<ErrorResponse>, StatusCodeHttpResult>> CreateContact(
         HttpContext context,
-        [FromBody] CreateContactRequest body,
         [FromServices] IContactStore store,
         IClock clock,
         CancellationToken ct)
     {
         if (!await IsPermittedAsync(context, CreatePermission))
             return NotPermitted();
+
+        var (body, unreadable) = await ReadBodyAsync<CreateContactRequest>(context, optional: false, ct);
+        if (body is null)
+            return unreadable!;
 
         var reserved = ReservedAddresses(body.Addresses);
         if (reserved.Count > 0)
@@ -231,10 +244,9 @@ internal static class ContactEndpoints
         return TypedResults.Created($"/contacts/{contact.ContactId}", contact);
     }
 
-    private static async Task<Results<Ok<Contact>, NotFound, BadRequest<ErrorDetailResponse>, JsonHttpResult<ErrorResponse>>> UpdateContact(
+    private static async Task<Results<Ok<Contact>, NotFound, BadRequest<ErrorDetailResponse>, JsonHttpResult<ErrorResponse>, StatusCodeHttpResult>> UpdateContact(
         string id,
         HttpContext context,
-        [FromBody] UpdateContactRequest body,
         [FromServices] IContactStore store,
         [FromServices] IContactAuditWriter writer,
         IClock clock,
@@ -242,6 +254,10 @@ internal static class ContactEndpoints
     {
         if (!await IsPermittedAsync(context, EditPermission))
             return NotPermitted();
+
+        var (body, unreadable) = await ReadBodyAsync<UpdateContactRequest>(context, optional: false, ct);
+        if (body is null)
+            return unreadable!;
 
         var reserved = ReservedAddresses(body.Addresses);
         if (reserved.Count > 0)
@@ -329,19 +345,23 @@ internal static class ContactEndpoints
     }
 
     /// <summary>
-    /// <c>POST /contacts/{id}/opt-out</c> (design D16): the permission first, then the channel names (as D8 checks
-    /// <c>channelConsent</c> keys), then the contact's existence, then <see cref="IContactOptOutService"/> with the
-    /// caller as the actor.
+    /// <c>POST /contacts/{id}/opt-out</c> (design D16): the permission first, then the body (none at all is a body that
+    /// changes nothing), then the channel names (as D8 checks <c>channelConsent</c> keys), then the contact's existence,
+    /// then <see cref="IContactOptOutService"/> with the caller as the actor.
     /// </summary>
-    private static async Task<Results<Ok<Contact>, NotFound, BadRequest<ErrorDetailResponse>, JsonHttpResult<ErrorResponse>>> OptOutContact(
+    private static async Task<Results<Ok<Contact>, NotFound, BadRequest<ErrorDetailResponse>, JsonHttpResult<ErrorResponse>, StatusCodeHttpResult>> OptOutContact(
         string id,
         HttpContext context,
-        [FromBody] ContactOptOutRequest body,
         [FromServices] IContactOptOutService optOut,
         CancellationToken ct)
     {
         if (!await IsPermittedAsync(context, OptOutPermission))
             return NotPermitted();
+
+        var (read, unreadable) = await ReadBodyAsync<ContactOptOutRequest>(context, optional: true, ct);
+        if (unreadable is not null)
+            return unreadable;
+        var body = read ?? new ContactOptOutRequest();
 
         var unknownChannels = UnknownChannelNames(body.Channels);
         if (unknownChannels.Count > 0)
@@ -361,6 +381,46 @@ internal static class ContactEndpoints
     {
         var authorization = context.RequestServices.GetRequiredService<IAuthorizationService>();
         return (await authorization.AuthorizeAsync(context.User, "Permission:" + permission)).Succeeded;
+    }
+
+    /// <summary>
+    /// The JSON body of a contact write, read only after its permission check (design D2), with the type information and
+    /// options the framework binds a <c>[FromBody]</c> parameter with (the HTTP JSON options, whose resolver chain starts
+    /// with <c>ApiJsonContext</c>), and refused as such a binding refuses it, with no body: 415 when a body is sent with
+    /// a content type that is not JSON; 400 when it is not valid JSON or does not fit the type (an unknown enum name, a
+    /// value of the wrong type), or when a required body is absent or <c>null</c>; the status of a request the server
+    /// cannot read (413 for a body over the size limit). An absent or <c>null</c> optional body is
+    /// <c>(null, null)</c>.
+    /// </summary>
+    private static async Task<(T? Body, StatusCodeHttpResult? Unreadable)> ReadBodyAsync<T>(
+        HttpContext context, bool optional, CancellationToken ct)
+        where T : class
+    {
+        var request = context.Request;
+        T? body = null;
+        if (context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true)
+        {
+            if (!request.HasJsonContentType())
+                return (null, TypedResults.StatusCode(StatusCodes.Status415UnsupportedMediaType));
+
+            var options = context.RequestServices.GetRequiredService<IOptions<HttpJsonOptions>>().Value.SerializerOptions;
+            try
+            {
+                body = await request.ReadFromJsonAsync((JsonTypeInfo<T>)options.GetTypeInfo(typeof(T)), ct);
+            }
+            catch (JsonException)
+            {
+                return (null, TypedResults.StatusCode(StatusCodes.Status400BadRequest));
+            }
+            catch (BadHttpRequestException ex)
+            {
+                return (null, TypedResults.StatusCode(ex.StatusCode));
+            }
+        }
+
+        return body is null && !optional
+            ? (null, TypedResults.StatusCode(StatusCodes.Status400BadRequest))
+            : (body, null);
     }
 
     /// <summary>403 <c>{"error": "not-permitted"}</c>.</summary>
