@@ -1,11 +1,13 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using Verbara.Platform.Api.Services;
 using Verbara.Sdk.Cluster.Postgres.DependencyInjection;
 using Verbara.Sdk.Pro.Cluster.DependencyInjection;
 using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Pro.EventStore;
+using Verbara.Sdk.Pro.EventStore.Postgres.DependencyInjection;
 
 namespace Verbara.Platform.Api.DependencyInjection;
 
@@ -107,19 +109,30 @@ public static class ClusterLeadershipExtensions
     /// The keyed leader is resolved at the delegate's first read, never at host start (a design-time boot never
     /// reads it), and a failed resolution is not cached: the event store treats a delegate that throws as not the
     /// writer, and the next read tries again. The delegate is the pre-check only; the fence is the authority (D13).
+    /// <para>The fence (design D13, <see cref="VoiceLeaseFence"/>) is registered here as well, over the same lease and
+    /// this replica's lease owner id (<see cref="ClusterLeadershipOptions.InstanceId"/>), with the renewal interval
+    /// (D13b) and the resource the event store names in its fault log; an ARI-only host registers no AMI owner lease
+    /// and so no fence. The startup probe (<see cref="EventStoreLeaseColocation"/>, D13a) proves the event store's
+    /// database holds that lease.</para>
     /// <para>The same lease's acquisition makes a former standby the writer of calls it holds without a tenant, so the
     /// event store's tenant resolver by LinkedId (<see cref="VoiceCallTenantResolver"/>, design D5) is registered here
     /// too; Pro resolves it at the acquisition pass's first need of it, never at host start.</para>
     /// </summary>
     private static void AddVoiceLeaderAsEventStoreWriter(this IServiceCollection services)
     {
-        services.AddOptions<EventStoreOptions>().Configure<IServiceProvider>((options, provider) =>
-        {
-            var voiceLeader = new Lazy<IClusterLeader>(
-                () => provider.GetRequiredKeyedService<IClusterLeader>(VoiceLeaderResources.AmiOwner),
-                LazyThreadSafetyMode.PublicationOnly);
-            options.IsWriter = () => voiceLeader.Value.IsLeader;
-        });
+        services.AddOptions<EventStoreOptions>().Configure<IServiceProvider, IOptions<ClusterLeadershipOptions>>(
+            (options, provider, leadership) =>
+            {
+                var voiceLeader = new Lazy<IClusterLeader>(
+                    () => provider.GetRequiredKeyedService<IClusterLeader>(VoiceLeaderResources.AmiOwner),
+                    LazyThreadSafetyMode.PublicationOnly);
+                options.IsWriter = () => voiceLeader.Value.IsLeader;
+                options.FenceRenewalInterval = leadership.Value.RenewalInterval;   // D13b
+                options.FenceResource = VoiceLeaderResources.AmiOwner;
+            });
+        services.UseEventStoreFence(provider => VoiceLeaseFence.Create(
+            VoiceLeaderResources.AmiOwner,
+            provider.GetRequiredService<IOptions<ClusterLeadershipOptions>>().Value.InstanceId));
         services.TryAddSingleton<ICallTenantResolver, VoiceCallTenantResolver>();
     }
 

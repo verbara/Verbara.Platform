@@ -86,6 +86,8 @@ public sealed class EventStoreReplicaFactory : WebApplicationFactory<Program>
             return;
         }
 
+        // The fence (D13) checks the lease row against this replica's lease owner id, its leader election's InstanceId.
+        builder.UseSetting("Cluster:Leadership:InstanceId", VoiceLeader.InstanceId);
         builder.UseSetting("Asterisk:Ami:Hostname", AmiHostname);
         builder.UseSetting("Asterisk:Ami:Port", "5038");
         builder.UseSetting("Asterisk:Ami:Username", "eventstore-replica");
@@ -193,6 +195,9 @@ public sealed class EventStoreReplicaFactory : WebApplicationFactory<Program>
 public sealed class FakeVoiceLeader(string instanceId, bool isLeader) : IClusterLeader
 {
     private volatile bool _isLeader = isLeader;
+
+    /// <summary>This replica's lease owner id: the <c>Cluster:Leadership:InstanceId</c> its host is configured with.</summary>
+    public string InstanceId => instanceId;
 
     /// <inheritdoc />
     public string Resource => VoiceLeaderResources.AmiOwner;

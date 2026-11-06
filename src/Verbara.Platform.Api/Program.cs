@@ -1039,10 +1039,10 @@ builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
 var dialerConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
     builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres")) ?? "";
+// D13a: before the first registration-time migrator of the event store's chain (the dialer's, then the event store's).
+await Verbara.Platform.Api.Services.EventStoreLeaseColocation.EnsureAsync(builder.Configuration);
 if (!string.IsNullOrEmpty(dialerConnectionString))
-{
     builder.Services.AddPlatformDialer(builder.Configuration, ResolveDataSource(dialerConnectionString, "dialer")!);
-}
 
 // ─── Pro.Cluster ─────────────────────────────────────────────────────────────
 var nodeAri = StasisAppNames.NodeOptions(builder.Configuration); // eager: equal app names fail the boot (ADR-0044)

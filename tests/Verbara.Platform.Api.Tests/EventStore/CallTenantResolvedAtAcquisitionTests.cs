@@ -52,7 +52,7 @@ public sealed class CallTenantResolvedAtAcquisitionTests : IAsyncLifetime
             MarkEnded(session);
             RaiseEnd(source, session);
 
-            host.VoiceLeader!.IsLeader = true;
+            await HoldVoiceLeaseAsync(host);
 
             using var client = host.CreateAuthenticatedClient();
             var status = await WaitForCdrAsync(client, session.SessionId);
@@ -89,7 +89,7 @@ public sealed class CallTenantResolvedAtAcquisitionTests : IAsyncLifetime
         {
             RaiseStartAndConnect(source, session);
 
-            host.VoiceLeader!.IsLeader = true;
+            await HoldVoiceLeaseAsync(host);
             await WaitUntilAsync(() => session.TenantId is not null);
             MarkEnded(session);
             RaiseEnd(source, session);
@@ -125,7 +125,7 @@ public sealed class CallTenantResolvedAtAcquisitionTests : IAsyncLifetime
             MarkEnded(session);
             RaiseEnd(source, session);
 
-            host.VoiceLeader!.IsLeader = true;
+            await HoldVoiceLeaseAsync(host);
             using var client = host.CreateAuthenticatedClient();
             var status = await WaitForCdrAsync(client, session.SessionId, Settle / 3);
 
@@ -164,6 +164,26 @@ public sealed class CallTenantResolvedAtAcquisitionTests : IAsyncLifetime
         {
             ApiKeyTenantId = TenantId,
         };
+
+    /// <summary>
+    /// Hands the voice leader lease to the replica: the lease row its fence reads (D13), owned by its InstanceId, then its
+    /// leader election's answer. The real election is a hosted service the test host strips.
+    /// </summary>
+    private async Task HoldVoiceLeaseAsync(EventStoreReplicaFactory host)
+    {
+        await using var dataSource = NpgsqlDataSource.Create(ConnectionString("lease"));
+        await Verbara.Sdk.Cluster.Postgres.Migrations.MigrationRunner.EnsureSchemaAsync(
+            dataSource, NullLogger.Instance, CancellationToken.None);
+        await using var command = dataSource.CreateCommand("""
+            INSERT INTO cluster_distributed_lock (resource, owner, expires_at)
+            VALUES (@resource, @owner, now() + interval '5 minutes')
+            ON CONFLICT (resource) DO UPDATE SET owner = EXCLUDED.owner, expires_at = EXCLUDED.expires_at
+            """);
+        command.Parameters.AddWithValue("resource", Verbara.Platform.Api.Services.VoiceLeaderResources.AmiOwner);
+        command.Parameters.AddWithValue("owner", host.VoiceLeader!.InstanceId);
+        await command.ExecuteNonQueryAsync();
+        host.VoiceLeader.IsLeader = true;
+    }
 
     private static (ICallSessionManager Manager, CallSession Session) SessionSource(
         Subject<SessionDomainEvent> source, string linkedId)
