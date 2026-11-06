@@ -24,11 +24,16 @@ namespace Verbara.Platform.Routing.Inbound;
 ///   <description>
 ///   <b>Sticky / last-agent bypass</b>: when <c>LastAgentMiddleware</c>
 ///   surfaces a <c>preferredAgentId</c>, the selector returns the preferred
-///   agent if they have membership in <i>any</i> active queue of the tenant
-///   even if not in the current queue's eligible pool. CSAT (returning the
-///   contact to the previous agent) intentionally overrides strict per-queue
-///   membership. If the preferred agent has zero memberships across the
-///   tenant, the bypass does NOT trigger and the regular selection applies.
+///   agent if they have a non-excluded membership in <i>any</i> queue of the
+///   tenant even if not in the current queue's eligible pool, provided the
+///   presence service reports them reachable for the <i>routed</i> queue and
+///   channel: that queue's required skills (one matching skill is enough), a
+///   routable state, no pending pause, an Active user and free capacity on the
+///   channel. CSAT (returning the contact to the previous agent) intentionally
+///   overrides strict per-queue membership, not the routed queue's skills. If
+///   the preferred agent has zero memberships across the tenant, or is not
+///   reachable, the bypass does NOT trigger and the regular selection applies
+///   in the same call (conversations-return-to-last-agent design D5).
 ///   </description>
 /// </item>
 /// </list>
@@ -80,8 +85,8 @@ public sealed class RoundRobinAgentSelector : IAgentSelector
                 .ConfigureAwait(false);
             if (preferredMemberships.Any(m => !m.IsExcluded))
             {
-                // Use the presence service (no queue filter for sticky) to
-                // confirm the preferred agent is reachable for the channel.
+                // The presence service for the ROUTED queue: its required skills,
+                // the routable state, an Active user and channel capacity apply.
                 var presenceForCurrentQueue = await _presenceService
                     .GetAvailableAgentsAsync(tenantId, queueId, channel, ct)
                     .ConfigureAwait(false);
