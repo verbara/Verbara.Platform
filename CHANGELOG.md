@@ -199,6 +199,10 @@ contact writes.
 
 ### Fixed
 
+- **One offer publishes one `conversation.offered`.** An offer made by the queue distribution reached the live stream
+  twice, from the switchboard and again from the distribution worker, so the console showed two notifications and
+  counted two on its badge. The worker no longer publishes it; the switchboard publishes it once, right after the save
+  that records the offer.
 - **An agent's reply reaches the session its conversation belongs to.** A reply went to the first WebChat address of the
   contact, which for a contact with several sessions could be one that had ended, and it was marked failed with
   `SESSION_NOT_CONNECTED`. A conversation now records its session's address and replies through it. A conversation from

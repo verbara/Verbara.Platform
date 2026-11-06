@@ -22,7 +22,6 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
     private readonly ITenantStore _tenantStore;
     private readonly IAgentSelector _agentSelector;
     private readonly IConversationSwitchboard _switchboard;
-    private readonly PlatformEventBus _eventBus;
     private readonly IClock _clock;
     private readonly IServiceHeartbeat _heartbeat;
     private readonly DistributionOptions _options;
@@ -34,6 +33,8 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
         ITenantStore tenantStore,
         IAgentSelector agentSelector,
         IConversationSwitchboard switchboard,
+        // Unused since the worker stopped publishing conversation.offered (design finding F1); kept so the
+        // constructor's callers do not change. The switchboard publishes the offer.
         PlatformEventBus eventBus,
         IClock clock,
         IServiceHeartbeat heartbeat,
@@ -45,7 +46,6 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
         _tenantStore = tenantStore;
         _agentSelector = agentSelector;
         _switchboard = switchboard;
-        _eventBus = eventBus;
         _clock = clock;
         _heartbeat = heartbeat;
         _options = options.Value;
@@ -142,13 +142,10 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
                         await _conversationStore.SaveAsync(offered, ct);
                     }
 
-                    _eventBus.Publish(new ConversationOfferedEvent(
-                        tenant.TenantId,
-                        conversation.ConversationId.Value,
-                        agentId.Value.Value,
-                        queueId.Value,
-                        conversation.Channel.ToString()));
-
+                    // conversation.offered is published once, by OfferToAgentAsync, right after the save that
+                    // commits the offer (conversations-return-to-last-agent, design finding F1). Publishing it here
+                    // too doubled every offer on the console, from this pre-offer snapshot and after this second
+                    // write, and never when this write throws although the offer has committed.
                     LogOfferSucceeded(conversation.ConversationId.Value, agentId.Value.Value);
                 }
                 else
