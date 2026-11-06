@@ -4,6 +4,7 @@ using Verbara.Platform.Api.Services;
 using Verbara.Sdk.Cluster.Postgres.DependencyInjection;
 using Verbara.Sdk.Pro.Cluster.DependencyInjection;
 using Verbara.Sdk.Pro.Cluster.Leadership;
+using Verbara.Sdk.Pro.EventStore;
 
 namespace Verbara.Platform.Api.DependencyInjection;
 
@@ -91,9 +92,29 @@ public static class ClusterLeadershipExtensions
         });
         if (!dialerEnabled)
             services.AddAlwaysLeader(CampaignMetricsLeaderResources.Webhooks);
+        if (voiceAmiEnabled)
+            services.AddVoiceLeaderAsEventStoreWriter();
 
         return services;
     }
+
+    /// <summary>
+    /// call-records-are-written-once (design D1): the event store's writer is the holder of the voice leader lease
+    /// <see cref="VoiceLeaderResources.AmiOwner"/>, the replica that already owns every other voice side effect.
+    /// Registered only where that lease is (<see cref="AddClusteredLeaders"/> with AMI configured); everywhere else
+    /// <see cref="EventStoreOptions.IsWriter"/> stays <see langword="null"/> and the single replica is the writer.
+    /// The keyed leader is resolved at the delegate's first read, never at host start (a design-time boot never
+    /// reads it), and a failed resolution is not cached: the event store treats a delegate that throws as not the
+    /// writer, and the next read tries again. The delegate is the pre-check only; the fence is the authority (D13).
+    /// </summary>
+    private static void AddVoiceLeaderAsEventStoreWriter(this IServiceCollection services) =>
+        services.AddOptions<EventStoreOptions>().Configure<IServiceProvider>((options, provider) =>
+        {
+            var voiceLeader = new Lazy<IClusterLeader>(
+                () => provider.GetRequiredKeyedService<IClusterLeader>(VoiceLeaderResources.AmiOwner),
+                LazyThreadSafetyMode.PublicationOnly);
+            options.IsWriter = () => voiceLeader.Value.IsLeader;
+        });
 
     /// <summary>
     /// Registers the single-node (no cluster connection) <see cref="AlwaysLeader"/> stubs, so the leader-gated

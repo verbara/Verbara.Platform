@@ -35,25 +35,28 @@ public sealed class EventStoreReplicaFactory : WebApplicationFactory<Program>
     private readonly string _clusterConnectionString;
     private readonly ICallSessionManager _sessionManager;
 
-    /// <summary>Creates one replica over the shared database, call session source and voice leader fake.</summary>
+    /// <summary>
+    /// Creates one replica over the shared database, call session source and voice leader fake. A
+    /// <see langword="null"/> <paramref name="voiceLeader"/> is a replica with no AMI configuration: an empty
+    /// <c>Asterisk:Ami:Hostname</c>, so <c>Program.cs</c> registers no voice leader lease at all.
+    /// </summary>
     public EventStoreReplicaFactory(
         string analyticsConnectionString,
         string clusterConnectionString,
         ICallSessionManager sessionManager,
-        FakeVoiceLeader voiceLeader)
+        FakeVoiceLeader? voiceLeader)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(analyticsConnectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(clusterConnectionString);
         ArgumentNullException.ThrowIfNull(sessionManager);
-        ArgumentNullException.ThrowIfNull(voiceLeader);
         _analyticsConnectionString = analyticsConnectionString;
         _clusterConnectionString = clusterConnectionString;
         _sessionManager = sessionManager;
         VoiceLeader = voiceLeader;
     }
 
-    /// <summary>This replica's voice leader lease.</summary>
-    public FakeVoiceLeader VoiceLeader { get; }
+    /// <summary>This replica's voice leader lease; <see langword="null"/> on a replica with no AMI configuration.</summary>
+    public FakeVoiceLeader? VoiceLeader { get; }
 
     /// <summary>What this replica's event store appended.</summary>
     public RecordingSessionEventStore Store { get; } = new();
@@ -63,6 +66,13 @@ public sealed class EventStoreReplicaFactory : WebApplicationFactory<Program>
     {
         builder.UseSetting("ConnectionStrings:Analytics", _analyticsConnectionString);
         builder.UseSetting("ConnectionStrings:Cluster", _clusterConnectionString);
+        if (VoiceLeader is null)
+        {
+            // appsettings.json ships a default AMI host (localhost); a host with no AMI configuration clears it.
+            builder.UseSetting("Asterisk:Ami:Hostname", string.Empty);
+            return;
+        }
+
         builder.UseSetting("Asterisk:Ami:Hostname", AmiHostname);
         builder.UseSetting("Asterisk:Ami:Port", "5038");
         builder.UseSetting("Asterisk:Ami:Username", "eventstore-replica");
@@ -88,6 +98,9 @@ public sealed class EventStoreReplicaFactory : WebApplicationFactory<Program>
             Replace(services, typeof(ISessionEventStore), ServiceDescriptor.Singleton<ISessionEventStore>(Store));
             Replace(services, typeof(IFencedCallEventStore), null);
             Replace(services, typeof(ILicenseGuard), ServiceDescriptor.Singleton<ILicenseGuard>(new AllowAllLicenseGuard()));
+
+            if (VoiceLeader is null)
+                return;
 
             var leases = services
                 .Where(d => d.ServiceType == typeof(IClusterLeader)

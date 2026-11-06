@@ -2,8 +2,11 @@ using System.Reactive.Subjects;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using NSubstitute;
+using Verbara.Platform.Api.Services;
 using Verbara.Sdk.Enums;
+using Verbara.Sdk.Pro.Cluster.Leadership;
 using Verbara.Sdk.Pro.EventStore;
 using Verbara.Sdk.Sessions;
 using Verbara.Sdk.Sessions.Manager;
@@ -68,6 +71,45 @@ public sealed class EventStoreWriterIsTheVoiceLeaderTests : IAsyncLifetime
         {
             await subscriberA.StopAsync(CancellationToken.None);
             await subscriberB.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task CallEvents_ShouldBeAppendedByTheSingleReplica_WhenNoAmiIsConfigured()
+    {
+        using var source = new Subject<SessionDomainEvent>();
+        var sessionManager = Substitute.For<ICallSessionManager>();
+        sessionManager.Events.Returns(source);
+        var sessionId = Guid.NewGuid().ToString("N");
+        sessionManager.GetById(sessionId).Returns(
+            new CallSession(sessionId, "1762430400.202", ServerId, CallDirection.Inbound) { TenantId = TenantId });
+
+        using var host = new EventStoreReplicaFactory(
+            ConnectionString("analytics-single"), ConnectionString("cluster-single"), sessionManager, voiceLeader: null);
+        var subscriber = host.Services.GetRequiredService<EventStoreSubscriber>();
+
+        host.Services.GetKeyedService<IClusterLeader>(VoiceLeaderResources.AmiOwner).Should().BeNull(
+            "a host with no AMI configuration registers no voice leader lease");
+        host.Services.GetRequiredService<IOptions<EventStoreOptions>>().Value.IsWriter.Should().BeNull(
+            "with no voice leader lease no writer delegate is passed, so the single replica is the writer");
+
+        await subscriber.StartAsync(CancellationToken.None);
+        try
+        {
+            source.OnNext(new CallStartedEvent(sessionId, ServerId, BaseTime, CallDirection.Inbound, "5551234"));
+            source.OnNext(new CallConnectedEvent(
+                sessionId, ServerId, BaseTime.AddSeconds(5), "agent-1", "sales", TimeSpan.FromSeconds(5)));
+            source.OnNext(new CallEndedEvent(
+                sessionId, ServerId, BaseTime.AddSeconds(30), HangupCause.NormalClearing, TimeSpan.FromSeconds(30), null));
+
+            await WaitUntilAsync(() => host.Store.Rows.Count >= 3);
+
+            host.Store.Rows.Select(r => r.EventType).Should().Equal(
+                ["CallStarted", "CallConnected", "CallEnded"], "the single replica of a host with no AMI writes the call");
+        }
+        finally
+        {
+            await subscriber.StopAsync(CancellationToken.None);
         }
     }
 
