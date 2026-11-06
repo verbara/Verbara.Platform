@@ -175,7 +175,7 @@ builder.Services.AddPlatformCore();
 builder.Services.AddPlatformConversations().AddConversationInactivityClose(); // options (D1) + close counter (D13)
 builder.Services.AddPlatformChannels();
 builder.Services.AddPlatformQueues();
-builder.Services.AddInboundRouting();
+builder.Services.AddInboundRouting().AddLastAgentRoutingOptionsBinding(); // InboundRouting:LastAgent (conversations-return-to-last-agent D1)
 builder.Services.AddSwitchboard();
 // Bridges WebChat inbound (which only persists messages) to the queue, mirroring the webhook
 // path, so a visitor's chat reaches an agent. See WebChatInboundRouter.
@@ -421,7 +421,7 @@ builder.Services.AddVerbaraOpenTelemetry(b => b
     .AddMeter(Verbara.Platform.Api.Services.RealtimeReconciliationService.MeterName)
     .AddMeter(Verbara.Platform.Api.Services.RecoveryCodeFamilyMetrics.MeterName) // mfa.recovery_codes.{users,redeemed}
     .AddMeter(Verbara.Platform.Api.Services.StasisInboundConsumer.MeterName) // voice.stasis.app_replaced (ADR-0044)
-    .AddMeter(Verbara.Platform.Api.Services.DialerDispositionMetrics.MeterName).AddMeter(Verbara.Platform.Api.Services.ConversationCloseMetrics.MeterName) // dialer.disposition_dispatch.* (D16); conversations.system_closed (inactivity close D13)
+    .AddMeter(Verbara.Platform.Api.Services.DialerDispositionMetrics.MeterName).AddMeter(Verbara.Platform.Api.Services.ConversationCloseMetrics.MeterName).AddMeter(Verbara.Platform.Routing.Inbound.RoutingMetrics.MeterName) // dialer.disposition_dispatch.* (D16); conversations.system_closed (inactivity close D13); routing.last_agent (last-agent routing D8)
     .AddDigitalChannelMeters() // channels.delivery_status.unknown_id, whatsapp.webhook.rejected
     .AddCapacityMeters() // Npgsql pool + operation instruments, auth.write.* (measure-api-multi-replica-baseline D1)
     .WithPrometheusExporter());

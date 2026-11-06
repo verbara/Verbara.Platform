@@ -6,6 +6,7 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Licensing;
 using Verbara.Platform.Queues.Services;
+using Verbara.Platform.Routing.Inbound;
 
 namespace Verbara.Platform.Switchboard;
 
@@ -19,6 +20,7 @@ public sealed partial class ConversationSwitchboard : IConversationSwitchboard
     private readonly IAgentAccountStatusLookup _accountStatus;
     private readonly ILicensedAgentOwnershipWriter? _ownershipWriter;
     private readonly ILogger<ConversationSwitchboard> _logger;
+    private readonly RoutingMetrics? _routingMetrics;
 
     public ConversationSwitchboard(
         IConversationStore store,
@@ -28,7 +30,8 @@ public sealed partial class ConversationSwitchboard : IConversationSwitchboard
         PlatformEventBus eventBus,
         IAgentAccountStatusLookup accountStatus,
         ILicensedAgentOwnershipWriter? ownershipWriter = null,
-        ILogger<ConversationSwitchboard>? logger = null)
+        ILogger<ConversationSwitchboard>? logger = null,
+        RoutingMetrics? routingMetrics = null)
     {
         _store = store;
         _capacity = capacity;
@@ -38,6 +41,7 @@ public sealed partial class ConversationSwitchboard : IConversationSwitchboard
         _accountStatus = accountStatus;
         _ownershipWriter = ownershipWriter;
         _logger = logger ?? NullLogger<ConversationSwitchboard>.Instance;
+        _routingMetrics = routingMetrics;
     }
 
     public async Task<OwnershipResult> AssignToQueueAsync(
@@ -94,15 +98,38 @@ public sealed partial class ConversationSwitchboard : IConversationSwitchboard
         // rejected only by that agent from the moment it exists (the offered event follows the save).
         conversation.SetMetadata(ConversationOffer.OfferedToKey, agentId.Value);
         conversation.SetMetadata(ConversationOffer.OfferedAtKey, now.ToString("O", CultureInfo.InvariantCulture));
+        // conversations-return-to-last-agent (design D3): the first successful offer consumes the last-agent preference
+        // in this same write, whichever agent receives it, so no later save is needed and a re-queue never prefers again.
+        var preferenceOutcome = ConsumePreference(conversation, agentId);
         conversation.UpdatedAt = now;
 
         await _store.SaveAsync(conversation, ct).ConfigureAwait(false);
+        if (preferenceOutcome is not null)
+            _routingMetrics?.RecordLastAgent(preferenceOutcome);
         _eventBus.Publish(new ConversationOfferedEvent(
             tenantId.Value, conversationId.Value, agentId.Value,
             conversation.Owner?.OwnerId?.Value ?? "", conversation.Channel.ToString()));
         _eventBus.Publish(new ConversationStateChangedEvent(
             tenantId.Value, conversationId.Value, "Queued", "Offered"));
         return new OwnershipResult(true, conversation.Owner, conversation.State, null);
+    }
+
+    /// <summary>
+    /// Removes <see cref="ConversationOffer.PreferredAgentIdKey"/> and writes <see cref="ConversationOffer.PreferredAgentOutcomeKey"/>
+    /// on <paramref name="conversation"/>, about to be offered to <paramref name="offeredTo"/>. Returns the outcome, or
+    /// <see langword="null"/> when the conversation carries no preference.
+    /// </summary>
+    private static string? ConsumePreference(Conversation conversation, EntityId offeredTo)
+    {
+        if (!conversation.Metadata.TryGetValue(ConversationOffer.PreferredAgentIdKey, out var preferred))
+            return null;
+
+        var outcome = string.Equals(preferred, offeredTo.Value, StringComparison.Ordinal)
+            ? ConversationOffer.PreferredOutcomeOfferedPreferred
+            : ConversationOffer.PreferredOutcomeFallback;
+        conversation.RemoveMetadata(ConversationOffer.PreferredAgentIdKey);
+        conversation.SetMetadata(ConversationOffer.PreferredAgentOutcomeKey, outcome);
+        return outcome;
     }
 
     public async Task<OwnershipResult> AcceptAsync(

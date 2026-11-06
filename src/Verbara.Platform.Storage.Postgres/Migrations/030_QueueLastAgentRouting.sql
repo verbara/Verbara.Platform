@@ -1,0 +1,23 @@
+-- =============================================================================
+-- Verbara.Platform — the per-queue last-agent routing override (030)
+-- =============================================================================
+-- conversations-return-to-last-agent (design D2; Platform/ADR-0049).
+--
+-- queue_configs.last_agent_routing_enabled: a nullable per-queue override of
+-- the host switch InboundRouting:LastAgent:Enabled, read for the queue a route
+-- finally lands in. NULL follows the host; true turns last-agent routing on for
+-- the queue even when the host is off; false turns it off even when the host is
+-- on. Null for every existing row, set by SQL only; no save of the application
+-- names it, and an older binary's upsert leaves it as it is. Catalog-only.
+--
+-- Locks (the runner wraps the file in one transaction): ADD COLUMN with no
+-- default changes only the catalog, under a brief ACCESS EXCLUSIVE lock on
+-- queue_configs; no row is rewritten.
+--
+-- Idempotent: ADD COLUMN IF NOT EXISTS, so a second run changes nothing.
+-- Rollback: an older binary never names the column; its inserts get NULL and its
+-- updates leave it as it is. To remove it,
+--   ALTER TABLE queue_configs DROP COLUMN IF EXISTS last_agent_routing_enabled;
+-- =============================================================================
+
+ALTER TABLE queue_configs ADD COLUMN IF NOT EXISTS last_agent_routing_enabled BOOLEAN NULL;

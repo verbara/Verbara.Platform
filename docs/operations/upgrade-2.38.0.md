@@ -109,6 +109,9 @@ cache lifetime (60 seconds) after the `UPDATE`, so within that 60 seconds plus o
 tick: about 2 minutes at the defaults, up to about 61 minutes with `InactivityCloseSweepIntervalSeconds=3600`.
 Replicas apply it independently; a restart applies it at once.
 
+A later release also reads this window, when it is longer than its own, to bound returning-customer routing to the last
+agent: see [`last-agent-routing.md`](last-agent-routing.md).
+
 ### Other changes in the same release
 
 - **A customer message to a `Resolved` conversation closes it**, with `metadata._closedReason` = `customer-returned`,

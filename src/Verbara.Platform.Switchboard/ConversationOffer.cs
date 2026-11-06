@@ -1,5 +1,6 @@
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Verbara.Platform.Routing.Inbound;
 
 namespace Verbara.Platform.Switchboard;
 
@@ -14,6 +15,26 @@ public static class ConversationOffer
 
     /// <summary>Metadata key holding when the offer was made (round-trip "O" format, UTC).</summary>
     public const string OfferedAtKey = "_offeredAt";
+
+    /// <summary>
+    /// Metadata key holding the agent last-agent routing prefers for this conversation's first offer
+    /// (conversations-return-to-last-agent design D3). Written by routing before queue assignment, removed by the
+    /// offer-state write of the first successful offer, whichever agent receives it.
+    /// </summary>
+    public const string PreferredAgentIdKey = "_preferredAgentId";
+
+    /// <summary>
+    /// Metadata key holding what became of the preference at the first offer: <see cref="PreferredOutcomeOfferedPreferred"/>
+    /// or <see cref="PreferredOutcomeFallback"/>. Written in the same offer-state write that removes
+    /// <see cref="PreferredAgentIdKey"/>, never rewritten afterwards.
+    /// </summary>
+    public const string PreferredAgentOutcomeKey = "_preferredAgentOutcome";
+
+    /// <summary>The first offer went to the preferred agent.</summary>
+    public const string PreferredOutcomeOfferedPreferred = LastAgentOutcomes.OfferedPreferred;
+
+    /// <summary>The first offer went to another agent.</summary>
+    public const string PreferredOutcomeFallback = LastAgentOutcomes.Fallback;
 
     /// <summary>
     /// Whether <paramref name="conversation"/> is an open offer made to <paramref name="agentId"/>. An
