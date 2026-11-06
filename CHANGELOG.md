@@ -12,7 +12,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 A caller reads a conversation only when it may: an agent reads what it owns, what it is offered and the history of the
 contacts it holds now, and everyone else needs `contacts:conversation:monitor` or the new `contacts:conversation:read`
 (Platform/ADR-0047). The contact's history becomes a page of summaries, and a new route reads a transcript newest first.
-Conversation content on the live stream reaches only its readers. Read **Changed — BREAKING** and **Upgrading** first:
+Conversation content on the live stream reaches only its readers, and the supervisor's conversation reads follow the
+same permissions. Read **Changed — BREAKING** and **Upgrading** first:
 tenant API keys bound to no user, roles without a conversation permission and agents outside a conversation now get
 403 `not-readable`, and `GET /api/v1/contacts/{id}/conversations` answers a new item shape.
 
@@ -196,6 +197,23 @@ contact writes.
   included, is not delivered these events. The other events, `conversation.offered`, `conversation.assigned` and
   `conversation.state_changed` included, are unchanged, and so is every event's JSON. A role change applies at the
   stream's next reconnect. Tenant webhooks are not affected. (#539)
+- **The supervisor conversation reads follow the conversation read permissions.** The supervisor routes still require
+  the Admin or Supervisor role, and inside it they now ask the same question as the conversation reads:
+  - `GET /api/v1/supervisor/conversations/{id}/messages` answers exactly as `GET /api/v1/conversations/{id}/messages`:
+    an id that names no conversation of the tenant answers 404 with no body, where it answered 200 with an empty
+    array; then 403 `{"error":"not-readable"}` when the caller may not read that conversation; then the transcript,
+    oldest first, as before. A Supervisor-role user without `contacts:conversation:monitor` or
+    `contacts:conversation:read` still reads the conversations its own Agent profile owns, is offered, or holds the
+    contact of.
+  - `GET /api/v1/supervisor/conversations`, `GET /api/v1/supervisor/conversations/stuck` and
+    `GET /api/v1/supervisor/sessions/active` answer only a caller that reads every conversation:
+    `contacts:conversation:monitor`, `contacts:conversation:read`, or the Admin or SystemAdmin role. Any other caller
+    gets 403 `{"error":"not-readable"}` and nothing of the tenant. Their shapes are unchanged.
+
+  The built-in Supervisor template holds `contacts:conversation:monitor`, so its users keep all four reads. A
+  Supervisor-role user, a tenant API key bound to one, or an impersonation session whose permissions hold neither
+  `contacts:conversation:monitor` nor `contacts:conversation:read` loses them (see Upgrading). A Manager on an
+  Agent-role user and a tenant API key bound to no user are refused by the role check, as before.
 
 ### Fixed
 
@@ -220,6 +238,12 @@ contact writes.
 
 ### Upgrading
 
+- **A supervisor role without a conversation read permission loses the supervisor reads.** Before you deploy, check
+  the tenant roles of your Supervisor-role users, of the users your API keys are bound to, and the permissions you mint
+  into impersonation sessions. Grant `contacts:conversation:monitor` to a role that monitors the floor, or
+  `contacts:conversation:read` to one that reads without listening, with `PUT /api/v1/admin/roles/{id}`. Without one of
+  them, the four supervisor reads answer 403 `not-readable`. A caller that sent the supervisor transcript route an id
+  it did not get from the list must expect 404 instead of an empty array.
 - **An integration may now get 403 `not-permitted` on the contact writes.** A tenant API key bound to no user carries no
   role and no permission, so it is refused `POST`, `PUT` and `DELETE /api/v1/contacts` and the opt-out route. To keep it
   working, bind the key to a user whose role is `Api` (create and update; delete stays with the admin roles), grant its
