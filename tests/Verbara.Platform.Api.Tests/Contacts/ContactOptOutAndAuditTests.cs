@@ -355,7 +355,7 @@ public sealed class ContactOptOutAndAuditTests : IClassFixture<ContactWritesApiF
         var contact = FixtureContact(_factory);
         var before = _factory.LoadContact(contact.ContactId)!;
         using var agent = AgentClient(out _);
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/contacts/{contact.ContactId.Value}/opt-out");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/contacts/{contact.ContactId.Value}/opt-out");
         if (jsonContentType)
             request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
 

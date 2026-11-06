@@ -163,10 +163,11 @@ public sealed class ContactWritePermissionTests : IClassFixture<ContactWritesApi
         using var agent = AgentTemplateClient();
         var path = method == "POST" ? "/api/v1/contacts" : $"/api/v1/contacts/{contact.ContactId.Value}";
 
-        var response = await agent.SendAsync(new HttpRequestMessage(new HttpMethod(method), path)
+        using var request = new HttpRequestMessage(new HttpMethod(method), path)
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
-        });
+        };
+        var response = await agent.SendAsync(request);
 
         await ShouldMatchAsync(response, expected);
         Snapshot(_factory.LoadContact(contact.ContactId)).Should().Be(before);
@@ -181,10 +182,11 @@ public sealed class ContactWritePermissionTests : IClassFixture<ContactWritesApi
         using var admin = _factory.ClientFor(_factory.NewUser(UserRole.Admin, "unreadable-admin"));
         var path = method == "POST" ? "/api/v1/contacts" : $"/api/v1/contacts/{contact.ContactId.Value}";
 
-        var response = await admin.SendAsync(new HttpRequestMessage(new HttpMethod(method), path)
+        using var request = new HttpRequestMessage(new HttpMethod(method), path)
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
-        });
+        };
+        var response = await admin.SendAsync(request);
 
         ((int)response.StatusCode).Should().Be(400, await response.Content.ReadAsStringAsync());
         Snapshot(_factory.LoadContact(contact.ContactId)).Should().Be(before);
@@ -205,8 +207,10 @@ public sealed class ContactWritePermissionTests : IClassFixture<ContactWritesApi
             Content = new StringContent("""{"firstName":"Ana"}""", Encoding.UTF8, "text/plain"),
         };
 
-        var permitted = await admin.SendAsync(PlainText());
-        var refused = await agent.SendAsync(PlainText());
+        using var toAdmin = PlainText();
+        using var toAgent = PlainText();
+        var permitted = await admin.SendAsync(toAdmin);
+        var refused = await agent.SendAsync(toAgent);
 
         ((int)permitted.StatusCode).Should().Be(415);
         ((int)refused.StatusCode).Should().Be(415, "routing refuses the content type before the handler's permission check");
