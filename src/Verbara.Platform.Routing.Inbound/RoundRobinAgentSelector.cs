@@ -25,7 +25,8 @@ namespace Verbara.Platform.Routing.Inbound;
 ///   <b>Sticky / last-agent bypass</b>: when <c>LastAgentMiddleware</c>
 ///   surfaces a <c>preferredAgentId</c>, the selector returns the preferred
 ///   agent if they have a non-excluded membership in <i>any</i> queue of the
-///   tenant even if not in the current queue's eligible pool, provided the
+///   tenant even if not in the current queue's eligible pool, unless their own
+///   row in the routed queue is excluded or does not allow the channel, provided the
 ///   presence service reports them reachable for the <i>routed</i> queue and
 ///   channel: that queue's required skills (one matching skill is enough), a
 ///   routable state, no pending pause, an Active user and free capacity on the
@@ -75,15 +76,19 @@ public sealed class RoundRobinAgentSelector : IAgentSelector
                 return preferredInPool.Agent.AgentId;
 
             // Sticky bypass: preferred agent may be a member of a different
-            // queue. Honor sticky if they have ANY membership in the tenant
-            // AND are reachable for this channel (routable + capacity). If
-            // they have zero memberships across the tenant the bypass does
-            // not apply — they are not eligible for routing at all.
+            // queue. Honor sticky if they have ANY non-excluded membership in
+            // the tenant AND are reachable for this channel (routable +
+            // capacity). If they have zero memberships across the tenant the
+            // bypass does not apply — they are not eligible for routing at all.
+            // A row in the ROUTED queue decides for that queue: one that
+            // excludes the agent or does not allow the channel refuses the
+            // bypass, as it keeps the agent out of that queue's own pool.
             var preferredId = preferredAgentId.Value;
             var preferredMemberships = await _membershipStore
                 .ListByAgentAsync(tenantId, preferredId, ct)
                 .ConfigureAwait(false);
-            if (preferredMemberships.Any(m => !m.IsExcluded))
+            if (preferredMemberships.Any(m => !m.IsExcluded)
+                && !RoutedQueueRowRefuses(preferredMemberships, queueId, channel))
             {
                 // The presence service for the ROUTED queue: its required skills,
                 // the routable state, an Active user and channel capacity apply.
@@ -110,5 +115,20 @@ public sealed class RoundRobinAgentSelector : IAgentSelector
 
         var index = Math.Abs(Interlocked.Increment(ref _counter) - 1) % lowestBandSize;
         return pool[index].Agent.AgentId;
+    }
+
+    /// <summary>
+    /// Whether the preferred agent's row in the routed queue keeps them out of it for <paramref name="channel"/>: it is
+    /// excluded, or its <c>AllowedChannels</c> list does not name the channel (case-insensitive; <c>null</c> allows every
+    /// channel, as in <see cref="Services.MembershipAwareRoutingEligibilityService"/>). No row in the routed queue refuses
+    /// nothing (design D5's any-queue default).
+    /// </summary>
+    private static bool RoutedQueueRowRefuses(IReadOnlyList<QueueMembership> memberships, EntityId queueId, ChannelType channel)
+    {
+        var channelName = channel.ToString();
+        return memberships.Any(m => m.QueueId == queueId
+            && (m.IsExcluded
+                || (m.AllowedChannels is { } allowed
+                    && !allowed.Any(c => string.Equals(c, channelName, StringComparison.OrdinalIgnoreCase)))));
     }
 }

@@ -63,11 +63,15 @@ WHERE last_agent_routing_enabled IS NOT NULL ORDER BY tenant_id, name;
 
 The last agent is offered the conversation when the queue distribution can offer it work now: `Available` or `Busy`, a
 free unit of chat capacity, no pending pause, an `Active` user, at least one of the routed queue's required skills when
-it has any, and a membership in the routed queue or in any other queue of the tenant. In `Break`, `ACW`,
-`Offline`, at capacity or suspended, the conversation goes to round robin in the same distribution pass.
+it has any, and a membership in the routed queue or in any other queue of the tenant. An agent's own row in the routed
+queue decides for that queue: if it excludes the agent, or lists channels that do not include the conversation's
+channel, the agent is not offered the conversation, whatever their other queues say. In `Break`, `ACW`, `Offline`, at
+capacity or suspended, the conversation goes to round robin in the same distribution pass.
 
 The preference is used once. Whoever receives the first offer, a reject or an expired offer sends the conversation back
-to round robin, never again to the preferred agent because of the preference. A routing lookup that fails never fails the
+to round robin, never again to the preferred agent because of the preference. A WebChat visitor who reloads the page
+opens a new session, and its first message does not route the conversation again: an open offer stays with its agent and
+a conversation waiting in its queue keeps its place. A routing lookup that fails never fails the
 route: the conversation is routed with no preference and a warning is logged.
 
 ## What it leaves behind

@@ -28,7 +28,7 @@ public sealed class RoundRobinAgentSelectorStickySkillTests
         CreatedAt = Now,
     };
 
-    private static RoundRobinAgentSelector Selector(Agent preferred, Agent inPool)
+    private static RoundRobinAgentSelector Selector(Agent preferred, Agent inPool, params QueueMembership[] routedQueueRows)
     {
         var agents = Substitute.For<IAgentStore>();
         agents.ListAsync(Tenant, Arg.Any<AgentQuery>(), Arg.Any<CancellationToken>())
@@ -55,6 +55,7 @@ public sealed class RoundRobinAgentSelectorStickySkillTests
             {
                 TenantId = Tenant, QueueId = Q2, AgentId = preferred.AgentId, Source = MembershipSource.Manual, CreatedAt = Now,
             },
+            .. routedQueueRows,
         ]);
         return new RoundRobinAgentSelector(eligibility, memberships, presence);
     }
@@ -77,6 +78,64 @@ public sealed class RoundRobinAgentSelectorStickySkillTests
         var b = MakeAgent("agent-b", "S");
 
         var chosen = await Selector(a, b).SelectAgentAsync(Tenant, Q1, ChannelType.WhatsApp, a.AgentId, CancellationToken.None);
+
+        chosen.Should().Be(a.AgentId);
+    }
+
+    // Review round (design D5): the any-queue default applies to an agent with no row in the routed queue. A row in the
+    // routed queue that excludes the agent, or that does not allow the conversation's channel, refuses the bypass, as it
+    // keeps the agent out of that queue's own pool.
+    private static QueueMembership RoutedQueueRow(Agent agent, bool excluded = false, IReadOnlyList<string>? channels = null) => new()
+    {
+        TenantId = Tenant, QueueId = Q1, AgentId = agent.AgentId, Source = MembershipSource.Manual, CreatedAt = Now,
+        IsExcluded = excluded, AllowedChannels = channels,
+    };
+
+    [Fact]
+    public async Task SelectAgentAsync_ShouldNotReturnThePreferredAgent_WhenTheirRowInTheRoutedQueueIsExcluded()
+    {
+        var a = MakeAgent("agent-a", "S");
+        var b = MakeAgent("agent-b", "S");
+
+        var chosen = await Selector(a, b, RoutedQueueRow(a, excluded: true))
+            .SelectAgentAsync(Tenant, Q1, ChannelType.WhatsApp, a.AgentId, CancellationToken.None);
+
+        chosen.Should().Be(b.AgentId);
+    }
+
+    [Fact]
+    public async Task SelectAgentAsync_ShouldNotReturnThePreferredAgent_WhenTheirRowInTheRoutedQueueDoesNotAllowTheChannel()
+    {
+        var a = MakeAgent("agent-a", "S");
+        var b = MakeAgent("agent-b", "S");
+
+        var chosen = await Selector(a, b, RoutedQueueRow(a, channels: ["Voice", "Email"]))
+            .SelectAgentAsync(Tenant, Q1, ChannelType.WhatsApp, a.AgentId, CancellationToken.None);
+
+        chosen.Should().Be(b.AgentId);
+    }
+
+    [Fact]
+    public async Task SelectAgentAsync_ShouldReturnThePreferredAgent_WhenTheyHaveNoRowInTheRoutedQueue()
+    {
+        var a = MakeAgent("agent-a", "S");
+        var b = MakeAgent("agent-b", "S");
+
+        // Only the Q2 row: the bypass's any-queue default (design D5).
+        var chosen = await Selector(a, b)
+            .SelectAgentAsync(Tenant, Q1, ChannelType.WhatsApp, a.AgentId, CancellationToken.None);
+
+        chosen.Should().Be(a.AgentId);
+    }
+
+    [Fact]
+    public async Task SelectAgentAsync_ShouldReturnThePreferredAgent_WhenTheirRowInTheRoutedQueueAllowsTheChannelInAnyCase()
+    {
+        var a = MakeAgent("agent-a", "S");
+        var b = MakeAgent("agent-b", "S");
+
+        var chosen = await Selector(a, b, RoutedQueueRow(a, channels: ["whatsapp"]))
+            .SelectAgentAsync(Tenant, Q1, ChannelType.WhatsApp, a.AgentId, CancellationToken.None);
 
         chosen.Should().Be(a.AgentId);
     }
