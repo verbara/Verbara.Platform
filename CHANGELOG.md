@@ -215,6 +215,10 @@ turn it on: read **Upgrading**.
 
 ### Fixed
 
+- **A WebChat page reload no longer routes the conversation again.** A new session's first message routed the
+  conversation it was stored in even when that conversation was already in a queue or offered to an agent: an open offer
+  went back to the queue and the queue wait started over. It now routes only a conversation that still needs it, a new one
+  or one not yet assigned to a queue, as a WhatsApp message does.
 - **One offer publishes one `conversation.offered`.** An offer made by the queue distribution reached the live stream
   twice, from the switchboard and again from the distribution worker, so the console showed two notifications and
   counted two on its badge. The worker no longer publishes it; the switchboard publishes it once, right after the save

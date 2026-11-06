@@ -14,8 +14,9 @@ public static class RoutePreferenceStamp
     /// <see cref="ConversationOffer.PreferredAgentIdKey"/> to the route's preferred agent, or removes a key an earlier
     /// routing attempt left when the route has none (audit 2026-11-06 F2: a first attempt whose metadata save committed
     /// and whose queue assignment then threw leaves its key on a queued, owner-less row, which a retry with no
-    /// preference must not leave for distribution). Returns whether it changed the row, so the caller persists the change
-    /// even when the route carries no other metadata.
+    /// preference must not leave for distribution). A conversation that already carries
+    /// <see cref="ConversationOffer.PreferredAgentOutcomeKey"/> gets no preference: its first offer consumed the one it had.
+    /// Returns whether it changed the row, so the caller persists the change even when the route carries no other metadata.
     /// </summary>
     public static bool Apply(Conversation conversation, RouteResult route)
     {
@@ -23,7 +24,10 @@ public static class RoutePreferenceStamp
         ArgumentNullException.ThrowIfNull(route);
 
         var pending = conversation.Metadata.TryGetValue(ConversationOffer.PreferredAgentIdKey, out var current) ? current : null;
-        if (route.PreferredAgentId is { } agentId)
+        // The preference is used once (spec "The preference MUST be used once"): a conversation whose first offer already
+        // consumed it, and so carries an outcome, never gets a new one, however often it is routed again.
+        var consumed = conversation.Metadata.ContainsKey(ConversationOffer.PreferredAgentOutcomeKey);
+        if (route.PreferredAgentId is { } agentId && !consumed)
         {
             if (string.Equals(pending, agentId.Value, StringComparison.Ordinal))
                 return false;

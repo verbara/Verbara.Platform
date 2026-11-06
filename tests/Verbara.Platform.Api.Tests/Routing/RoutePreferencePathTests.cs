@@ -331,6 +331,71 @@ public sealed class RoutePreferencePathTests : IDisposable
         await _selector.Received(1).SelectAgentAsync(Tenant, QueueId, ChannelType.WebChat, null, Arg.Any<CancellationToken>());
     }
 
+    // ─── A new WebChat session after the first offer (review round, spec "The preference MUST be used once") ─────
+
+    [Fact]
+    public async Task WebChat_ShouldNotPreferAgain_WhenANewSessionWritesAfterThePreferredAgentDeclined()
+    {
+        LookupFinds(AgentA);
+        var id = await SeedQueuedAsync(ChannelType.WebChat);
+        var (firstRouter, firstSession) = WebChat(id);
+        await VisitorMessageAsync(firstRouter, firstSession, id, opens: false);
+        await DistributeAsync(selects: AgentA);
+        (await _realSwitchboard.RejectAsync(id, Tenant, AgentA, CancellationToken.None)).Success.Should().BeTrue();
+
+        // The visitor reloads the page: a new session, whose first message is stored in the same conversation.
+        var (secondRouter, secondSession) = WebChat(id);
+        await VisitorMessageAsync(secondRouter, secondSession, id, opens: false);
+
+        var row = await RowAsync(id);
+        row.Metadata.Should().NotContainKey(ConversationOffer.PreferredAgentIdKey, "the first offer consumed the preference");
+        row.Metadata.Should().Contain(ConversationOffer.PreferredAgentOutcomeKey, LastAgentOutcomes.OfferedPreferred);
+        await DistributeAsync(selects: AgentA);
+        await _selector.Received(1).SelectAgentAsync(Tenant, QueueId, ChannelType.WebChat, null, Arg.Any<CancellationToken>());
+        _outcomes.Should().Equal(LastAgentOutcomes.Stamped, LastAgentOutcomes.OfferedPreferred);
+    }
+
+    [Fact]
+    public async Task WebChat_ShouldKeepTheOpenOffer_WhenANewSessionWritesDuringIt()
+    {
+        LookupFinds(AgentA);
+        var id = await SeedQueuedAsync(ChannelType.WebChat);
+        var (firstRouter, firstSession) = WebChat(id);
+        await VisitorMessageAsync(firstRouter, firstSession, id, opens: false);
+        await DistributeAsync(selects: AgentA);
+        var offered = await RowAsync(id);
+        offered.State.Should().Be(ConversationState.Offered);
+
+        var (secondRouter, secondSession) = WebChat(id);
+        await VisitorMessageAsync(secondRouter, secondSession, id, opens: false);
+
+        var row = await RowAsync(id);
+        row.State.Should().Be(ConversationState.Offered, "a new session does not pull an open offer back to the queue");
+        row.Owner.Should().Be(ConversationOwner.ForQueue(QueueId));
+        row.Metadata.Should().Contain(ConversationOffer.OfferedToKey, AgentA.Value);
+        row.Metadata.Should().Contain(ConversationOffer.OfferedAtKey, offered.Metadata[ConversationOffer.OfferedAtKey]);
+        row.Metadata.Should().NotContainKey(ConversationOffer.PreferredAgentIdKey);
+        _outcomes.Should().Equal(LastAgentOutcomes.Stamped, LastAgentOutcomes.OfferedPreferred);
+    }
+
+    [Fact]
+    public async Task WebChat_ShouldNotRouteAgain_WhenANewSessionWritesToAConversationAlreadyInItsQueue()
+    {
+        LookupFinds(AgentA);
+        var id = await SeedQueuedAsync(ChannelType.WebChat);
+        var (firstRouter, firstSession) = WebChat(id);
+        await VisitorMessageAsync(firstRouter, firstSession, id, opens: false);
+        var queued = await RowAsync(id);
+
+        var (secondRouter, secondSession) = WebChat(id);
+        await VisitorMessageAsync(secondRouter, secondSession, id, opens: false);
+
+        var row = await RowAsync(id);
+        ShouldBeAssigned(row);
+        row.Metadata.Should().Equal(queued.Metadata, "the queue clock and the pending preference stay as the first routing left them");
+        _outcomes.Should().Equal(LastAgentOutcomes.Stamped);
+    }
+
     // ─── Counted per routing attempt (design D8, task 2.1) ───────────────────────────────────────────────────────
 
     [Fact]
@@ -369,6 +434,23 @@ public sealed class RoutePreferencePathTests : IDisposable
         RoutePreferenceStamp.Apply(conversation, preferred).Should().BeFalse();
         RoutePreferenceStamp.Apply(conversation, none).Should().BeTrue();
         conversation.Metadata.Should().NotContainKey(ConversationOffer.PreferredAgentIdKey);
+    }
+
+    [Fact]
+    public void Apply_ShouldWriteNoPreference_WhenThePreferenceWasAlreadyConsumed()
+    {
+        var conversation = new Conversation
+        {
+            ConversationId = EntityId.New(), TenantId = Tenant, ContactId = ContactId, Channel = ChannelType.WhatsApp,
+            State = ConversationState.Queued, CreatedAt = DateTimeOffset.UtcNow,
+        };
+        conversation.SetMetadata(ConversationOffer.PreferredAgentOutcomeKey, LastAgentOutcomes.Fallback);
+
+        RoutePreferenceStamp.Apply(conversation, new RouteResult(QueueId, MessagePriority.Normal, AgentA, null))
+            .Should().BeFalse();
+
+        conversation.Metadata.Should().NotContainKey(ConversationOffer.PreferredAgentIdKey);
+        conversation.Metadata.Should().Contain(ConversationOffer.PreferredAgentOutcomeKey, LastAgentOutcomes.Fallback);
     }
 
     private sealed class FixedQueueMiddleware(EntityId queueId) : InboundRoutingMiddlewareBase
