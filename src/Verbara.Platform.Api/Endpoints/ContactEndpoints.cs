@@ -386,27 +386,23 @@ internal static class ContactEndpoints
     /// <summary>
     /// The JSON body of a contact write, read only after its permission check (design D2), with the type information and
     /// options the framework binds a <c>[FromBody]</c> parameter with (the HTTP JSON options, whose resolver chain starts
-    /// with <c>ApiJsonContext</c>), and refused as such a binding refuses it, with no body: 415 when a body is sent with
-    /// a content type that is not JSON; 400 when it is not valid JSON or does not fit the type (an unknown enum name, a
-    /// value of the wrong type), or when a required body is absent or <c>null</c>; the status of a request the server
-    /// cannot read (413 for a body over the size limit). An absent or <c>null</c> optional body is
-    /// <c>(null, null)</c>.
+    /// with <c>ApiJsonContext</c>), and refused as such a binding refuses it, with no body: 400 when it is not valid JSON
+    /// or does not fit the type (an unknown enum name, a value of the wrong type), or when a required body is absent or
+    /// <c>null</c>; the status of a request the server cannot read (413 for a body over the size limit). An absent or
+    /// <c>null</c> optional body is <c>(null, null)</c>. A content type that is not JSON never gets here: the route's
+    /// <c>Accepts</c> makes routing answer it 415, as the binding's own metadata did.
     /// </summary>
     private static async Task<(T? Body, StatusCodeHttpResult? Unreadable)> ReadBodyAsync<T>(
         HttpContext context, bool optional, CancellationToken ct)
         where T : class
     {
-        var request = context.Request;
         T? body = null;
         if (context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true)
         {
-            if (!request.HasJsonContentType())
-                return (null, TypedResults.StatusCode(StatusCodes.Status415UnsupportedMediaType));
-
             var options = context.RequestServices.GetRequiredService<IOptions<HttpJsonOptions>>().Value.SerializerOptions;
             try
             {
-                body = await request.ReadFromJsonAsync((JsonTypeInfo<T>)options.GetTypeInfo(typeof(T)), ct);
+                body = await context.Request.ReadFromJsonAsync((JsonTypeInfo<T>)options.GetTypeInfo(typeof(T)), ct);
             }
             catch (JsonException)
             {

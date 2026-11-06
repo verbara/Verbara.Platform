@@ -190,6 +190,28 @@ public sealed class ContactWritePermissionTests : IClassFixture<ContactWritesApi
         Snapshot(_factory.LoadContact(contact.ContactId)).Should().Be(before);
     }
 
+    /// <summary>
+    /// The declared JSON body (<c>Accepts</c>, as the <c>[FromBody]</c> binding declared it before) makes routing answer a
+    /// non-JSON <c>Content-Type</c> with 415 before any handler runs, whoever calls: it reads only the header, never the
+    /// body, and was the same before the review round.
+    /// </summary>
+    [Fact]
+    public async Task CreateContact_ShouldAnswer415AtRoutingWhoeverCalls_WhenTheContentTypeIsNotJson()
+    {
+        using var admin = _factory.ClientFor(_factory.NewUser(UserRole.Admin, "plain-text-admin"));
+        using var agent = AgentTemplateClient();
+        HttpRequestMessage PlainText() => new(HttpMethod.Post, "/api/v1/contacts")
+        {
+            Content = new StringContent("""{"firstName":"Ana"}""", Encoding.UTF8, "text/plain"),
+        };
+
+        var permitted = await admin.SendAsync(PlainText());
+        var refused = await agent.SendAsync(PlainText());
+
+        ((int)permitted.StatusCode).Should().Be(415);
+        ((int)refused.StatusCode).Should().Be(415, "routing refuses the content type before the handler's permission check");
+    }
+
     [Fact]
     public async Task UpdateContact_ShouldStoreChannelConsentAndReadItBack_WhenTheCallerMayEdit()
     {
