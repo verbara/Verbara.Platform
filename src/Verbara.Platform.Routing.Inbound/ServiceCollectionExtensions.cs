@@ -21,6 +21,7 @@ public static class ServiceCollectionExtensions
         else
             services.AddOptions<InboundRoutingOptions>();
 
+        services.AddSingleton<RoutingMetrics>(); // routing.last_agent (conversations-return-to-last-agent D8)
         services.AddSingleton<ReasonHintMiddleware>();
         services.AddSingleton<ChannelQueueMappingMiddleware>();
         services.AddSingleton<LastAgentMiddleware>();
