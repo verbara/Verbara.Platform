@@ -11,7 +11,8 @@ namespace Verbara.Platform.Api.Services;
 /// The audit record of a contact's do-not-contact or consent change, and of a contact delete
 /// (contacts-writes-follow-their-permissions, design D17; fixtures/contact-opt-out.v1.json <c>audit</c>). Built as
 /// <see cref="DefaultAuditService.RecordAsync"/> builds an entry, v2 integrity hash included, so
-/// <see cref="IContactAuditWriter"/> can write it in the same unit as the contact.
+/// <see cref="IContactAuditWriter"/> can write it in the same unit as the contact. Under impersonation its metadata
+/// names the impersonator's tenant and session (<see cref="ContactActor.Impersonation"/>), as every audited write does.
 /// </summary>
 internal static class ContactAuditRecord
 {
@@ -97,6 +98,7 @@ internal static class ContactAuditRecord
         IReadOnlyDictionary<string, string>? metadata)
     {
         ArgumentNullException.ThrowIfNull(actor);
+        metadata = WithImpersonation(metadata, actor);
         var retainUntil = now.AddYears(RetentionYears);
         return new AuditEntry
         {
@@ -116,5 +118,23 @@ internal static class ContactAuditRecord
             IntegrityHash = DefaultAuditService.ComputeIntegrityHashV2(
                 tenantId, actor.ActorType, actor.ActorId, action, TargetType, contactId.Value, now, retainUntil, metadata),
         };
+    }
+
+    /// <summary>
+    /// <paramref name="metadata"/> with the actor's impersonation context added, as every other audited write adds it,
+    /// before the integrity hash covers it; <paramref name="metadata"/> itself when the actor is not impersonating.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string>? WithImpersonation(
+        IReadOnlyDictionary<string, string>? metadata, ContactActor actor)
+    {
+        if (actor.Impersonation.Count == 0)
+            return metadata;
+
+        var merged = metadata is null
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            : new Dictionary<string, string>(metadata, StringComparer.Ordinal);
+        foreach (var (key, value) in actor.Impersonation)
+            merged[key] = value;
+        return merged;
     }
 }

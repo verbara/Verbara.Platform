@@ -43,13 +43,15 @@ public sealed class ContactOptOutAndAuditTests : IClassFixture<ContactWritesApiF
         return contact;
     }
 
-    private static HttpRequestMessage Request(JsonNode request, string? contactId, JsonNode? bodyOverride = null)
+    private static HttpRequestMessage Request(JsonNode request, string? contactId, JsonNode? bodyOverride = null, string? rawBody = null)
     {
         var path = request["path"]!.GetValue<string>();
         if (contactId is not null)
             path = path.Replace(FixtureContactId, contactId, StringComparison.Ordinal);
         var message = new HttpRequestMessage(new HttpMethod(request["method"]!.GetValue<string>()), path);
-        if ((bodyOverride ?? request["body"]) is JsonNode body)
+        if (rawBody is not null)
+            message.Content = new StringContent(rawBody, Encoding.UTF8, "application/json");
+        else if ((bodyOverride ?? request["body"]) is JsonNode body)
             message.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
         return message;
     }
@@ -322,6 +324,135 @@ public sealed class ContactOptOutAndAuditTests : IClassFixture<ContactWritesApiF
         entry.ActorId.Should().Be(keyId);
         entry.ActorType.Should().Be(expected["actorType"]!.GetValue<string>());
         body!["updatedBy"]!.GetValue<string>().Should().Be(keyId);
+    }
+
+    // ─── review round: the permission before the body, an empty body ─────────
+
+    [Theory]
+    [InlineData("""{"doNotContact":"yes"}""")]
+    [InlineData("""{"channels":"Sms"}""")]
+    [InlineData("""{"doNotContact":""")]
+    public async Task OptOut_ShouldRefuseNotPermitted_WhenTheCallerLacksThePermissionAndTheBodyCannotBeRead(string json)
+    {
+        var refusal = OptOut["refusals"]![0]!;
+        var contact = FixtureContact(_factory);
+        var user = _factory.NewUser(UserRole.Agent, "opt-out-unreadable");
+        _factory.GrantTemplate(user, "quality_analyst");
+        using var client = _factory.ClientFor(user);
+
+        var body = await ShouldBeAsync(
+            await client.SendAsync(Request(refusal["request"]!, contact.ContactId.Value, JsonNode.Parse("{}"), json)), 403);
+
+        JsonNode.DeepEquals(body, refusal["body"]).Should().BeTrue(body?.ToJsonString());
+        _factory.ContactAuditOf(contact.ContactId).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OptOut_ShouldAnswerTheContactAndWriteNothing_WhenAPermittedCallerSendsNoBody(bool jsonContentType)
+    {
+        var contact = FixtureContact(_factory);
+        var before = _factory.LoadContact(contact.ContactId)!;
+        using var agent = AgentClient(out _);
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/contacts/{contact.ContactId.Value}/opt-out");
+        if (jsonContentType)
+            request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
+
+        var body = await ShouldBeAsync(await agent.SendAsync(request), 200);
+
+        body!["contactId"]!.GetValue<string>().Should().Be(contact.ContactId.Value);
+        body["doNotContact"]!.GetValue<bool>().Should().BeFalse();
+        var stored = _factory.LoadContact(contact.ContactId)!;
+        stored.UpdatedAt.Should().Be(before.UpdatedAt, "an empty body changes nothing");
+        stored.ChannelConsent.Should().BeEquivalentTo(before.ChannelConsent);
+        _factory.ContactAuditOf(contact.ContactId).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task OptOut_ShouldAnswer400AndWriteNothing_WhenAPermittedCallersBodyCannotBeRead()
+    {
+        var contact = FixtureContact(_factory);
+        using var agent = AgentClient(out _);
+
+        await ShouldBeAsync(
+            await agent.SendAsync(Request(OptOut["request"]!, contact.ContactId.Value, JsonNode.Parse("{}"), """{"doNotContact":"yes"}""")),
+            400);
+
+        _factory.LoadContact(contact.ContactId)!.DoNotContact.Should().BeFalse();
+        _factory.ContactAuditOf(contact.ContactId).Should().BeEmpty();
+    }
+
+    // ─── review round: the impersonation context of a record ─────────────────
+
+    private static void ShouldNameTheImpersonation(AuditEntry entry, User admin)
+    {
+        entry.ActorId.Should().Be(admin.UserId.Value);
+        entry.Metadata.Should().NotBeNull();
+        entry.Metadata!["impersonator_id"].Should().Be(admin.UserId.Value);
+        entry.Metadata["impersonator_tenant"].Should().Be(admin.TenantId.Value);
+        entry.Metadata.Should().ContainKey("impersonation_session_id");
+        entry.Metadata["impersonation_session_id"].Should().NotBeNullOrEmpty();
+        DefaultAuditService.VerifyIntegrity(entry).Should().BeTrue("the impersonation context is covered by the integrity hash");
+    }
+
+    [Fact]
+    public async Task UpdateContact_ShouldNameTheImpersonationInTheRecord_WhenAnImpersonatingAdminChangesConsent()
+    {
+        var contact = _factory.SeedContact(new ChannelAddress(ChannelType.Email, "imp-consent@example.com"));
+        var admin = _factory.NewPlatformAdmin();
+        using var client = _factory.CreateBearerClient(
+            _factory.MintImpersonationToken(admin, ["contacts:contact:edit"], readOnly: false));
+
+        await ShouldBeAsync(await client.SendAsync(Put(contact, """{"channelConsent":{"Email":false}}""")), 200);
+
+        var entry = _factory.ContactAuditOf(contact.ContactId).Should().ContainSingle().Subject;
+        entry.Action.Should().Be(Audit["update"]!["action"]!.GetValue<string>());
+        ShouldNameTheImpersonation(entry, admin);
+    }
+
+    [Fact]
+    public async Task OptOut_ShouldNameTheImpersonationInTheRecord_WhenAnImpersonatingAdminSendsIt()
+    {
+        var contact = FixtureContact(_factory);
+        var admin = _factory.NewPlatformAdmin();
+        using var client = _factory.CreateBearerClient(
+            _factory.MintImpersonationToken(admin, ["contacts:conversation:handle"], readOnly: false));
+
+        await ShouldBeAsync(await client.SendAsync(Request(OptOut["request"]!, contact.ContactId.Value)), 200);
+
+        var entry = _factory.ContactAuditOf(contact.ContactId).Should().ContainSingle().Subject;
+        entry.Action.Should().Be(Audit["optOut"]!["action"]!.GetValue<string>());
+        ShouldNameTheImpersonation(entry, admin);
+    }
+
+    [Fact]
+    public async Task DeleteContact_ShouldNameTheImpersonationInTheRecordAndKeepDoNotContact_WhenAnImpersonatingAdminDeletes()
+    {
+        var contact = FixtureContact(_factory, doNotContact: true);
+        var admin = _factory.NewPlatformAdmin();
+        using var client = _factory.CreateBearerClient(
+            _factory.MintImpersonationToken(admin, ["contacts:contact:delete"], readOnly: false));
+
+        await ShouldBeAsync(await client.DeleteAsync($"/api/v1/contacts/{contact.ContactId.Value}"), 204);
+
+        var entry = _factory.ContactAuditOf(contact.ContactId).Should().ContainSingle().Subject;
+        entry.Action.Should().Be(Audit["delete"]!["action"]!.GetValue<string>());
+        entry.Metadata![ContactAuditRecord.DoNotContactMetadataKey].Should().Be("true");
+        ShouldNameTheImpersonation(entry, admin);
+    }
+
+    [Fact]
+    public async Task UpdateContact_ShouldAddNoImpersonationMetadata_WhenTheCallerIsNotImpersonating()
+    {
+        var contact = _factory.SeedContact(new ChannelAddress(ChannelType.Email, "plain-consent@example.com"));
+        using var client = _factory.ClientFor(_factory.NewUser(UserRole.Admin, "plain-admin"));
+
+        await ShouldBeAsync(await client.SendAsync(Put(contact, """{"channelConsent":{"Email":false}}""")), 200);
+
+        var entry = _factory.ContactAuditOf(contact.ContactId).Should().ContainSingle().Subject;
+        entry.Metadata.Should().BeNull("a consent change by a signed-in user carries no metadata");
+        DefaultAuditService.VerifyIntegrity(entry).Should().BeTrue();
     }
 
     // ─── atomicity (design D17, fourth spec audit F1) ────────────────────────

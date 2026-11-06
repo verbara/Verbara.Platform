@@ -14,6 +14,15 @@ namespace Verbara.Platform.Api.Services;
 /// <param name="ActorType"><see cref="UserType"/>, <see cref="ApiKeyType"/> or <see cref="SystemType"/>.</param>
 internal sealed record ContactActor(string ActorId, string ActorType)
 {
+    /// <summary>
+    /// The impersonation context of the caller (<see cref="CallerIdentity.AddImpersonationContext"/>): under
+    /// impersonation <see cref="ActorId"/> is the impersonating admin's, from another tenant, so the record also names
+    /// that tenant and the impersonation session. Empty otherwise.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Impersonation { get; init; } = Empty;
+
+    private static readonly IReadOnlyDictionary<string, string> Empty = new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>A signed-in user, or an API key acting as the user it is bound to.</summary>
     public const string UserType = "user";
 
@@ -29,7 +38,8 @@ internal sealed record ContactActor(string ActorId, string ActorType)
     /// <summary>
     /// The actor of an HTTP caller. The id is <see cref="CallerIdentity.ResolveUserId"/>: a JWT user's id, the owner of
     /// a bound API key, or the key id of a key bound to no user. The type is <see cref="ApiKeyType"/> for a principal of
-    /// the API-key scheme with no <c>user_id</c>, else <see cref="UserType"/>.
+    /// the API-key scheme with no <c>user_id</c>, else <see cref="UserType"/>. Under impersonation it carries the
+    /// impersonation context, which every record it writes adds to its metadata.
     /// </summary>
     public static ContactActor Of(ClaimsPrincipal caller)
     {
@@ -38,7 +48,12 @@ internal sealed record ContactActor(string ActorId, string ActorType)
             && caller.Identities.Any(identity =>
                 identity.IsAuthenticated
                 && string.Equals(identity.AuthenticationType, AuthSchemeConfiguration.ApiKeyScheme, StringComparison.Ordinal));
-        return new ContactActor(CallerIdentity.ResolveUserIdOrSystem(caller), unboundKey ? ApiKeyType : UserType);
+        var impersonation = new Dictionary<string, string>(StringComparer.Ordinal);
+        CallerIdentity.AddImpersonationContext(impersonation, caller);
+        return new ContactActor(CallerIdentity.ResolveUserIdOrSystem(caller), unboundKey ? ApiKeyType : UserType)
+        {
+            Impersonation = impersonation,
+        };
     }
 }
 
