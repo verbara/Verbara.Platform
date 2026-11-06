@@ -1769,7 +1769,8 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         var capacity = FreshPersistentCapacity();
         var leader = LeaderStub(isLeader: true);
         var dial = new AgentOutboundDialService(
-            _conversations, capacity, _contacts, _agents, Substitute.For<Verbara.Sdk.Pro.MultiTenant.ITenantStore>(),
+            _conversations, capacity, _contacts, new Verbara.Platform.Storage.InMemory.InMemoryContactStore(), _agents,
+            Substitute.For<Verbara.Sdk.Pro.MultiTenant.ITenantStore>(),
             new AcceptingOriginateExecutor(),
             OutboundTrunk.TrunkFakes.Resolver(null, new OutboundTrunk.FakeTrunkStore().Add(Tenant, OutboundTrunk.TrunkFakes.IpTrunk(7, "pstn-default")), "pstn-default"),
             null, leader, _clock, NullLogger<AgentOutboundDialService>.Instance);

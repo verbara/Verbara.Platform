@@ -5,6 +5,7 @@ using Verbara.Platform.Conversations.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
+using Verbara.Platform.Storage.InMemory;
 using Verbara.Sdk;
 using Verbara.Sdk.Ami.Actions;
 using Verbara.Sdk.Pro.Cluster.Leadership;
@@ -72,7 +73,7 @@ public sealed class AgentOutboundDialServiceTests
         leader.IsLeader.Returns(isLeader);
         leader.Resource.Returns(VoiceLeaderResources.AmiOwner);
         return new AgentOutboundDialService(
-            _conversations, _capacity, _contacts, _agents, _tenants, _executor, Resolver(routes, _trunks, defaultTrunk), dnc, leader,
+            _conversations, _capacity, _contacts, new InMemoryContactStore(), _agents, _tenants, _executor, Resolver(routes, _trunks, defaultTrunk), dnc, leader,
             _clock, NullLogger<AgentOutboundDialService>.Instance);
     }
 

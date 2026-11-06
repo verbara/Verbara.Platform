@@ -40,7 +40,7 @@ internal static class PermissionSeeder
     /// </summary>
     internal static IEnumerable<PermissionRow> GetPermissions()
     {
-        // ── contacts (9) ──
+        // ── contacts (10) ──
         yield return P("contacts:conversation:handle", "contacts", "conversation", "handle",
             "Handle inbound/outbound conversations");
         yield return P("contacts:conversation:transfer", "contacts", "conversation", "transfer",
@@ -65,6 +65,11 @@ internal static class PermissionSeeder
             ["contacts:contact:view"]);
         yield return P("contacts:contact:create", "contacts", "contact", "create",
             "Create new contacts",
+            ["contacts:contact:view"]);
+        // contacts-writes-follow-their-permissions (design D4): DELETE /contacts/{id} requires it; the admin family
+        // holds it. Implication is catalog metadata only (ADR-0037).
+        yield return P("contacts:contact:delete", "contacts", "contact", "delete",
+            "Delete contacts",
             ["contacts:contact:view"]);
 
         // ── queues (8) ──

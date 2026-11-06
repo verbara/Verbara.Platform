@@ -20,10 +20,10 @@ public sealed class AuditEntry : ITenantScoped
 
     /// <summary>
     /// Audit category. Must be one of the values allowed by the
-    /// audit_entries_category_check constraint (migration 021 + 034):
+    /// audit_entries_category_check constraint (migration 021 + 034 + 029):
     /// "auth", "billing", "config", "tenant", "security", "impersonation",
     /// "retention", "data", "rbac", "data_access", "admin", "conversations",
-    /// "queues", "reports", "operational", "license". A value outside this set
+    /// "queues", "reports", "operational", "license", "contact". A value outside this set
     /// is rejected by Postgres (23514) — keep the constraint and the call sites
     /// in sync when adding a new category.
     /// </summary>

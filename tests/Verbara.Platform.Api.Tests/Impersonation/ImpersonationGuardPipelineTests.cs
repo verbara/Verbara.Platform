@@ -153,7 +153,10 @@ public sealed class ImpersonationGuardPipelineTests : IClassFixture<Impersonatio
     [Fact]
     public async Task FullImpersonation_ShouldAllowWrite_WhenOperationIsNotBlocked()
     {
-        var token = _factory.MintImpersonationToken(_factory.NewPlatformAdmin(), FullPermissions, readOnly: false);
+        // Creating a contact requires contacts:contact:create, and an impersonation token passes a permission only when
+        // it was minted into it, so this session is minted that permission too.
+        var token = _factory.MintImpersonationToken(
+            _factory.NewPlatformAdmin(), [.. FullPermissions, "contacts:contact:create"], readOnly: false);
 
         var (status, body) = await SendAsync(token, "POST", "/api/v1/contacts", ContactJson);
 

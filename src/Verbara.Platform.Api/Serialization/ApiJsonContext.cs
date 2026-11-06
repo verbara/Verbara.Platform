@@ -660,6 +660,8 @@ namespace Verbara.Platform.Api.Serialization;
 // Contacts
 [JsonSerializable(typeof(CreateContactRequest))]
 [JsonSerializable(typeof(UpdateContactRequest))]
+[JsonSerializable(typeof(ContactOptOutRequest))]
+[JsonSerializable(typeof(ContactConsentAuditState))]  // contacts-writes-follow-their-permissions D17 audit payload
 // RBAC (tenant roles)
 [JsonSerializable(typeof(CreateTenantRoleRequest))]
 [JsonSerializable(typeof(UpdateTenantRoleRequest))]

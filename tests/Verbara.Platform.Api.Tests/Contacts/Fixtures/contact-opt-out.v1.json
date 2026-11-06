@@ -1,0 +1,105 @@
+{
+  "_comment": "The opt-out route (design D16) and the audit record every do-not-contact or consent change writes (design D17). Written 2026-11-05 from Platform main a1fc0481 by reading the code, folding the judge's ruling on Q2 (the route) and Q5; nothing here was run and the route does not exist today. POST /api/v1/contacts/{id}/opt-out ONLY RESTRICTS: it can set `doNotContact` to true and record `false` for the channels it names; it never clears do-not-contact and never records `true` (the permissive direction stays on PUT /contacts/{id} behind contacts:contact:edit, design D3). Permission: contacts:conversation:handle (the agent, supervisor, manager templates and the admin family hold it; quality_analyst and api do not), evaluated first in the handler through IAuthorizationService with `Permission:contacts:conversation:handle` (design D2's mechanism; PermissionPolicyProvider.cs:8, 18-20 resolves any `Permission:` policy), refused with the ErrorResponse of contact-write-refusals.v1.json. Evaluation order: 1. permission -> 403 not-permitted; 2. `channels` validated as `channelConsent` keys are on PUT (ChannelType names compared ordinally) -> 400 unknown-consent-channel with `details`; 3. no contact of the tenant has that id -> 404, no body; 4. the write. A body that changes nothing (no `doNotContact: true`, no channel, or every named value already in place) answers 200 with the contact and writes nothing, audit included. The route wraps a service, IContactOptOutService, so an inbound processor can later call it with the actor `system`. ApiJsonContext: camelCase, enums as PascalCase strings, null members absent. Every child change's delta spec must cite these field names and codes VERBATIM.",
+  "request": {
+    "case": "an agent hears 'do not call me again, and no more SMS' and records it from the contact card",
+    "method": "POST",
+    "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d/opt-out",
+    "body": { "doNotContact": true, "channels": ["Sms"] }
+  },
+  "requestFields": {
+    "doNotContact": "boolean, optional: `true` sets the contact's do-not-contact; absent or `false` leaves it as stored (the route never clears it)",
+    "channels": "array of strings, optional: each a ChannelType name exactly as GET writes it (case-sensitive), recorded as `false` in `channelConsent`; channels not named keep their value"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "contactId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d",
+      "tenantId": "t-demo-0001",
+      "firstName": "Ana",
+      "lastName": "Ruiz",
+      "doNotContact": true,
+      "addresses": [ { "channel": "Voice", "address": "+15551234567" }, { "channel": "Sms", "address": "+15551234567" } ],
+      "customFields": {},
+      "channelConsent": { "Voice": true, "Sms": false },
+      "createdAt": "2026-11-01T10:00:00.000+00:00",
+      "updatedAt": "2026-11-05T09:30:00.000+00:00",
+      "updatedBy": "u-agent-0042",
+      "fullName": "Ana Ruiz"
+    },
+    "_note": "the Contact read model, the same shape PUT /contacts/{id} answers; the stored `channelConsent` was { \"Voice\": true } before the call. `updatedBy` is now written (the audit `actorId` of `audit.actorResolution`: here the agent's user id) by the opt-out and by PUT (design D17); today PUT writes only `updatedAt`"
+  },
+  "refusals": [
+    {
+      "case": "a caller whose roles hold no contacts:conversation:handle, e.g. the quality_analyst or api template, or a read-only impersonation token",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d/opt-out",
+        "body": { "doNotContact": true }
+      },
+      "status": 403,
+      "body": { "error": "not-permitted" }
+    },
+    {
+      "case": "a channel that is not a ChannelType name as GET writes it; nothing is written, `doNotContact` included",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/contacts/7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d/opt-out",
+        "body": { "doNotContact": true, "channels": ["sms", "Sms", "Fax"] }
+      },
+      "status": 400,
+      "body": { "error": "unknown-consent-channel", "details": ["sms", "Fax"] }
+    },
+    {
+      "case": "an id no contact of the tenant has",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/contacts/ffffffffffffffffffffffffffffffff/opt-out",
+        "body": { "doNotContact": true }
+      },
+      "status": 404,
+      "_noBody": true
+    }
+  ],
+  "audit": {
+    "_comment": "Not a wire shape the console consumes: the record IAuditService.RecordAsync writes (actor per `actorResolution`, never DncListEndpoints.cs:120's `sub ?? system`), read back through the existing audit log. Written when the route, PUT /contacts/{id} (only when `doNotContact` or a `channelConsent` key changes value) or DELETE /contacts/{id} changes something; never on a refusal or a no-op. `changes.before`/`after` hold ONLY `doNotContact` and `channelConsent`, never names or addresses. They are given as a typed sealed record registered in a source-generated JSON context the audit store serializes with (PostgresAuditStore.SerializeChange, :379-402; an unregistered type falls back to ToString() in the AOT image), or as pre-serialized JSON. `retainUntil` is the write time plus five years (IAuditService.cs:14-19, 32).",
+    "optOut": {
+      "category": "contact",
+      "action": "contact.opted_out",
+      "severity": "info",
+      "actorId": "u-agent-0042",
+      "actorType": "user",
+      "targetId": "7a1c0e2b5d3f4a6b8c9d0e1f2a3b4c5d",
+      "targetType": "contact",
+      "changes": {
+        "before": { "doNotContact": false, "channelConsent": { "Voice": true } },
+        "after": { "doNotContact": true, "channelConsent": { "Voice": true, "Sms": false } }
+      },
+      "retainUntil": "2031-11-05T09:30:00.000+00:00",
+      "_actor": "a JWT agent: `actorId` its user id, `actorType` `user` (see `actorResolution`)"
+    },
+    "actorResolution": {
+      "_comment": "design D17, second spec audit F1; read on Platform a1fc0481. actorId is CallerIdentity.ResolveUserId (CallerIdentity.cs:31-34, order user_id ?? NameIdentifier ?? sub); actorType `api_key` is the value AuditEntry.ActorType documents (AuditEntry.cs:43). Contact.UpdatedBy is set to the same actorId. Applies to contact.opted_out, contact.consent_changed and contact.deleted alike.",
+      "jwtUser": { "claims": "sub = user id (JwtTokenService.cs:187)", "actorId": "u-agent-0042", "actorType": "user", "updatedBy": "u-agent-0042" },
+      "apiKeyBoundToUser": { "claims": "NameIdentifier = key id, user_id = owner (ApiKeyAuthenticationHandler.cs:56, :94); no sub", "actorId": "u-api-0007", "actorType": "user", "updatedBy": "u-api-0007" },
+      "apiKeyUnbound": { "claims": "NameIdentifier = key id, no user_id, no sub; only a management key passes the permission (design D7)", "actorId": "k-mgmt-0003", "actorType": "api_key", "updatedBy": "k-mgmt-0003" },
+      "service": { "claims": "none: IContactOptOutService called with no HTTP caller (a later inbound processor)", "actorId": "system", "actorType": "system", "updatedBy": "system" }
+    },
+    "update": {
+      "category": "contact",
+      "action": "contact.consent_changed",
+      "severity": "info",
+      "actorType": "per `actorResolution` (`user` or `api_key`)",
+      "targetType": "contact",
+      "_changes": "before/after of `doNotContact` and `channelConsent` only, as for `contact.opted_out`; `retainUntil` write time plus five years"
+    },
+    "delete": {
+      "category": "contact",
+      "action": "contact.deleted",
+      "severity": "info",
+      "actorType": "per `actorResolution` (`user` or `api_key`)",
+      "targetType": "contact",
+      "metadata": { "doNotContact": "true" },
+      "_note": "no `changes` and no addresses; `metadata.doNotContact` is the deleted contact's flag as a string. Optional (design D17): first to drop if the change must shrink"
+    }
+  }
+}

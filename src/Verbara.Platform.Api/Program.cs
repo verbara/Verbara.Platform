@@ -243,13 +243,13 @@ builder.Services.AddPlatformKnowledgeBase();
 builder.Services.AddPlatformSurveys();
 builder.Services.AddPlatformTypification();
 builder.Services.AddPlatformBilling();
-// P2c.2 (C3/C4) — platform-managed Typification LLM credit meter (records AiAnalysis/Tokens usage via
-// the Billing IMeteringService). Depends on IMeteringService (Billing) + IClock; registered here so
-// the suggestion handler can resolve ITypificationCreditMeter.
+// P2c.2 (C3/C4) — platform-managed Typification LLM credit meter (AiAnalysis/Tokens usage via the Billing
+// IMeteringService; depends on it + IClock), registered here so the suggestion handler resolves it.
 builder.Services.AddSingleton<Verbara.Platform.Typification.Ai.ITypificationCreditMeter,
     Verbara.Platform.Api.Services.BillingTypificationCreditMeter>();
 // Digital channels (WebChat + WhatsApp only) and the conditional Twilio SMS provider.
 builder.Services.AddDigitalChannels(builder.Configuration);
+builder.Services.AddSingleton<IContactOptOutService, ContactOptOutService>();  // contact opt-out (route + inbound callers)
 
 // ─── GDPR Services ──────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IGdprExportService, GdprExportService>();
@@ -1125,13 +1125,13 @@ if (!string.IsNullOrEmpty(clusterConn))
                     // (AgentOutboundDialService click-to-dial + the W5b CallbackOriginator) inherit
                     // spend-point enforcement — the two paths that had NO license check before.
                     sp.GetService<Verbara.Sdk.Pro.Licensing.ILicenseGuard>()));
-            // The DNC checker registers only with the full dialer Postgres storage, so it is optional here
-            // (GetService): a voice-only tenant fails DNC open.
+            // The DNC checker registers only with the dialer Postgres storage (GetService): a voice-only tenant fails DNC open.
             builder.Services.AddSingleton<Verbara.Platform.Api.Services.IAgentOutboundDialService>(sp =>
                 new Verbara.Platform.Api.Services.AgentOutboundDialService(
                     sp.GetRequiredService<Verbara.Platform.Conversations.IConversationStore>(),
                     sp.GetRequiredService<IAgentCapacityService>(),
                     sp.GetRequiredService<Verbara.Platform.Conversations.Services.IContactIdentityResolver>(),
+                    sp.GetRequiredService<Verbara.Platform.Conversations.IContactStore>(),
                     sp.GetRequiredService<Verbara.Platform.Queues.IAgentStore>(),
                     sp.GetRequiredService<Verbara.Sdk.Pro.MultiTenant.ITenantStore>(),
                     sp.GetRequiredService<Verbara.Sdk.Pro.Dialer.Execution.OriginateExecutorBase>(),

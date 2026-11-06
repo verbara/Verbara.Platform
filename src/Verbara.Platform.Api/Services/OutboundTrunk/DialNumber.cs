@@ -1,3 +1,5 @@
+using Verbara.Platform.Core;
+
 namespace Verbara.Platform.Api.Services.OutboundTrunk;
 
 /// <summary>
@@ -7,13 +9,9 @@ namespace Verbara.Platform.Api.Services.OutboundTrunk;
 /// </summary>
 internal static class DialNumber
 {
-    /// <summary>The digits of <paramref name="raw"/>, prefixed with <c>+</c> when its first non-blank character is one.</summary>
-    public static string Normalize(string raw)
-    {
-        ArgumentNullException.ThrowIfNull(raw);
-        var trimmed = raw.AsSpan().TrimStart();
-        var plus = trimmed.Length > 0 && trimmed[0] == '+';
-        var digits = new string([.. raw.Where(char.IsAsciiDigit)]);
-        return plus && digits.Length > 0 ? "+" + digits : digits;
-    }
+    /// <summary>
+    /// The digits of <paramref name="raw"/>, prefixed with <c>+</c> when its first character that is not an ASCII blank
+    /// is one: <see cref="VoiceNumber.Canonical"/>, the form the contact stores compare too.
+    /// </summary>
+    public static string Normalize(string raw) => VoiceNumber.Canonical(raw);
 }

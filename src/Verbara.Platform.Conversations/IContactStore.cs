@@ -6,6 +6,17 @@ public interface IContactStore
 {
     Task<Contact?> GetByIdAsync(TenantId tenantId, EntityId contactId, CancellationToken ct);
     Task<Contact?> FindByAddressAsync(TenantId tenantId, ChannelAddress address, CancellationToken ct);
+
+    /// <summary>
+    /// Every contact of the tenant holding an address on <paramref name="channel"/> that matches
+    /// <paramref name="address"/> by <see cref="ChannelAddressMatch.KeyOf"/> (on a phone-like channel the canonical
+    /// number, <see cref="VoiceNumber.Canonical"/>; on any other the address with ASCII blanks trimmed), restricted ones
+    /// first (do-not-contact, then consent on <paramref name="channel"/> recorded <c>false</c>, then contact id), at most
+    /// <paramref name="limit"/> rows. An address that reduces to the empty string matches nothing. Creates and changes
+    /// nothing.
+    /// </summary>
+    Task<IReadOnlyList<Contact>> FindAllByChannelAddressAsync(
+        TenantId tenantId, ChannelType channel, string address, int limit, CancellationToken ct);
     Task<PagedResult<Contact>> SearchAsync(TenantId tenantId, string? searchTerm, PagedQuery query, CancellationToken ct);
     Task SaveAsync(Contact contact, CancellationToken ct);
     Task DeleteAsync(TenantId tenantId, EntityId contactId, CancellationToken ct);

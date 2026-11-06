@@ -129,7 +129,10 @@ public sealed class InMemoryContactStoreTests
 
         probe.CompletedInGap.Should().BeFalse("a save must not replace the contact between the write-back's lookup and its change");
         result.Should().BeSameAs(contact);
-        (await store.GetByIdAsync(Tenant, contact.ContactId, CancellationToken.None)).Should().BeSameAs(replacement);
+        // A read answers a copy (contacts-writes-follow-their-permissions D17), so the replacement is recognised by content.
+        var stored = await store.GetByIdAsync(Tenant, contact.ContactId, CancellationToken.None);
+        stored!.Company.Should().Be("NewCo", "the save ran after the write-back and replaced the contact");
+        stored.Addresses.Should().BeEmpty("the replacement carries none of the write-back's addresses");
     }
 
     /// <summary>

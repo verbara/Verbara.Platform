@@ -20,6 +20,12 @@ internal static class RbacMigrationSeeder
     private static readonly string[] s_clonedTemplates =
         ["agent", "supervisor", "quality_analyst", "manager", "admin", "system_admin", "api"];
 
+    // The templates setup clones under its own ids (DefaultTenantRole.SetupRoleIdPrefixFor), whose copies gain the
+    // contact delete grant at start-up (contacts-writes-follow-their-permissions, design D6).
+    private static readonly string[] s_setupTemplatesGrantedContactDelete = ["admin", "platform_admin"];
+
+    private const string ContactDeletePermission = "contacts:contact:delete";
+
     public static Task MigrateExistingUsersAsync(NpgsqlDataSource dataSource, CancellationToken ct = default) =>
         MigrateExistingUsersAsync(dataSource, NullLogger.Instance, ct);
 
@@ -112,6 +118,30 @@ internal static class RbacMigrationSeeder
                 {
                     p.Add(new NpgsqlParameter("TenantId", tenantId));
                     p.Add(new NpgsqlParameter("TemplateId", templateId));
+                },
+                tx, ct);
+        }
+
+        // 2b. contacts-writes-follow-their-permissions (design D6): the roles setup creates, admin-{tenant} and
+        // platform-admin-{tenant}, are not reached by the copy above (their ids are not template ids, and the `admin`
+        // clone is a no-op beside a role named "Admin"). Each gains contacts:contact:delete, and only that id, while its
+        // source is still the template setup cloned it from. Additive: nothing is removed, no other grant is copied.
+        foreach (var setupTemplate in s_setupTemplatesGrantedContactDelete)
+        {
+            await conn.ExecuteAsync(
+                "INSERT INTO tenant_role_permissions (tenant_id, role_id, permission_id) " +
+                "SELECT tr.tenant_id, tr.role_id, @Permission FROM tenant_roles tr " +
+                "WHERE tr.tenant_id = @TenantId AND tr.role_id = @RoleId AND tr.source_template_id = @TemplateId " +
+                "ON CONFLICT (tenant_id, role_id, permission_id) DO NOTHING",
+                p =>
+                {
+                    p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId });
+                    p.Add(new NpgsqlParameter("RoleId", NpgsqlDbType.Text)
+                    {
+                        Value = DefaultTenantRole.SetupRoleIdPrefixFor(setupTemplate) + tenantId,
+                    });
+                    p.Add(new NpgsqlParameter("TemplateId", NpgsqlDbType.Text) { Value = setupTemplate });
+                    p.Add(new NpgsqlParameter("Permission", NpgsqlDbType.Text) { Value = ContactDeletePermission });
                 },
                 tx, ct);
         }

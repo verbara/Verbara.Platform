@@ -12,10 +12,13 @@ internal sealed class InMemoryContactStore : IContactStore
     // before or wholly after it, never in between. Reads stay lock-free.
     private readonly Lock _writeGate = new();
 
+    // A copy, as Postgres reads a new row: a caller that changes the contact it read changes nothing stored until it
+    // saves, so a write that fails leaves the stored contact as it was (contacts-writes-follow-their-permissions D17).
+    // Taken under the write gate, so it never sees a write half applied.
     public Task<Contact?> GetByIdAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
-        _items.TryGetValue((tenantId, contactId), out var item);
-        return Task.FromResult(item);
+        lock (_writeGate)
+            return Task.FromResult(_items.TryGetValue((tenantId, contactId), out var item) ? Copy(item) : null);
     }
 
     public Task<Contact?> FindByAddressAsync(TenantId tenantId, ChannelAddress address, CancellationToken ct)
@@ -25,6 +28,26 @@ internal sealed class InMemoryContactStore : IContactStore
             c.Addresses.Any(a => a.Channel == address.Channel && a.Address == address.Address));
 
         return Task.FromResult(result);
+    }
+
+    public Task<IReadOnlyList<Contact>> FindAllByChannelAddressAsync(
+        TenantId tenantId, ChannelType channel, string address, int limit, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+        var key = ChannelAddressMatch.KeyOf(channel, address);
+        if (key.Length == 0)
+            return Task.FromResult<IReadOnlyList<Contact>>([]);
+
+        IReadOnlyList<Contact> result = _items.Values
+            .Where(c => c.TenantId == tenantId && c.Addresses.Any(a => a.Channel == channel && Matches(a.Address)))
+            .OrderByDescending(c => c.DoNotContact)
+            .ThenByDescending(c => c.ChannelConsent.TryGetValue(channel, out var consented) && !consented)
+            .ThenBy(c => c.ContactId.Value, StringComparer.Ordinal)
+            .Take(Math.Max(0, limit))
+            .ToList();
+        return Task.FromResult(result);
+
+        bool Matches(string stored) => string.Equals(ChannelAddressMatch.KeyOf(channel, stored), key, StringComparison.Ordinal);
     }
 
     public Task<PagedResult<Contact>> SearchAsync(TenantId tenantId, string? searchTerm, PagedQuery query, CancellationToken ct)

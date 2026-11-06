@@ -1409,7 +1409,7 @@ internal static class RoleDefaultPermissions
         "contacts:conversation:handle", "contacts:conversation:transfer", "contacts:conversation:monitor",
         "contacts:conversation:barge", "contacts:conversation:whisper", "contacts:conversation:read",
         "contacts:contact:view",
-        "contacts:contact:edit", "contacts:contact:create",
+        "contacts:contact:edit", "contacts:contact:create", "contacts:contact:delete",
         "queues:queue:view", "queues:queue:create", "queues:queue:edit", "queues:queue:delete",
         "queues:member:assign",
         "users:user:view", "users:user:create", "users:user:edit", "users:user:deactivate",

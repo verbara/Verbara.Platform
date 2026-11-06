@@ -218,6 +218,9 @@ public static class ServiceCollectionExtensions
 
         // Audit
         services.AddSingleton<IAuditStore, PostgresAuditStore>();
+        // contacts-writes-follow-their-permissions (D17): a contact change and its audit record in one transaction on the
+        // data source the contact store and the audit store share.
+        services.AddSingleton<IContactAuditWriter, PostgresContactAuditWriter>();
 
         // Dialer license-enforcement audit sink (dialer-license-audit-sink, Pro/ADR-0016).
         // Implements the OPTIONAL Pro seam IDialerLicenseAuditSink; the Pro DialerEngine resolves it
