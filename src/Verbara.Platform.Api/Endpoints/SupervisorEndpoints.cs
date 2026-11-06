@@ -24,12 +24,14 @@ internal static class SupervisorEndpoints
         var group = app.MapGroup("/supervisor").RequireAuthorization("SupervisorPlus").RequireOperationalTenant();
 
         // Voice sessions
-        group.MapGet("/sessions/active", GetActiveSessions);
+        group.MapGet("/sessions/active", GetActiveSessions)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapPost("/sessions/{sessionId}/whisper", PostWhisper);
         group.MapPost("/sessions/{sessionId}/listen", PostListen);
 
         // Digital conversations
-        group.MapGet("/conversations", ListDigitalConversations);
+        group.MapGet("/conversations", ListDigitalConversations)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapGet("/conversations/{id}/messages", GetConversationMessages)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound);
@@ -38,7 +40,8 @@ internal static class SupervisorEndpoints
         group.MapPost("/conversations/{id}/note", SendCoachingNote);
 
         // W5 (A7) — stuck-work visibility + manual reassign
-        group.MapGet("/conversations/stuck", GetStuckConversations);
+        group.MapGet("/conversations/stuck", GetStuckConversations)
+            .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapPost("/conversations/{id}/reassign", ReassignConversation);
 
         // W5b — voice-appropriate counterpart to reassign: re-arm the rescue of a
@@ -53,17 +56,35 @@ internal static class SupervisorEndpoints
 
     // ─── Handlers ─────────────────────────────────────────────────────────────
 
-    private static async Task<Ok<ActiveSessionDto[]>> GetActiveSessions(
+    /// <summary>
+    /// design D2: the tenant-wide supervisor reads (the conversation list, stuck work and active sessions) show other
+    /// agents' work, so they answer only a caller that reads every conversation of the tenant (the conversation read
+    /// rule's <see cref="ConversationReaderClass.ReadsAll"/>). Returns the 403 <c>not-readable</c> refusal otherwise,
+    /// or <see langword="null"/> when the caller may read. Called before any store or session read.
+    /// </summary>
+    private static async Task<JsonHttpResult<ErrorResponse>?> RefuseUnlessReadsAllAsync(
+        HttpContext context, TenantId tenantId, IAgentStore agents, CancellationToken ct)
+    {
+        var readerClass = await ConversationReaderClass.ResolveAsync(context, tenantId, agents, ct);
+        return readerClass.ReadsAll ? null : ConversationReadRule.Refusal();
+    }
+
+    private static async Task<Results<Ok<ActiveSessionDto[]>, JsonHttpResult<ErrorResponse>>> GetActiveSessions(
         HttpContext context,
         [FromServices] IConversationStore conversations,
+        [FromServices] IAgentStore agents,
         CancellationToken ct)
     {
+        var tenantId = GetTenantId(context);
+        if (await RefuseUnlessReadsAllAsync(context, tenantId, agents, ct) is { } refusal)
+            return refusal;
+
         var supervisor = context.RequestServices.GetService<AgentAssistSupervisor>();
         if (supervisor is null)
             return TypedResults.Ok(Array.Empty<ActiveSessionDto>());
 
         var sessions = supervisor.ActiveSessions.Values.Select(s => (s.SessionId, s.CallSession)).ToList();
-        return TypedResults.Ok(await ToActiveSessionsAsync(sessions, GetTenantId(context), conversations, ct));
+        return TypedResults.Ok(await ToActiveSessionsAsync(sessions, tenantId, conversations, ct));
     }
 
     /// <summary>
@@ -130,9 +151,10 @@ internal static class SupervisorEndpoints
 
     // ─── Digital Conversation Monitoring ─────────────────────────────────────────
 
-    private static async Task<Ok<PagedResult<Conversation>>> ListDigitalConversations(
+    private static async Task<Results<Ok<PagedResult<Conversation>>, JsonHttpResult<ErrorResponse>>> ListDigitalConversations(
         HttpContext context,
         [FromServices] IConversationStore store,
+        [FromServices] IAgentStore agents,
         [FromQuery] string? queue,
         [FromQuery] string? agent,
         [FromQuery] string? channel,
@@ -142,6 +164,8 @@ internal static class SupervisorEndpoints
         CancellationToken ct = default)
     {
         var tenantId = GetTenantId(context);
+        if (await RefuseUnlessReadsAllAsync(context, tenantId, agents, ct) is { } refusal)
+            return refusal;
 
         ConversationState? parsedState = null;
         if (state is not null && Enum.TryParse<ConversationState>(state, ignoreCase: true, out var s))
@@ -285,13 +309,15 @@ internal static class SupervisorEndpoints
     /// offline-agent + failover-work-by-owner queries (N+1 over a tenant's offline agents
     /// is fine for a supervisor-initiated query).
     /// </summary>
-    private static async Task<Ok<IReadOnlyList<StuckConversationDto>>> GetStuckConversations(
+    private static async Task<Results<Ok<IReadOnlyList<StuckConversationDto>>, JsonHttpResult<ErrorResponse>>> GetStuckConversations(
         HttpContext context,
         [FromServices] IAgentStore agentStore,
         [FromServices] IConversationStore conversationStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        if (await RefuseUnlessReadsAllAsync(context, tenantId, agentStore, ct) is { } refusal)
+            return refusal;
 
         // Page through ALL offline agents (large page so a single call covers them).
         var offline = await agentStore.ListAsync(
