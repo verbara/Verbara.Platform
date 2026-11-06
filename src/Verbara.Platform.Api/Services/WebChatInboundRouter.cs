@@ -14,10 +14,11 @@ namespace Verbara.Platform.Api.Services;
 /// conversations are pre-created (owner-less, in <see cref="ConversationState.Queued"/>) at
 /// session open, and the inbound pipeline only persists messages — it never routes/assigns —
 /// so <c>QueueDistributionWorker</c> (which skips owner-less conversations) never offers them
-/// to an agent. This bridge closes that gap. It routes the session's first inbound message and any
-/// message whose conversation still needs routing (<see cref="WebhookInboundProcessor.NeedsRouting"/>: the
-/// session's conversation ended, so the pipeline created a fresh owner-less one, or reused one still queued
-/// and owner-less); other messages are only published on the live stream (contact-history-opens-by-assignment, design D17).
+/// to an agent. This bridge closes that gap. It routes a message whose conversation still needs routing
+/// (<see cref="WebhookInboundProcessor.NeedsRouting"/>: the session's own owner-less conversation, a fresh one the
+/// pipeline created after the session's conversation ended, or one still queued and owner-less), as the webhook path
+/// does; a conversation already distributed is not routed again on a new session. Other messages are only published on
+/// the live stream (contact-history-opens-by-assignment, design D17).
 /// </summary>
 internal sealed partial class WebChatInboundRouter
 {
@@ -29,6 +30,8 @@ internal sealed partial class WebChatInboundRouter
     private readonly WebChatSessionManager _sessionManager;
     private readonly CustomerReturnAnnouncer _returnAnnouncer;
     private readonly ILogger<WebChatInboundRouter> _logger;
+
+    private static readonly IReadOnlyDictionary<string, string> EmptyMetadata = new Dictionary<string, string>();
 
     public WebChatInboundRouter(
         IInboundRouter router,
@@ -70,9 +73,10 @@ internal sealed partial class WebChatInboundRouter
         });
 
     /// <summary>
-    /// Routes and assigns the conversation to a queue on the session's first inbound message, or when the conversation
-    /// the message was stored in still needs routing (<see cref="WebhookInboundProcessor.NeedsRouting"/>: it is new, or
-    /// <c>Queued</c> with no owner). Other calls keep the session on the visitor's conversation and publish the message.
+    /// Routes and assigns the conversation to a queue when the conversation the message was stored in still needs routing
+    /// (<see cref="WebhookInboundProcessor.NeedsRouting"/>: it is new, or <c>Queued</c> with no owner), or, when it could
+    /// not be read, on the session's first inbound message. Other calls keep the session on the visitor's conversation and
+    /// publish the message.
     /// Every non-duplicate message is published as the webhook path publishes it, so the agent UI updates live.
     /// </summary>
     /// <remarks>
@@ -105,16 +109,20 @@ internal sealed partial class WebChatInboundRouter
             session.ConversationId = pipelineResult.ConversationId;
         }
 
-        // Route the session's first message, and any message whose conversation still needs routing: one the message
-        // opened (the session's conversation ended), or one still queued and owner-less (a replacement another
-        // delivery opened, or an earlier routing that found no queue) — the predicate the webhook path uses.
+        // Route a message whose conversation still needs routing — the predicate the webhook path uses: one the message
+        // opened (the session's conversation ended), or one still queued and owner-less (the conversation the session
+        // was created with, a replacement another delivery opened, or an earlier routing that found no queue). A
+        // conversation already distributed is never routed again, even on a new session's first message: a page reload
+        // must not pull an open offer back to the queue, restart the queue clock, nor stamp a preference the first offer
+        // consumed (conversations-return-to-last-agent review round). A conversation an agent holds keeps its agent.
+        // Only a conversation that could not be read falls back to the session's first-message mark.
         var firstOfSession = _sessionManager.TryMarkRouted(sessionId);
         var conversation = await ReadForPublishAsync(tenantId, pipelineResult.ConversationId).ConfigureAwait(false);
 
-        // A session's first message can answer a conversation an agent started towards it: the agent keeps it.
-        var heldByAgent = conversation?.Owner?.Kind == ConversationOwnerKind.Agent;
-        if ((!firstOfSession || heldByAgent)
-            && (conversation is null || !WebhookInboundProcessor.NeedsRouting(pipelineResult, conversation)))
+        var routes = conversation is null
+            ? firstOfSession
+            : WebhookInboundProcessor.NeedsRouting(pipelineResult, conversation);
+        if (!routes)
         {
             // Every stored message is published, not only the one that routes (contact-history-opens-by-assignment,
             // design D17, spec audit F3): a later message of an Offered or Active conversation reaches its agent live.
@@ -149,9 +157,13 @@ internal sealed partial class WebChatInboundRouter
             // ReasonHintMiddleware's "reasonPath") onto the conversation BEFORE assignment.
             // WebChat does NOT run the bot here, so there is no C6 FlowMetadata path in this bridge.
             // AssignToQueueAsync reloads + persists the row, so this metadata round-trips through it.
-            if (routeResult.Metadata is { Count: > 0 })
+            // The route's last-agent preference replaces any an earlier attempt left (conversations-return-to-last-agent
+            // D3), and is saved even when the route carries no other metadata: the reload in AssignToQueueAsync would
+            // lose it.
+            var preferenceChanged = RoutePreferenceStamp.Apply(conversation, routeResult);
+            if (routeResult.Metadata is { Count: > 0 } || preferenceChanged)
             {
-                foreach (var kv in routeResult.Metadata)
+                foreach (var kv in routeResult.Metadata ?? EmptyMetadata)
                     conversation.SetMetadata(kv.Key, kv.Value);
                 await _conversationStore.SaveAsync(conversation, ct).ConfigureAwait(false);
             }

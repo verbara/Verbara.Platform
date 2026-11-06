@@ -343,6 +343,9 @@ internal sealed class HookedConversationStore(IConversationStore inner) : IConve
     public Task<PagedResult<ContactConversationSummary>> ListContactSummariesAsync(
         TenantId tenantId, EntityId contactId, EntityId? ownedByAgentId, int page, int pageSize, CancellationToken ct) =>
         inner.ListContactSummariesAsync(tenantId, contactId, ownedByAgentId, page, pageSize, ct);
+    public Task<EntityId?> FindLastAgentOwnerAsync(TenantId tenantId, EntityId contactId, DateTimeOffset since, CancellationToken ct) =>
+        inner.FindLastAgentOwnerAsync(tenantId, contactId, since, ct);
+
     public Task<bool> HoldsOpenConversationOfContactAsync(TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct) =>
         inner.HoldsOpenConversationOfContactAsync(tenantId, contactId, agentId, ct);
 

@@ -26,7 +26,23 @@ channel, whoever handles a contact can record its opt-out, and every do-not-cont
 who made it. Read **Changed — BREAKING** and **Upgrading**: an integration may now get 403 `not-permitted` on the
 contact writes.
 
+A returning customer can be offered first to the agent who last served them, per host or per queue. It is off until you
+turn it on: read **Upgrading**.
+
 ### Added
+
+- **Returning-customer routing to the last agent, off by default.** When it is on, a new digital conversation is offered
+  first to the agent who owned the customer's most recent conversation (any channel, any state but `Merged` and `Spam`,
+  an open one included) within `InboundRouting:LastAgent:WindowHours` (default `72`, `1` to `720`), or within the
+  tenant's inactivity window when that is longer and the inactivity close is on. That agent must be able to take it
+  now; otherwise it goes to round robin in the same pass, and a reject or an expired offer never brings it back to that
+  agent because of the preference. The host switch `InboundRouting:LastAgent:Enabled` defaults to `false`; the new nullable
+  column `queue_configs.last_agent_routing_enabled`, set by SQL only, turns it on or off for a queue, read for the queue
+  the conversation is finally routed to. While the conversation waits, `GET /api/v1/conversations/{id}` shows
+  `metadata._preferredAgentId`, replaced by `metadata._preferredAgentOutcome` (`offered-preferred` or `fallback`) at the
+  first offer; the counter `routing.last_agent{outcome}` of the meter `verbara.platform.routing` counts each decision.
+  Shared contacts and unverified WebChat visitors get no preference, and voice does not use it. Settings, the SQL and the
+  signals: `docs/operations/last-agent-routing.md`.
 
 - **`PUT /api/v1/contacts/{id}` stores `channelConsent`.** A map from channel name to `true` or `false`, each key the name
   of a channel exactly as `GET` writes it (`Voice`, `WhatsApp`, `Sms`, `WebChat`, `Email`, ...), compared by exact case.
@@ -199,6 +215,14 @@ contact writes.
 
 ### Fixed
 
+- **A WebChat page reload no longer routes the conversation again.** A new session's first message routed the
+  conversation it was stored in even when that conversation was already in a queue or offered to an agent: an open offer
+  went back to the queue and the queue wait started over. It now routes only a conversation that still needs it, a new one
+  or one not yet assigned to a queue, as a WhatsApp message does.
+- **One offer publishes one `conversation.offered`.** An offer made by the queue distribution reached the live stream
+  twice, from the switchboard and again from the distribution worker, so the console showed two notifications and
+  counted two on its badge. The worker no longer publishes it; the switchboard publishes it once, right after the save
+  that records the offer.
 - **An agent's reply reaches the session its conversation belongs to.** A reply went to the first WebChat address of the
   contact, which for a contact with several sessions could be one that had ended, and it was marked failed with
   `SESSION_NOT_CONNECTED`. A conversation now records its session's address and replies through it. A conversation from
@@ -220,6 +244,13 @@ contact writes.
 
 ### Upgrading
 
+- **Last-agent routing stays off until you turn it on.** Set `InboundRouting__LastAgent__Enabled=true` on the Api and
+  restart it to turn it on for every queue, or turn it on for one queue with
+  `UPDATE queue_configs SET last_agent_routing_enabled = true WHERE tenant_id = '…' AND queue_id = '…';` (`false` turns
+  it off for that queue under a host switch that is on, `NULL` follows the host). A queue change applies to the next
+  routed conversation, with no restart. **Migration `030` runs at start-up**: it adds that nullable column, changing only
+  the catalog under a brief lock on `queue_configs`. A rollback to the previous image leaves the column, which that image
+  never reads or writes.
 - **An integration may now get 403 `not-permitted` on the contact writes.** A tenant API key bound to no user carries no
   role and no permission, so it is refused `POST`, `PUT` and `DELETE /api/v1/contacts` and the opt-out route. To keep it
   working, bind the key to a user whose role is `Api` (create and update; delete stays with the admin roles), grant its

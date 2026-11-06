@@ -28,6 +28,8 @@
     <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\ContactConversationSummaryStoreContract.cs" Link="Stores\ContactConversationSummaryStoreContract.cs" />
     <!-- contact-history-opens-by-assignment 2.4: the newest-first keyset history on both stores. -->
     <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\MessageHistoryStoreContract.cs" Link="Stores\MessageHistoryStoreContract.cs" />
+    <!-- conversations-return-to-last-agent 1.3: the last-agent lookup (design D4) on both stores. -->
+    <Compile Include="..\Verbara.Platform.Storage.InMemory.Tests\LastAgentOwnerStoreContract.cs" Link="Stores\LastAgentOwnerStoreContract.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -20,7 +20,7 @@ internal sealed class PostgresQueueStore : IQueueStore
         var row = await _dataSource.QuerySingleOrDefaultAsync(
             "SELECT queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
             "required_skills, auto_answer_default, csat_enabled, csat_channel, csat_prompt_id, csat_sampling_rate, " +
-            "created_at, updated_at, created_by, updated_by " +
+            "created_at, updated_at, created_by, updated_by, last_agent_routing_enabled " +
             "FROM queue_configs WHERE tenant_id = @TenantId AND queue_id = @QueueId",
             p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("QueueId", queueId.Value)); },
             QueueRow.Map, ct);
@@ -35,7 +35,7 @@ internal sealed class PostgresQueueStore : IQueueStore
         var row = await _dataSource.QueryFirstOrDefaultAsync(
             "SELECT queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
             "required_skills, auto_answer_default, csat_enabled, csat_channel, csat_prompt_id, csat_sampling_rate, " +
-            "created_at, updated_at, created_by, updated_by " +
+            "created_at, updated_at, created_by, updated_by, last_agent_routing_enabled " +
             "FROM queue_configs WHERE tenant_id = @TenantId AND name = @Name " +
             "ORDER BY is_active DESC, queue_id LIMIT 1",
             p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Name", name)); },
@@ -51,7 +51,7 @@ internal sealed class PostgresQueueStore : IQueueStore
         var rows = await _dataSource.QueryListAsync(
             "SELECT queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
             "required_skills, auto_answer_default, csat_enabled, csat_channel, csat_prompt_id, csat_sampling_rate, " +
-            "created_at, updated_at, created_by, updated_by " +
+            "created_at, updated_at, created_by, updated_by, last_agent_routing_enabled " +
             "FROM queue_configs WHERE tenant_id = @TenantId ORDER BY name LIMIT @Limit OFFSET @Offset",
             p => { p.Add(new NpgsqlParameter("TenantId", tenantId.Value)); p.Add(new NpgsqlParameter("Limit", query.PageSize)); p.Add(new NpgsqlParameter("Offset", query.Offset)); },
             QueueRow.Map, ct);
@@ -71,7 +71,7 @@ internal sealed class PostgresQueueStore : IQueueStore
         var rows = await _dataSource.QueryListAsync(
             "SELECT queue_id, tenant_id, name, is_active, max_waiting, sla_targets, overflow_rule, hours, wrap_up, " +
             "required_skills, auto_answer_default, csat_enabled, csat_channel, csat_prompt_id, csat_sampling_rate, " +
-            "created_at, updated_at, created_by, updated_by " +
+            "created_at, updated_at, created_by, updated_by, last_agent_routing_enabled " +
             "FROM queue_configs WHERE tenant_id = @TenantId AND (@After IS NULL OR queue_id > @After) " +
             "ORDER BY queue_id LIMIT @Limit",
             p =>
@@ -101,6 +101,9 @@ internal sealed class PostgresQueueStore : IQueueStore
         var wrapUpJson = JsonSerializer.Serialize(queue.WrapUp, PostgresJson.Ctx.WrapUpConfig);
         var skillsJson = JsonSerializer.Serialize(queue.RequiredSkills, PostgresJson.Ctx.IReadOnlyListString);
 
+        // last_agent_routing_enabled is set by SQL only (conversations-return-to-last-agent design D2): this upsert names it
+        // in neither the column list nor DO UPDATE SET, so a new row gets NULL and a save never changes it, even a save of
+        // an entity loaded before an operator set the column.
         try
         {
             await _dataSource.ExecuteAsync(
@@ -190,6 +193,7 @@ internal sealed class PostgresQueueStore : IQueueStore
         public DateTime? updated_at { get; init; }
         public string? created_by { get; init; }
         public string? updated_by { get; init; }
+        public bool? last_agent_routing_enabled { get; init; }
 
         public static QueueRow Map(NpgsqlDataReader r) => new()
         {
@@ -212,6 +216,7 @@ internal sealed class PostgresQueueStore : IQueueStore
             updated_at = r.GetDateTimeOrNull("updated_at"),
             created_by = r.GetStringOrNull("created_by"),
             updated_by = r.GetStringOrNull("updated_by"),
+            last_agent_routing_enabled = r.GetBooleanOrNull("last_agent_routing_enabled"),
         };
 
         public Queue ToQueue() => new()
@@ -250,6 +255,7 @@ internal sealed class PostgresQueueStore : IQueueStore
             UpdatedAt = updated_at,
             CreatedBy = created_by,
             UpdatedBy = updated_by,
+            LastAgentRoutingEnabled = last_agent_routing_enabled,
         };
     }
 }

@@ -55,7 +55,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     private readonly ITenantAutonomousDispositionStore? _gateStore;
 
     private readonly ConversationOptions _conversationOptions;
-    private readonly ITenantAuthConfigStore? _tenantAuthConfigStore;
+    private readonly TenantInactivityWindowResolver _windowResolver;
 
     // D13: the system-close counter; only a won close increments it. Optional so existing ctor usages keep compiling.
     private readonly ConversationCloseMetrics? _closeMetrics;
@@ -106,7 +106,7 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
         _autonomousMetrics = autonomousMetrics;
         _gateStore = gateStore;
         _conversationOptions = conversationOptions?.Value ?? new ConversationOptions();
-        _tenantAuthConfigStore = tenantAuthConfigStore;
+        _windowResolver = new TenantInactivityWindowResolver(_conversationOptions, tenantAuthConfigStore);
         _closeMetrics = closeMetrics;
     }
 
@@ -362,33 +362,30 @@ internal sealed partial class ConversationTimeoutWorker : BackgroundService
     /// </summary>
     private async Task<TimeSpan?> InactivityWindowAsync(TenantId tid, DateTimeOffset now, CancellationToken ct)
     {
-        var hours = _conversationOptions.InactivityCloseAfterHours;
-        if (_tenantAuthConfigStore is not null)
+        // The resolution and its validity rules are shared with last-agent routing's clamp
+        // (conversations-return-to-last-agent task 2.1); the warnings and the skip on a failed read stay here.
+        InactivityWindowResolution resolution;
+        try
         {
-            int? stored;
-            try
-            {
-                stored = (await _tenantAuthConfigStore.GetAsync(tid.Value, ct))?.InactivityCloseAfterHours;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                LogInactivityWindowReadFailed(tid.Value, ex);
-                return null;
-            }
+            resolution = await _windowResolver.ResolveAsync(tid, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogInactivityWindowReadFailed(tid.Value, ex);
+            return null;
+        }
 
-            if (stored is { } tenantHours)
+        var hours = resolution.Hours;
+        if (resolution.StoredOverrideHours is { } tenantHours)
+        {
+            if (!resolution.OverrideApplied)
             {
-                if (tenantHours < ConversationOptionsSetup.MinAfterHours)
-                {
-                    if (_invalidWindowWarned.Add(tid.Value))
-                        LogInactivityWindowInvalid(tid.Value, tenantHours, hours);
-                }
-                else
-                {
-                    hours = tenantHours;
-                    if (tenantHours < ConversationOptionsSetup.WhatsAppWindowHours && _belowWhatsAppWarned.Add(tid.Value))
-                        LogInactivityWindowBelowWhatsApp(tid.Value, tenantHours, ConversationOptionsSetup.WhatsAppWindowHours);
-                }
+                if (_invalidWindowWarned.Add(tid.Value))
+                    LogInactivityWindowInvalid(tid.Value, tenantHours, hours);
+            }
+            else if (tenantHours < ConversationOptionsSetup.WhatsAppWindowHours && _belowWhatsAppWarned.Add(tid.Value))
+            {
+                LogInactivityWindowBelowWhatsApp(tid.Value, tenantHours, ConversationOptionsSetup.WhatsAppWindowHours);
             }
         }
 

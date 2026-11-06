@@ -84,6 +84,9 @@ internal static class ConversationOptionsSetup
         services.AddConversationOptionsBinding();
         services.AddSingleton<ConversationCloseMetrics>();
         services.AddSingleton<CustomerReturnAnnouncer>();
+        // The tenant's effective inactivity window, read by last-agent routing's clamp with the worker's validity rules
+        // (conversations-return-to-last-agent task 2.1).
+        services.AddSingleton<IInactivityWindowResolver, TenantInactivityWindowResolver>();
         return services;
     }
 
