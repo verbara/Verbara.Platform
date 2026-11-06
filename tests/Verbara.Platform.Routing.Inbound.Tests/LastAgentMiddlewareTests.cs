@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute.ReturnsExtensions;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
@@ -151,7 +152,7 @@ public sealed class LastAgentMiddlewareTests : IDisposable
     [Fact]
     public async Task RouteAsync_ShouldFollowTheHost_WhenTheQueueIsMissingFromTheStore()
     {
-        _queues.GetByIdAsync(Tenant, Q1, Arg.Any<CancellationToken>()).Returns((Queue?)null);
+        _queues.GetByIdAsync(Tenant, Q1, Arg.Any<CancellationToken>()).ReturnsNull();
         OwnerIs(AgentA);
 
         (await Middleware(hostEnabled: false).RouteAsync(MakeContext(), RouteTo(Q1), CancellationToken.None))!
