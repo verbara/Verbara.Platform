@@ -39,16 +39,18 @@ contact writes.
   restricts: it never clears do-not-contact and never records `true`, which stays with `PUT`. It needs
   `contacts:conversation:handle`, so the agent, supervisor, manager and admin roles may send it; any other caller gets
   403 `{"error":"not-permitted"}`. A channel name outside the list answers 400 `unknown-consent-channel`, an unknown id
-  answers 404 with no body, and the answer is the contact, 200. A body that changes nothing answers 200 and writes
-  nothing.
+  answers 404 with no body, and the answer is the contact, 200. A body that changes nothing, or no body at all, answers
+  200 and writes nothing.
 - **Do-not-contact and consent changes are recorded with who made them.** A `PUT` that changes `doNotContact` or a
-  `channelConsent` value, an opt-out that changes something, and a `DELETE` that removes a contact write one audit record,
-  category `contact`, action `contact.consent_changed`, `contact.opted_out` or `contact.deleted`, kept for five years.
-  Its `changes` hold the before and after of `doNotContact` and `channelConsent` only. The actor is the signed-in user,
-  the user a key is bound to, or the key itself (`actorType` `api_key`) for a key bound to no user, and the contact's
-  `updatedBy` is set to the same id. The change and its record are written together: if the record cannot be written,
-  the contact is left as it was and the request fails. A `PUT` that changes neither member writes no record and keeps
-  the previous `updatedBy`.
+  `channelConsent` value, an opt-out that changes something, and a `DELETE` that removes a contact write one audit
+  record, category `contact`, action `contact.consent_changed`, `contact.opted_out` or `contact.deleted`, kept for five
+  years. Its `changes` hold the before and after of `doNotContact` and `channelConsent` only. The actor is the signed-in
+  user, the user a key is bound to, or the key itself (`actorType` `api_key`) for a key bound to no user, and the
+  contact's `updatedBy` is set to the same id. Under impersonation the record's `metadata` also names the impersonating
+  administrator, their home tenant and the impersonation session (`impersonator_id`, `impersonator_tenant`,
+  `impersonation_session_id`), as other audited changes do. The change and its record are written together: if the
+  record cannot be written, the contact is left as it was and the request fails. A `PUT` that changes neither member
+  writes no record and keeps the previous `updatedBy`.
 - **The permission `contacts:contact:delete`**: delete contacts (it implies `contacts:contact:view`). It is granted to
   the admin templates. The `Api` role template also gains `contacts:contact:create` and `contacts:contact:edit`.
 
@@ -115,7 +117,8 @@ contact writes.
 - **Creating, updating and deleting a contact require their permission.** `POST /api/v1/contacts` needs
   `contacts:contact:create`, `PUT /api/v1/contacts/{id}` needs `contacts:contact:edit` and `DELETE /api/v1/contacts/{id}`
   needs `contacts:contact:delete`. A caller without it gets 403 `{"error":"not-permitted"}`, checked before anything
-  else, so it learns neither whether the id exists nor whether its body was valid. The reads are unchanged. The Admin
+  else, before the body is even read, so it learns neither whether the id exists nor whether its body was valid (a body
+  that is not valid JSON, or names an unknown channel, gets the same 403). The reads are unchanged. The Admin
   and SystemAdmin roles pass, management keys included, and an impersonation token passes only on a permission it was
   issued with.
 
@@ -134,9 +137,12 @@ contact writes.
   `contactId` names another or an unknown contact; otherwise it answers 409 with `contact-consent-withdrawn` when one of
   them recorded `false` for `Voice`. Nothing rings and no contact is created, and if the contacts cannot be read the dial
   fails rather than ringing. `POST /api/v1/conversations` with a first message answers 409
-  `{"error":"contact-do-not-contact"}` for a marked contact, else `{"error":"contact-consent-withdrawn"}` when the
-  contact recorded `false` for that channel; nothing is sent or stored. Continuing the caller's own open conversation
-  with the contact is not refused, and a channel with no recorded answer, or `true`, is placed as before.
+  `{"error":"contact-do-not-contact"}` when the contact, or any other contact of the tenant holding the same address on
+  that channel, is marked, else `{"error":"contact-consent-withdrawn"}` when one of them recorded `false` for that
+  channel; nothing is sent or stored. On Voice, SMS, WhatsApp and RCS two addresses are the same number when their
+  digits and leading plus match, as for the dial; on any other channel when they are equal once leading and trailing
+  spaces, tabs and line breaks are removed. Continuing the caller's own open conversation with the contact is not
+  refused, and a channel with no recorded answer, or `true`, is placed as before.
 - **`POST` and `PUT /api/v1/contacts` refuse the WebChat identity key forms.** A WebChat address that starts with
   `webchat-visitor:` or `webchat-external:`, compared by exact case, answers 400 `reserved-contact-address`, with the
   addresses in `details`, and nothing is written. That refusal comes before the contact is read, so a `PUT` on an unknown id
@@ -227,7 +233,8 @@ contact writes.
 - **Click-to-dial matches a dialed number to a contact by its digits and a leading `+`.** A stored Voice address written
   with spaces, dashes or brackets (`+1 (555) 123-4567`) matches a dial of `+15551234567`. No country or trunk prefix is
   added or removed, so a stored number without `+` dialed with it, or the reverse, is not matched by the number; the
-  dial still checks the contact its `contactId` names. Store contacts' Voice numbers in one form to avoid this.
+  dial still checks the contact its `contactId` names. Starting a conversation on SMS, WhatsApp or RCS matches numbers
+  the same way, and still checks the contact it names. Store contacts' numbers in one form to avoid this.
 - **Migration `029` runs at start-up**: it lets the audit log hold the category `contact`. It replaces the category
   check of `audit_entries`, which locks that table and reads it once while the check is validated, so on a large audit
   log plan the start-up for it. It is additive; a rollback to the previous image leaves the wider check in place, which
