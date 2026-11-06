@@ -175,7 +175,7 @@ builder.Services.AddPlatformCore();
 builder.Services.AddPlatformConversations().AddConversationInactivityClose(); // options (D1) + close counter (D13)
 builder.Services.AddPlatformChannels();
 builder.Services.AddPlatformQueues();
-builder.Services.AddInboundRouting();
+builder.Services.AddInboundRouting().AddLastAgentRoutingOptionsBinding(); // InboundRouting:LastAgent (conversations-return-to-last-agent D1)
 builder.Services.AddSwitchboard();
 // Bridges WebChat inbound (which only persists messages) to the queue, mirroring the webhook
 // path, so a visitor's chat reaches an agent. See WebChatInboundRouter.
