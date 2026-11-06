@@ -620,6 +620,179 @@ public sealed class VoiceConversationBridgeTests : IDisposable
         result.Should().BeNull();
     }
 
+    // ─── Lease acquisition stamps the live mirrors (call-records-are-written-once D5, task B.3b) ───
+    //
+    // Replica B is a standby: its session engine mirrors every call of the PBX, but the bridge handles none of them
+    // (leader gate), so none of its mirror sessions carries a tenant. When B acquires the voice leader lease, the bridge
+    // stamps each live mirror by its LinkedId: the Conversation the previous leader created, else the trunk leg's
+    // TENANT_ID (round 12 F1); neither leaves it tenant-less, logged, not guessed.
+
+    private (VoiceConversationBridge Bridge, IClusterLeader Leader) CreateStandbyBridge(
+        ILogger<VoiceConversationBridge>? logger = null, TimeProvider? timeProvider = null)
+    {
+        var leader = LeaderStub(isLeader: false);
+        var bridge = new VoiceConversationBridge(
+            _sessions, _serverPool, _conversations, _contacts, _contactStore, _agents, _queues, _capacity, _eventBus,
+            leader, _clock, logger ?? NullLogger<VoiceConversationBridge>.Instance, timeProvider);
+        return (bridge, leader);
+    }
+
+    private CallSession LiveMirror(string linkedId, Conversation? conversation)
+    {
+        var session = MakeSession(linkedId, tenant: null);
+        _sessions.ActiveSessions.Returns([session]);
+        _sessions.GetById(session.SessionId).Returns(session);
+        _sessions.GetByLinkedId(linkedId).Returns(session);
+        _conversations.FindByVoiceLinkedIdAcrossTenantsAsync(linkedId, Arg.Any<CancellationToken>())
+            .Returns(conversation);
+        return session;
+    }
+
+    [Fact]
+    public async Task ObserveLeadershipAsync_ShouldStampTheLiveMirrorWithItsConversationTenant_WhenTheStandbyAcquiresTheVoiceLease()
+    {
+        var session = LiveMirror("link-acq1", VoiceConversation("link-acq1", ConversationState.Active));
+        var (bridge, leader) = CreateStandbyBridge();
+
+        await bridge.ObserveLeadershipAsync();
+        session.TenantId.Should().BeNull("a standby handles no call, so its mirror carries no tenant");
+
+        leader.IsLeader.Returns(true);
+        await bridge.ObserveLeadershipAsync();
+
+        session.TenantId.Should().Be(Tenant,
+            "on acquiring the voice leader lease the bridge stamps each live mirror with the tenant of the Conversation " +
+            "the previous leader created for its LinkedId");
+    }
+
+    [Fact]
+    public async Task ObserveLeadershipAsync_ShouldStampTheTrunkLegTenant_WhenTheLiveMirrorHasNoConversation()
+    {
+        AddPrimaryServer();
+        StubGetVar("Success", "beta");
+        var session = LiveMirror("link-acq2", conversation: null);
+        AddCaller(session, "PJSIP/t-7-00000001");
+        var (bridge, leader) = CreateStandbyBridge();
+
+        leader.IsLeader.Returns(true);
+        await bridge.ObserveLeadershipAsync();
+
+        using var scope = new AssertionScope();
+        session.TenantId.Should().Be("beta",
+            "a call born in the lease gap has no Conversation, so its tenant is read off its live trunk leg (round 12 F1)");
+#pragma warning disable CA2012 // ValueTask in NSubstitute verification
+        await _ami.Received(1).SendActionAsync<GetVarResponse>(
+            Arg.Is<ManagerAction>(a => a is GetVarAction && ((GetVarAction)a).Channel == "PJSIP/t-7-00000001"
+                && ((GetVarAction)a).Variable == "TENANT_ID"),
+            Arg.Any<CancellationToken>());
+#pragma warning restore CA2012
+    }
+
+    [Fact]
+    public async Task ObserveLeadershipAsync_ShouldLeaveTheMirrorTenantlessAndLogIt_WhenNeitherSourceAnswers()
+    {
+        AddPrimaryServer();
+        StubGetVar("Success", "");
+        var session = LiveMirror("link-acq3", conversation: null);
+        AddCaller(session, "PJSIP/t-7-00000002");
+        using var capture = new LogRecordCapture();
+        using var loggerFactory = new LoggerFactory([capture]);
+        var (bridge, leader) = CreateStandbyBridge(loggerFactory.CreateLogger<VoiceConversationBridge>());
+
+        leader.IsLeader.Returns(true);
+        await bridge.ObserveLeadershipAsync();
+
+        using var scope = new AssertionScope();
+        session.TenantId.Should().BeNull("with no Conversation and no TENANT_ID the tenant is not guessed");
+        capture.RecordsContaining("link-acq3").Should().ContainSingle(r => r.Level == LogLevel.Warning,
+            "the mirror left tenant-less is logged with its LinkedId");
+    }
+
+    [Fact]
+    public async Task ObserveLeadershipAsync_ShouldStampOncePerAcquisition_WhenTheLeaseIsRenewed()
+    {
+        var session = LiveMirror("link-acq4", conversation: null);
+        var (bridge, leader) = CreateStandbyBridge();
+
+        leader.IsLeader.Returns(true);
+        await bridge.ObserveLeadershipAsync();
+        await bridge.ObserveLeadershipAsync();
+        await bridge.ObserveLeadershipAsync();
+
+        await _conversations.Received(1).FindByVoiceLinkedIdAcrossTenantsAsync("link-acq4", Arg.Any<CancellationToken>());
+
+        leader.IsLeader.Returns(false);
+        await bridge.ObserveLeadershipAsync();
+        leader.IsLeader.Returns(true);
+        await bridge.ObserveLeadershipAsync();
+
+        await _conversations.Received(2).FindByVoiceLinkedIdAcrossTenantsAsync("link-acq4", Arg.Any<CancellationToken>());
+        session.TenantId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ObserveLeadershipAsync_ShouldNotTouchAnEndedOrStampedSession_WhenTheLeaseIsAcquired()
+    {
+        var stamped = MakeSession("link-acq5", Tenant);
+        var ended = MakeSession("link-acq5b", tenant: null);
+        typeof(CallSession).GetProperty(nameof(CallSession.State))!.SetValue(ended, CallSessionState.Completed);
+        _sessions.ActiveSessions.Returns([stamped, ended]);
+        var (bridge, leader) = CreateStandbyBridge();
+
+        leader.IsLeader.Returns(true);
+        await bridge.ObserveLeadershipAsync();
+
+        using var scope = new AssertionScope();
+        stamped.TenantId.Should().Be(Tenant);
+        ended.TenantId.Should().BeNull("an ended call is the event store's resolver's, not the bridge's");
+        await _conversations.DidNotReceive().FindByVoiceLinkedIdAcrossTenantsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ObserveLeadershipAsync_ShouldStampTheNextMirror_WhenTheLookupOfOneFails()
+    {
+        var failing = MakeSession("link-acq7", tenant: null);
+        var next = MakeSession("link-acq8", tenant: null);
+        _sessions.ActiveSessions.Returns([failing, next]);
+        _conversations.FindByVoiceLinkedIdAcrossTenantsAsync("link-acq7", Arg.Any<CancellationToken>())
+            .ThrowsAsync(new TimeoutException("store down"));
+        _conversations.FindByVoiceLinkedIdAcrossTenantsAsync("link-acq8", Arg.Any<CancellationToken>())
+            .Returns(VoiceConversation("link-acq8", ConversationState.Active));
+        var (bridge, leader) = CreateStandbyBridge();
+
+        leader.IsLeader.Returns(true);
+        await bridge.ObserveLeadershipAsync();
+
+        using var scope = new AssertionScope();
+        failing.TenantId.Should().BeNull("a failed lookup stamps nothing");
+        next.TenantId.Should().Be(Tenant, "one session's failure does not stop the pass");
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldStampTheLiveMirrors_WhenTheLeaderPollSeesTheLeaseAcquired()
+    {
+        var session = LiveMirror("link-acq6", VoiceConversation("link-acq6", ConversationState.Queued));
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(_clock.UtcNow);
+        var (bridge, leader) = CreateStandbyBridge(timeProvider: time);
+        await bridge.StartAsync(CancellationToken.None);
+        try
+        {
+            time.Advance(TimeSpan.FromSeconds(1));
+            leader.IsLeader.Returns(true);
+            time.Advance(TimeSpan.FromSeconds(1));
+
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (session.TenantId is null && DateTime.UtcNow < deadline)
+                await Task.Delay(10);
+
+            session.TenantId.Should().Be(Tenant, "the bridge polls the voice leader lease and stamps on its acquisition");
+        }
+        finally
+        {
+            await bridge.StopAsync(CancellationToken.None);
+        }
+    }
+
     // ─── ResolveReasonFromChannelAsync (Typification P1 implicit voice capture — VERBARA_REASON) ───
 
     [Fact]

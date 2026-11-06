@@ -34,6 +34,7 @@ public sealed class EventStoreReplicaFactory : WebApplicationFactory<Program>
     private readonly string _analyticsConnectionString;
     private readonly string _clusterConnectionString;
     private readonly ICallSessionManager _sessionManager;
+    private readonly bool _postgresEventStore;
 
     /// <summary>
     /// Creates one replica over the shared database, call session source and voice leader fake. A
@@ -44,7 +45,8 @@ public sealed class EventStoreReplicaFactory : WebApplicationFactory<Program>
         string analyticsConnectionString,
         string clusterConnectionString,
         ICallSessionManager sessionManager,
-        FakeVoiceLeader? voiceLeader)
+        FakeVoiceLeader? voiceLeader,
+        bool postgresEventStore = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(analyticsConnectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(clusterConnectionString);
@@ -53,12 +55,23 @@ public sealed class EventStoreReplicaFactory : WebApplicationFactory<Program>
         _clusterConnectionString = clusterConnectionString;
         _sessionManager = sessionManager;
         VoiceLeader = voiceLeader;
+        _postgresEventStore = postgresEventStore;
     }
+
+    /// <summary>
+    /// The tenant of the test API key (<see cref="AuthenticatedPlatformApiFactory.TestApiKey"/>), set before the host is
+    /// built; <see langword="null"/> leaves the host with no test caller.
+    /// </summary>
+    public string? ApiKeyTenantId { get; init; }
 
     /// <summary>This replica's voice leader lease; <see langword="null"/> on a replica with no AMI configuration.</summary>
     public FakeVoiceLeader? VoiceLeader { get; }
 
-    /// <summary>What this replica's event store appended.</summary>
+    /// <summary>
+    /// What this replica's event store appended; empty on a replica built with <c>postgresEventStore</c>, whose event
+    /// store and call records are the real Postgres ones <c>Program.cs</c> registered (the ledger and
+    /// <c>completed_sessions</c>, read by the CDR endpoints).
+    /// </summary>
     public RecordingSessionEventStore Store { get; } = new();
 
     /// <inheritdoc />
@@ -92,11 +105,30 @@ public sealed class EventStoreReplicaFactory : WebApplicationFactory<Program>
             if (!services.Any(d => d.ServiceType == typeof(byte[])))
                 services.AddSingleton<byte[]>([]);
 
+            if (ApiKeyTenantId is not null)
+            {
+                AuthenticatedPlatformApiFactory.SetupTestAuth(
+                    services, HashedTestApiKey, ApiKeyTenantId, AuthenticatedPlatformApiFactory.TestUserId);
+            }
+
+            var recordStores = services
+                .Where(d => d.ServiceType == typeof(ICompletedSessionStore) && !d.IsKeyedService)
+                .ToList();
             AuthenticatedPlatformApiFactory.RegisterInMemoryStores(services);
 
             Replace(services, typeof(ICallSessionManager), ServiceDescriptor.Singleton(_sessionManager));
-            Replace(services, typeof(ISessionEventStore), ServiceDescriptor.Singleton<ISessionEventStore>(Store));
-            Replace(services, typeof(IFencedCallEventStore), null);
+            if (_postgresEventStore)
+            {
+                // The call records the CDR endpoints read are the ones the event store projected.
+                Replace(services, typeof(ICompletedSessionStore), null);
+                foreach (var recordStore in recordStores)
+                    services.Add(recordStore);
+            }
+            else
+            {
+                Replace(services, typeof(ISessionEventStore), ServiceDescriptor.Singleton<ISessionEventStore>(Store));
+                Replace(services, typeof(IFencedCallEventStore), null);
+            }
             Replace(services, typeof(ILicenseGuard), ServiceDescriptor.Singleton<ILicenseGuard>(new AllowAllLicenseGuard()));
 
             if (VoiceLeader is null)
@@ -111,8 +143,28 @@ public sealed class EventStoreReplicaFactory : WebApplicationFactory<Program>
             services.AddKeyedSingleton<IClusterLeader>(VoiceLeaderResources.AmiOwner, VoiceLeader);
         });
 
-        return base.CreateHost(builder);
+        var host = base.CreateHost(builder);
+        if (ApiKeyTenantId is not null)
+        {
+            AuthenticatedPlatformApiFactory.SeedEnterpriseFeatureGate(host.Services, ApiKeyTenantId);
+            AuthenticatedPlatformApiFactory.SeedTestCustomerTenant(host.Services, ApiKeyTenantId);
+        }
+
+        return host;
     }
+
+    /// <summary>A client that calls as the test API key, in <see cref="ApiKeyTenantId"/>.</summary>
+    public HttpClient CreateAuthenticatedClient()
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {AuthenticatedPlatformApiFactory.TestApiKey}");
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", ApiKeyTenantId);
+        return client;
+    }
+
+    private static string HashedTestApiKey => Convert.ToHexStringLower(
+        System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(AuthenticatedPlatformApiFactory.TestApiKey)));
 
     /// <summary>
     /// The runtime license guard reads the license key itself, which a test host has none of; the event store's

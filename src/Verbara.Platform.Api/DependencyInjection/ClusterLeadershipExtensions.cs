@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using Verbara.Platform.Api.Services;
 using Verbara.Sdk.Cluster.Postgres.DependencyInjection;
@@ -106,8 +107,12 @@ public static class ClusterLeadershipExtensions
     /// The keyed leader is resolved at the delegate's first read, never at host start (a design-time boot never
     /// reads it), and a failed resolution is not cached: the event store treats a delegate that throws as not the
     /// writer, and the next read tries again. The delegate is the pre-check only; the fence is the authority (D13).
+    /// <para>The same lease's acquisition makes a former standby the writer of calls it holds without a tenant, so the
+    /// event store's tenant resolver by LinkedId (<see cref="VoiceCallTenantResolver"/>, design D5) is registered here
+    /// too; Pro resolves it at the acquisition pass's first need of it, never at host start.</para>
     /// </summary>
-    private static void AddVoiceLeaderAsEventStoreWriter(this IServiceCollection services) =>
+    private static void AddVoiceLeaderAsEventStoreWriter(this IServiceCollection services)
+    {
         services.AddOptions<EventStoreOptions>().Configure<IServiceProvider>((options, provider) =>
         {
             var voiceLeader = new Lazy<IClusterLeader>(
@@ -115,6 +120,8 @@ public static class ClusterLeadershipExtensions
                 LazyThreadSafetyMode.PublicationOnly);
             options.IsWriter = () => voiceLeader.Value.IsLeader;
         });
+        services.TryAddSingleton<ICallTenantResolver, VoiceCallTenantResolver>();
+    }
 
     /// <summary>
     /// Registers the single-node (no cluster connection) <see cref="AlwaysLeader"/> stubs, so the leader-gated
