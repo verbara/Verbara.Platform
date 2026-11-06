@@ -26,7 +26,7 @@ public sealed class StartDoNotContactTests : IClassFixture<AgentStartedConversat
 
     public StartDoNotContactTests(AgentStartedConversationEndpointTests.AgentStartApiFactory factory) => _factory = factory;
 
-    private async Task<(Contact Contact, string Address)> SeedContactAsync(bool doNotContact, JsonNode? consent)
+    private async Task<(Contact Contact, string Address)> SeedContactAsync(bool doNotContact, JsonNode? consent, string? sharedAddress = null)
     {
         await _factory.EnsureWhatsAppConfiguredAsync();
         var contact = new Contact
@@ -35,7 +35,7 @@ public sealed class StartDoNotContactTests : IClassFixture<AgentStartedConversat
             TenantId = ConversationOwnershipApiFactory.Tenant,
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        var address = $"1555{Random.Shared.Next(1_000_000, 9_999_999)}";
+        var address = sharedAddress ?? $"1555{Random.Shared.Next(1_000_000, 9_999_999)}";
         contact.AddAddress(new ChannelAddress(ChannelType.WhatsApp, address));
         contact.DoNotContact = doNotContact;
         foreach (var (channel, value) in consent?.AsObject() ?? [])
@@ -84,10 +84,18 @@ public sealed class StartDoNotContactTests : IClassFixture<AgentStartedConversat
         .Where(c => c.State != ConversationState.Closed)
         .ToList();
 
-    private async Task ShouldRefuseAsync(JsonNode fixtureCase, bool doNotContact, JsonNode? consent)
+    private async Task ShouldRefuseAsync(JsonNode fixtureCase, bool doNotContact, JsonNode? consent, bool onATwin = false)
     {
         var (user, agent) = _factory.NewAgent("dnc-starter");
-        var (contact, address) = await SeedContactAsync(doNotContact, consent);
+        var (contact, address) = onATwin
+            ? await SeedContactAsync(doNotContact: false, consent: null)
+            : await SeedContactAsync(doNotContact, consent);
+        if (onATwin)
+        {
+            // Another contact of the tenant holds the same WhatsApp number, written differently, and carries the
+            // restriction; the request names the unmarked one.
+            await SeedContactAsync(doNotContact, consent, sharedAddress: $"{address[..1]} ({address[1..4]}) {address[4..]}");
+        }
         using var client = _factory.ClientFor(user);
 
         var response = await client.SendAsync(RequestFor(fixtureCase["request"]!, contact));
@@ -165,5 +173,46 @@ public sealed class StartDoNotContactTests : IClassFixture<AgentStartedConversat
             response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
             _factory.Graph.RequestsTo(address).Should().ContainSingle();
         }
+    }
+
+    // ─── review round: a duplicate contact holding the same number ───────────
+
+    [Fact]
+    public async Task CreateConversation_ShouldRefuseDoNotContact_WhenAnotherContactHoldingTheNumberIsMarked()
+    {
+        await ShouldRefuseAsync(Fixture["start"]!, doNotContact: true, consent: null, onATwin: true);
+    }
+
+    [Fact]
+    public async Task CreateConversation_ShouldRefuseConsentWithdrawn_WhenAnotherContactHoldingTheNumberRecordsNo()
+    {
+        var start = Fixture["startConsentWithdrawn"]!;
+        await ShouldRefuseAsync(start, doNotContact: false, start["contactChannelConsent"], onATwin: true);
+    }
+
+    [Fact]
+    public async Task CreateConversation_ShouldReuseTheOwnOpenConversation_WhenAnotherContactHoldingTheNumberIsMarked()
+    {
+        var reuse = Fixture["startReusesOwnOpenConversation"]!;
+        var (user, agent) = _factory.NewAgent("twin-reuser");
+        var (contact, address) = await SeedContactAsync(doNotContact: false, consent: null);
+        await SeedContactAsync(doNotContact: true, reuse["contactChannelConsent"], sharedAddress: address);
+        var open = new Conversation
+        {
+            ConversationId = EntityId.From($"conv-{Guid.NewGuid():N}"),
+            TenantId = ConversationOwnershipApiFactory.Tenant,
+            ContactId = contact.ContactId,
+            Channel = ChannelType.WhatsApp,
+            State = ConversationState.Active,
+            Owner = ConversationOwner.ForAgent(agent.AgentId),
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await _factory.Services.GetRequiredService<IConversationStore>().SaveAsync(open, CancellationToken.None);
+        using var client = _factory.ClientFor(user);
+
+        var response = await client.SendAsync(RequestFor(reuse["request"]!, contact));
+
+        ((int)response.StatusCode).Should().Be(reuse["status"]!.GetValue<int>(), await response.Content.ReadAsStringAsync());
+        response.Headers.Location!.ToString().Should().EndWith($"/conversations/{open.ConversationId.Value}");
     }
 }

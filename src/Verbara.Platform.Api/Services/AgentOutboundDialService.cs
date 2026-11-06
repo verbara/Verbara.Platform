@@ -254,7 +254,8 @@ internal sealed partial class AgentOutboundDialService : IAgentOutboundDialServi
         var named = contactId is null
             ? null
             : await _contactStore.GetByIdAsync(tenantId, contactId.Value, ct).ConfigureAwait(false);
-        var holders = await _contactStore.FindAllByVoiceNumberAsync(tenantId, number, NumberMatchLimit, ct).ConfigureAwait(false);
+        var holders = await _contactStore.FindAllByChannelAddressAsync(tenantId, ChannelType.Voice, number, NumberMatchLimit, ct)
+            .ConfigureAwait(false);
 
         var consentWithdrawn = false;
         foreach (var contact in named is null ? holders : holders.Prepend(named))

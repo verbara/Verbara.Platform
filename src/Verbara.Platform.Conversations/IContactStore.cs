@@ -8,12 +8,15 @@ public interface IContactStore
     Task<Contact?> FindByAddressAsync(TenantId tenantId, ChannelAddress address, CancellationToken ct);
 
     /// <summary>
-    /// Every contact of the tenant holding a Voice address whose canonical form (<see cref="VoiceNumber.Canonical"/>)
-    /// equals <paramref name="canonicalNumber"/>, restricted ones first (do-not-contact, then Voice consent recorded
-    /// <c>false</c>, then contact id), at most <paramref name="limit"/> rows. An address with no digit matches nothing.
-    /// Creates and changes nothing.
+    /// Every contact of the tenant holding an address on <paramref name="channel"/> that matches
+    /// <paramref name="address"/> by <see cref="ChannelAddressMatch.KeyOf"/> (on a phone-like channel the canonical
+    /// number, <see cref="VoiceNumber.Canonical"/>; on any other the address with ASCII blanks trimmed), restricted ones
+    /// first (do-not-contact, then consent on <paramref name="channel"/> recorded <c>false</c>, then contact id), at most
+    /// <paramref name="limit"/> rows. An address that reduces to the empty string matches nothing. Creates and changes
+    /// nothing.
     /// </summary>
-    Task<IReadOnlyList<Contact>> FindAllByVoiceNumberAsync(TenantId tenantId, string canonicalNumber, int limit, CancellationToken ct);
+    Task<IReadOnlyList<Contact>> FindAllByChannelAddressAsync(
+        TenantId tenantId, ChannelType channel, string address, int limit, CancellationToken ct);
     Task<PagedResult<Contact>> SearchAsync(TenantId tenantId, string? searchTerm, PagedQuery query, CancellationToken ct);
     Task SaveAsync(Contact contact, CancellationToken ct);
     Task DeleteAsync(TenantId tenantId, EntityId contactId, CancellationToken ct);

@@ -42,6 +42,12 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
     private readonly ILogger<OutboundConversationStarter> _logger;
     private readonly KeyedGate<(TenantId, EntityId, ChannelType)> _gate = new();
 
+    /// <summary>
+    /// The most contacts the address side of a start's refusal reads, as the dial's. Restricted contacts sort first, so a
+    /// shorter list never drops one that changes the answer.
+    /// </summary>
+    internal const int AddressMatchLimit = 50;
+
     public OutboundConversationStarter(
         IConversationStore conversations,
         IContactStore contacts,
@@ -105,14 +111,12 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
         }
 
         // A new conversation is not started with a contact marked do-not-contact, nor on a channel whose consent the
-        // contact recorded as no. The caller's own open, sendable conversation is still reused: a message on that
-        // thread is accepted the same way when it is sent to the conversation directly. A channel with no recorded
-        // answer refuses nothing.
-        if (open is null && contact.DoNotContact)
-            return Refuse(request, OutboundStartCodes.ContactDoNotContact);
-
-        if (open is null && contact.ChannelConsent.TryGetValue(channel, out var consented) && !consented)
-            return Refuse(request, OutboundStartCodes.ContactConsentWithdrawn);
+        // contact recorded as no, and that holds for every contact of the tenant holding the same address on the channel:
+        // a duplicate contact's restriction is not bypassed through its unmarked twin. The caller's own open, sendable
+        // conversation is still reused: a message on that thread is accepted the same way when it is sent to the
+        // conversation directly. A channel with no recorded answer refuses nothing.
+        if (open is null && await ContactRestrictionAsync(tenantId, contact, address, channel, ct).ConfigureAwait(false) is { } restriction)
+            return Refuse(request, restriction);
 
         if (channel == ChannelType.WhatsApp)
         {
@@ -223,6 +227,32 @@ internal sealed partial class OutboundConversationStarter : IOutboundConversatio
         });
 
         return OutboundStartOutcome.Started(conversation, message, reused: open is not null);
+    }
+
+    /// <summary>
+    /// <see cref="OutboundStartCodes.ContactDoNotContact"/> when the named contact or any contact of the tenant holding
+    /// <paramref name="address"/> on <paramref name="channel"/> (<see cref="IContactStore.FindAllByChannelAddressAsync"/>,
+    /// restricted first) is marked do-not-contact, else <see cref="OutboundStartCodes.ContactConsentWithdrawn"/> when any
+    /// records its consent on the channel as <c>false</c>, else <c>null</c>. The address is the destination of every
+    /// channel but WebChat, whose destination is the contact's own key or one of its own session addresses. Store errors
+    /// are not caught.
+    /// </summary>
+    private async Task<string?> ContactRestrictionAsync(
+        TenantId tenantId, Contact named, ChannelAddress address, ChannelType channel, CancellationToken ct)
+    {
+        var holders = await _contacts.FindAllByChannelAddressAsync(tenantId, channel, address.Address, AddressMatchLimit, ct)
+            .ConfigureAwait(false);
+
+        var consentWithdrawn = false;
+        foreach (var contact in holders.Prepend(named))
+        {
+            if (contact.DoNotContact)
+                return OutboundStartCodes.ContactDoNotContact;
+            if (contact.ChannelConsent.TryGetValue(channel, out var consented) && !consented)
+                consentWithdrawn = true;
+        }
+
+        return consentWithdrawn ? OutboundStartCodes.ContactConsentWithdrawn : null;
     }
 
     // A contact can hold several WebChat sessions. No connected session keeps the contact's own address, whose send is

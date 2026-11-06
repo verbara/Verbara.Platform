@@ -288,8 +288,8 @@ public sealed class InMemoryContactAuditWriterTests
         public Task<Contact?> FindByAddressAsync(TenantId tenantId, ChannelAddress address, CancellationToken ct) =>
             inner.FindByAddressAsync(tenantId, address, ct);
 
-        public Task<IReadOnlyList<Contact>> FindAllByVoiceNumberAsync(TenantId tenantId, string canonicalNumber, int limit, CancellationToken ct) =>
-            inner.FindAllByVoiceNumberAsync(tenantId, canonicalNumber, limit, ct);
+        public Task<IReadOnlyList<Contact>> FindAllByChannelAddressAsync(TenantId tenantId, ChannelType channel, string address, int limit, CancellationToken ct) =>
+            inner.FindAllByChannelAddressAsync(tenantId, channel, address, limit, ct);
 
         public Task<PagedResult<Contact>> SearchAsync(TenantId tenantId, string? searchTerm, PagedQuery query, CancellationToken ct) =>
             inner.SearchAsync(tenantId, searchTerm, query, ct);

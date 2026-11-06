@@ -52,4 +52,27 @@ public sealed class PostgresVoiceNumberMatchStoreTests : VoiceNumberMatchStoreCo
 
         found.Select(c => c.ContactId.Value).Should().Equal(byName, byOrdinal);
     }
+
+    [Fact]
+    public async Task FindAllByChannelAddress_ShouldMatchAWhatsAppRow_WhetherItsChannelIsWrittenAsNameOrOrdinal()
+    {
+        var byName = await SeedRowAsync("\"WhatsApp\"", "+1 (555) 123-4567", doNotContact: true);
+        var byOrdinal = await SeedRowAsync("1", "+15551234567", doNotContact: false);
+        await SeedRowAsync("0", "+15551234567", doNotContact: true); // Voice, by ordinal
+
+        var found = await FindOnAsync(ChannelType.WhatsApp, "+15551234567");
+
+        found.Select(c => c.ContactId.Value).Should().Equal(byName, byOrdinal);
+    }
+
+    [Fact]
+    public async Task FindAllByChannelAddress_ShouldMatchAnEmailRow_WhetherItsChannelIsWrittenAsNameOrOrdinal()
+    {
+        var byName = await SeedRowAsync("\"Email\"", " ana@example.com", doNotContact: true);
+        var byOrdinal = await SeedRowAsync("4", "ana@example.com", doNotContact: false);
+
+        var found = await FindOnAsync(ChannelType.Email, "ana@example.com");
+
+        found.Select(c => c.ContactId.Value).Should().Equal(byName, byOrdinal);
+    }
 }

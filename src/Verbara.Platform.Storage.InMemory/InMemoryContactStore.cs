@@ -30,24 +30,24 @@ internal sealed class InMemoryContactStore : IContactStore
         return Task.FromResult(result);
     }
 
-    public Task<IReadOnlyList<Contact>> FindAllByVoiceNumberAsync(
-        TenantId tenantId, string canonicalNumber, int limit, CancellationToken ct)
+    public Task<IReadOnlyList<Contact>> FindAllByChannelAddressAsync(
+        TenantId tenantId, ChannelType channel, string address, int limit, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(canonicalNumber);
+        ArgumentNullException.ThrowIfNull(address);
+        var key = ChannelAddressMatch.KeyOf(channel, address);
+        if (key.Length == 0)
+            return Task.FromResult<IReadOnlyList<Contact>>([]);
+
         IReadOnlyList<Contact> result = _items.Values
-            .Where(c => c.TenantId == tenantId && c.Addresses.Any(a => a.Channel == ChannelType.Voice && Matches(a.Address)))
+            .Where(c => c.TenantId == tenantId && c.Addresses.Any(a => a.Channel == channel && Matches(a.Address)))
             .OrderByDescending(c => c.DoNotContact)
-            .ThenByDescending(c => c.ChannelConsent.TryGetValue(ChannelType.Voice, out var voice) && !voice)
+            .ThenByDescending(c => c.ChannelConsent.TryGetValue(channel, out var consented) && !consented)
             .ThenBy(c => c.ContactId.Value, StringComparer.Ordinal)
             .Take(Math.Max(0, limit))
             .ToList();
         return Task.FromResult(result);
 
-        bool Matches(string address)
-        {
-            var canonical = VoiceNumber.Canonical(address);
-            return canonical.Length > 0 && string.Equals(canonical, canonicalNumber, StringComparison.Ordinal);
-        }
+        bool Matches(string stored) => string.Equals(ChannelAddressMatch.KeyOf(channel, stored), key, StringComparison.Ordinal);
     }
 
     public Task<PagedResult<Contact>> SearchAsync(TenantId tenantId, string? searchTerm, PagedQuery query, CancellationToken ct)

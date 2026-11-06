@@ -18,9 +18,9 @@ internal sealed class InterleaveAfterLookupContactStore(IContactStore inner, Fun
     public Task<Contact?> GetByIdAsync(TenantId tenantId, EntityId contactId, CancellationToken ct) =>
         inner.GetByIdAsync(tenantId, contactId, ct);
 
-    public Task<IReadOnlyList<Contact>> FindAllByVoiceNumberAsync(
-        TenantId tenantId, string canonicalNumber, int limit, CancellationToken ct) =>
-        inner.FindAllByVoiceNumberAsync(tenantId, canonicalNumber, limit, ct);
+    public Task<IReadOnlyList<Contact>> FindAllByChannelAddressAsync(
+        TenantId tenantId, ChannelType channel, string address, int limit, CancellationToken ct) =>
+        inner.FindAllByChannelAddressAsync(tenantId, channel, address, limit, ct);
 
     public async Task<Contact?> FindByAddressAsync(TenantId tenantId, ChannelAddress address, CancellationToken ct)
     {

@@ -21,21 +21,36 @@ internal sealed class PostgresContactStore : IContactStore
         "  AND EXISTS (SELECT 1 FROM jsonb_array_elements(addresses) AS a " +
         "              WHERE a->>'channel' IN (@ChannelName, @ChannelOrdinal) AND a->>'address' = @Address)";
 
-    // contacts-writes-follow-their-permissions (design D10): VoiceNumber.Canonical in SQL, on each Voice element of
-    // either channel form. The blank class is written out as the four ASCII characters C# skips, never \s (which
-    // follows the database's locale). A stored address with no digit matches nothing, so it never reduces to a lone +.
-    // The order puts every restricted contact ahead of every unrestricted one, so the bound drops only rows that cannot
-    // change a refusal. '0' is Voice's ordinal, the only key form SaveAsync writes into channel_consent.
-    private const string FindAllByVoiceNumberSql =
+    // contacts-writes-follow-their-permissions (design D10): ChannelAddressMatch.KeyOf in SQL, on each element of the
+    // channel in either of its forms (the enum name, or the ordinal written before 2.13.0). A phone-like channel compares
+    // VoiceNumber.Canonical; the blank class is written out as the four ASCII characters C# skips, never \s (which
+    // follows the database's locale), and a stored address with no digit matches nothing, so it never reduces to a lone
+    // +. Any other channel compares the address with the same four characters trimmed from both ends. The order puts
+    // every restricted contact ahead of every unrestricted one, so the bound drops only rows that cannot change a
+    // refusal; channel_consent keys are the channel's ordinal, the only key form SaveAsync writes.
+    private const string FindAllByChannelAddressSelect =
         "SELECT " + ReturnedColumns + " " +
         "FROM contacts WHERE tenant_id = @TenantId " +
         "  AND EXISTS (SELECT 1 FROM jsonb_array_elements(addresses) AS a " +
-        "              WHERE a->>'channel' IN ('Voice', '0') " +
-        "                AND regexp_replace(a->>'address', '[^0-9]', '', 'g') <> '' " +
-        "                AND (CASE WHEN a->>'address' ~ '^[ \\t\\r\\n]*\\+' THEN '+' ELSE '' END) " +
-        "                    || regexp_replace(a->>'address', '[^0-9]', '', 'g') = @Number) " +
-        "ORDER BY do_not_contact DESC, COALESCE(channel_consent->'0' = 'false'::jsonb, false) DESC, contact_id " +
+        "              WHERE a->>'channel' IN (@ChannelName, @ChannelOrdinal) AND ";
+
+    private const string PhoneLikeAddressMatches =
+        "regexp_replace(a->>'address', '[^0-9]', '', 'g') <> '' " +
+        "AND (CASE WHEN a->>'address' ~ '^[ \\t\\r\\n]*\\+' THEN '+' ELSE '' END) " +
+        "    || regexp_replace(a->>'address', '[^0-9]', '', 'g') = @Key";
+
+    private const string ExactAddressMatches =
+        "btrim(a->>'address', ' ' || chr(9) || chr(13) || chr(10)) = @Key";
+
+    private const string FindAllByChannelAddressOrder =
+        ") ORDER BY do_not_contact DESC, COALESCE(channel_consent->@ChannelOrdinal = 'false'::jsonb, false) DESC, contact_id " +
         "LIMIT @Limit";
+
+    private const string FindAllByPhoneLikeAddressSql =
+        FindAllByChannelAddressSelect + PhoneLikeAddressMatches + FindAllByChannelAddressOrder;
+
+    private const string FindAllByExactAddressSql =
+        FindAllByChannelAddressSelect + ExactAddressMatches + FindAllByChannelAddressOrder;
 
     private const string SearchPredicate =
         "(first_name ILIKE @Term OR last_name ILIKE @Term OR company ILIKE @Term " +
@@ -87,16 +102,25 @@ internal sealed class PostgresContactStore : IContactStore
         return rows.Select(r => r.ToContact()).FirstOrDefault();
     }
 
-    public async Task<IReadOnlyList<Contact>> FindAllByVoiceNumberAsync(
-        TenantId tenantId, string canonicalNumber, int limit, CancellationToken ct)
+    public async Task<IReadOnlyList<Contact>> FindAllByChannelAddressAsync(
+        TenantId tenantId, ChannelType channel, string address, int limit, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(canonicalNumber);
+        ArgumentNullException.ThrowIfNull(address);
+        var key = ChannelAddressMatch.KeyOf(channel, address);
+        if (key.Length == 0)
+            return [];
+
         var rows = await _dataSource.QueryListAsync(
-            FindAllByVoiceNumberSql,
+            ChannelAddressMatch.IsPhoneLike(channel) ? FindAllByPhoneLikeAddressSql : FindAllByExactAddressSql,
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
-                p.Add(new NpgsqlParameter("Number", NpgsqlDbType.Text) { Value = canonicalNumber });
+                p.Add(new NpgsqlParameter("ChannelName", NpgsqlDbType.Text) { Value = channel.ToString() });
+                p.Add(new NpgsqlParameter("ChannelOrdinal", NpgsqlDbType.Text)
+                {
+                    Value = ((int)channel).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+                p.Add(new NpgsqlParameter("Key", NpgsqlDbType.Text) { Value = key });
                 p.Add(new NpgsqlParameter("Limit", NpgsqlDbType.Integer) { Value = Math.Max(0, limit) });
             },
             ContactRow.Map, ct);

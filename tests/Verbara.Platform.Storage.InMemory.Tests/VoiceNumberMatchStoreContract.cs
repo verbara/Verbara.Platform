@@ -5,9 +5,12 @@ namespace Verbara.Platform.Storage.TestSupport;
 
 /// <summary>
 /// contacts-writes-follow-their-permissions task 1.6 (design D10; third spec audit F1, F2; fourth spec audit F3):
-/// <see cref="IContactStore.FindAllByVoiceNumberAsync"/> returns every contact of the tenant holding a Voice address
+/// <see cref="IContactStore.FindAllByChannelAddressAsync"/> on Voice returns every contact of the tenant holding a Voice address
 /// whose canonical form (<see cref="VoiceNumber.Canonical"/>) equals the number, restricted ones first, bounded, and
 /// writes nothing. One shared table of stored and dialed forms runs against every store, so the stores agree.
+/// Review round: the lookup is <see cref="IContactStore.FindAllByChannelAddressAsync"/> for every channel; the
+/// phone-like channels (<see cref="ChannelAddressMatch.IsPhoneLike"/>) compare <see cref="VoiceNumber.Canonical"/>, every
+/// other channel compares the address as stored with ASCII blanks trimmed.
 /// </summary>
 /// <remarks>Linked into Verbara.Platform.Storage.Postgres.Tests.</remarks>
 public abstract class VoiceNumberMatchStoreContract
@@ -57,7 +60,19 @@ public abstract class VoiceNumberMatchStoreContract
     }
 
     protected Task<IReadOnlyList<Contact>> FindAsync(string canonicalNumber, int limit = 50) =>
-        Store.FindAllByVoiceNumberAsync(Tenant, canonicalNumber, limit, CancellationToken.None);
+        Store.FindAllByChannelAddressAsync(Tenant, ChannelType.Voice, canonicalNumber, limit, CancellationToken.None);
+
+    protected Task<IReadOnlyList<Contact>> FindOnAsync(ChannelType channel, string address, int limit = 50) =>
+        Store.FindAllByChannelAddressAsync(Tenant, channel, address, limit, CancellationToken.None);
+
+    protected Contact NewContactOn(ChannelType channel, string address, bool doNotContact = false, ChannelType? consentChannel = null, bool consent = false)
+    {
+        var contact = new Contact { ContactId = EntityId.New(), TenantId = Tenant, CreatedAt = Now, DoNotContact = doNotContact };
+        contact.AddAddress(new ChannelAddress(channel, address));
+        if (consentChannel is { } recorded)
+            contact.SetConsent(recorded, consent);
+        return contact;
+    }
 
     private static string[] Ids(IEnumerable<Contact> contacts) => [.. contacts.Select(c => c.ContactId.Value)];
 
@@ -151,5 +166,79 @@ public abstract class VoiceNumberMatchStoreContract
         var stored = (await Store.GetByIdAsync(Tenant, contact.ContactId, CancellationToken.None))!;
         stored.Addresses.Single().Address.Should().Be("+1 (555) 123-4567", "no stored address is rewritten");
         stored.UpdatedAt.Should().BeNull();
+    }
+
+    // ─── review round: every channel the start sends on ──────────────────────
+
+    /// <summary>A stored address, the address looked up, and whether the stored contact matches, per channel.</summary>
+    public static TheoryData<ChannelType, string, string, bool> ChannelTable() => new()
+    {
+        { ChannelType.WhatsApp, "+1 (555) 123-4567", "+15551234567", true },
+        { ChannelType.WhatsApp, "15551234567", "+15551234567", false },
+        { ChannelType.WhatsApp, " +15551234567", "+1 555 123 4567", true },
+        { ChannelType.Sms, "+1 (555) 123-4567", "+15551234567", true },
+        { ChannelType.Sms, "+15551234567", "15551234567", false },
+        { ChannelType.Rcs, "+1-555-123-4567", "+15551234567", true },
+        { ChannelType.Email, " ana@example.com\t", "ana@example.com", true },
+        { ChannelType.Email, "ana@example.com", "\r\nana@example.com ", true },
+        { ChannelType.Email, "Ana@example.com", "ana@example.com", false },
+        { ChannelType.Email, "ana@example.com", "ana@example.co", false },
+        { ChannelType.Telegram, "123456789", " 123456789 ", true },
+        { ChannelType.Telegram, "+123456789", "123456789", false },
+        { ChannelType.Messenger, "psid-1", "psid-2", false },
+    };
+
+    [Theory]
+    [MemberData(nameof(ChannelTable))]
+    public async Task FindAllByChannelAddress_ShouldMatchByTheChannelsRule_WhenGivenTheChannelTable(
+        ChannelType channel, string stored, string lookedUp, bool matches)
+    {
+        var contact = await SeedAsync(NewContactOn(channel, stored));
+
+        var found = await FindOnAsync(channel, lookedUp);
+
+        if (matches)
+            Ids(found).Should().Equal(contact.ContactId.Value);
+        else
+            found.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(ChannelType.Email, "ana@example.com", "   ")]
+    [InlineData(ChannelType.Email, "ana@example.com", "")]
+    [InlineData(ChannelType.WhatsApp, "+", "+")]
+    [InlineData(ChannelType.WhatsApp, "+abc", "")]
+    public async Task FindAllByChannelAddress_ShouldMatchNothing_WhenAnAddressReducesToNothing(ChannelType channel, string stored, string lookedUp)
+    {
+        await SeedAsync(NewContactOn(channel, stored, doNotContact: true));
+
+        (await FindOnAsync(channel, lookedUp)).Should().BeEmpty("an address that reduces to the empty string matches nothing");
+    }
+
+    [Fact]
+    public async Task FindAllByChannelAddress_ShouldIgnoreOtherChannels_WhenTheSameNumberIsHeldOnAnother()
+    {
+        await SeedAsync(NewContactOn(ChannelType.Sms, "+15551234567", doNotContact: true));
+        await SeedAsync(NewContactOn(ChannelType.Voice, "+15551234567", doNotContact: true));
+
+        (await FindOnAsync(ChannelType.WhatsApp, "+15551234567")).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(ChannelType.WhatsApp)]
+    [InlineData(ChannelType.Sms)]
+    public async Task FindAllByChannelAddress_ShouldPutTheContactsRestrictedOnThatChannelFirst_WhenTheLimitIsOne(ChannelType channel)
+    {
+        await SeedAsync(NewContactOn(channel, "+15551234567"));
+        await SeedAsync(NewContactOn(channel, "+15551234567", consentChannel: ChannelType.Voice, consent: false));
+        var withdrawn = await SeedAsync(NewContactOn(channel, "+1 555 123 4567", consentChannel: channel, consent: false));
+
+        Ids(await FindOnAsync(channel, "+15551234567", limit: 1)).Should().Equal(withdrawn.ContactId.Value);
+
+        var marked = await SeedAsync(NewContactOn(channel, "+15551234567", doNotContact: true));
+        var found = Ids(await FindOnAsync(channel, "+15551234567"));
+        found.Should().HaveCount(4);
+        found[0].Should().Be(marked.ContactId.Value);
+        found[1].Should().Be(withdrawn.ContactId.Value);
     }
 }
