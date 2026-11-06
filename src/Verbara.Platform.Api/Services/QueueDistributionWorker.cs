@@ -117,7 +117,7 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
 
                 var queueId = conversation.Owner.OwnerId.Value;
                 var agentId = await _agentSelector.SelectAgentAsync(
-                    tid, queueId, conversation.Channel, preferredAgentId: null, ct);
+                    tid, queueId, conversation.Channel, PreferredAgentOf(conversation), ct);
 
                 if (!agentId.HasValue) continue;
 
@@ -126,6 +126,8 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
 
                 if (result.Success)
                 {
+                    // The offer's own save consumed the last-agent preference (conversations-return-to-last-agent D3);
+                    // this re-load-and-save neither reads nor writes _preferredAgentId or _preferredAgentOutcome.
                     // Re-load the freshly-OFFERED conversation and stamp metadata on THAT instance.
                     // OfferToAgentAsync did its own GetById→Offered→Save; saving our stale Queued
                     // snapshot here would revert the offer in stores that return distinct instances
@@ -155,6 +157,15 @@ internal sealed partial class QueueDistributionWorker : BackgroundService
             }
         }
     }
+
+    /// <summary>
+    /// The last-agent preference routing wrote on <paramref name="conversation"/> (conversations-return-to-last-agent D3),
+    /// or <see langword="null"/> when it carries none or an unusable value.
+    /// </summary>
+    internal static EntityId? PreferredAgentOf(Conversation conversation) =>
+        conversation.Metadata.TryGetValue(ConversationOffer.PreferredAgentIdKey, out var raw) && !string.IsNullOrWhiteSpace(raw)
+            ? EntityId.From(raw)
+            : null;
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Offered conversation {ConversationId} to agent {AgentId}")]
     private partial void LogOfferSucceeded(string conversationId, string agentId);

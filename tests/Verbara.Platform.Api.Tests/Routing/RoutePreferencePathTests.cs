@@ -47,6 +47,8 @@ public sealed class RoutePreferencePathTests : IDisposable
     private readonly IConversationSwitchboard _switchboard = Substitute.For<IConversationSwitchboard>();
     private readonly IAgentSelector _selector = Substitute.For<IAgentSelector>();
     private readonly RoutingMetrics _metrics = new();
+    private readonly System.Diagnostics.Metrics.MeterListener _listener = new();
+    private readonly List<string> _outcomes = [];
     private readonly IInboundRouter _router;
     private bool _failNextAssign;
 
@@ -54,9 +56,25 @@ public sealed class RoutePreferencePathTests : IDisposable
     {
         _store = new ProbeConversationStore(_inner, detached: true);
         _clock.UtcNow.Returns(_ => DateTimeOffset.UtcNow);
+        var agents = Substitute.For<IAgentStore>();
+        agents.GetByIdAsync(Tenant, AgentA, Arg.Any<CancellationToken>()).Returns(new Agent
+        {
+            AgentId = AgentA, TenantId = Tenant, UserId = EntityId.From("user-route-pref-a"), DisplayName = "A",
+            State = AgentState.Available, CreatedAt = DateTimeOffset.UtcNow,
+        });
         _realSwitchboard = new ConversationSwitchboard(
-            _store, Substitute.For<IAgentCapacityService>(), Substitute.For<IAgentStore>(), _clock, _eventBus,
-            new FakeAgentAccountStatusLookup());
+            _store, Substitute.For<IAgentCapacityService>(), agents, _clock, _eventBus,
+            new FakeAgentAccountStatusLookup(), routingMetrics: _metrics);
+        _listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (ReferenceEquals(instrument.Meter, _metrics.LastAgent.Meter))
+                l.EnableMeasurementEvents(instrument);
+        };
+        _listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            lock (_outcomes) _outcomes.Add((string)tags[0].Value!);
+        });
+        _listener.Start();
 
         // The real switchboard, except that the next assignment can be made to throw after routing's metadata save.
         _switchboard.AssignToQueueAsync(default!, default!, default!, default).ReturnsForAnyArgs(call =>
@@ -81,6 +99,7 @@ public sealed class RoutePreferencePathTests : IDisposable
 
     public void Dispose()
     {
+        _listener.Dispose();
         _eventBus.Dispose();
         _metrics.Dispose();
     }
@@ -109,12 +128,12 @@ public sealed class RoutePreferencePathTests : IDisposable
 
     private async Task<Conversation> RowAsync(EntityId id) => (await _inner.GetByIdAsync(Tenant, id, CancellationToken.None))!;
 
-    private async Task DistributeAsync()
+    private async Task DistributeAsync(EntityId? selects = null)
     {
         var tenants = Substitute.For<ITenantStore>();
         tenants.GetAllActiveAsync(Arg.Any<CancellationToken>())
             .Returns([new Tenant { TenantId = Tenant.Value, Name = "Route preference", Status = TenantStatus.Active }]);
-        _selector.SelectAgentAsync(default!, default!, default, default, default).ReturnsForAnyArgs((EntityId?)null);
+        _selector.SelectAgentAsync(default!, default!, default, default, default).ReturnsForAnyArgs(selects);
         using var worker = new QueueDistributionWorker(
             _store, tenants, _selector, _realSwitchboard, _eventBus, _clock, new ServiceHeartbeat(),
             Options.Create(new DistributionOptions()), NullLogger<QueueDistributionWorker>.Instance);
@@ -310,6 +329,25 @@ public sealed class RoutePreferencePathTests : IDisposable
         row.Metadata.Should().NotContainKey(ConversationOffer.PreferredAgentIdKey);
         await DistributeAsync();
         await _selector.Received(1).SelectAgentAsync(Tenant, QueueId, ChannelType.WebChat, null, Arg.Any<CancellationToken>());
+    }
+
+    // ─── Counted per routing attempt (design D8, task 2.1) ───────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Webhook_ShouldCountTwoStampedAndOneOfferedPreferred_WhenTheSameConversationIsRoutedTwiceAndThenOffered()
+    {
+        // An assertion of the documented per-attempt semantics, not a de-duplication.
+        LookupFinds(AgentA);
+        var id = await SeedQueuedAsync(ChannelType.WhatsApp);
+        _failNextAssign = true;
+        await WhatsAppMessageAsync(id, opensConversation: true);
+        await WhatsAppMessageAsync(id, opensConversation: false);
+        ShouldBeAssigned(await RowAsync(id));
+
+        await DistributeAsync(selects: AgentA);
+
+        (await RowAsync(id)).State.Should().Be(ConversationState.Offered);
+        _outcomes.Should().Equal(LastAgentOutcomes.Stamped, LastAgentOutcomes.Stamped, LastAgentOutcomes.OfferedPreferred);
     }
 
     // ─── Apply itself ────────────────────────────────────────────────────────────────────────────────────────────
