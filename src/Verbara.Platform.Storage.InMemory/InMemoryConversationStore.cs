@@ -224,6 +224,22 @@ internal sealed class InMemoryConversationStore : IConversationStore
         return Task.FromResult(holds);
     }
 
+    public Task<EntityId?> FindLastAgentOwnerAsync(TenantId tenantId, EntityId contactId, DateTimeOffset since, CancellationToken ct)
+    {
+        // conversations-return-to-last-agent (design D4): agent-owned, any state but Merged/Spam, ordered and filtered by
+        // the last customer-facing message. LastMessageAt is set on every stored row (the insert's COALESCE above).
+        var owner = _items.Values
+            .Where(c => c.TenantId == tenantId
+                && c.ContactId == contactId
+                && c.Owner is { Kind: ConversationOwnerKind.Agent, OwnerId: not null }
+                && !LastAgentLookup.ExcludedStates.Contains(c.State)
+                && c.LastMessageAt is { } at && at >= since)
+            .OrderByDescending(c => c.LastMessageAt)
+            .Select(c => c.Owner!.OwnerId)
+            .FirstOrDefault();
+        return Task.FromResult(owner);
+    }
+
     public Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
         IReadOnlyList<Conversation> result = _items.Values

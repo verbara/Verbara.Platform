@@ -467,6 +467,33 @@ internal sealed class PostgresConversationStore : IConversationStore
         return holds ?? false;
     }
 
+    private static readonly int[] s_lastAgentExcludedStateValues = LastAgentLookup.ExcludedStates.Select(s => (int)s).ToArray();
+
+    public async Task<EntityId?> FindLastAgentOwnerAsync(TenantId tenantId, EntityId contactId, DateTimeOffset since, CancellationToken ct)
+    {
+        // conversations-return-to-last-agent (design D4): agent-owned, any state but Merged/Spam (state and owner_kind are
+        // INTEGER columns), filtered and ordered by last_message_at only (NOT NULL since migration 026, so no fallback).
+        // Served by idx_conversations_contact (tenant_id, contact_id, state).
+        var ownerId = await _dataSource.ExecuteScalarAsync<string?>(
+            "SELECT owner_id FROM conversations " +
+            "WHERE tenant_id = @TenantId AND contact_id = @ContactId " +
+            "  AND owner_kind = @AgentKind AND owner_id IS NOT NULL " +
+            "  AND state <> ALL(@ExcludedStates) " +
+            "  AND last_message_at >= @Since " +
+            "ORDER BY last_message_at DESC " +
+            "LIMIT 1",
+            p =>
+            {
+                p.Add(new NpgsqlParameter("TenantId", NpgsqlDbType.Text) { Value = tenantId.Value });
+                p.Add(new NpgsqlParameter("ContactId", NpgsqlDbType.Text) { Value = contactId.Value });
+                p.Add(new NpgsqlParameter("AgentKind", NpgsqlDbType.Integer) { Value = (int)ConversationOwnerKind.Agent });
+                p.Add(new NpgsqlParameter("ExcludedStates", NpgsqlDbType.Array | NpgsqlDbType.Integer) { Value = s_lastAgentExcludedStateValues });
+                p.Add(new NpgsqlParameter("Since", NpgsqlDbType.TimestampTz) { Value = since.UtcDateTime });
+            },
+            ct);
+        return ownerId is null ? null : EntityId.From(ownerId);
+    }
+
     public async Task<IReadOnlyList<Conversation>> ListByContactAsync(TenantId tenantId, EntityId contactId, CancellationToken ct)
     {
         var rows = await _dataSource.QueryListAsync(

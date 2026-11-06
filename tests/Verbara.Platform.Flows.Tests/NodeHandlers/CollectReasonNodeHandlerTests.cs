@@ -373,6 +373,9 @@ public sealed class CollectReasonNodeHandlerTests
         public Task<PagedResult<ContactConversationSummary>> ListContactSummariesAsync(
             TenantId tenantId, EntityId contactId, EntityId? ownedByAgentId, int page, int pageSize, CancellationToken ct) =>
             Task.FromResult(PagedResult<ContactConversationSummary>.Empty(page, pageSize));
+        public Task<EntityId?> FindLastAgentOwnerAsync(TenantId tenantId, EntityId contactId, DateTimeOffset since, CancellationToken ct) =>
+            throw new NotSupportedException();
+
         public Task<bool> HoldsOpenConversationOfContactAsync(
             TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct) =>
             Task.FromResult(false);
