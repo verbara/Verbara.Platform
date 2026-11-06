@@ -33,14 +33,14 @@ contact writes.
   The channels it names take the new value and the others keep theirs; an absent or `null` member changes nothing. Any
   other key (another case, a number, an unknown name) answers 400 `{"error":"unknown-consent-channel","details":[...]}`
   with those keys, and nothing is written, `doNotContact` included. That refusal comes before the contact is read, so an
-  unknown id with such a key answers 400 instead of 404. Before, the member was accepted and dropped.
+  unknown id with such a key answers 400 instead of 404. Before, the member was accepted and dropped. (#546)
 - **`POST /api/v1/contacts/{id}/opt-out` records a contact's opt-out.** The body `{"doNotContact": true, "channels":
   ["Sms"]}` (both members optional) marks the contact do-not-contact and records `false` for each named channel. It only
   restricts: it never clears do-not-contact and never records `true`, which stays with `PUT`. It needs
   `contacts:conversation:handle`, so the agent, supervisor, manager and admin roles may send it; any other caller gets
   403 `{"error":"not-permitted"}`. A channel name outside the list answers 400 `unknown-consent-channel`, an unknown id
   answers 404 with no body, and the answer is the contact, 200. A body that changes nothing, or no body at all, answers
-  200 and writes nothing.
+  200 and writes nothing. (#546)
 - **Do-not-contact and consent changes are recorded with who made them.** A `PUT` that changes `doNotContact` or a
   `channelConsent` value, an opt-out that changes something, and a `DELETE` that removes a contact write one audit
   record, category `contact`, action `contact.consent_changed`, `contact.opted_out` or `contact.deleted`, kept for five
@@ -50,9 +50,9 @@ contact writes.
   administrator, their home tenant and the impersonation session (`impersonator_id`, `impersonator_tenant`,
   `impersonation_session_id`), as other audited changes do. The change and its record are written together: if the
   record cannot be written, the contact is left as it was and the request fails. A `PUT` that changes neither member
-  writes no record and keeps the previous `updatedBy`.
+  writes no record and keeps the previous `updatedBy`. (#546)
 - **The permission `contacts:contact:delete`**: delete contacts (it implies `contacts:contact:view`). It is granted to
-  the admin templates. The `Api` role template also gains `contacts:contact:create` and `contacts:contact:edit`.
+  the admin templates. The `Api` role template also gains `contacts:contact:create` and `contacts:contact:edit`. (#546)
 
 - **`POST /api/v1/webchat/sessions` resolves its contact by identity level.** The request gains `identityToken`, and
   `visitorId`, `visitorName`, `visitorEmail` and `pageContext` get a meaning. The response gains `identityLevel`, always
@@ -129,7 +129,7 @@ contact writes.
   | User whose roles lack `contacts:contact:delete` (every template but the admin family) | `DELETE /contacts/{id}` 204 | 403 `not-permitted` |
   | Tenant API key bound to no user | all three 2xx | 403 `not-permitted` |
   | Key bound to a user whose role is `Api` | all three 2xx | create and update 2xx, delete 403 |
-  | Management key, Admin or SystemAdmin role | all three 2xx | unchanged |
+  | Management key, Admin or SystemAdmin role | all three 2xx | unchanged | (#546)
 
 - **Click-to-dial and starting a conversation do not reach a contact who asked not to be contacted.**
   `POST /api/v1/voice/dial` answers 409 `{"accepted":false,"error":"contact-do-not-contact","trunkId":null}` when the
@@ -142,7 +142,7 @@ contact writes.
   channel; nothing is sent or stored. On Voice, SMS, WhatsApp and RCS two addresses are the same number when their
   digits and leading plus match, as for the dial; on any other channel when they are equal once leading and trailing
   spaces, tabs and line breaks are removed. Continuing the caller's own open conversation with the contact is not
-  refused, and a channel with no recorded answer, or `true`, is placed as before.
+  refused, and a channel with no recorded answer, or `true`, is placed as before. (#546)
 - **`POST` and `PUT /api/v1/contacts` refuse the WebChat identity key forms.** A WebChat address that starts with
   `webchat-visitor:` or `webchat-external:`, compared by exact case, answers 400 `reserved-contact-address`, with the
   addresses in `details`, and nothing is written. That refusal comes before the contact is read, so a `PUT` on an unknown id
@@ -224,23 +224,23 @@ contact writes.
   role and no permission, so it is refused `POST`, `PUT` and `DELETE /api/v1/contacts` and the opt-out route. To keep it
   working, bind the key to a user whose role is `Api` (create and update; delete stays with the admin roles), grant its
   role the permission it needs, or use a management key. Check also every other role your integrations or users rely on
-  against the table in **Changed — BREAKING**.
+  against the table in **Changed — BREAKING**. (#546)
 - **Seeded tenant roles gain the new grants at the next start.** `admin`, `system_admin`, `api` (template ids) gain the
   new grants, and the two roles setup creates, `admin-{tenant}` and `platform-admin-{tenant}`, gain
   `contacts:contact:delete`; a role under any other id gains nothing (its `Admin` users still pass on the server; the
   console shows Delete once the role is granted the id). Add the permission to such a role with
-  `PUT /api/v1/admin/roles/{id}`.
+  `PUT /api/v1/admin/roles/{id}`. (#546)
 - **Click-to-dial matches a dialed number to a contact by its digits and a leading `+`.** A stored Voice address written
   with spaces, dashes or brackets (`+1 (555) 123-4567`) matches a dial of `+15551234567`. No country or trunk prefix is
   added or removed, so a stored number without `+` dialed with it, or the reverse, is not matched by the number; the
   dial still checks the contact its `contactId` names. Starting a conversation on SMS, WhatsApp or RCS matches numbers
-  the same way, and still checks the contact it names. Store contacts' numbers in one form to avoid this.
+  the same way, and still checks the contact it names. Store contacts' numbers in one form to avoid this. (#546)
 - **Migration `029` runs at start-up**: it lets the audit log hold the category `contact`. It replaces the category
   check of `audit_entries`, which locks that table and reads it once while the check is validated, so on a large audit
   log plan the start-up for it. It is additive; a rollback to the previous image leaves the wider check in place, which
-  that image never uses.
+  that image never uses. (#546)
 - **Deploy Platform before the console release that writes `channelConsent` and uses the opt-out route**: an older
-  Platform drops `channelConsent` and answers the opt-out route 404.
+  Platform drops `channelConsent` and answers the opt-out route 404. (#546)
 - **A returning WebChat visitor stays unlinked until you turn it on.** `WebChat:VisitorIdentity:Level1Enabled` defaults to
   `false`. While it is off, `POST /api/v1/webchat/sessions` treats every `visitorId` as absent: the session gets a contact
   of its own at `Anonymous` and no contact gains a `webchat-visitor:` address. A verified identity token works either way.
