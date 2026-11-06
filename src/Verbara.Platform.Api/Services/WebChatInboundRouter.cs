@@ -30,6 +30,8 @@ internal sealed partial class WebChatInboundRouter
     private readonly CustomerReturnAnnouncer _returnAnnouncer;
     private readonly ILogger<WebChatInboundRouter> _logger;
 
+    private static readonly IReadOnlyDictionary<string, string> EmptyMetadata = new Dictionary<string, string>();
+
     public WebChatInboundRouter(
         IInboundRouter router,
         IConversationSwitchboard switchboard,
@@ -149,9 +151,13 @@ internal sealed partial class WebChatInboundRouter
             // ReasonHintMiddleware's "reasonPath") onto the conversation BEFORE assignment.
             // WebChat does NOT run the bot here, so there is no C6 FlowMetadata path in this bridge.
             // AssignToQueueAsync reloads + persists the row, so this metadata round-trips through it.
-            if (routeResult.Metadata is { Count: > 0 })
+            // The route's last-agent preference replaces any an earlier attempt left (conversations-return-to-last-agent
+            // D3), and is saved even when the route carries no other metadata: the reload in AssignToQueueAsync would
+            // lose it.
+            var preferenceChanged = RoutePreferenceStamp.Apply(conversation, routeResult);
+            if (routeResult.Metadata is { Count: > 0 } || preferenceChanged)
             {
-                foreach (var kv in routeResult.Metadata)
+                foreach (var kv in routeResult.Metadata ?? EmptyMetadata)
                     conversation.SetMetadata(kv.Key, kv.Value);
                 await _conversationStore.SaveAsync(conversation, ct).ConfigureAwait(false);
             }
