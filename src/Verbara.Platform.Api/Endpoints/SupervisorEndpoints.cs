@@ -27,7 +27,8 @@ internal static class SupervisorEndpoints
         group.MapGet("/sessions/active", GetActiveSessions)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapPost("/sessions/{sessionId}/whisper", PostWhisper);
-        group.MapPost("/sessions/{sessionId}/listen", PostListen);
+        group.MapPost("/sessions/{sessionId}/listen", PostListen)
+            .Produces(StatusCodes.Status403Forbidden);
 
         // Digital conversations
         group.MapGet("/conversations", ListDigitalConversations)
@@ -142,17 +143,27 @@ internal static class SupervisorEndpoints
         return Results.Ok();
     }
 
-    private static Results<Ok<ListenEntry>, NotFound> PostListen(
+    /// <summary>
+    /// design D5: records the signed-in caller as the listening supervisor. The body is optional and its
+    /// <c>SupervisorId</c> is ignored; credentials with no user id are refused with a bodyless 403 before anything is
+    /// recorded. Entries are keyed by tenant, session and user, so each tenant's listens stay apart.
+    /// </summary>
+    private static Results<Ok<ListenEntry>, NotFound, StatusCodeHttpResult> PostListen(
         HttpContext context,
         string sessionId,
-        [FromBody] ListenRequest body,
+        [FromBody] ListenRequest? body,
         [FromServices] IAgentAssistLiveSessions liveSessions)
     {
-        if (!IsLiveSessionOf(liveSessions, GetTenantId(context), sessionId))
+        _ = body;
+        if (AgentAssistCaller.CallerUserIdOf(context.User) is not { } userId)
+            return TypedResults.StatusCode(StatusCodes.Status403Forbidden);
+
+        var tenantId = GetTenantId(context);
+        if (!IsLiveSessionOf(liveSessions, tenantId, sessionId))
             return TypedResults.NotFound();
 
-        var entry = new ListenEntry(body.SupervisorId, sessionId, DateTimeOffset.UtcNow);
-        SupervisorListenStore.Sessions[sessionId + ":" + body.SupervisorId] = entry;
+        var entry = new ListenEntry(userId, sessionId, DateTimeOffset.UtcNow);
+        SupervisorListenStore.Sessions[$"{tenantId.Value}:{sessionId}:{userId}"] = entry;
 
         return TypedResults.Ok(entry);
     }
