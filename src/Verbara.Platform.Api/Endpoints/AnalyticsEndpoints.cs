@@ -281,7 +281,7 @@ internal static class AnalyticsEndpoints
 
         var hasTranscript = qa is not null && qa.Summary is not null;
         var recordingStreamUrl = !string.IsNullOrEmpty(row.RecordingName)
-            ? $"/api/recordings/{row.SessionId}/stream"
+            ? $"/api/v1/recordings/{row.SessionId}/stream"
             : null;
 
         return TypedResults.Ok(new CdrDetailDto(

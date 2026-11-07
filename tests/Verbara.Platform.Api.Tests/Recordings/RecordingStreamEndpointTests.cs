@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Claims;
+using System.Text.Json.Nodes;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
@@ -120,6 +122,53 @@ public sealed class RecordingStreamEndpointTests : IClassFixture<RecordingStream
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await response.Content.ReadAsByteArrayAsync()).Should().Equal(RecordingStreamApiFactory.CustomerFileBytes);
+    }
+
+    // ─── The links to the stream (call-records-are-written-once D11) ─────────
+
+    [Fact]
+    public async Task GetCdrDetail_ShouldLinkTheVersionedStreamRoute_WhenTheCallIsRecorded()
+    {
+        using var client = PartnerAdminClientForCustomer();
+        var sessionId = RecordingStreamApiFactory.CustomerSessionId;
+
+        var detail = await client.GetFromJsonAsync<JsonObject>($"/api/v1/analytics/cdr/{sessionId}");
+
+        var streamUrl = detail!["recordingStreamUrl"]?.GetValue<string>();
+        streamUrl.Should().Be($"/api/v1/recordings/{sessionId}/stream",
+            because: "the Api maps the stream under /api/v{version} only, so the detail links that route");
+        await AssertTheLinkServesTheCustomersFile(client, streamUrl!);
+    }
+
+    [Fact]
+    public async Task GetRecordingMetadata_ShouldLinkTheVersionedStreamRoute_WhenTheCallIsRecorded()
+    {
+        using var client = PartnerAdminClientForCustomer();
+        var sessionId = RecordingStreamApiFactory.CustomerSessionId;
+
+        var metadata = await client.GetFromJsonAsync<JsonObject>($"/api/v1/recordings/{sessionId}");
+
+        var streamUrl = metadata!["streamUrl"]?.GetValue<string>();
+        streamUrl.Should().Be($"/api/v1/recordings/{sessionId}/stream",
+            because: "the Api maps the stream under /api/v{version} only, so the metadata links that route");
+        await AssertTheLinkServesTheCustomersFile(client, streamUrl!);
+    }
+
+    private HttpClient PartnerAdminClientForCustomer()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _factory.MintPartnerAdminJwt());
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", RecordingStreamApiFactory.PartnerCustomerTenantId);
+        return client;
+    }
+
+    private static async Task AssertTheLinkServesTheCustomersFile(HttpClient client, string streamUrl)
+    {
+        // The emitted path, requested as it is: it reaches StreamRecording (the file's bytes), not an unmapped 404.
+        using var response = await client.GetAsync(streamUrl);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, because: "the link names a mapped route");
+        (await response.Content.ReadAsByteArrayAsync()).Should().Equal(RecordingStreamApiFactory.CustomerFileBytes,
+            because: "the route is the stream handler's, which serves the recorded call's file");
     }
 
     private static HttpRequestMessage StreamRequest(string sessionId, string? bearer)

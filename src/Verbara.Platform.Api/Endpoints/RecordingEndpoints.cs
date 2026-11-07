@@ -38,7 +38,7 @@ internal static class RecordingEndpoints
             SessionId: row.SessionId,
             RecordingName: row.RecordingName,
             HasRecording: true,
-            StreamUrl: $"/api/recordings/{row.SessionId}/stream"));
+            StreamUrl: $"/api/v1/recordings/{row.SessionId}/stream"));
     }
 
     private static async Task<IResult> StreamRecording(
