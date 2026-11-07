@@ -56,15 +56,7 @@ internal static class RecordingEndpoints
             return Results.NotFound();
 
         var recordingName = row.RecordingName;
-        string[] extensions = [".wav", ".gsm", ".ogg", ""];
-        string? filePath = null;
-
-        foreach (var ext in extensions)
-        {
-            filePath = ResolveRecordingPath(options.Value.BasePath, tenantId, recordingName, ext);
-            if (filePath is not null) break;
-        }
-
+        var filePath = FindRecordingFile(options.Value.BasePath, tenantId, recordingName);
         if (filePath is null)
             return Results.NotFound();
 
@@ -95,6 +87,26 @@ internal static class RecordingEndpoints
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    private static readonly string[] RecordingExtensions = [".wav", ".gsm", ".ogg", ""];
+
+    /// <summary>
+    /// The file a tenant's recording named <paramref name="recordingName"/> is stored in under
+    /// <paramref name="basePath"/> — the tenant's directory first, then the legacy flat layout, each extension in turn —
+    /// or <see langword="null"/> when there is none. The stream reads it; the event store's recording resolver asks it
+    /// whether a call was recorded (<see cref="Services.RecordingFileCallRecordingResolver"/>).
+    /// </summary>
+    internal static string? FindRecordingFile(string basePath, string tenantId, string recordingName)
+    {
+        foreach (var ext in RecordingExtensions)
+        {
+            var filePath = ResolveRecordingPath(basePath, tenantId, recordingName, ext);
+            if (filePath is not null)
+                return filePath;
+        }
+
+        return null;
+    }
 
     private static string? ResolveRecordingPath(string basePath, string tenantId, string recordingName, string ext)
     {

@@ -1293,12 +1293,7 @@ if (!builder.Services.Any(d => d.ServiceType == typeof(Verbara.Sdk.Pro.CallAnaly
     builder.Services.AddSingleton<Verbara.Sdk.Pro.CallAnalytics.Store.ICallAnalyticsStore, Verbara.Platform.Storage.InMemory.InMemoryCallAnalyticsStore>();
 
 // ─── Recordings ─────────────────────────────────────────────────────────────
-builder.Services.Configure<RecordingOptions>(o =>
-{
-    var path = builder.Configuration["Recordings:BasePath"];
-    if (!string.IsNullOrEmpty(path))
-        o.BasePath = path;
-});
+builder.Services.AddPlatformRecordings(builder.Configuration);
 
 // ─── S3 Media Storage (overrides FileSystem default when S3_BUCKET is set) ──
 var s3Bucket = builder.Configuration["S3_BUCKET"];

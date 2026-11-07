@@ -64,6 +64,12 @@ public sealed class EventStoreReplicaFactory : WebApplicationFactory<Program>
     /// </summary>
     public string? ApiKeyTenantId { get; init; }
 
+    /// <summary>
+    /// The replica's <c>Recordings:BasePath</c>, where its recording files are read; <see langword="null"/> keeps the
+    /// shipped default.
+    /// </summary>
+    public string? RecordingsBasePath { get; init; }
+
     /// <summary>This replica's voice leader lease; <see langword="null"/> on a replica with no AMI configuration.</summary>
     public FakeVoiceLeader? VoiceLeader { get; }
 
@@ -79,6 +85,8 @@ public sealed class EventStoreReplicaFactory : WebApplicationFactory<Program>
     {
         builder.UseSetting("ConnectionStrings:Analytics", _analyticsConnectionString);
         builder.UseSetting("ConnectionStrings:Cluster", _clusterConnectionString);
+        if (RecordingsBasePath is not null)
+            builder.UseSetting("Recordings:BasePath", RecordingsBasePath);
         if (VoiceLeader is null)
         {
             // appsettings.json ships a default AMI host (localhost); a host with no AMI configuration clears it.
