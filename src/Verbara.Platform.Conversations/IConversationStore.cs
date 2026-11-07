@@ -66,6 +66,17 @@ public interface IConversationStore
     Task<bool> HoldsOpenConversationOfContactAsync(TenantId tenantId, EntityId contactId, EntityId agentId, CancellationToken ct);
 
     /// <summary>
+    /// The agent who owns contact <paramref name="contactId"/>'s most recent agent-owned conversation in
+    /// <paramref name="tenantId"/>, on any channel, open or closed, whose <see cref="Conversation.LastMessageAt"/> is at or
+    /// after <paramref name="since"/>, ordered by that same instant; <c>null</c> when none qualifies
+    /// (conversations-return-to-last-agent design D4). A conversation in a state of
+    /// <see cref="LastAgentLookup.ExcludedStates"/> (<c>Merged</c>, <c>Spam</c>) never qualifies; every other state does.
+    /// No close-time fallback: <c>last_message_at</c> is never null. The caller computes <paramref name="since"/> (the
+    /// window, clamped to the inactivity window). Served by <c>idx_conversations_contact (tenant_id, contact_id, state)</c>.
+    /// </summary>
+    Task<EntityId?> FindLastAgentOwnerAsync(TenantId tenantId, EntityId contactId, DateTimeOffset since, CancellationToken ct);
+
+    /// <summary>
     /// One page of contact <paramref name="contactId"/>'s conversations in <paramref name="tenantId"/>, every state
     /// included, newest first (<c>created_at</c> descending, then the conversation id descending, ordinal), each with
     /// its queue name, its agent owner's display name, its disposition and its newest activity message, in one query

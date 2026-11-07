@@ -1,3 +1,4 @@
+using Verbara.Platform.Conversations;
 using Verbara.Platform.Routing.Inbound.Middlewares;
 using Verbara.Platform.Routing.Inbound.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +22,10 @@ public static class ServiceCollectionExtensions
         else
             services.AddOptions<InboundRoutingOptions>();
 
+        // Defaults for hosts that do not bind them; the Api binds InboundRouting:LastAgent and Conversations.
+        services.AddOptions<LastAgentRoutingOptions>();
+        services.AddOptions<ConversationOptions>();
+        services.AddSingleton<RoutingMetrics>(); // routing.last_agent (conversations-return-to-last-agent D8)
         services.AddSingleton<ReasonHintMiddleware>();
         services.AddSingleton<ChannelQueueMappingMiddleware>();
         services.AddSingleton<LastAgentMiddleware>();
@@ -35,8 +40,11 @@ public static class ServiceCollectionExtensions
             // chain below run first, then stamps the captured reason taxonomy
             // (reasonPath) into the resolved route's metadata using the final QueueId.
             sp.GetRequiredService<ReasonHintMiddleware>(),
-            sp.GetRequiredService<ChannelQueueMappingMiddleware>(),
+            // Continuation-first too, and outside every middleware that can change the queue (ChannelQueueMapping
+            // overwrites it after its continuation, BusinessHours moves it to the overflow queue), so the queue whose
+            // last-agent switch it reads is the queue the caller assigns (conversations-return-to-last-agent D10).
             sp.GetRequiredService<LastAgentMiddleware>(),
+            sp.GetRequiredService<ChannelQueueMappingMiddleware>(),
             sp.GetRequiredService<PriorityEscalationMiddleware>(),
             sp.GetRequiredService<OverflowMiddleware>(),
             sp.GetRequiredService<BusinessHoursMiddleware>(),

@@ -29,6 +29,14 @@ public sealed class Queue : ITenantScoped, IAuditable
     // Csat.Enabled == false) is never solicited for CSAT.
     public CsatConfig? Csat { get; set; }
 
+    /// <summary>
+    /// <c>queue_configs.last_agent_routing_enabled</c>: this queue's override of the host switch
+    /// <c>InboundRouting:LastAgent:Enabled</c> (conversations-return-to-last-agent design D2). <c>null</c> follows the
+    /// host. <b>Set by SQL only:</b> the store reads it and no queue save writes it, so <c>init</c> lets only the store's
+    /// row mapping set it, and saving an entity loaded before an operator changed the column keeps the column's value.
+    /// </summary>
+    public bool? LastAgentRoutingEnabled { get; init; }
+
     public required DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? UpdatedAt { get; set; }
     public string? CreatedBy { get; init; }

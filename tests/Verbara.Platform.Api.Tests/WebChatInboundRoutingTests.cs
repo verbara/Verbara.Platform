@@ -441,10 +441,14 @@ public sealed class WebChatInboundRoutingTests
 
         var act = () => h.Sut.RouteFirstInboundAsync(h.SessionId, Tenant, FirstMessageResult(), Content(), cancelled.Token);
 
-        await act.Should().ThrowAsync<OperationCanceledException>("the first message goes on to the contact read, which does take the request's token");
-        h.Published.OfType<ConversationMessageEvent>().Should().ContainSingle("the publish happens before the cancellation can end the flow")
+        // An open offer is not routed again on a session's first message (conversations-return-to-last-agent review
+        // round), so the flow ends at the publish and never reaches the contact read, the one that takes the token.
+        await act.Should().NotThrowAsync("the conversation read does not take the request's token");
+        h.Published.OfType<ConversationMessageEvent>().Should().ContainSingle()
             .Which.Audience.Should().Be(new ConversationAudience(null, agentId.Value));
+        h.Published.OfType<ConversationStateChangedEvent>().Should().BeEmpty();
         await h.Router.DidNotReceiveWithAnyArgs().RouteAsync(default!, default);
+        await h.Contacts.DidNotReceiveWithAnyArgs().GetByIdAsync(default!, default, default);
     }
 
     // A session's first message can answer a conversation an agent started towards it (design D9): the agent keeps it.

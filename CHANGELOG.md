@@ -12,7 +12,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 A caller reads a conversation only when it may: an agent reads what it owns, what it is offered and the history of the
 contacts it holds now, and everyone else needs `contacts:conversation:monitor` or the new `contacts:conversation:read`
 (Platform/ADR-0047). The contact's history becomes a page of summaries, and a new route reads a transcript newest first.
-Conversation content on the live stream reaches only its readers. Read **Changed — BREAKING** and **Upgrading** first:
+Conversation content on the live stream reaches only its readers, and the supervisor's conversation reads follow the
+same permissions. Read **Changed — BREAKING** and **Upgrading** first:
 tenant API keys bound to no user, roles without a conversation permission and agents outside a conversation now get
 403 `not-readable`, and `GET /api/v1/contacts/{id}/conversations` answers a new item shape.
 
@@ -26,7 +27,23 @@ channel, whoever handles a contact can record its opt-out, and every do-not-cont
 who made it. Read **Changed — BREAKING** and **Upgrading**: an integration may now get 403 `not-permitted` on the
 contact writes.
 
+A returning customer can be offered first to the agent who last served them, per host or per queue. It is off until you
+turn it on: read **Upgrading**.
+
 ### Added
+
+- **Returning-customer routing to the last agent, off by default.** When it is on, a new digital conversation is offered
+  first to the agent who owned the customer's most recent conversation (any channel, any state but `Merged` and `Spam`,
+  an open one included) within `InboundRouting:LastAgent:WindowHours` (default `72`, `1` to `720`), or within the
+  tenant's inactivity window when that is longer and the inactivity close is on. That agent must be able to take it
+  now; otherwise it goes to round robin in the same pass, and a reject or an expired offer never brings it back to that
+  agent because of the preference. The host switch `InboundRouting:LastAgent:Enabled` defaults to `false`; the new nullable
+  column `queue_configs.last_agent_routing_enabled`, set by SQL only, turns it on or off for a queue, read for the queue
+  the conversation is finally routed to. While the conversation waits, `GET /api/v1/conversations/{id}` shows
+  `metadata._preferredAgentId`, replaced by `metadata._preferredAgentOutcome` (`offered-preferred` or `fallback`) at the
+  first offer; the counter `routing.last_agent{outcome}` of the meter `verbara.platform.routing` counts each decision.
+  Shared contacts and unverified WebChat visitors get no preference, and voice does not use it. Settings, the SQL and the
+  signals: `docs/operations/last-agent-routing.md`. (#549)
 
 - **`PUT /api/v1/contacts/{id}` stores `channelConsent`.** A map from channel name to `true` or `false`, each key the name
   of a channel exactly as `GET` writes it (`Voice`, `WhatsApp`, `Sms`, `WebChat`, `Email`, ...), compared by exact case.
@@ -196,9 +213,34 @@ contact writes.
   included, is not delivered these events. The other events, `conversation.offered`, `conversation.assigned` and
   `conversation.state_changed` included, are unchanged, and so is every event's JSON. A role change applies at the
   stream's next reconnect. Tenant webhooks are not affected. (#539)
+- **The supervisor conversation reads follow the conversation read permissions.** The supervisor routes still require
+  the Admin or Supervisor role, and inside it they now ask the same question as the conversation reads:
+  - `GET /api/v1/supervisor/conversations/{id}/messages` answers exactly as `GET /api/v1/conversations/{id}/messages`:
+    an id that names no conversation of the tenant answers 404 with no body, where it answered 200 with an empty
+    array; then 403 `{"error":"not-readable"}` when the caller may not read that conversation; then the transcript,
+    oldest first, as before. A Supervisor-role user without `contacts:conversation:monitor` or
+    `contacts:conversation:read` still reads the conversations its own Agent profile owns, is offered, or holds the
+    contact of.
+  - `GET /api/v1/supervisor/conversations`, `GET /api/v1/supervisor/conversations/stuck` and
+    `GET /api/v1/supervisor/sessions/active` answer only a caller that reads every conversation:
+    `contacts:conversation:monitor`, `contacts:conversation:read`, or the Admin or SystemAdmin role. Any other caller
+    gets 403 `{"error":"not-readable"}` and nothing of the tenant. Their shapes are unchanged. (#550)
+
+  The built-in Supervisor template holds `contacts:conversation:monitor`, so its users keep all four reads. A
+  Supervisor-role user, a tenant API key bound to one, or an impersonation session whose permissions hold neither
+  `contacts:conversation:monitor` nor `contacts:conversation:read` loses them (see Upgrading). A Manager on an
+  Agent-role user and a tenant API key bound to no user are refused by the role check, as before.
 
 ### Fixed
 
+- **A WebChat page reload no longer routes the conversation again.** A new session's first message routed the
+  conversation it was stored in even when that conversation was already in a queue or offered to an agent: an open offer
+  went back to the queue and the queue wait started over. It now routes only a conversation that still needs it, a new one
+  or one not yet assigned to a queue, as a WhatsApp message does. (#549)
+- **One offer publishes one `conversation.offered`.** An offer made by the queue distribution reached the live stream
+  twice, from the switchboard and again from the distribution worker, so the console showed two notifications and
+  counted two on its badge. The worker no longer publishes it; the switchboard publishes it once, right after the save
+  that records the offer. (#549)
 - **An agent's reply reaches the session its conversation belongs to.** A reply went to the first WebChat address of the
   contact, which for a contact with several sessions could be one that had ended, and it was marked failed with
   `SESSION_NOT_CONNECTED`. A conversation now records its session's address and replies through it. A conversation from
@@ -220,6 +262,19 @@ contact writes.
 
 ### Upgrading
 
+- **Last-agent routing stays off until you turn it on.** Set `InboundRouting__LastAgent__Enabled=true` on the Api and
+  restart it to turn it on for every queue, or turn it on for one queue with
+  `UPDATE queue_configs SET last_agent_routing_enabled = true WHERE tenant_id = '…' AND queue_id = '…';` (`false` turns
+  it off for that queue under a host switch that is on, `NULL` follows the host). A queue change applies to the next
+  routed conversation, with no restart. **Migration `030` runs at start-up**: it adds that nullable column, changing only
+  the catalog under a brief lock on `queue_configs`. A rollback to the previous image leaves the column, which that image
+  never reads or writes. (#549)
+- **A supervisor role without a conversation read permission loses the supervisor reads.** Before you deploy, check
+  the tenant roles of your Supervisor-role users, of the users your API keys are bound to, and the permissions you mint
+  into impersonation sessions. Grant `contacts:conversation:monitor` to a role that monitors the floor, or
+  `contacts:conversation:read` to one that reads without listening, with `PUT /api/v1/admin/roles/{id}`. Without one of
+  them, the four supervisor reads answer 403 `not-readable`. A caller that sent the supervisor transcript route an id
+  it did not get from the list must expect 404 instead of an empty array. (#550)
 - **An integration may now get 403 `not-permitted` on the contact writes.** A tenant API key bound to no user carries no
   role and no permission, so it is refused `POST`, `PUT` and `DELETE /api/v1/contacts` and the opt-out route. To keep it
   working, bind the key to a user whose role is `Api` (create and update; delete stays with the admin roles), grant its

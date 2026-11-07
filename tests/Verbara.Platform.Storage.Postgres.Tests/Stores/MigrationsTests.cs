@@ -139,4 +139,26 @@ public class MigrationsTests : IClassFixture<MigrationsFixture>
         (await _fixture.ColumnDefinitionAsync("dialer_disposition_dispatches", "next_attempt_at"))
             .Should().Be(("timestamp with time zone", false));
     }
+
+    // conversations-return-to-last-agent (design D2): the nullable per-queue override, the last migration, idempotent.
+    [Fact]
+    public async Task Migration030_ShouldAddANullableBooleanQueueOverride_AndBeIdempotent()
+    {
+        var names = typeof(ServiceCollectionExtensions).Assembly.GetManifestResourceNames()
+            .Where(n => n.StartsWith("Verbara.Platform.Storage.Postgres.Migrations.", StringComparison.Ordinal)
+                        && n.EndsWith(".sql", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        names[^1].Should().Be("Verbara.Platform.Storage.Postgres.Migrations.030_QueueLastAgentRouting.sql",
+            "030 runs after 029, the last migration before it");
+        names.Should().ContainSingle(n => n.Contains(".030_", StringComparison.Ordinal), "one migration per ordinal");
+
+        (await _fixture.ColumnDefinitionAsync("queue_configs", "last_agent_routing_enabled"))
+            .Should().Be(("boolean", true));
+
+        await _fixture.ReapplyMigrationAsync("030_QueueLastAgentRouting.sql");
+
+        (await _fixture.ColumnDefinitionAsync("queue_configs", "last_agent_routing_enabled"))
+            .Should().Be(("boolean", true));
+    }
 }
