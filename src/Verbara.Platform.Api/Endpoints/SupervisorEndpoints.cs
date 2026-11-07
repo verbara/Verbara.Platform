@@ -80,9 +80,20 @@ internal static class SupervisorEndpoints
         if (await RefuseUnlessReadsAllAsync(context, tenantId, agents, ct) is { } refusal)
             return refusal;
 
-        var sessions = liveSessions.Snapshot().Select(s => (s.SessionId, s.Call)).ToList();
+        var sessions = LiveSessionsOf(liveSessions, tenantId).Select(s => (s.SessionId, s.Call)).ToList();
         return TypedResults.Ok(await ToActiveSessionsAsync(sessions, tenantId, conversations, ct));
     }
+
+    /// <summary>
+    /// design D1, D3: the live Agent Assist sessions owned by <paramref name="callerTenant"/> (ordinal). A session whose
+    /// owner tenant is unresolved or conflicted owns nothing and is kept for no caller. Every live-session route reads
+    /// through this before anything else, so another tenant's session answers exactly as an unknown one.
+    /// </summary>
+    private static List<LiveAssistSession> LiveSessionsOf(IAgentAssistLiveSessions liveSessions, TenantId callerTenant) =>
+        [.. liveSessions.Snapshot().Where(s => string.Equals(s.OwnerTenant, callerTenant.Value, StringComparison.Ordinal))];
+
+    private static bool IsLiveSessionOf(IAgentAssistLiveSessions liveSessions, TenantId callerTenant, string sessionId) =>
+        LiveSessionsOf(liveSessions, callerTenant).Exists(s => string.Equals(s.SessionId, sessionId, StringComparison.Ordinal));
 
     /// <summary>
     /// supervisor-silent-listen (boundary gap 1, design D13): the active-session items, each with the id of the tracked
@@ -116,11 +127,12 @@ internal static class SupervisorEndpoints
     }
 
     private static IResult PostWhisper(
+        HttpContext context,
         string sessionId,
         [FromBody] WhisperRequest body,
         [FromServices] IAgentAssistLiveSessions liveSessions)
     {
-        if (!liveSessions.Snapshot().Any(s => string.Equals(s.SessionId, sessionId, StringComparison.Ordinal)))
+        if (!IsLiveSessionOf(liveSessions, GetTenantId(context), sessionId))
             return Results.NotFound();
 
         var enqueued = liveSessions.TryWhisper(sessionId, body.Text);
@@ -131,11 +143,12 @@ internal static class SupervisorEndpoints
     }
 
     private static Results<Ok<ListenEntry>, NotFound> PostListen(
+        HttpContext context,
         string sessionId,
         [FromBody] ListenRequest body,
         [FromServices] IAgentAssistLiveSessions liveSessions)
     {
-        if (!liveSessions.Snapshot().Any(s => string.Equals(s.SessionId, sessionId, StringComparison.Ordinal)))
+        if (!IsLiveSessionOf(liveSessions, GetTenantId(context), sessionId))
             return TypedResults.NotFound();
 
         var entry = new ListenEntry(body.SupervisorId, sessionId, DateTimeOffset.UtcNow);
