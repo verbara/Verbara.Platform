@@ -30,8 +30,21 @@ contact writes.
 A returning customer can be offered first to the agent who last served them, per host or per queue. It is off until you
 turn it on: read **Upgrading**.
 
+Call records are written. Each call now gets one record, written by the voice leader alone, also when the voice leader
+changes during the call, so `GET /api/v1/analytics/cdr`, the recording archive and the conversation_summary report are no
+longer empty. This takes Verbara.Sdk.Pro `2.26.0-pro` and adds a startup precondition for clustered voice: read
+**Changed — BREAKING** and **Upgrading**. Most installations need no action.
+
 ### Added
 
+- **A CDR row says whether its record is partial.** `CdrRowDto` gains `isPartial`, always present, in the rows of
+  `GET /api/v1/analytics/cdr` and in the `cdr` of the CDR detail. It is `true` for a record built from an incomplete
+  history of the call, for example a call the voice leader inherited from a previous leader; its hold count, hold time
+  and talk time then cover only part of the call and read as unknown. A complete record reads `false`. (#N)
+- **Every shipped `manager.conf` emits AMI event timestamps.** `timestampevents = yes` is set in `[general]` of the
+  compose template, both demo configurations and the Helm Asterisk configmap, so every AMI event carries Asterisk's
+  `Timestamp` header. Nothing reads it yet; it is the PBX requirement for exact de-duplication of call events across
+  replicas in a later release. `docs/manuales/smb/06-canal-voz-sip.md` §0.1 lists it for your own Asterisk. (#N)
 - **Returning-customer routing to the last agent, off by default.** When it is on, a new digital conversation is offered
   first to the agent who owned the customer's most recent conversation (any channel, any state but `Merged` and `Spam`,
   an open one included) within `InboundRouting:LastAgent:WindowHours` (default `72`, `1` to `720`), or within the
@@ -130,6 +143,15 @@ turn it on: read **Upgrading**.
   everything. (#539)
 
 ### Changed — BREAKING
+
+- **Clustered voice refuses to start when the voice leader lease and the event store are not one database.** With
+  `Asterisk:Ami:Hostname` set, the event store now checks inside each write that its replica still holds the voice leader
+  lease, so the event store's database (`ConnectionStrings:Analytics`, then `Dialer`, then `Postgres`) must be the one
+  that holds the lease (`ConnectionStrings:Cluster`, then `Postgres`). When the two resolved strings are identical, as in
+  every shipped compose file and the Helm chart, nothing runs. When they differ, the Api proves at start-up, by a round
+  trip, that they reach one writable database, and otherwise exits with `EventStoreLeaseColocationException`, naming the
+  failed step and both sides: another database, a standby, or an event-store role without `SELECT` and `UPDATE` on
+  `cluster_distributed_lock`. A host without AMI is not checked. (#N)
 
 - **Creating, updating and deleting a contact require their permission.** `POST /api/v1/contacts` needs
   `contacts:contact:create`, `PUT /api/v1/contacts/{id}` needs `contacts:contact:edit` and `DELETE /api/v1/contacts/{id}`
@@ -233,6 +255,24 @@ turn it on: read **Upgrading**.
 
 ### Fixed
 
+- **Call records are written.** No call record was ever built, so `GET /api/v1/analytics/cdr` answered an empty `data`
+  array for every tenant, and the recording archive, the conversation_summary report and post-call analytics had
+  nothing to read. Each call now gets one record when it ends, updated when its wrap-up lands, and it keeps its first
+  lifecycle events, which were dropped while the call's tenant was not yet known. Calls that ended before this version
+  get no record. (#N)
+- **Only the voice leader writes a call's events and its record.** The warm standby wrote nothing only because it never
+  knew a call's tenant. The event store's writer is now the holder of the voice leader lease, and each write checks the
+  lease in its own transaction, so a deposed leader writes nothing. (#N)
+- **A call keeps its ending when the voice leader changes.** A new voice leader did not know the tenant of the calls it
+  took over, so their endings were not recorded. On acquiring the lease it now resolves each live call's tenant, from
+  the call's conversation or else from the `TENANT_ID` of its trunk leg, and records the call once; a call with neither
+  stays unrecorded and is logged. (#N)
+- **A call record names a recording only when the call's recording file exists**, looked up the way the stream route
+  looks it up, so a record's recording and its stream agree. (#N)
+- **The recording links reach the stream.** The CDR detail's `recordingStreamUrl` and the recording metadata's
+  `streamUrl` were `/api/recordings/{id}/stream`, a route the Api does not map, so every link answered 404. They are now
+  `/api/v1/recordings/{id}/stream`. (#N)
+
 - **A WebChat page reload no longer routes the conversation again.** A new session's first message routed the
   conversation it was stored in even when that conversation was already in a queue or offered to an agent: an open offer
   went back to the queue and the queue wait started over. It now routes only a conversation that still needs it, a new one
@@ -261,6 +301,16 @@ turn it on: read **Upgrading**.
   the contact, after the conversation was read, still fails the WebChat request of a message already stored and published. (#539)
 
 ### Upgrading
+
+- **Check where the voice leader lease and the event store live before you upgrade a clustered voice host.** Read
+  [`docs/operations/event-store-lease-colocation-upgrade.md`](docs/operations/event-store-lease-colocation-upgrade.md):
+  the precondition, the refusals and their fixes, and the runtime check that follows it. A `ConnectionStrings:Dialer`
+  that names another database while `ConnectionStrings:Analytics` is unset moves the event store away from the lease, and
+  the Api then refuses to start. A split topology has no escape hatch. No Platform migration runs; the Pro event-store
+  migration adds columns and a table, and a rollback to the previous image leaves them unused. (#N)
+- **Verbara.Sdk.Pro moves to `2.26.0-pro`.** (#N)
+- **Your own Asterisk should set `timestampevents = yes`** in `[general]` of `manager.conf`, as every shipped
+  configuration now does; nothing requires it in this release. (#N)
 
 - **Last-agent routing stays off until you turn it on.** Set `InboundRouting__LastAgent__Enabled=true` on the Api and
   restart it to turn it on for every queue, or turn it on for one queue with

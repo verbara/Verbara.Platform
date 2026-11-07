@@ -68,6 +68,9 @@
          opt-out and its audit record, the dial and start refusals and the token permissions, copied verbatim from the
          change's cross-repo contract fixtures. -->
     <None Include="Contacts/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- call-records-are-written-once: the CDR list and detail wire shapes the console reads (full, sparse, empty and
+         partial), copied verbatim from the change's cross-repo contract fixtures. -->
+    <None Include="CallRecords/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

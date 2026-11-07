@@ -189,7 +189,8 @@ internal static class AnalyticsEndpoints
                 RingDurationMs: ComputeRingDurationMs(row),
                 CampaignName: null,
                 DispositionName: null,
-                Metadata: row.Metadata);
+                Metadata: row.Metadata,
+                IsPartial: row.IsPartial);
         }).ToArray();
 
         return TypedResults.Ok(new PagedDataResponse<CdrRowDto>(dtos, hasMore, page, pageSize));
@@ -275,11 +276,12 @@ internal static class AnalyticsEndpoints
             RingDurationMs: ComputeRingDurationMs(row),
             CampaignName: null,
             DispositionName: null,
-            Metadata: row.Metadata);
+            Metadata: row.Metadata,
+            IsPartial: row.IsPartial);
 
         var hasTranscript = qa is not null && qa.Summary is not null;
         var recordingStreamUrl = !string.IsNullOrEmpty(row.RecordingName)
-            ? $"/api/recordings/{row.SessionId}/stream"
+            ? $"/api/v1/recordings/{row.SessionId}/stream"
             : null;
 
         return TypedResults.Ok(new CdrDetailDto(
@@ -705,7 +707,10 @@ internal sealed record CdrRowDto(
     long? RingDurationMs,
     string? CampaignName,
     string? DispositionName,
-    Dictionary<string, string>? Metadata);
+    Dictionary<string, string>? Metadata,
+    // D17 (call-records-are-written-once): true when the record was built from an incomplete history, so its
+    // hold figures are not trustworthy. Always present (a bool is never omitted); the partial cause is Pro-only.
+    bool IsPartial);
 
 internal sealed record CdrDetailDto(
     CdrRowDto Cdr,

@@ -67,6 +67,7 @@ Si usás el Asterisk del stack de Verbara (Compose), esto ya está hecho: su `ma
 enabled = yes
 bindaddr = 0.0.0.0
 port = 5038
+timestampevents = yes
 
 [platform]
 secret = <tu-password-AMI>
@@ -77,6 +78,13 @@ permit = 0.0.0.0/0.0.0.0
 ```
 
 El `secret` es el mismo valor que Verbara usa como `Asterisk__Ami__Password`. Restringí `permit` a la IP del servidor de Verbara si podés.
+
+**`timestampevents = yes`** hace que Asterisk agregue a cada evento AMI un encabezado `Timestamp` (segundos con microsegundos, el reloj del propio Asterisk). Es el requisito para que, con varias réplicas de Verbara conectadas al mismo Asterisk, un mismo evento se reconozca como uno solo y se registre exactamente una vez en el historial de llamadas. Hoy Verbara todavía no lo usa para eso (esa deduplicación llega en una versión posterior), pero dejalo activado desde ya: no cambia nada más y tu Asterisk queda listo. Para comprobarlo:
+
+```bash
+$ asterisk -rx 'manager show settings' | grep -i timestamp
+  Timestamp events:          Yes
+```
 
 **Por qué cada clase de `write`** (cada acción AMI exige una clase; Asterisk rechaza la acción si el usuario no la tiene):
 
