@@ -135,7 +135,7 @@ public sealed class RecordingStreamEndpointTests : IClassFixture<RecordingStream
         var detail = await client.GetFromJsonAsync<JsonObject>($"/api/v1/analytics/cdr/{sessionId}");
 
         var expected = $"/api/v1/recordings/{sessionId}/stream";
-        var streamUrl = detail!["recordingStreamUrl"]?.GetValue<string>();
+        var streamUrl = detail!["recordingStreamUrl"]?.GetValue<string>() ?? "(member absent)";
         streamUrl.Should().Be(expected,
             because: "the Api maps the stream under /api/v{version} only, so the detail links that route");
         await AssertTheLinkServesTheCustomersFile(client, expected);
@@ -150,7 +150,7 @@ public sealed class RecordingStreamEndpointTests : IClassFixture<RecordingStream
         var metadata = await client.GetFromJsonAsync<JsonObject>($"/api/v1/recordings/{sessionId}");
 
         var expected = $"/api/v1/recordings/{sessionId}/stream";
-        var streamUrl = metadata!["streamUrl"]?.GetValue<string>();
+        var streamUrl = metadata!["streamUrl"]?.GetValue<string>() ?? "(member absent)";
         streamUrl.Should().Be(expected,
             because: "the Api maps the stream under /api/v{version} only, so the metadata links that route");
         await AssertTheLinkServesTheCustomersFile(client, expected);
