@@ -54,8 +54,8 @@ public sealed class CallRecordRecordingThroughProjectionTests : IAsyncLifetime
         }
 
         // The recorded call's file, where Asterisk's MixMonitor writes it for the tenant, named by the record's session id.
-        var tenantDir = Directory.CreateDirectory(Path.Combine(_recordingsRoot!, TenantId)).FullName;
-        await File.WriteAllBytesAsync(Path.Combine(tenantDir, recorded.SessionId + ".wav"), RecordingBytes);
+        var tenantDir = Directory.CreateDirectory(Path.Join(_recordingsRoot!, TenantId)).FullName;
+        await File.WriteAllBytesAsync(Path.Join(tenantDir, recorded.SessionId + ".wav"), RecordingBytes);
 
         using var host = new EventStoreReplicaFactory(
             ConnectionString("analytics"), ConnectionString("cluster"), sessionManager,

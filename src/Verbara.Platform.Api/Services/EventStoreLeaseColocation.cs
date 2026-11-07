@@ -116,6 +116,7 @@ internal static class EventStoreLeaseColocation
 
         private string _step = "ensure the lock schema (lease database)";
         private bool _inserted;
+        private string _leftBehind = "";
 
         public async Task RunAsync(CancellationToken cancellationToken)
         {
@@ -163,10 +164,13 @@ internal static class EventStoreLeaseColocation
                 _step = "4 delete the probe row (lease database)";
                 await DeleteProbeRowAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (EventStoreLeaseColocationException)
+            catch (EventStoreLeaseColocationException ex)
             {
                 await DeleteProbeRowBestEffortAsync().ConfigureAwait(false);
-                throw;
+                if (_leftBehind.Length == 0)
+                    throw;
+                throw new EventStoreLeaseColocationException(ex.Message + _leftBehind, ex.Step, ex.SqlState,
+                    ex.InnerException);
             }
             catch (PostgresException ex)
             {
@@ -232,10 +236,11 @@ internal static class EventStoreLeaseColocation
                 using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(StatementTimeoutSeconds));
                 await DeleteProbeRowAsync(cleanup.Token).ConfigureAwait(false);
             }
-#pragma warning disable CA1031 // best effort: the row expires and the next probe of this instance deletes it
-            catch (Exception)
-#pragma warning restore CA1031
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
+                // Best effort: the refusal is already decided. The row is named in it, so the operator knows it exists.
+                _leftBehind = $" The probe row '{_resource}' could not be deleted ({ex.GetType().Name}: {ex.Message}); it "
+                    + "expires one minute after its insert, matches no lease, and this instance's next probe deletes it.";
             }
         }
 
@@ -267,6 +272,7 @@ internal static class EventStoreLeaseColocation
             var decoration = await DecorateAsync().ConfigureAwait(false);
             if (decoration.Length > 0)
                 message.Append(" Server facts (informational): ").Append(decoration).Append('.');
+            message.Append(_leftBehind);
             return new EventStoreLeaseColocationException(message.ToString(), _step, sqlState, inner);
         }
 
@@ -295,10 +301,9 @@ internal static class EventStoreLeaseColocation
                     $"{(reader.IsDBNull(3) ? "(local socket)" : reader.GetString(3))}, " +
                     $"started {reader.GetFieldValue<DateTimeOffset>(4):O}");
             }
-#pragma warning disable CA1031 // decoration only: it never decides and never hides the refusal
-            catch (Exception)
-#pragma warning restore CA1031
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
+                // Decoration only: it never decides and never hides the refusal.
                 return "";
             }
         }

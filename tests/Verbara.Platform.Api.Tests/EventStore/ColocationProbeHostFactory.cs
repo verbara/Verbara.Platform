@@ -27,10 +27,9 @@ public sealed class ColocationProbeHostFactory(IReadOnlyDictionary<string, strin
             _ = Services;
             return null;
         }
-#pragma warning disable CA1031 // the test reads whatever the startup threw
-        catch (Exception ex)
-#pragma warning restore CA1031
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            // The test reads whatever the startup threw.
             return ex;
         }
     }

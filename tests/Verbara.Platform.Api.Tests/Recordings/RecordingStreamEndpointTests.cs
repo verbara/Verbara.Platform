@@ -134,10 +134,11 @@ public sealed class RecordingStreamEndpointTests : IClassFixture<RecordingStream
 
         var detail = await client.GetFromJsonAsync<JsonObject>($"/api/v1/analytics/cdr/{sessionId}");
 
+        var expected = $"/api/v1/recordings/{sessionId}/stream";
         var streamUrl = detail!["recordingStreamUrl"]?.GetValue<string>();
-        streamUrl.Should().Be($"/api/v1/recordings/{sessionId}/stream",
+        streamUrl.Should().Be(expected,
             because: "the Api maps the stream under /api/v{version} only, so the detail links that route");
-        await AssertTheLinkServesTheCustomersFile(client, streamUrl!);
+        await AssertTheLinkServesTheCustomersFile(client, expected);
     }
 
     [Fact]
@@ -148,10 +149,11 @@ public sealed class RecordingStreamEndpointTests : IClassFixture<RecordingStream
 
         var metadata = await client.GetFromJsonAsync<JsonObject>($"/api/v1/recordings/{sessionId}");
 
+        var expected = $"/api/v1/recordings/{sessionId}/stream";
         var streamUrl = metadata!["streamUrl"]?.GetValue<string>();
-        streamUrl.Should().Be($"/api/v1/recordings/{sessionId}/stream",
+        streamUrl.Should().Be(expected,
             because: "the Api maps the stream under /api/v{version} only, so the metadata links that route");
-        await AssertTheLinkServesTheCustomersFile(client, streamUrl!);
+        await AssertTheLinkServesTheCustomersFile(client, expected);
     }
 
     private HttpClient PartnerAdminClientForCustomer()
@@ -201,12 +203,12 @@ public sealed class RecordingStreamEndpointTests : IClassFixture<RecordingStream
         private static readonly byte[] PartnerFileBytes = "RIFF-partner-recording"u8.ToArray();
         private static readonly byte[] RivalFileBytes = "RIFF-rival-recording"u8.ToArray();
 
-        private readonly string _root = Path.Combine(Path.GetTempPath(), $"rec-stream-{Guid.NewGuid():N}");
+        private readonly string _root = Path.Join(Path.GetTempPath(), $"rec-stream-{Guid.NewGuid():N}");
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseSetting("Recordings:BasePath", Path.Combine(_root, "recordings"));
-            builder.UseSetting("Auth:KeyDirectory", Path.Combine(_root, "keys"));
+            builder.UseSetting("Recordings:BasePath", Path.Join(_root, "recordings"));
+            builder.UseSetting("Auth:KeyDirectory", Path.Join(_root, "keys"));
             builder.UseSetting("Identity:JwtKeyRotation:UseRotationPool", "true");
         }
 
@@ -269,7 +271,7 @@ public sealed class RecordingStreamEndpointTests : IClassFixture<RecordingStream
 
         private void Seed(IServiceProvider services)
         {
-            var recordings = Path.Combine(_root, "recordings");
+            var recordings = Path.Join(_root, "recordings");
             WriteRecording(recordings, PartnerCustomerTenantId, CustomerFileBytes);
             WriteRecording(recordings, PartnerTenantId, PartnerFileBytes);
             WriteRecording(recordings, RivalCustomerTenantId, RivalFileBytes);
@@ -292,9 +294,9 @@ public sealed class RecordingStreamEndpointTests : IClassFixture<RecordingStream
 
         private static void WriteRecording(string basePath, string tenantId, byte[] bytes)
         {
-            var dir = Path.Combine(basePath, tenantId);
+            var dir = Path.Join(basePath, tenantId);
             Directory.CreateDirectory(dir);
-            File.WriteAllBytes(Path.Combine(dir, RecordingName + ".wav"), bytes);
+            File.WriteAllBytes(Path.Join(dir, RecordingName + ".wav"), bytes);
         }
 
         private static void UpsertTenant(ITenantStore store, string tenantId, TenantType type, string? parent)

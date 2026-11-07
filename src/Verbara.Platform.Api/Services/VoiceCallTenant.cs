@@ -66,7 +66,7 @@ internal static partial class VoiceCallTenant
             session.TenantId = response.Value;
             return response.Value;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogGetVarFailed(logger, channel, ex.Message);
             return null;

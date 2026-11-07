@@ -276,11 +276,8 @@ public abstract class EventStoreLeaseColocationTests(string image) : IAsyncLifet
 
     async Task IAsyncLifetime.DisposeAsync()
     {
-        foreach (var container in new[] { _bouncer, _second, _primary })
-        {
-            if (container is not null)
-                await container.DisposeAsync();
-        }
+        foreach (var container in new[] { _bouncer, _second, _primary }.OfType<IContainer>())
+            await container.DisposeAsync();
     }
 
     private IContainer Postgres(bool exposeStandby)

@@ -241,7 +241,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
                 if (await ResolveTenantAsync(session).ConfigureAwait(false) is null)
                     LogMirrorLeftTenantless(session.SessionId, session.LinkedId);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 LogAcquisitionStampFailed(session.SessionId, session.LinkedId, ex.Message, ex);
             }
@@ -266,7 +266,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         {
             await ObserveLeadershipAsync().ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogLeaderPollFailed(ex.Message, ex);
         }
