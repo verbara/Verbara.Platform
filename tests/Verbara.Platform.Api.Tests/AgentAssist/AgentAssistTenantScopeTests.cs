@@ -8,6 +8,7 @@ using Verbara.Platform.Api.Services.AgentAssist;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Stores;
 using Verbara.Platform.Core;
+using Verbara.Platform.Identity;
 using Verbara.Sdk.Enums;
 using Verbara.Sdk.Pro.AgentAssist.Storage.Postgres.Stores;
 using Verbara.Sdk.Sessions;
@@ -205,6 +206,34 @@ public sealed class AgentAssistTenantScopeTests : IClassFixture<AgentAssistTenan
         JsonNode.Parse(body)!["supervisorId"]!.GetValue<string>().Should().Be(caller, "the signed-in supervisor is recorded");
         var recorded = ListenKeysOf(acmeSession).Select(k => SupervisorListenStore.Sessions[k].SupervisorId).ToList();
         recorded.Should().Equal([caller], "the only entry recorded for the session names the caller, never the body's id");
+    }
+
+    /// <summary>
+    /// Audit F2 (spec "A recorded listen MUST be kept apart per tenant"): the same session id and the same user id,
+    /// recorded under two tenants one after the other, leave two entries. Without the tenant in the store key the
+    /// second listen overwrites the first and one entry remains.
+    /// </summary>
+    [Fact]
+    public async Task PostListen_ShouldKeepOneEntryPerTenant_WhenTheSameUserIdListensToTheSameSessionIdInTwoTenants()
+    {
+        var sessionId = NewId("listen-two-tenants");
+        var sharedUserId = $"shared-supervisor-{Guid.NewGuid():N}";
+        var acmeUser = _factory.SaveUser(sharedUserId, Acme, UserRole.Supervisor, UserStatus.Active);
+        var globexUser = _factory.SaveUser(sharedUserId, Globex, UserRole.Supervisor, UserStatus.Active);
+
+        _factory.Live.Add(AgentAssistLiveSessions.ToLive(sessionId, Call($"{sessionId}.acme", Acme), Acme));
+        using (var acme = _factory.CreateBearerClient(_factory.MintAccessToken(acmeUser)))
+        using (var response = await acme.PostAsync(ListenRoute(sessionId), content: null))
+            response.StatusCode.Should().Be(HttpStatusCode.OK, because: $"the response was {await response.Content.ReadAsStringAsync()}");
+
+        _factory.Live.Add(AgentAssistLiveSessions.ToLive(sessionId, Call($"{sessionId}.globex", Globex), Globex));
+        using (var globex = _factory.CreateBearerClient(_factory.MintAccessToken(globexUser)))
+        using (var response = await globex.PostAsync(ListenRoute(sessionId), content: null))
+            response.StatusCode.Should().Be(HttpStatusCode.OK, because: $"the response was {await response.Content.ReadAsStringAsync()}");
+
+        var recorded = ListenKeysOf(sessionId).Select(k => SupervisorListenStore.Sessions[k].SupervisorId).ToList();
+        recorded.Should().Equal([sharedUserId, sharedUserId],
+            "each tenant's listen is its own entry; the second tenant's listen never replaces the first one's");
     }
 
     [Fact]

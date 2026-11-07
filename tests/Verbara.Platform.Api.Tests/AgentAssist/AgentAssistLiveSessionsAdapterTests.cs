@@ -7,10 +7,8 @@ namespace Verbara.Platform.Api.Tests.AgentAssist;
 
 /// <summary>
 /// agent-assist-sessions-stay-in-their-tenant task 1.1 (design D2, audit missed P2): the production adapter's mapping,
-/// over real Sdk <see cref="CallSession"/> values. A Platform test cannot register an <c>AgentAssistSession</c> (its
-/// constructor and <c>AgentAssistSupervisor.Add</c> are internal to Pro), so the one projection line of
-/// <see cref="AgentAssistLiveSessions.Snapshot"/> over a registered session is not covered here; the candidate
-/// re-measurement's late-stamp arm (task 3.6) covers it.
+/// over real Sdk <see cref="CallSession"/> values. The projection line of <see cref="AgentAssistLiveSessions.Snapshot"/>
+/// over a session the Pro engine registered is covered by <see cref="AgentAssistLiveSessionsRegisteredSessionTests"/>.
 /// </summary>
 public sealed class AgentAssistLiveSessionsAdapterTests
 {
