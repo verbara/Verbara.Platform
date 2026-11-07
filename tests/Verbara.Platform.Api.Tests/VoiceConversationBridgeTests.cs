@@ -783,7 +783,7 @@ public sealed class VoiceConversationBridgeTests : IDisposable
 
             var deadline = DateTime.UtcNow.AddSeconds(5);
             while (session.TenantId is null && DateTime.UtcNow < deadline)
-                await Task.Delay(10);
+                await Task.Delay(10); // fence-allow: LOOP-DRIVER — poll pacing for the stamp the fake-time poll triggers, bounded by the 5-s deadline
 
             session.TenantId.Should().Be(Tenant, "the bridge polls the voice leader lease and stamps on its acquisition");
         }

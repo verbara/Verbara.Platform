@@ -253,7 +253,7 @@ public sealed class CallTenantResolvedAtAcquisitionTests : IAsyncLifetime
             using var response = await client.GetAsync($"/api/v1/analytics/cdr/{sessionId}");
             if (response.StatusCode != HttpStatusCode.NotFound || DateTimeOffset.UtcNow >= deadline)
                 return response.StatusCode;
-            await Task.Delay(100);
+            await Task.Delay(100); // fence-allow: LOOP-DRIVER — poll pacing for the CDR read, bounded by the deadline
         }
     }
 
@@ -264,7 +264,7 @@ public sealed class CallTenantResolvedAtAcquisitionTests : IAsyncLifetime
         {
             if (DateTimeOffset.UtcNow >= deadline)
                 throw new TimeoutException($"The condition did not hold within {Settle}.");
-            await Task.Delay(25);
+            await Task.Delay(25); // fence-allow: LOOP-DRIVER — poll pacing for the condition, bounded by Settle
         }
     }
 

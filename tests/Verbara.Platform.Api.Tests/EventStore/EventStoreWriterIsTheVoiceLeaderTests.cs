@@ -145,7 +145,7 @@ public sealed class EventStoreWriterIsTheVoiceLeaderTests : IAsyncLifetime
                 return;
             }
 
-            await Task.Delay(25);
+            await Task.Delay(25); // fence-allow: LOOP-DRIVER — poll pacing for the condition, bounded by the deadline
         }
     }
 

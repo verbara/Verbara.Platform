@@ -202,7 +202,7 @@ public abstract class EventStoreLeaseColocationTests(string image) : IAsyncLifet
         host.Services.GetKeyedService<IClusterLeader>(VoiceLeaderResources.Inbound).Should().NotBeNull();
         var subscriber = host.Services.GetRequiredService<EventStoreSubscriber>();
         await subscriber.StartAsync(CancellationToken.None);
-        await Task.Delay(TimeSpan.FromSeconds(2));
+        await Task.Delay(TimeSpan.FromSeconds(2)); // fence-allow: SETTLE — an absence check: the window in which the subscriber would have written, had anything fed it
         await subscriber.StopAsync(CancellationToken.None);
         (await CountAsync(Primary(database), "session_events")).Should().Be(0,
             "no AMI server feeds the session manager, so there is no call event to write");
@@ -387,7 +387,7 @@ public abstract class EventStoreLeaseColocationTests(string image) : IAsyncLifet
             }
             catch (NpgsqlException) when (DateTimeOffset.UtcNow < deadline)
             {
-                await Task.Delay(200);
+                await Task.Delay(200); // fence-allow: LOOP-DRIVER — retry pacing until the standby accepts connections, bounded by the deadline
             }
         }
     }
