@@ -61,11 +61,13 @@ internal static class AgentAssistEndpoints
 
     private static async Task<Ok<SuggestionLogRowDto[]>> GetSessionSuggestions(
         string sessionId,
+        HttpContext context,
         [FromServices] IAgentAssistRecordReader records,
         CancellationToken ct)
     {
+        var tenantId = GetTenantId(context);
         var rows = await records.SuggestionsBySessionAsync(sessionId, ct);
-        var dtos = rows.Select(r => new SuggestionLogRowDto(
+        var dtos = rows.Where(r => IsOfTenant(r.TenantId, tenantId)).Select(r => new SuggestionLogRowDto(
             r.Id,
             r.SessionId,
             r.TenantId,
@@ -81,11 +83,13 @@ internal static class AgentAssistEndpoints
 
     private static async Task<Ok<ComplianceAlertRowDto[]>> GetSessionCompliance(
         string sessionId,
+        HttpContext context,
         [FromServices] IAgentAssistRecordReader records,
         CancellationToken ct)
     {
+        var tenantId = GetTenantId(context);
         var rows = await records.ComplianceBySessionAsync(sessionId, ct);
-        var dtos = rows.Select(r => new ComplianceAlertRowDto(
+        var dtos = rows.Where(r => IsOfTenant(r.TenantId, tenantId)).Select(r => new ComplianceAlertRowDto(
             r.Id,
             r.SessionId,
             r.TenantId,
@@ -169,6 +173,11 @@ internal static class AgentAssistEndpoints
             FilterAgentIds: [.. opts.Filters.AgentIds]);
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    // A stored row is returned only to its own tenant; the caller's tenant is never empty, so a row stored
+    // without one matches no caller. Rows of another tenant answer as a session with no rows.
+    private static bool IsOfTenant(string rowTenant, string callerTenant) =>
+        string.Equals(rowTenant, callerTenant, StringComparison.Ordinal);
 
     private static string GetTenantId(HttpContext context)
     {
