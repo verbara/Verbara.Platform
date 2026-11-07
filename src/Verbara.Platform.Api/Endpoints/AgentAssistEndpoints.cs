@@ -1,4 +1,5 @@
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Api.Services.AgentAssist;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.AgentAssist.Options;
 using Verbara.Sdk.Pro.AgentAssist.Storage.Postgres.Stores;
@@ -60,10 +61,10 @@ internal static class AgentAssistEndpoints
 
     private static async Task<Ok<SuggestionLogRowDto[]>> GetSessionSuggestions(
         string sessionId,
-        [FromServices] SuggestionLogStore store,
+        [FromServices] IAgentAssistRecordReader records,
         CancellationToken ct)
     {
-        var rows = await store.QueryBySessionAsync(sessionId, ct);
+        var rows = await records.SuggestionsBySessionAsync(sessionId, ct);
         var dtos = rows.Select(r => new SuggestionLogRowDto(
             r.Id,
             r.SessionId,
@@ -80,10 +81,10 @@ internal static class AgentAssistEndpoints
 
     private static async Task<Ok<ComplianceAlertRowDto[]>> GetSessionCompliance(
         string sessionId,
-        [FromServices] ComplianceAlertStore store,
+        [FromServices] IAgentAssistRecordReader records,
         CancellationToken ct)
     {
-        var rows = await store.QueryBySessionAsync(sessionId, ct);
+        var rows = await records.ComplianceBySessionAsync(sessionId, ct);
         var dtos = rows.Select(r => new ComplianceAlertRowDto(
             r.Id,
             r.SessionId,

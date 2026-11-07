@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json.Serialization;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Services.AgentAssist;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
@@ -11,7 +12,6 @@ using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Licensing;
 using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Switchboard;
-using Verbara.Sdk.Pro.AgentAssist.Engine;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
@@ -73,17 +73,14 @@ internal static class SupervisorEndpoints
         HttpContext context,
         [FromServices] IConversationStore conversations,
         [FromServices] IAgentStore agents,
+        [FromServices] IAgentAssistLiveSessions liveSessions,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         if (await RefuseUnlessReadsAllAsync(context, tenantId, agents, ct) is { } refusal)
             return refusal;
 
-        var supervisor = context.RequestServices.GetService<AgentAssistSupervisor>();
-        if (supervisor is null)
-            return TypedResults.Ok(Array.Empty<ActiveSessionDto>());
-
-        var sessions = supervisor.ActiveSessions.Values.Select(s => (s.SessionId, s.CallSession)).ToList();
+        var sessions = liveSessions.Snapshot().Select(s => (s.SessionId, s.Call)).ToList();
         return TypedResults.Ok(await ToActiveSessionsAsync(sessions, tenantId, conversations, ct));
     }
 
@@ -121,13 +118,12 @@ internal static class SupervisorEndpoints
     private static IResult PostWhisper(
         string sessionId,
         [FromBody] WhisperRequest body,
-        IServiceProvider services)
+        [FromServices] IAgentAssistLiveSessions liveSessions)
     {
-        var supervisor = services.GetService<AgentAssistSupervisor>();
-        if (supervisor is null || !supervisor.ActiveSessions.TryGetValue(sessionId, out var session))
+        if (!liveSessions.Snapshot().Any(s => string.Equals(s.SessionId, sessionId, StringComparison.Ordinal)))
             return Results.NotFound();
 
-        var enqueued = session.TryEnqueueSupervisorWhisper(body.Text);
+        var enqueued = liveSessions.TryWhisper(sessionId, body.Text);
         if (!enqueued)
             return Results.BadRequest(new ErrorResponse("Whisper delivery is not enabled for this session."));
 
@@ -137,10 +133,9 @@ internal static class SupervisorEndpoints
     private static Results<Ok<ListenEntry>, NotFound> PostListen(
         string sessionId,
         [FromBody] ListenRequest body,
-        IServiceProvider services)
+        [FromServices] IAgentAssistLiveSessions liveSessions)
     {
-        var supervisor = services.GetService<AgentAssistSupervisor>();
-        if (supervisor is null || !supervisor.ActiveSessions.ContainsKey(sessionId))
+        if (!liveSessions.Snapshot().Any(s => string.Equals(s.SessionId, sessionId, StringComparison.Ordinal)))
             return TypedResults.NotFound();
 
         var entry = new ListenEntry(body.SupervisorId, sessionId, DateTimeOffset.UtcNow);
