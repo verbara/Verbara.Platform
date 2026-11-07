@@ -259,9 +259,23 @@ turn it on: read **Upgrading**.
   every conversation only, on the webhook channels too, and the next customer message routes the conversation, unless the
   queue timeout abandoned it first. A sender that hangs up during that read no longer changes the publish. A failed read of
   the contact, after the conversation was read, still fails the WebChat request of a message already stored and published. (#539)
+- **Agent Assist sessions stay in their tenant.** Agent Assist live sessions, whisper, transcript listen and stored
+  suggestions and compliance alerts are now limited to the caller's tenant; the transcript listen records the signed-in
+  supervisor. `GET /api/v1/supervisor/sessions/active` lists only the sessions whose call belongs to the caller's
+  tenant. `POST /api/v1/supervisor/sessions/{sessionId}/whisper` and `/listen` answer 404 with no body for a session of
+  another tenant or of no known tenant, and enqueue or record nothing. `POST /api/v1/supervisor/sessions/{sessionId}/listen`
+  records and returns the caller's own user id: its body is optional, its `supervisorId` is ignored, and credentials
+  that carry no user id get 403 with no body. `GET /api/v1/agent-assist/sessions/{sessionId}/suggestions` and
+  `/compliance` return only the caller's tenant's rows, and still answer 200, possibly with `[]`. Same routes, same
+  response shapes.
 
 ### Upgrading
 
+- **An Agent Assist session whose call carries no tenant is no longer listed.** A call that arrives on a trunk without
+  the `TENANT_ID` channel variable has no tenant, so its Agent Assist session is missing from
+  `GET /api/v1/supervisor/sessions/active` and answers 404 to whisper and transcript listen. Set `TENANT_ID` on every
+  trunk. A client that registered a transcript listen for another supervisor id now gets the signed-in caller recorded
+  instead.
 - **Last-agent routing stays off until you turn it on.** Set `InboundRouting__LastAgent__Enabled=true` on the Api and
   restart it to turn it on for every queue, or turn it on for one queue with
   `UPDATE queue_configs SET last_agent_routing_enabled = true WHERE tenant_id = '…' AND queue_id = '…';` (`false` turns
