@@ -69,8 +69,8 @@ internal static class RecordingEndpoints
             _ => "application/octet-stream",
         };
 
-        // no-store: the browser keeps no copy, so every play and download is a request the Api answers and audits,
-        // and a later request without credentials cannot be answered from a cache (call-records-are-written-once D19).
+        // no-store: the browser keeps no copy, so every play and download is a request the Api answers and audits
+        // (call-records-are-written-once D19).
         context.Response.Headers.CacheControl = "no-store";
 
         await audit.RecordAsync(
