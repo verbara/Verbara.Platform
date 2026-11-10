@@ -9,6 +9,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `GET /api/v1/recordings/{sessionId}/stream` answers `Cache-Control: no-store` instead of `private, max-age=86400`.
+  Recordings are not stored in the browser's HTTP cache, so a second play or a download reaches the Api and
+  is recorded in the audit log as `recording.played`. Range (206) responses carry the same header.
+
 ## [2.39.0] - 2026-11-07
 
 A caller reads a conversation only when it may: an agent reads what it owns, what it is offered and the history of the

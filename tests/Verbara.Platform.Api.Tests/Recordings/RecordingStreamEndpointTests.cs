@@ -124,6 +124,45 @@ public sealed class RecordingStreamEndpointTests : IClassFixture<RecordingStream
         (await response.Content.ReadAsByteArrayAsync()).Should().Equal(RecordingStreamApiFactory.CustomerFileBytes);
     }
 
+    // ─── Every play reaches the Api (call-records-are-written-once D19) ──────
+
+    [Fact]
+    public async Task StreamRecording_ShouldSendNoStore_WhenTheWholeFileIsServed()
+    {
+        using var client = PartnerAdminClientForCustomer();
+
+        using var response = await client.GetAsync($"/api/v1/recordings/{RecordingStreamApiFactory.CustomerSessionId}/stream");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        AssertNotStoredByTheBrowser(response);
+    }
+
+    [Fact]
+    public async Task StreamRecording_ShouldSendNoStore_WhenARangeIsServed()
+    {
+        using var client = PartnerAdminClientForCustomer();
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            $"/api/v1/recordings/{RecordingStreamApiFactory.CustomerSessionId}/stream");
+        request.Headers.Range = new RangeHeaderValue(0, 3);
+
+        using var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.PartialContent, because: "the player seeks with range requests");
+        (await response.Content.ReadAsByteArrayAsync()).Should().Equal(RecordingStreamApiFactory.CustomerFileBytes[..4]);
+        AssertNotStoredByTheBrowser(response);
+    }
+
+    private static void AssertNotStoredByTheBrowser(HttpResponseMessage response)
+    {
+        // A cached copy would let the browser replay or download the recording without asking the Api: no
+        // audit entry for that play, and a later request without credentials answered from the cache.
+        var cacheControl = response.Headers.CacheControl;
+        cacheControl.Should().NotBeNull(because: "the stream states its caching policy");
+        cacheControl!.NoStore.Should().BeTrue(because: "no cache keeps a copy of a recording");
+        cacheControl.MaxAge.Should().BeNull(because: "nothing about the response may be reused");
+        cacheControl.Private.Should().BeFalse(because: "private still lets the browser's own cache keep it");
+    }
+
     // ─── The links to the stream (call-records-are-written-once D11) ─────────
 
     [Fact]

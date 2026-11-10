@@ -69,7 +69,9 @@ internal static class RecordingEndpoints
             _ => "application/octet-stream",
         };
 
-        context.Response.Headers.CacheControl = "private, max-age=86400";
+        // no-store: the browser keeps no copy, so every play and download is a request the Api answers and audits
+        // (call-records-are-written-once D19).
+        context.Response.Headers.CacheControl = "no-store";
 
         await audit.RecordAsync(
             new TenantId(tenantId), category: "data_access", action: "recording.played", severity: "info",
