@@ -9,11 +9,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.39.1] - 2026-11-10
+
+Patch release: call recordings are no longer kept in the browser's HTTP cache.
+
 ### Fixed
 
 - `GET /api/v1/recordings/{sessionId}/stream` answers `Cache-Control: no-store` instead of `private, max-age=86400`.
   Recordings are not stored in the browser's HTTP cache, so a second play or a download reaches the Api and
-  is recorded in the audit log as `recording.played`. Range (206) responses carry the same header.
+  is recorded in the audit log as `recording.played`. Range (206) responses carry the same header. (#558)
 
 ## [2.39.0] - 2026-11-07
 
