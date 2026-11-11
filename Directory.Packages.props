@@ -99,7 +99,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="StackExchange.Redis" Version="3.4.29" />
+    <PackageVersion Include="StackExchange.Redis" Version="3.4.31" />
     <!-- ASP.NET Core 10.x band, as Microsoft.AspNetCore.Authentication.JwtBearer
          (ADR-0022 Phase A). 10.0.15 is the first release past GHSA-wr8v-9x5q-ggcm (<= 10.0.14):
          advisory drift, like the transitive pins below. -->
