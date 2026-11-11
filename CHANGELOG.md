@@ -17,6 +17,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   used to start at the host's local midnight), and a `from` or `to` that carries a time keeps its meaning. This applies
   to `GET /api/v1/analytics/{dashboard,cdr,qa,intervals,intervals/agents,bot}` and
   `GET /api/v1/call-analytics/{topics/trends,sentiment/trends,compliance/summary}`.
+- The other endpoints that take a date range in the query string also read a date-only upper bound as the whole of
+  that UTC day, and a date-only lower bound as 00:00 UTC. Before, `to=2026-11-10` stopped at 00:00 of that day, so the
+  console's audit log and GDPR purge log filters left out the last day they showed. This applies to `to` on
+  `GET /api/v1/admin/audit`, `/admin/audit/events`, `/admin/audit/export`, `/management/gdpr/purge-log` and
+  `/management/impersonation/sessions/history`, `until` on `GET /api/v1/partner/revenue` and `/partner/revenue/details`,
+  and `endDate` on `GET /api/v1/admin/auth/events`. On the billing windows, which exclude their end, a date-only end
+  becomes the next day's 00:00 UTC: `until` on `GET /api/v1/management/tenants/{tenantId}/usage` and `/usage/details`,
+  `to` on `GET /api/v1/partner/credit-ledger/attribution` and on
+  `POST /api/v1/partner/customers/{customerId}/invoices/generate`, whose invoice period then ends at that midnight. A
+  bound that carries a time keeps its meaning: `endDate=2026-11-10T00:00:00Z` on auth events no longer stretches to the
+  end of the day. A malformed bound is still refused with 400. In the OpenAPI document these parameters are plain
+  strings instead of `date-time` strings.
 
 ## [2.39.1] - 2026-11-10
 

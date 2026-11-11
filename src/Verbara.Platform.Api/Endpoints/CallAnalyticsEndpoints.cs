@@ -42,8 +42,8 @@ internal static class CallAnalyticsEndpoints
 
         topN = Math.Min(topN, 50);
 
-        var toDate = AnalyticsRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
-        var fromDate = AnalyticsRangeBound.ParseFrom(from) ?? toDate.AddDays(-30);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-30);
 
         var query = new CallAnalyticsQuery
         {
@@ -119,8 +119,8 @@ internal static class CallAnalyticsEndpoints
 
         var tenantId = GetTenantId(context);
 
-        var toDate = AnalyticsRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
-        var fromDate = AnalyticsRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
 
         var query = new CallAnalyticsQuery
         {
@@ -201,8 +201,8 @@ internal static class CallAnalyticsEndpoints
 
         var tenantId = GetTenantId(context);
 
-        var toDate = AnalyticsRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
-        var fromDate = AnalyticsRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
 
         var query = new CallAnalyticsQuery
         {

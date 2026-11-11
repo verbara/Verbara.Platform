@@ -308,8 +308,8 @@ internal static class ManagementBillingEndpoints
 
     private static async Task<Ok<List<UsageSummaryDto>>> GetUsageSummary(
         string tenantId,
-        [FromQuery] DateTimeOffset? from,
-        [FromQuery] DateTimeOffset? until,
+        DateRangeStart? from,
+        DateRangeExclusiveEnd? until,
         [FromServices] IUsageRecordStore store,
         [FromServices] IClock clock,
         CancellationToken ct)
@@ -324,8 +324,8 @@ internal static class ManagementBillingEndpoints
 
     private static async Task<Results<Ok<List<UsageRecordDto>>, BadRequest<ErrorResponse>>> GetUsageDetails(
         string tenantId,
-        [FromQuery] DateTimeOffset? from,
-        [FromQuery] DateTimeOffset? until,
+        DateRangeStart? from,
+        DateRangeExclusiveEnd? until,
         [FromQuery] string? type,
         [FromQuery] int? page,
         [FromQuery] int? pageSize,

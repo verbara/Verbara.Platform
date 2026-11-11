@@ -45,8 +45,8 @@ internal static class AnalyticsEndpoints
     {
         var tenantId = GetTenantId(context);
 
-        var toDate = AnalyticsRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
-        var fromDate = AnalyticsRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
         var period = toDate - fromDate;
 
         // Current period snapshots
@@ -124,8 +124,8 @@ internal static class AnalyticsEndpoints
         var tenantId = GetTenantId(context);
         var tenantIdObj = new TenantId(tenantId);
 
-        var toDate = AnalyticsRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
-        var fromDate = AnalyticsRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
 
         var query = new CompletedSessionQuery
         {
@@ -313,8 +313,8 @@ internal static class AnalyticsEndpoints
         var tenantId = GetTenantId(context);
         var tenantIdObj = new TenantId(tenantId);
 
-        var toDate = AnalyticsRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
-        var fromDate = AnalyticsRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
 
         // minScore arrives as 0-100; QaResult scores are stored as 0-1 fractions
         var query = new CallAnalyticsQuery
@@ -460,8 +460,8 @@ internal static class AnalyticsEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var fromDt = AnalyticsRangeBound.TryParseFrom(from, out var f) ? f : DateTimeOffset.UtcNow.AddDays(-1);
-        var toDt = AnalyticsRangeBound.TryParseTo(to, out var t) ? t : DateTimeOffset.UtcNow;
+        var fromDt = DateRangeBound.TryParseFrom(from, out var f) ? f : DateTimeOffset.UtcNow.AddDays(-1);
+        var toDt = DateRangeBound.TryParseTo(to, out var t) ? t : DateTimeOffset.UtcNow;
 
         var snapshots = await svc.GetAgentIntervalsAsync(tenantId, fromDt, toDt, agentId, ct);
         var dtos = snapshots.Select(s => new AgentIntervalDto(
@@ -490,8 +490,8 @@ internal static class AnalyticsEndpoints
     {
         var tenantId = GetTenantId(context);
 
-        var toDate = AnalyticsRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
-        var fromDate = AnalyticsRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
 
         var snapshots = await snapshotStore.QueryAsync(tenantId, fromDate, toDate, queue, null, ct);
 
@@ -521,8 +521,8 @@ internal static class AnalyticsEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var toDate = AnalyticsRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
-        var fromDate = AnalyticsRangeBound.ParseFrom(from) ?? toDate.AddDays(-30);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-30);
 
         var summary = await botAnalyticsStore.GetSummaryAsync(new TenantId(tenantId), fromDate, toDate, ct);
         return Results.Ok(summary);

@@ -245,8 +245,8 @@ internal static class CreditLedgerEndpoints
 
     private static async Task<Ok<PartnerAttributionResponse>> GetPartnerAttribution(
         HttpContext context,
-        [FromQuery] DateTimeOffset? from,
-        [FromQuery] DateTimeOffset? to,
+        DateRangeStart? from,
+        DateRangeExclusiveEnd? to,
         [FromServices] ICreditLedgerStore ledger,
         [FromServices] ITenantStore tenantStore,
         [FromServices] IClock clock,
