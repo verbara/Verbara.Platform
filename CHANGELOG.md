@@ -9,6 +9,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The analytics endpoints read a date-only `to` (`2026-11-10`) as the whole of that UTC day. Before, it was that day's
+  00:00, so the console's default range and its "Today" preset left out every call made that day, and
+  `GET /api/v1/analytics/cdr` did not list today's calls. A date-only `from` starts at 00:00 UTC on every host (it
+  used to start at the host's local midnight), and a `from` or `to` that carries a time keeps its meaning. This applies
+  to `GET /api/v1/analytics/{dashboard,cdr,qa,intervals,intervals/agents,bot}` and
+  `GET /api/v1/call-analytics/{topics/trends,sentiment/trends,compliance/summary}`.
+
 ## [2.39.1] - 2026-11-10
 
 Patch release: call recordings are no longer kept in the browser's HTTP cache.
