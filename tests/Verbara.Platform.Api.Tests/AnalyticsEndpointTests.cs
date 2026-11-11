@@ -398,6 +398,82 @@ public sealed class AnalyticsEndpointTests : IClassFixture<UnifiedPlatformApiFac
         rows[0]!["sessionId"]!.GetValue<string>().Should().Be("session-recent");
     }
 
+    // The console's default range and its "Today" preset send date-only bounds (yyyy-MM-dd, the UTC
+    // date). A date-only `to` covers that whole UTC day; the next day's first instant is outside it.
+    private static readonly DateOnly RangeDay = new(2026, 3, 4);
+
+    private static CompletedSessionRow MakeCdrAt(UnifiedPlatformApiFactory factory, string sessionId, DateTimeOffset at)
+    {
+        var cdr = MakeCdr(factory, sessionId, "support");
+        cdr.StartedAt = at;
+        cdr.ConnectedAt = at;
+        cdr.CompletedAt = at;
+        cdr.CreatedAt = at;
+        return cdr;
+    }
+
+    private static DateTimeOffset UtcAt(DateOnly day, int hour, int minute = 0)
+        => new(day.ToDateTime(new TimeOnly(hour, minute)), TimeSpan.Zero);
+
+    private static async Task<string[]> ListCdrSessionIdsAsync(HttpClient client, string query)
+    {
+        var response = await client.GetAsync($"/api/analytics/cdr?{query}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        return json!["data"]!.AsArray().Select(r => r!["sessionId"]!.GetValue<string>()).ToArray();
+    }
+
+    [Fact]
+    public async Task ListCdr_ShouldIncludeTheWholeDay_WhenToIsDateOnly()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-day-start", UtcAt(RangeDay, 0)));
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-afternoon", UtcAt(RangeDay, 15)));
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-late", UtcAt(RangeDay, 23, 59)));
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-next-day", UtcAt(RangeDay.AddDays(1), 0)));
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-day-before", UtcAt(RangeDay, 0).AddTicks(-TimeSpan.TicksPerMicrosecond)));
+
+        var day = RangeDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var ids = await ListCdrSessionIdsAsync(client, $"from={day}&to={day}");
+
+        ids.Should().BeEquivalentTo("session-day-start", "session-afternoon", "session-late");
+    }
+
+    [Fact]
+    public async Task ListCdr_ShouldKeepTheInstant_WhenToCarriesATime()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-morning", UtcAt(RangeDay, 9)));
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-afternoon", UtcAt(RangeDay, 15)));
+
+        var day = RangeDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var to = Uri.EscapeDataString($"{day}T12:00:00Z");
+        var ids = await ListCdrSessionIdsAsync(client, $"from={day}&to={to}");
+
+        ids.Should().BeEquivalentTo("session-morning");
+    }
+
+    [Fact]
+    public async Task ListIntervals_ShouldIncludeTheWholeDay_WhenToIsDateOnly()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        await factory.SnapshotStore.UpsertAsync(MakeSnapshot(factory, "same-day", UtcAt(RangeDay, 15), serverId: "s1"));
+        await factory.SnapshotStore.UpsertAsync(MakeSnapshot(factory, "next-day", UtcAt(RangeDay.AddDays(1), 0), serverId: "s2"));
+
+        var day = RangeDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var response = await client.GetAsync($"/api/analytics/intervals?from={day}&to={day}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!.AsArray().Select(i => i!["queueName"]!.GetValue<string>()).Should().BeEquivalentTo("same-day");
+    }
+
     [Fact]
     public async Task GetCdrDetail_ShouldReturnDetail_WhenExists()
     {
