@@ -6,13 +6,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.15" />
   </ItemGroup>
 
   <ItemGroup>
@@ -100,9 +100,10 @@
 
   <ItemGroup>
     <PackageVersion Include="StackExchange.Redis" Version="3.4.29" />
-    <!-- Pinned same version as Microsoft.AspNetCore.Authentication.JwtBearer to keep the
-         ASP.NET Core 10.x band consistent across Verbara.Platform.Realtime (ADR-0022 Phase A). -->
-    <PackageVersion Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="10.0.5" />
+    <!-- ASP.NET Core 10.x band, as Microsoft.AspNetCore.Authentication.JwtBearer
+         (ADR-0022 Phase A). 10.0.15 is the first release past GHSA-wr8v-9x5q-ggcm (<= 10.0.14):
+         advisory drift, like the transitive pins below. -->
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="10.0.15" />
     <!-- Client-side SignalR consumed by tests/Verbara.Platform.E2E.Harness (NO-AOT
          walking-skeleton harness for ADR-0022 Phase A.5 exactly-once verification).
          Reflection-based — incompatible with Native AOT, but the harness itself is
@@ -118,8 +119,10 @@
          The version it would otherwise resolve (2.5.187) carries CVE-2026-48109 — a HIGH
          (CVSS 8.2) DoS in LZ4Block/LZ4BlockArray decompression of untrusted payloads.
          2.5.301 is the patched release. SignalR does not enable LZ4 by default so real
-         exposure is low, but NuGet audit (NU1903) correctly flags the vulnerable version. -->
-    <PackageVersion Include="MessagePack" Version="2.5.301" />
+         exposure is low, but NuGet audit (NU1903) correctly flags the vulnerable version.
+         Microsoft.AspNetCore.SignalR.StackExchangeRedis 10.0.15 needs MessagePack >= 2.5.303,
+         so the pin follows that floor (NU1109 otherwise). -->
+    <PackageVersion Include="MessagePack" Version="2.5.303" />
     <!-- Transitive-pin override (CentralPackageTransitivePinningEnabled=true): the .NET 10
          OpenAPI stack (Microsoft.AspNetCore.OpenApi 10.0.5) pulls Microsoft.OpenApi 2.0.0
          transitively. 2.0.0 carries GHSA-v5pm-xwqc-g5wc — a HIGH-severity advisory that NuGet
