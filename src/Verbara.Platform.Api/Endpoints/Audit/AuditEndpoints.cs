@@ -7,6 +7,7 @@ using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Verbara.Platform.Api.Endpoints.Shared;
 
 namespace Verbara.Platform.Api.Endpoints.Audit;
 
@@ -63,8 +64,8 @@ internal static class AuditAdminEndpoints
         string? actionPrefix = null,
         string? actor = null,
         string? target = null,
-        DateTimeOffset? from = null,
-        DateTimeOffset? to = null,
+        DateRangeStart? from = null,
+        DateRangeEnd? to = null,
         string? tenantId = null,
         int page = 1,
         int pageSize = 50,
@@ -105,8 +106,8 @@ internal static class AuditAdminEndpoints
         string? actionPrefix = null,
         string? actor = null,
         string? target = null,
-        DateTimeOffset? from = null,
-        DateTimeOffset? to = null,
+        DateRangeStart? from = null,
+        DateRangeEnd? to = null,
         string? tenantId = null,
         CancellationToken ct = default)
     {

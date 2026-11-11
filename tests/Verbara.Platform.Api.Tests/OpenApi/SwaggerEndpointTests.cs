@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json.Nodes;
 using Verbara.Sdk.Pro.Licensing;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
@@ -45,6 +46,26 @@ public sealed class SwaggerEndpointTests
         body.Should().NotBeNullOrWhiteSpace();
         body.Should().Contain("\"openapi\"",
             "a valid OpenAPI document must start with the version discriminator");
+    }
+
+    [Theory]
+    [InlineData("/api/v{version}/management/gdpr/purge-log", "get", "to")]
+    [InlineData("/api/v{version}/partner/customers/{customerId}/invoices/generate", "post", "to")]
+    [InlineData("/api/v{version}/management/tenants/{tenantId}/usage", "get", "until")]
+    [InlineData("/api/v{version}/admin/audit/events", "get", "from")]
+    public async Task OpenApiJson_ShouldDocumentADateRangeBoundAsAString_WhenItAcceptsADateOrAnInstant(
+        string path, string method, string parameter)
+    {
+        await using var factory = new OpenApiEnabledFactory();
+        var client = factory.CreateClient();
+
+        var document = JsonNode.Parse(await client.GetStringAsync(OpenApiDocumentPath))!;
+
+        var schema = document["paths"]![path]![method]!["parameters"]!.AsArray()
+            .Single(p => p!["name"]!.GetValue<string>() == parameter)!["schema"]!;
+        schema.ToJsonString().Should().Be("""{"type":"string"}""");
+        document["components"]!["schemas"]!.AsObject().Select(s => s.Key)
+            .Should().NotContain(name => name.StartsWith("DateRange", StringComparison.Ordinal));
     }
 
     [Fact]

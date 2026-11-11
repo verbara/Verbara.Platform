@@ -172,8 +172,8 @@ internal static class PartnerBillingEndpoints
     private static async Task<IResult> GenerateCustomerInvoice(
         string customerId,
         HttpContext context,
-        [FromQuery] DateTimeOffset? from,
-        [FromQuery] DateTimeOffset? to,
+        DateRangeStart? from,
+        DateRangeExclusiveEnd? to,
         [FromServices] ITenantStore tenantStore,
         [FromServices] IRateCardStore rateCardStore,
         [FromServices] IInvoiceGenerationService invoiceService,

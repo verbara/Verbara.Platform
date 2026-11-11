@@ -1,6 +1,7 @@
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Microsoft.AspNetCore.Mvc;
+using Verbara.Platform.Api.Endpoints.Shared;
 
 namespace Verbara.Platform.Api.Endpoints;
 
@@ -22,8 +23,8 @@ internal static class AuditEndpoints
         string? action = null,
         string? entityType = null,
         string? performedBy = null,
-        DateTimeOffset? from = null,
-        DateTimeOffset? to = null,
+        DateRangeStart? from = null,
+        DateRangeEnd? to = null,
         string? category = null,
         string? severity = null,
         string? actorId = null,
