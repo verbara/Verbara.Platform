@@ -92,7 +92,7 @@ public abstract class EventStoreLeaseColocationTests(string image) : IAsyncLifet
     [Fact]
     public async Task Boot_ShouldRefuseAtTheLockingSelectWith25006_WhenTheEventStoreIsAPhysicalStandby()
     {
-        var database = await CreateDatabaseAsync();
+        var database = await CreateDatabaseAsync(withLockTable: true);
         await WaitForStandbyAsync(database);
 
         var refusal = Refusal(Boot(Voice(cluster: Primary(database), analytics: Standby(database))));
@@ -228,7 +228,7 @@ public abstract class EventStoreLeaseColocationTests(string image) : IAsyncLifet
     [Fact]
     public async Task Boot_ShouldRefuseThroughDialerNamingIt_WhenDialerIsAStandbyAndAnalyticsIsUnset()
     {
-        var database = await CreateDatabaseAsync();
+        var database = await CreateDatabaseAsync(withLockTable: true);
         await WaitForStandbyAsync(database);
 
         var refusal = Refusal(Boot(Voice(cluster: Primary(database), dialer: Standby(database))));
@@ -371,6 +371,12 @@ public abstract class EventStoreLeaseColocationTests(string image) : IAsyncLifet
         await MigrationRunner.EnsureSchemaAsync(dataSource, NullLogger.Instance);
     }
 
+    /// <summary>
+    /// Waits until the standby has replayed the lock table the primary created. Accepting
+    /// connections is not enough: the boot under test queries the table on the standby right after
+    /// the primary creates it, and a standby that has not replayed it yet answers 42P01 instead of
+    /// the 25006 the test asserts. So the table is created before boot and awaited here.
+    /// </summary>
     private async Task WaitForStandbyAsync(string database)
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
@@ -378,14 +384,15 @@ public abstract class EventStoreLeaseColocationTests(string image) : IAsyncLifet
         {
             try
             {
-                await using var connection = new NpgsqlConnection(Standby(database));
-                await connection.OpenAsync();
-                return;
+                if (await TableExistsAsync(Standby(database), "cluster_distributed_lock"))
+                    return;
             }
             catch (NpgsqlException) when (DateTimeOffset.UtcNow < deadline)
             {
-                await Task.Delay(200); // fence-allow: LOOP-DRIVER — retry pacing until the standby accepts connections, bounded by the deadline
             }
+            if (DateTimeOffset.UtcNow >= deadline)
+                throw new TimeoutException($"The standby did not replay cluster_distributed_lock of {database} within 30 s.");
+            await Task.Delay(200); // fence-allow: LOOP-DRIVER — retry pacing until the standby has replayed the lock table, bounded by the deadline
         }
     }
 
