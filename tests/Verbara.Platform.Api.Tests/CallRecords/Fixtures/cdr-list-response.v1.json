@@ -1,0 +1,52 @@
+{
+  "data": [
+    {
+      "sessionId": "c7a1f0e25b6d4c3e9a8f1e2d3c4b5a69",
+      "startTime": "2026-11-04T15:02:11.482+00:00",
+      "answerTime": "2026-11-04T15:02:19.12+00:00",
+      "endTime": "2026-11-04T15:03:33.904+00:00",
+      "contact": "55502520001",
+      "channel": "voice",
+      "queueName": "support",
+      "agentName": "Lab Agent 1001",
+      "durationMs": 82422,
+      "talkTimeMs": 74784,
+      "waitTimeMs": 6210,
+      "disposition": "ANSWERED",
+      "slaMet": true,
+      "hasQaScore": true,
+      "qaScore": 87.5,
+      "sentimentLabel": "Positive",
+      "hasRecording": true,
+      "transferredTo": "1002",
+      "transferType": 1,
+      "hangupSource": 1,
+      "wrapUpDurationMs": 15000,
+      "holdCount": 0,
+      "ringDurationMs": 1428,
+      "metadata": {
+        "x-lab-tag": "sample"
+      },
+      "isPartial": false
+    },
+    {
+      "sessionId": "0b9e4d217c3a4f58b6e192d4a7c0f3e8",
+      "startTime": "2026-11-04T15:05:40.017+00:00",
+      "endTime": "2026-11-04T15:06:10.022+00:00",
+      "contact": "55502520002",
+      "channel": "voice",
+      "queueName": "support",
+      "durationMs": 30005,
+      "waitTimeMs": 30005,
+      "disposition": "NO ANSWER",
+      "slaMet": false,
+      "hasQaScore": false,
+      "hasRecording": false,
+      "holdCount": 0,
+      "isPartial": false
+    }
+  ],
+  "hasMore": true,
+  "page": 1,
+  "pageSize": 50
+}

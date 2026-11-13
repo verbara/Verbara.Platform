@@ -45,8 +45,8 @@ internal static class AnalyticsEndpoints
     {
         var tenantId = GetTenantId(context);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-7);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
         var period = toDate - fromDate;
 
         // Current period snapshots
@@ -124,8 +124,8 @@ internal static class AnalyticsEndpoints
         var tenantId = GetTenantId(context);
         var tenantIdObj = new TenantId(tenantId);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-7);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
 
         var query = new CompletedSessionQuery
         {
@@ -189,7 +189,8 @@ internal static class AnalyticsEndpoints
                 RingDurationMs: ComputeRingDurationMs(row),
                 CampaignName: null,
                 DispositionName: null,
-                Metadata: row.Metadata);
+                Metadata: row.Metadata,
+                IsPartial: row.IsPartial);
         }).ToArray();
 
         return TypedResults.Ok(new PagedDataResponse<CdrRowDto>(dtos, hasMore, page, pageSize));
@@ -275,11 +276,12 @@ internal static class AnalyticsEndpoints
             RingDurationMs: ComputeRingDurationMs(row),
             CampaignName: null,
             DispositionName: null,
-            Metadata: row.Metadata);
+            Metadata: row.Metadata,
+            IsPartial: row.IsPartial);
 
         var hasTranscript = qa is not null && qa.Summary is not null;
         var recordingStreamUrl = !string.IsNullOrEmpty(row.RecordingName)
-            ? $"/api/recordings/{row.SessionId}/stream"
+            ? $"/api/v1/recordings/{row.SessionId}/stream"
             : null;
 
         return TypedResults.Ok(new CdrDetailDto(
@@ -311,8 +313,8 @@ internal static class AnalyticsEndpoints
         var tenantId = GetTenantId(context);
         var tenantIdObj = new TenantId(tenantId);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-7);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
 
         // minScore arrives as 0-100; QaResult scores are stored as 0-1 fractions
         var query = new CallAnalyticsQuery
@@ -458,8 +460,8 @@ internal static class AnalyticsEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var fromDt = DateTimeOffset.TryParse(from, out var f) ? f.ToUtcInstant() : DateTimeOffset.UtcNow.AddDays(-1);
-        var toDt = DateTimeOffset.TryParse(to, out var t) ? t.ToUtcInstant() : DateTimeOffset.UtcNow;
+        var fromDt = DateRangeBound.TryParseFrom(from, out var f) ? f : DateTimeOffset.UtcNow.AddDays(-1);
+        var toDt = DateRangeBound.TryParseTo(to, out var t) ? t : DateTimeOffset.UtcNow;
 
         var snapshots = await svc.GetAgentIntervalsAsync(tenantId, fromDt, toDt, agentId, ct);
         var dtos = snapshots.Select(s => new AgentIntervalDto(
@@ -488,8 +490,8 @@ internal static class AnalyticsEndpoints
     {
         var tenantId = GetTenantId(context);
 
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-7);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
 
         var snapshots = await snapshotStore.QueryAsync(tenantId, fromDate, toDate, queue, null, ct);
 
@@ -519,8 +521,8 @@ internal static class AnalyticsEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        var toDate = to is not null ? DateTimeOffset.Parse(to, CultureInfo.InvariantCulture).ToUtcInstant() : DateTimeOffset.UtcNow;
-        var fromDate = from is not null ? DateTimeOffset.Parse(from, CultureInfo.InvariantCulture).ToUtcInstant() : toDate.AddDays(-30);
+        var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
+        var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-30);
 
         var summary = await botAnalyticsStore.GetSummaryAsync(new TenantId(tenantId), fromDate, toDate, ct);
         return Results.Ok(summary);
@@ -705,7 +707,10 @@ internal sealed record CdrRowDto(
     long? RingDurationMs,
     string? CampaignName,
     string? DispositionName,
-    Dictionary<string, string>? Metadata);
+    Dictionary<string, string>? Metadata,
+    // D17 (call-records-are-written-once): true when the record was built from an incomplete history, so its
+    // hold figures are not trustworthy. Always present (a bool is never omitted); the partial cause is Pro-only.
+    bool IsPartial);
 
 internal sealed record CdrDetailDto(
     CdrRowDto Cdr,

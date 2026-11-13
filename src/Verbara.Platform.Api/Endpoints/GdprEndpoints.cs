@@ -181,8 +181,8 @@ internal static class GdprEndpoints
 
     private static async Task<IResult> ListPurgeLog(
         [FromQuery] string? tenantId,
-        [FromQuery] DateTimeOffset? from,
-        [FromQuery] DateTimeOffset? to,
+        DateRangeStart? from,
+        DateRangeEnd? to,
         [FromServices] IPurgeLogStore store,
         CancellationToken ct)
     {

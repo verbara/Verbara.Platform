@@ -1039,10 +1039,10 @@ builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
 // ─── Pro.Dialer (Outbound Campaigns) ────────────────────────────────────────
 var dialerConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
     builder.Configuration.GetConnectionString("Dialer") ?? builder.Configuration.GetConnectionString("Postgres")) ?? "";
+// D13a: before the first registration-time migrator of the event store's chain (the dialer's, then the event store's).
+await Verbara.Platform.Api.Services.EventStoreLeaseColocation.EnsureAsync(builder.Configuration);
 if (!string.IsNullOrEmpty(dialerConnectionString))
-{
     builder.Services.AddPlatformDialer(builder.Configuration, ResolveDataSource(dialerConnectionString, "dialer")!);
-}
 
 // ─── Pro.Cluster ─────────────────────────────────────────────────────────────
 var nodeAri = StasisAppNames.NodeOptions(builder.Configuration); // eager: equal app names fail the boot (ADR-0044)
@@ -1293,12 +1293,7 @@ if (!builder.Services.Any(d => d.ServiceType == typeof(Verbara.Sdk.Pro.CallAnaly
     builder.Services.AddSingleton<Verbara.Sdk.Pro.CallAnalytics.Store.ICallAnalyticsStore, Verbara.Platform.Storage.InMemory.InMemoryCallAnalyticsStore>();
 
 // ─── Recordings ─────────────────────────────────────────────────────────────
-builder.Services.Configure<RecordingOptions>(o =>
-{
-    var path = builder.Configuration["Recordings:BasePath"];
-    if (!string.IsNullOrEmpty(path))
-        o.BasePath = path;
-});
+builder.Services.AddPlatformRecordings(builder.Configuration);
 
 // ─── S3 Media Storage (overrides FileSystem default when S3_BUCKET is set) ──
 var s3Bucket = builder.Configuration["S3_BUCKET"];

@@ -84,6 +84,7 @@ data:
     enabled = yes
     bindaddr = 0.0.0.0
     port = 5038
+    timestampevents = yes
 
     [{{ .Values.asterisk.ami.username }}]
     secret = __AMI_PASSWORD__

@@ -88,16 +88,13 @@ internal static class AuthAdminEndpoints
         int pageSize = 50,
         string? userId = null,
         string? eventType = null,
-        DateTimeOffset? startDate = null,
-        DateTimeOffset? endDate = null,
+        DateRangeStart? startDate = null,
+        DateRangeEnd? endDate = null,
         CancellationToken ct = default)
     {
         var tenantId = GetTenantId(context);
         if (tenantId is null)
             return TypedResults.Unauthorized();
-
-        if (endDate.HasValue && endDate.Value.TimeOfDay == TimeSpan.Zero)
-            endDate = endDate.Value.AddDays(1).AddTicks(-1);
 
         var query = new AuthEventQuery(
             UserId: userId,

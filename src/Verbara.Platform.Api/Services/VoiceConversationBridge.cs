@@ -40,6 +40,11 @@ namespace Verbara.Platform.Api.Services;
 /// index (migration 027) is the failover safety net behind this gate. On SMB single-host the
 /// lease is always held by the only pod, so correctness is free.</para>
 ///
+/// <para><b>Lease acquisition (call-records-are-written-once D5):</b> a standby stamps no tenant, so on the
+/// lease's false-to-true edge (read every <see cref="LeaderPollInterval"/>) the bridge stamps each live, tenant-less
+/// mirror session by its LinkedId — the Conversation the previous leader created, else the trunk leg's
+/// <c>TENANT_ID</c> — once per acquisition, never per renewal.</para>
+///
 /// <para><b>StopHost safety:</b> the subscription's <c>OnNext</c> is synchronous and never throws
 /// (fire-and-forget into a fully-guarded async handler), so an event-handling fault can never
 /// bubble out and trip <c>BackgroundServiceExceptionBehavior.StopHost</c>.</para>
@@ -100,6 +105,7 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     private readonly IClusterLeader _leader;
     private readonly IClock _clock;
     private readonly ILogger<VoiceConversationBridge> _logger;
+    private readonly TimeProvider _timeProvider;
 
     // Serializes the handling of events for the SAME call: OnNext fans out fire-and-forget async
     // handlers that interleave at await points, so without this a Connected/Ended pair for one call
@@ -111,6 +117,15 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     private readonly SemaphoreSlim[] _callLocks =
         [.. Enumerable.Range(0, CallLockStripes).Select(_ => new SemaphoreSlim(1, 1))];
     private IDisposable? _subscription;
+
+    /// <summary>
+    /// How often the bridge reads the voice leader lease to notice its acquisition on a quiet replica (design D5); the
+    /// event store reads its writer delegate at the same interval (Pro <c>EventStoreOptions.WriterPollInterval</c>).
+    /// </summary>
+    internal static readonly TimeSpan LeaderPollInterval = TimeSpan.FromSeconds(1);
+    private ITimer? _leaderPoll;
+    private int _wasLeader;
+    private int _leaderPollRunning;
 
     private SemaphoreSlim CallLockFor(string sessionId) =>
         _callLocks[(int)((uint)sessionId.GetHashCode() % (uint)CallLockStripes)];
@@ -127,7 +142,8 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         PlatformEventBus eventBus,
         [FromKeyedServices(VoiceLeaderResources.AmiOwner)] IClusterLeader leader,
         IClock clock,
-        ILogger<VoiceConversationBridge> logger)
+        ILogger<VoiceConversationBridge> logger,
+        TimeProvider? timeProvider = null)
     {
         _sessions = sessions;
         _serverPool = serverPool;
@@ -141,22 +157,27 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
         _leader = leader;
         _clock = clock;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public Task StartAsync(CancellationToken ct)
     {
         _subscription = _sessions.Events.Subscribe(OnEvent);
+        _leaderPoll = _timeProvider.CreateTimer(
+            static state => ((VoiceConversationBridge)state!).OnLeaderPoll(), this, LeaderPollInterval, LeaderPollInterval);
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken ct)
     {
+        _leaderPoll?.Dispose();
         _subscription?.Dispose();
         return Task.CompletedTask;
     }
 
     public void Dispose()
     {
+        _leaderPoll?.Dispose();
         _subscription?.Dispose();
         foreach (var stripe in _callLocks)
             stripe.Dispose();
@@ -168,6 +189,92 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     // never call back synchronously into the session engine: either one deadlocks the call. Today it is lock-free
     // reads plus `await gate.WaitAsync()`; a blocking `gate.Wait()` there is the failure this rule exists to stop.
     internal void OnEvent(SessionDomainEvent evt) => _ = HandleEventAsync(evt);
+
+    /// <summary>
+    /// Reads the voice leader lease and, on its false-to-true edge only, stamps the live mirror sessions
+    /// (<see cref="StampLiveSessionsAsync"/>): once per acquisition, never per renewal. A lost lease re-arms the edge.
+    /// The leader poll calls it every <see cref="LeaderPollInterval"/>; internal so a test drives an edge directly.
+    /// </summary>
+    internal async Task ObserveLeadershipAsync()
+    {
+        var isLeader = _leader.IsLeader;
+        var wasLeader = Interlocked.Exchange(ref _wasLeader, isLeader ? 1 : 0) == 1;
+        if (!isLeader || wasLeader)
+            return;
+
+        await StampLiveSessionsAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// call-records-are-written-once design D5: the replica that just acquired the voice leader lease was a standby, so
+    /// none of its mirror sessions carries a tenant (only the leader stamps one). Each live, tenant-less mirror is stamped
+    /// by its LinkedId from the Conversation the previous leader created (the cross-tenant lookup the hangup path uses),
+    /// else, for a call born in the lease gap, from its trunk leg's <c>TENANT_ID</c> through the same fail-closed read
+    /// the queue path uses (round 12 F1). A mirror with neither stays tenant-less and is logged, never guessed. Runs
+    /// under the call's stripe lock, as the event handlers do.
+    /// </summary>
+    private async Task StampLiveSessionsAsync()
+    {
+        var sessions = _sessions.ActiveSessions
+            .Where(s => string.IsNullOrEmpty(s.TenantId) && VoiceCallTenant.IsLive(s))
+            .ToList();
+        LogAcquisitionStamp(sessions.Count);
+
+        foreach (var session in sessions)
+        {
+            var gate = CallLockFor(session.SessionId);
+            await gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (!string.IsNullOrEmpty(session.TenantId))
+                    continue; // an event handler stamped it while this pass waited
+
+                var conversation = await _conversations
+                    .FindByVoiceLinkedIdAcrossTenantsAsync(session.LinkedId, CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (conversation is not null)
+                {
+                    session.TenantId = conversation.TenantId.Value;
+                    continue;
+                }
+
+                if (await ResolveTenantAsync(session).ConfigureAwait(false) is null)
+                    LogMirrorLeftTenantless(session.SessionId, session.LinkedId);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                LogAcquisitionStampFailed(session.SessionId, session.LinkedId, ex.Message, ex);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+    }
+
+    // The leader poll's callback: one pass at a time, never throws onto the timer thread.
+    private void OnLeaderPoll()
+    {
+        if (Interlocked.Exchange(ref _leaderPollRunning, 1) == 1)
+            return;
+        _ = RunLeaderPollAsync();
+    }
+
+    private async Task RunLeaderPollAsync()
+    {
+        try
+        {
+            await ObserveLeadershipAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            LogLeaderPollFailed(ex.Message, ex);
+        }
+        finally
+        {
+            Volatile.Write(ref _leaderPollRunning, 0);
+        }
+    }
 
     internal async Task HandleEventAsync(SessionDomainEvent evt)
     {
@@ -676,18 +783,8 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     /// <c>ps_endpoints set_var</c>, Phase 2.4) off the inbound trunk leg via an AMI <c>GetVar</c>.
     /// Returns <see langword="null"/> (fail-closed) when AMI is unavailable or the variable is unset.
     /// </summary>
-    private async Task<string?> ResolveTenantAsync(CallSession session)
-    {
-        if (!string.IsNullOrEmpty(session.TenantId))
-            return session.TenantId;
-
-        var trunk = session.Participants.FirstOrDefault(p => p.Role == ParticipantRole.Caller)
-                    ?? (session.Participants.Count > 0 ? session.Participants[0] : null);
-        if (trunk is null)
-            return null;
-
-        return await ResolveTenantFromChannelAsync(session, trunk.Channel).ConfigureAwait(false);
-    }
+    private Task<string?> ResolveTenantAsync(CallSession session) =>
+        VoiceCallTenant.ResolveAsync(_serverPool, session, _logger);
 
     /// <summary>
     /// Reads the <c>TENANT_ID</c> channel variable on <paramref name="channel"/> via an AMI GetVar
@@ -696,34 +793,8 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     /// or the action fails. Internal so the resolution wire (the linchpin) is unit-testable without
     /// a live SDK-internal participant.
     /// </summary>
-    internal async Task<string?> ResolveTenantFromChannelAsync(CallSession session, string channel)
-    {
-        var server = _serverPool.GetServer("primary");
-        if (server is null)
-            return null; // AMI not connected / unconfigured — fail-closed
-
-        try
-        {
-            var response = await server.Connection.SendActionAsync<GetVarResponse>(
-                new GetVarAction { Channel = channel, Variable = TenantVariable },
-                CancellationToken.None).ConfigureAwait(false);
-
-            var ok = string.Equals(response.Response, "Success", StringComparison.OrdinalIgnoreCase);
-            if (!ok || string.IsNullOrEmpty(response.Value))
-                return null;
-
-            // Stamp the SDK's reserved tenant hook so downstream observers on THIS (leader) pod —
-            // CDR projection, AgentAssist — resolve the same tenant; followers never stamp, so
-            // their fail-closed paths keep side-effects single cluster-wide.
-            session.TenantId = response.Value;
-            return response.Value;
-        }
-        catch (Exception ex)
-        {
-            LogGetVarFailed(channel, ex.Message);
-            return null;
-        }
-    }
+    internal Task<string?> ResolveTenantFromChannelAsync(CallSession session, string channel) =>
+        VoiceCallTenant.ReadAndStampAsync(_serverPool, session, channel, _logger);
 
     /// <summary>
     /// Reads the <c>VERBARA_REASON</c> channel variable on <paramref name="channel"/> (the caller /
@@ -1038,6 +1109,22 @@ internal sealed partial class VoiceConversationBridge : IHostedService, IDisposa
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[VOICE-CONV] Voice capacity {Operation} for agent {AgentId} failed: {Reason}")]
     private partial void LogCapacityFailed(string agentId, string operation, string reason);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "[VOICE-CONV] Voice leader lease acquired: stamping {Count} live tenant-less call session(s) by LinkedId.")]
+    private partial void LogAcquisitionStamp(int count);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[VOICE-CONV] Session {SessionId} (LinkedId {LinkedId}): no Conversation and no TENANT_ID on its trunk leg at lease acquisition — left without a tenant.")]
+    private partial void LogMirrorLeftTenantless(string sessionId, string linkedId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "[VOICE-CONV] Session {SessionId} (LinkedId {LinkedId}): the tenant stamp at lease acquisition failed: {Reason}")]
+    private partial void LogAcquisitionStampFailed(string sessionId, string linkedId, string reason, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error,
+        Message = "[VOICE-CONV] The voice leader poll failed: {Reason}")]
+    private partial void LogLeaderPollFailed(string reason, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Error,
         Message = "[VOICE-CONV] Error handling {Event} for session {SessionId}: {Reason}")]

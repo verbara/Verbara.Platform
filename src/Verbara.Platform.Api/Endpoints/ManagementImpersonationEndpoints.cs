@@ -524,8 +524,8 @@ internal static class ManagementImpersonationEndpoints
         [FromServices] ITenantStore tenantStore,
         [FromServices] TimeProvider clock,
         [FromQuery] string? actorTenantId = null,
-        [FromQuery] DateTimeOffset? from = null,
-        [FromQuery] DateTimeOffset? to = null,
+        DateRangeStart? from = null,
+        DateRangeEnd? to = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)

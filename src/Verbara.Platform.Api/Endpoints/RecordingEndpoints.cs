@@ -38,7 +38,7 @@ internal static class RecordingEndpoints
             SessionId: row.SessionId,
             RecordingName: row.RecordingName,
             HasRecording: true,
-            StreamUrl: $"/api/recordings/{row.SessionId}/stream"));
+            StreamUrl: $"/api/v1/recordings/{row.SessionId}/stream"));
     }
 
     private static async Task<IResult> StreamRecording(
@@ -56,15 +56,7 @@ internal static class RecordingEndpoints
             return Results.NotFound();
 
         var recordingName = row.RecordingName;
-        string[] extensions = [".wav", ".gsm", ".ogg", ""];
-        string? filePath = null;
-
-        foreach (var ext in extensions)
-        {
-            filePath = ResolveRecordingPath(options.Value.BasePath, tenantId, recordingName, ext);
-            if (filePath is not null) break;
-        }
-
+        var filePath = FindRecordingFile(options.Value.BasePath, tenantId, recordingName);
         if (filePath is null)
             return Results.NotFound();
 
@@ -77,7 +69,9 @@ internal static class RecordingEndpoints
             _ => "application/octet-stream",
         };
 
-        context.Response.Headers.CacheControl = "private, max-age=86400";
+        // no-store: the browser keeps no copy, so every play and download is a request the Api answers and audits
+        // (call-records-are-written-once D19).
+        context.Response.Headers.CacheControl = "no-store";
 
         await audit.RecordAsync(
             new TenantId(tenantId), category: "data_access", action: "recording.played", severity: "info",
@@ -95,6 +89,26 @@ internal static class RecordingEndpoints
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    private static readonly string[] RecordingExtensions = [".wav", ".gsm", ".ogg", ""];
+
+    /// <summary>
+    /// The file a tenant's recording named <paramref name="recordingName"/> is stored in under
+    /// <paramref name="basePath"/> — the tenant's directory first, then the legacy flat layout, each extension in turn —
+    /// or <see langword="null"/> when there is none. The stream reads it; the event store's recording resolver asks it
+    /// whether a call was recorded (<see cref="Services.RecordingFileCallRecordingResolver"/>).
+    /// </summary>
+    internal static string? FindRecordingFile(string basePath, string tenantId, string recordingName)
+    {
+        foreach (var ext in RecordingExtensions)
+        {
+            var filePath = ResolveRecordingPath(basePath, tenantId, recordingName, ext);
+            if (filePath is not null)
+                return filePath;
+        }
+
+        return null;
+    }
 
     private static string? ResolveRecordingPath(string basePath, string tenantId, string recordingName, string ext)
     {

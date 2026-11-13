@@ -2,6 +2,7 @@ using Verbara.Platform.Billing;
 using Verbara.Platform.Core;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Verbara.Platform.Api.Endpoints.Shared;
 
 namespace Verbara.Platform.Api.Endpoints;
 
@@ -24,8 +25,8 @@ internal static class PartnerRevenueEndpoints
 
     private static async Task<Results<Ok<PartnerRevenueSummaryDto>, ForbidHttpResult>> GetRevenueSummary(
         HttpContext context,
-        [FromQuery] DateTimeOffset? from,
-        [FromQuery] DateTimeOffset? until,
+        DateRangeStart? from,
+        DateRangeEnd? until,
         [FromServices] IPartnerRevenueStore revenueStore,
         CancellationToken ct)
     {
@@ -50,8 +51,8 @@ internal static class PartnerRevenueEndpoints
 
     private static async Task<Results<Ok<List<PartnerRevenueDetailDto>>, ForbidHttpResult>> GetRevenueDetails(
         HttpContext context,
-        [FromQuery] DateTimeOffset? from,
-        [FromQuery] DateTimeOffset? until,
+        DateRangeStart? from,
+        DateRangeEnd? until,
         [FromServices] IPartnerRevenueStore revenueStore,
         CancellationToken ct)
     {

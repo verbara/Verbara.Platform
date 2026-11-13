@@ -1,0 +1,36 @@
+{
+  "data": [
+    {
+      "sessionId": "5d2a8c419e074b3fa1c67f80e2d94b15",
+      "startTime": "2026-11-04T15:02:11.482+00:00",
+      "answerTime": "2026-11-04T15:02:19.12+00:00",
+      "endTime": "2026-11-04T15:03:33.904+00:00",
+      "contact": "55502520001",
+      "channel": "voice",
+      "queueName": "support",
+      "agentName": "Lab Agent 1001",
+      "durationMs": 82422,
+      "talkTimeMs": 74784,
+      "waitTimeMs": 6210,
+      "disposition": "ANSWERED",
+      "slaMet": true,
+      "hasQaScore": true,
+      "qaScore": 87.5,
+      "sentimentLabel": "Positive",
+      "hasRecording": true,
+      "transferredTo": "1002",
+      "transferType": 1,
+      "hangupSource": 1,
+      "wrapUpDurationMs": 15000,
+      "holdCount": 1,
+      "ringDurationMs": 1428,
+      "metadata": {
+        "x-lab-tag": "sample"
+      },
+      "isPartial": true
+    }
+  ],
+  "hasMore": false,
+  "page": 1,
+  "pageSize": 50
+}

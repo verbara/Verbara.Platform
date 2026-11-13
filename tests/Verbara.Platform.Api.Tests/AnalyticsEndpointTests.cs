@@ -398,6 +398,82 @@ public sealed class AnalyticsEndpointTests : IClassFixture<UnifiedPlatformApiFac
         rows[0]!["sessionId"]!.GetValue<string>().Should().Be("session-recent");
     }
 
+    // The console's default range and its "Today" preset send date-only bounds (yyyy-MM-dd, the UTC
+    // date). A date-only `to` covers that whole UTC day; the next day's first instant is outside it.
+    private static readonly DateOnly RangeDay = new(2026, 3, 4);
+
+    private static CompletedSessionRow MakeCdrAt(UnifiedPlatformApiFactory factory, string sessionId, DateTimeOffset at)
+    {
+        var cdr = MakeCdr(factory, sessionId, "support");
+        cdr.StartedAt = at;
+        cdr.ConnectedAt = at;
+        cdr.CompletedAt = at;
+        cdr.CreatedAt = at;
+        return cdr;
+    }
+
+    private static DateTimeOffset UtcAt(DateOnly day, int hour, int minute = 0)
+        => new(day.ToDateTime(new TimeOnly(hour, minute)), TimeSpan.Zero);
+
+    private static async Task<string[]> ListCdrSessionIdsAsync(HttpClient client, string query)
+    {
+        var response = await client.GetAsync($"/api/analytics/cdr?{query}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        return json!["data"]!.AsArray().Select(r => r!["sessionId"]!.GetValue<string>()).ToArray();
+    }
+
+    [Fact]
+    public async Task ListCdr_ShouldIncludeTheWholeDay_WhenToIsDateOnly()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-day-start", UtcAt(RangeDay, 0)));
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-afternoon", UtcAt(RangeDay, 15)));
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-late", UtcAt(RangeDay, 23, 59)));
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-next-day", UtcAt(RangeDay.AddDays(1), 0)));
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-day-before", UtcAt(RangeDay, 0).AddTicks(-TimeSpan.TicksPerMicrosecond)));
+
+        var day = RangeDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var ids = await ListCdrSessionIdsAsync(client, $"from={day}&to={day}");
+
+        ids.Should().BeEquivalentTo("session-day-start", "session-afternoon", "session-late");
+    }
+
+    [Fact]
+    public async Task ListCdr_ShouldKeepTheInstant_WhenToCarriesATime()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-morning", UtcAt(RangeDay, 9)));
+        await factory.CdrStore.UpsertAsync(MakeCdrAt(factory, "session-afternoon", UtcAt(RangeDay, 15)));
+
+        var day = RangeDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var to = Uri.EscapeDataString($"{day}T12:00:00Z");
+        var ids = await ListCdrSessionIdsAsync(client, $"from={day}&to={to}");
+
+        ids.Should().BeEquivalentTo("session-morning");
+    }
+
+    [Fact]
+    public async Task ListIntervals_ShouldIncludeTheWholeDay_WhenToIsDateOnly()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        await factory.SnapshotStore.UpsertAsync(MakeSnapshot(factory, "same-day", UtcAt(RangeDay, 15), serverId: "s1"));
+        await factory.SnapshotStore.UpsertAsync(MakeSnapshot(factory, "next-day", UtcAt(RangeDay.AddDays(1), 0), serverId: "s2"));
+
+        var day = RangeDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var response = await client.GetAsync($"/api/analytics/intervals?from={day}&to={day}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
+        json!.AsArray().Select(i => i!["queueName"]!.GetValue<string>()).Should().BeEquivalentTo("same-day");
+    }
+
     [Fact]
     public async Task GetCdrDetail_ShouldReturnDetail_WhenExists()
     {
@@ -412,6 +488,52 @@ public sealed class AnalyticsEndpointTests : IClassFixture<UnifiedPlatformApiFac
         var json = JsonNode.Parse(await response.Content.ReadAsStringAsync());
         json!["cdr"]!["sessionId"]!.GetValue<string>().Should().Be("session-detail");
         json["timeline"]!.AsArray().Count.Should().BeGreaterThan(0);
+    }
+
+    // D17 (call-records-are-written-once): a record built from an incomplete history is marked partial,
+    // and the CDR DTO carries `isPartial` always present — true for a partial record, false otherwise.
+    [Fact]
+    public async Task ListCdr_ShouldCarryIsPartial_WhenRecordIsPartialOrComplete()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var partial = MakeCdr(factory, "session-partial", "support", partialCause: "leader_change");
+        await factory.CdrStore.UpsertAsync(partial);
+        await factory.CdrStore.UpsertAsync(MakeCdr(factory, "session-complete", "support"));
+
+        var response = await client.GetAsync("/api/analytics/cdr");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var rows = JsonNode.Parse(await response.Content.ReadAsStringAsync())!["data"]!.AsArray();
+        var bySession = rows.ToDictionary(r => r!["sessionId"]!.GetValue<string>(), r => r!.AsObject());
+        bySession["session-partial"].Should().ContainKey("isPartial", "every CDR row carries isPartial (D17)");
+        bySession["session-complete"].Should().ContainKey("isPartial", "isPartial is never omitted, not even when false");
+        bySession["session-partial"]["isPartial"]!.GetValue<bool>().Should().BeTrue();
+        bySession["session-complete"]["isPartial"]!.GetValue<bool>().Should().BeFalse(
+            "isPartial is always present on a row, false for a complete record");
+        bySession["session-partial"].ContainsKey("partialCause").Should().BeFalse(
+            "the partial cause is Pro-only diagnostics and is never exposed (D17)");
+    }
+
+    [Fact]
+    public async Task GetCdrDetail_ShouldCarryIsPartial_WhenRecordIsPartial()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var partial = MakeCdr(factory, "session-detail-partial", "support", partialCause: "leader_change");
+        await factory.CdrStore.UpsertAsync(partial);
+        await factory.CdrStore.UpsertAsync(MakeCdr(factory, "session-detail-complete", "support"));
+
+        var partialJson = JsonNode.Parse(await (await client.GetAsync("/api/analytics/cdr/session-detail-partial")).Content.ReadAsStringAsync())!;
+        var completeJson = JsonNode.Parse(await (await client.GetAsync("/api/analytics/cdr/session-detail-complete")).Content.ReadAsStringAsync())!;
+
+        partialJson["cdr"]!.AsObject().Should().ContainKey("isPartial", "the detail's cdr carries isPartial (D17)");
+        completeJson["cdr"]!.AsObject().Should().ContainKey("isPartial", "isPartial is never omitted, not even when false");
+        partialJson["cdr"]!["isPartial"]!.GetValue<bool>().Should().BeTrue();
+        partialJson["cdr"]!.AsObject().ContainsKey("partialCause").Should().BeFalse();
+        completeJson["cdr"]!["isPartial"]!.GetValue<bool>().Should().BeFalse();
     }
 
     [Fact]
@@ -651,12 +773,15 @@ public sealed class AnalyticsEndpointTests : IClassFixture<UnifiedPlatformApiFac
         UnifiedPlatformApiFactory factory,
         string sessionId,
         string queueName = "support",
-        string? agentId = "agent-1")
+        string? agentId = "agent-1",
+        string? partialCause = null)
     {
         _ = factory; // factory parameter kept for call-site consistency
         var now = DateTimeOffset.UtcNow;
         return new CompletedSessionRow
         {
+            IsPartial = partialCause is not null,
+            PartialCause = partialCause,
             TenantId = UnifiedPlatformApiFactory.TestTenantId,
             SessionId = sessionId,
             ServerId = "server-1",
