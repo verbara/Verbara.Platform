@@ -11,6 +11,10 @@ namespace Verbara.Platform.Api.DependencyInjection;
 /// </summary>
 internal static class QaAvailabilityExtensions
 {
+    /// <summary>
+    /// Registers <see cref="QaAvailabilityService"/>, and <see cref="UnconfiguredQaAnalysisSetup"/> as the setup when none
+    /// is registered.
+    /// </summary>
     /// <param name="services">The host's services.</param>
     /// <param name="analysisRegistered">Whether this host registered post-call analysis (an analytics or dialer
     /// connection string is configured).</param>
