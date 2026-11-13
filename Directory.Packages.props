@@ -108,7 +108,7 @@
          walking-skeleton harness for ADR-0022 Phase A.5 exactly-once verification).
          Reflection-based — incompatible with Native AOT, but the harness itself is
          NO-AOT per ADR-0023; deliverables (Api + Realtime images) remain AOT-clean. -->
-    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.15" />
     <!-- Transitive-pin override: Microsoft.AspNetCore.SignalR.Common <= 10.0.12 carries GHSA-334f-vvp4-7g6p
          (HIGH, CVE-2026-70159, ASP.NET Core denial of service), published 2026-10-13 after the last green
          main run. 10.0.13 is the first patched .NET 10 release. Pinned so no project resolves an older
