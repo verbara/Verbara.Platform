@@ -416,7 +416,12 @@ public sealed class OutboundConversationStarterTests : IDisposable
         var first = sut.StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
         await firstSendEntered.Task;
         var second = sut.StartAsync(Request(templateName: "hello_world"), CancellationToken.None);
-        await Task.WhenAny(second, Task.Delay(300)); // fence-allow: SETTLE — lets an unserialised second start run ahead of the first; the assertions hold whatever the timing
+        // SETTLE — lets an unserialised second start run ahead of the first; the assertions hold whatever the timing.
+        // A bounded wait that never throws here (neither on timeout nor on a fault, which Task.WhenAll below surfaces),
+        // and whose timer is cancelled when the second start finishes first (CA2027).
+        // Held as a non-generic Task: SuppressThrowing is rejected on a Task<TResult> awaiter.
+        Task secondOrTimeout = second.WaitAsync(TimeSpan.FromMilliseconds(300));
+        await secondOrTimeout.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
         releaseFirstSend.SetResult();
         var outcomes = await Task.WhenAll(first, second);
 

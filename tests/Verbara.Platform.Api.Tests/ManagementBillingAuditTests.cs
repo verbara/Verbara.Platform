@@ -65,8 +65,8 @@ public sealed class ManagementBillingAuditTests : IClassFixture<PlatformAdminApi
             isDefault = false,
             rates = new[] { new { usageType = "SmsOutbound", unitPrice = 0.01m, includedQuantity = 0m } },
         });
-        var rateCardId = System.Text.Json.JsonDocument.Parse(await create.Content.ReadAsStringAsync())
-            .RootElement.GetProperty("rateCardId").GetString();
+        var rateCardId = System.Text.Json.JsonElement.Parse(await create.Content.ReadAsStringAsync())
+            .GetProperty("rateCardId").GetString();
 
         var response = await _client.PutAsJsonAsync($"/api/management/rate-cards/{rateCardId}?tenantId={TestTenantId}", new
         {
@@ -92,8 +92,8 @@ public sealed class ManagementBillingAuditTests : IClassFixture<PlatformAdminApi
             isDefault = false,
             rates = Array.Empty<object>(),
         });
-        var rateCardId = System.Text.Json.JsonDocument.Parse(await create.Content.ReadAsStringAsync())
-            .RootElement.GetProperty("rateCardId").GetString();
+        var rateCardId = System.Text.Json.JsonElement.Parse(await create.Content.ReadAsStringAsync())
+            .GetProperty("rateCardId").GetString();
 
         var response = await _client.DeleteAsync($"/api/management/rate-cards/{rateCardId}?tenantId={TestTenantId}");
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
