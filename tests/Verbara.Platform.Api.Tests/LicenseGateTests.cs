@@ -222,7 +222,7 @@ public sealed class LicenseGateTests
         ctx.Response.Body.Seek(0, SeekOrigin.Begin);
         using var reader = new StreamReader(ctx.Response.Body);
         var text = await reader.ReadToEndAsync();
-        return System.Text.Json.JsonDocument.Parse(text).RootElement;
+        return System.Text.Json.JsonElement.Parse(text);
     }
 
     private static DefaultHttpContext BuildContextWithCapturedBody(LicenseFeatureMetadata metadata)

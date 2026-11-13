@@ -459,8 +459,11 @@ public sealed class RealtimeReconciliationServiceTests
         public async Task<bool> ReachedAsync(int pass, TimeSpan bound)
         {
             var reached = _reached[pass - 1].Task;
-            // fence-allow: GUARD-TIMEOUT — turns a pass that never comes into an assertion failure
-            return await Task.WhenAny(reached, Task.Delay(bound)) == reached;
+            // GUARD-TIMEOUT — turns a pass that never comes into an assertion failure. WaitAsync cancels its timer
+            // when the pass arrives first (CA2027); SuppressThrowing turns the timeout into a false instead of an exception.
+            await reached.WaitAsync(bound)
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
+            return reached.IsCompleted;
         }
 
         public async Task<bool> AnswersAsync(int seconds, TimeSpan bound)
