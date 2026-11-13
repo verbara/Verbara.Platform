@@ -37,7 +37,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   records and returns the caller's own user id: its body is optional, its `supervisorId` is ignored, and credentials
   that carry no user id get 403 with no body. `GET /api/v1/agent-assist/sessions/{sessionId}/suggestions` and
   `/compliance` return only the caller's tenant's rows, and still answer 200, possibly with `[]`. Same routes, same
-  response shapes.
+  response shapes. (#552)
 
 ### Upgrading
 
@@ -45,7 +45,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the `TENANT_ID` channel variable has no tenant, so its Agent Assist session is missing from
   `GET /api/v1/supervisor/sessions/active` and answers 404 to whisper and transcript listen. Set `TENANT_ID` on every
   trunk. A client that registered a transcript listen for another supervisor id now gets the signed-in caller recorded
-  instead.
+  instead. (#552)
 
 ## [2.39.1] - 2026-11-10
 
