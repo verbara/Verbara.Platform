@@ -155,7 +155,7 @@ public sealed class WebChatSessionIdentityLevelTests : IDisposable
 
     private sealed record Created(HttpStatusCode Status, string Body)
     {
-        private JsonElement Root => JsonDocument.Parse(Body).RootElement.Clone();
+        private JsonElement Root => JsonElement.Parse(Body);
         public string SessionId => Root.GetProperty("sessionId").GetString()!;
         public string VisitorAddress => Root.GetProperty("visitorAddress").GetString()!;
         public EntityId ContactId => EntityId.From(Root.GetProperty("contactId").GetString()!);

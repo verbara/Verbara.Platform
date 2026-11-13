@@ -26,9 +26,12 @@ internal static class WorkerResilienceTestHelpers
         if (executeTask is null)
             return null;
 
-        // GUARD, not a sync fence: this is the fault-or-timeout race — the Task.Delay is a hard cap so a hung worker can't stall the suite. Do NOT migrate it to a causal signal.
-        var winner = await Task.WhenAny(executeTask, Task.Delay(timeout)); // fence-allow: GUARD-TIMEOUT — wall-clock cap on a hung worker (fault-or-timeout race), not a sync fence; do not migrate
-        if (winner != executeTask)
+        // GUARD, not a sync fence: this is the fault-or-timeout race — the timeout is a hard cap so a hung worker can't stall the suite. Do NOT migrate it to a causal signal.
+        // WaitAsync cancels its timer when the worker finishes first (CA2027); SuppressThrowing keeps a fault, a cancellation
+        // and the timeout from throwing here — the fault is read from the task below, the timeout returns null.
+        await executeTask.WaitAsync(timeout)
+            .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
+        if (!executeTask.IsCompleted)
             return null;
 
         return executeTask.Exception?.GetBaseException();

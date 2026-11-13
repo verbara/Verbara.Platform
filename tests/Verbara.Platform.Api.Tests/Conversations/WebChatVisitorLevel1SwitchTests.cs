@@ -82,7 +82,7 @@ public sealed class WebChatVisitorLevel1SwitchTests
 
     private sealed record Created(string Body)
     {
-        private JsonElement Root => JsonDocument.Parse(Body).RootElement.Clone();
+        private JsonElement Root => JsonElement.Parse(Body);
         public EntityId ContactId => EntityId.From(Root.GetProperty("contactId").GetString()!);
         public string ConversationId => Root.GetProperty("conversationId").GetString()!;
         public string IdentityLevel => Root.GetProperty("identityLevel").GetString()!;
