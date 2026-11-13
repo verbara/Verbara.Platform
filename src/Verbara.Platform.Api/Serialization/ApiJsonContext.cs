@@ -233,6 +233,8 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(QaRowDto))]
 [JsonSerializable(typeof(List<QaRowDto>))]
 [JsonSerializable(typeof(QaDetailDto))]
+[JsonSerializable(typeof(QaAvailabilityDto))]
+[JsonSerializable(typeof(QaBacklogDto))]
 [JsonSerializable(typeof(QaCriterionDto))]
 [JsonSerializable(typeof(QaCriterionDto[]))]
 [JsonSerializable(typeof(ComplianceViolationDto))]
