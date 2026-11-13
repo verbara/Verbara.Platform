@@ -29,6 +29,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   bound that carries a time keeps its meaning: `endDate=2026-11-10T00:00:00Z` on auth events no longer stretches to the
   end of the day. A malformed bound is still refused with 400. In the OpenAPI document these parameters are plain
   strings instead of `date-time` strings.
+- **Agent Assist sessions stay in their tenant.** Agent Assist live sessions, whisper, transcript listen and stored
+  suggestions and compliance alerts are now limited to the caller's tenant; the transcript listen records the signed-in
+  supervisor. `GET /api/v1/supervisor/sessions/active` lists only the sessions whose call belongs to the caller's
+  tenant. `POST /api/v1/supervisor/sessions/{sessionId}/whisper` and `/listen` answer 404 with no body for a session of
+  another tenant or of no known tenant, and enqueue or record nothing. `POST /api/v1/supervisor/sessions/{sessionId}/listen`
+  records and returns the caller's own user id: its body is optional, its `supervisorId` is ignored, and credentials
+  that carry no user id get 403 with no body. `GET /api/v1/agent-assist/sessions/{sessionId}/suggestions` and
+  `/compliance` return only the caller's tenant's rows, and still answer 200, possibly with `[]`. Same routes, same
+  response shapes.
+
+### Upgrading
+
+- **An Agent Assist session whose call carries no tenant is no longer listed.** A call that arrives on a trunk without
+  the `TENANT_ID` channel variable has no tenant, so its Agent Assist session is missing from
+  `GET /api/v1/supervisor/sessions/active` and answers 404 to whisper and transcript listen. Set `TENANT_ID` on every
+  trunk. A client that registered a transcript listen for another supervisor id now gets the signed-in caller recorded
+  instead.
 
 ## [2.39.1] - 2026-11-10
 

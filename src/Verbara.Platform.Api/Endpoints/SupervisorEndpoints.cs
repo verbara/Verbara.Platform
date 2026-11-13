@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json.Serialization;
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.Services.AgentAssist;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Conversations.Services;
@@ -11,7 +12,6 @@ using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Licensing;
 using Verbara.Platform.Queues.Services;
 using Verbara.Platform.Switchboard;
-using Verbara.Sdk.Pro.AgentAssist.Engine;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
@@ -27,7 +27,8 @@ internal static class SupervisorEndpoints
         group.MapGet("/sessions/active", GetActiveSessions)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
         group.MapPost("/sessions/{sessionId}/whisper", PostWhisper);
-        group.MapPost("/sessions/{sessionId}/listen", PostListen);
+        group.MapPost("/sessions/{sessionId}/listen", PostListen)
+            .Produces(StatusCodes.Status403Forbidden);
 
         // Digital conversations
         group.MapGet("/conversations", ListDigitalConversations)
@@ -73,19 +74,27 @@ internal static class SupervisorEndpoints
         HttpContext context,
         [FromServices] IConversationStore conversations,
         [FromServices] IAgentStore agents,
+        [FromServices] IAgentAssistLiveSessions liveSessions,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
         if (await RefuseUnlessReadsAllAsync(context, tenantId, agents, ct) is { } refusal)
             return refusal;
 
-        var supervisor = context.RequestServices.GetService<AgentAssistSupervisor>();
-        if (supervisor is null)
-            return TypedResults.Ok(Array.Empty<ActiveSessionDto>());
-
-        var sessions = supervisor.ActiveSessions.Values.Select(s => (s.SessionId, s.CallSession)).ToList();
+        var sessions = LiveSessionsOf(liveSessions, tenantId).Select(s => (s.SessionId, s.Call)).ToList();
         return TypedResults.Ok(await ToActiveSessionsAsync(sessions, tenantId, conversations, ct));
     }
+
+    /// <summary>
+    /// design D1, D3: the live Agent Assist sessions owned by <paramref name="callerTenant"/> (ordinal). A session whose
+    /// owner tenant is unresolved or conflicted owns nothing and is kept for no caller. Every live-session route reads
+    /// through this before anything else, so another tenant's session answers exactly as an unknown one.
+    /// </summary>
+    private static List<LiveAssistSession> LiveSessionsOf(IAgentAssistLiveSessions liveSessions, TenantId callerTenant) =>
+        [.. liveSessions.Snapshot().Where(s => string.Equals(s.OwnerTenant, callerTenant.Value, StringComparison.Ordinal))];
+
+    private static bool IsLiveSessionOf(IAgentAssistLiveSessions liveSessions, TenantId callerTenant, string sessionId) =>
+        LiveSessionsOf(liveSessions, callerTenant).Exists(s => string.Equals(s.SessionId, sessionId, StringComparison.Ordinal));
 
     /// <summary>
     /// supervisor-silent-listen (boundary gap 1, design D13): the active-session items, each with the id of the tracked
@@ -119,32 +128,42 @@ internal static class SupervisorEndpoints
     }
 
     private static IResult PostWhisper(
+        HttpContext context,
         string sessionId,
         [FromBody] WhisperRequest body,
-        IServiceProvider services)
+        [FromServices] IAgentAssistLiveSessions liveSessions)
     {
-        var supervisor = services.GetService<AgentAssistSupervisor>();
-        if (supervisor is null || !supervisor.ActiveSessions.TryGetValue(sessionId, out var session))
+        if (!IsLiveSessionOf(liveSessions, GetTenantId(context), sessionId))
             return Results.NotFound();
 
-        var enqueued = session.TryEnqueueSupervisorWhisper(body.Text);
+        var enqueued = liveSessions.TryWhisper(sessionId, body.Text);
         if (!enqueued)
             return Results.BadRequest(new ErrorResponse("Whisper delivery is not enabled for this session."));
 
         return Results.Ok();
     }
 
-    private static Results<Ok<ListenEntry>, NotFound> PostListen(
+    /// <summary>
+    /// design D5: records the signed-in caller as the listening supervisor. The body is optional and its
+    /// <c>SupervisorId</c> is ignored; credentials with no user id are refused with a bodyless 403 before anything is
+    /// recorded. Entries are keyed by tenant, session and user, so each tenant's listens stay apart.
+    /// </summary>
+    private static Results<Ok<ListenEntry>, NotFound, StatusCodeHttpResult> PostListen(
+        HttpContext context,
         string sessionId,
-        [FromBody] ListenRequest body,
-        IServiceProvider services)
+        [FromBody] ListenRequest? body,
+        [FromServices] IAgentAssistLiveSessions liveSessions)
     {
-        var supervisor = services.GetService<AgentAssistSupervisor>();
-        if (supervisor is null || !supervisor.ActiveSessions.ContainsKey(sessionId))
+        _ = body;
+        if (AgentAssistCaller.CallerUserIdOf(context.User) is not { } userId)
+            return TypedResults.StatusCode(StatusCodes.Status403Forbidden);
+
+        var tenantId = GetTenantId(context);
+        if (!IsLiveSessionOf(liveSessions, tenantId, sessionId))
             return TypedResults.NotFound();
 
-        var entry = new ListenEntry(body.SupervisorId, sessionId, DateTimeOffset.UtcNow);
-        SupervisorListenStore.Sessions[sessionId + ":" + body.SupervisorId] = entry;
+        var entry = new ListenEntry(userId, sessionId, DateTimeOffset.UtcNow);
+        SupervisorListenStore.Sessions[$"{tenantId.Value}:{sessionId}:{userId}"] = entry;
 
         return TypedResults.Ok(entry);
     }
