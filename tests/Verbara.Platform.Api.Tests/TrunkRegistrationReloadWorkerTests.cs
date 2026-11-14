@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using Verbara.Platform.Api.Services;
 using Verbara.Sdk;
 using Verbara.Sdk.Ami;
@@ -30,7 +31,7 @@ public sealed class TrunkRegistrationReloadWorkerTests : IDisposable
     private readonly TrunkRegistrationReloadSignal _signal = new();
     private readonly IClusterLeader _leader = Substitute.For<IClusterLeader>();
     private readonly ITrunkRegistrationFingerprintSource _fingerprints = Substitute.For<ITrunkRegistrationFingerprintSource>();
-    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 10, 16, 12, 0, 0, TimeSpan.Zero));
+    private readonly ArmSignallingTimeProvider _clock = new(new DateTimeOffset(2026, 10, 16, 12, 0, 0, TimeSpan.Zero));
     private int _sends;
 
     public TrunkRegistrationReloadWorkerTests()
@@ -317,16 +318,26 @@ public sealed class TrunkRegistrationReloadWorkerTests : IDisposable
         _leader.IsLeader.Returns(false);
         using var sut = CreateWorker();
         await sut.StartAsync(CancellationToken.None);
-        await Task.Delay(50); // fence-allow: SETTLE — let ExecuteAsync (off the StartAsync caller) reach its first fake-time wait; later steps tolerate a late arm
 
+        // Each fake-time step runs only after the loop has armed the timer it targets, however late the loop is.
+        await _clock.NextArmAsync(IdleWait, "its first wait for a signal or the convergence tick");
         _signal.RequestReload();
-        await AdvanceAsync(TimeSpan.FromSeconds(1.5), until: () => Volatile.Read(ref _sends) > 0);
+        await _clock.NextArmAsync(TimeSpan.FromSeconds(1), "the debounce after the signal");
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        await _clock.NextArmAsync(TimeSpan.FromSeconds(1), "the 1 s backoff after the first refused reload");
         _sends.Should().Be(1);
-        await AdvanceAsync(TimeSpan.FromMilliseconds(1500));
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        await _clock.NextArmAsync(TimeSpan.FromSeconds(1), "the debounce after the 1 s backoff");
+        _clock.Advance(TimeSpan.FromMilliseconds(500));
         _sends.Should().Be(1, "the first retry waits a 1 s backoff and then the 1 s debounce");
 
-        await AdvanceAsync(TimeSpan.FromSeconds(10), until: () => Volatile.Read(ref _sends) >= 3);
-        await AdvanceAsync(TimeSpan.FromSeconds(5));
+        _clock.Advance(TimeSpan.FromMilliseconds(500));
+        await _clock.NextArmAsync(TimeSpan.FromSeconds(2), "the 2 s backoff after the second refused reload");
+        _clock.Advance(TimeSpan.FromSeconds(2));
+        await _clock.NextArmAsync(TimeSpan.FromSeconds(1), "the debounce after the 2 s backoff");
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        await _clock.NextArmAsync(IdleWait, "its wait for the next signal after the accepted reload");
         await sut.StopAsync(CancellationToken.None);
 
         await ReceivedReloads(3);
@@ -357,5 +368,56 @@ public sealed class TrunkRegistrationReloadWorkerTests : IDisposable
         var source = new RealtimeTrunkRegistrationFingerprintSource(null);
 
         (await source.GetFingerprintAsync(CancellationToken.None)).Should().BeNull();
+    }
+
+    /// <summary>The loop's idle wait: until the convergence tick (an hour here), far longer than any debounce or backoff.</summary>
+    private static bool IdleWait(TimeSpan due) => due > TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// A fake clock that reports every timer armed on it, with its due time, so a test advances fake time only after
+    /// the loop has armed the wait that step targets. A loop that runs late on a loaded machine then makes the test
+    /// wait for it instead of advancing past a timer that does not exist yet.
+    /// </summary>
+    private sealed class ArmSignallingTimeProvider(DateTimeOffset start) : FakeTimeProvider(start)
+    {
+        /// <summary>
+        /// Real-time guard on one arm; a loop that never arms fails the test here instead of hanging it. 30 s is the
+        /// bound tasks A.6 sized for this test (3 × its 10 s longest CI duration); the seven arms fit in CI's 5 minutes.
+        /// </summary>
+        private static readonly TimeSpan ArmGuard = TimeSpan.FromSeconds(30);
+
+        private readonly Channel<TimeSpan> _arms = Channel.CreateUnbounded<TimeSpan>();
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = base.CreateTimer(callback, state, dueTime, period);
+            _arms.Writer.TryWrite(dueTime);
+            return timer;
+        }
+
+        /// <summary>Waits for the next armed timer of exactly <paramref name="due"/>.</summary>
+        public Task NextArmAsync(TimeSpan due, string what) => NextArmAsync(d => d == due, what);
+
+        /// <summary>
+        /// Waits for the next armed timer whose due time matches, in arm order. Arms that do not match are passed over:
+        /// the 10 s send timeout of each reload is a timer on this clock too.
+        /// </summary>
+        public async Task NextArmAsync(Func<TimeSpan, bool> match, string what)
+        {
+            using var guard = new CancellationTokenSource(ArmGuard);
+            try
+            {
+                while (true)
+                {
+                    var due = await _arms.Reader.ReadAsync(guard.Token);
+                    if (match(due))
+                        return;
+                }
+            }
+            catch (OperationCanceledException) when (guard.IsCancellationRequested)
+            {
+                throw new TimeoutException($"The worker did not arm {what} within {ArmGuard}.");
+            }
+        }
     }
 }
