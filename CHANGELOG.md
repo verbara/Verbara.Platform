@@ -31,6 +31,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   answers 404. Its sentiment, topics and compliance stay readable on their own routes.
 - **`GET /api/v1/analytics/qa` refuses a `minScore` outside 0-100** with 400 and an `error` naming the parameter,
   before reading any data.
+- **The QA data routes require the call analytics licence module.** `GET /api/v1/analytics/qa`,
+  `GET /api/v1/analytics/qa/{sessionId}` and `GET /api/v1/call-analytics/{topics/trends,sentiment/trends,compliance/summary}`
+  now need both the analytics and the call analytics modules, and answer 402 like any other licence-gated route when
+  either is missing. `GET /api/v1/analytics/qa-availability` and the CDR routes still need only the analytics module.
+  Without call analytics, `GET /api/v1/analytics/cdr` and `GET /api/v1/analytics/cdr/{sessionId}` answer
+  `hasQaScore` false, `qaScore` null and `sentimentLabel` null on every row, and the detail answers `qaSummary` null.
 
 ### Fixed
 

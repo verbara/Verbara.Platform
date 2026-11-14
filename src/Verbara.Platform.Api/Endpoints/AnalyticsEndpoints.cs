@@ -5,6 +5,7 @@ using Verbara.Platform.Api.Services.QaAvailability;
 using Verbara.Platform.Bot;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Typification.Licensing;
 using Verbara.Sdk.Pro.Analytics;
 using Verbara.Sdk.Pro.CallAnalytics.Domain;
 using Verbara.Sdk.Pro.CallAnalytics.Store;
@@ -17,6 +18,10 @@ namespace Verbara.Platform.Api.Endpoints;
 
 internal static class AnalyticsEndpoints
 {
+    /// <summary>The modules the QA data routes require: <c>/analytics/qa</c>, <c>/analytics/qa/{sessionId}</c> and the
+    /// <c>/call-analytics/*</c> routes.</summary>
+    internal const LicenseFeature QaDataFeatures = LicenseFeature.Analytics | LicenseFeature.CallAnalytics;
+
     public static void MapAnalyticsEndpoints(this IEndpointRouteBuilder app)
     {
         var analytics = app.MapGroup("/analytics")
@@ -26,8 +31,10 @@ internal static class AnalyticsEndpoints
         analytics.MapGet("/dashboard", GetDashboard);
         analytics.MapGet("/cdr", ListCdr);
         analytics.MapGet("/cdr/{sessionId}", GetCdrDetail);
-        analytics.MapGet("/qa", ListQa);
-        analytics.MapGet("/qa/{sessionId}", GetQaDetail);
+        // The QA data needs the call analytics module as well; the CDR routes and the availability read stay on
+        // Analytics, and the CDR routes leave out every call analytics field when the module is not licensed.
+        analytics.MapGet("/qa", ListQa).RequireLicenseFeature(QaDataFeatures);
+        analytics.MapGet("/qa/{sessionId}", GetQaDetail).RequireLicenseFeature(QaDataFeatures);
         analytics.MapGet("/qa-availability", GetQaAvailability);
         analytics.MapGet("/intervals/agents", ListAgentIntervals);
         analytics.MapGet("/intervals", ListIntervals);
@@ -114,6 +121,8 @@ internal static class AnalyticsEndpoints
         [FromServices] ICallAnalyticsStore qaStore,
         [FromServices] IAgentStore agentStore,
         [FromServices] IQueueStore queueStore,
+        [FromServices] ILicenseStatus licenseStatus,
+        [FromServices] ILicenseGuard licenseGuard,
         string? from,
         string? to,
         string? queue,
@@ -147,10 +156,15 @@ internal static class AnalyticsEndpoints
         // Batch enrich agent names
         var agentNames = await BuildAgentNameMapAsync(pageRows.Select(r => r.AgentId).Distinct(), tenantIdObj, agentStore, ct);
 
-        // Batch lookup QA scores
-        var sessionIds = pageRows.Select(r => r.SessionId).Distinct().ToList();
-        var qaList = await qaStore.GetBySessionIdsAsync(sessionIds, tenantId, ct);
-        var qaResults = qaList.ToDictionary(q => q.SessionId, q => (CallAnalysisResult?)q);
+        // Batch lookup QA scores. Without the call analytics module no analysis is read, so every row reports no QA
+        // score and no sentiment.
+        var qaResults = new Dictionary<string, CallAnalysisResult?>();
+        if (CallAnalyticsLicensed(licenseStatus, licenseGuard))
+        {
+            var sessionIds = pageRows.Select(r => r.SessionId).Distinct().ToList();
+            var qaList = await qaStore.GetBySessionIdsAsync(sessionIds, tenantId, ct);
+            qaResults = qaList.ToDictionary(q => q.SessionId, q => (CallAnalysisResult?)q);
+        }
 
         // Batch lookup queue SLA targets (by name)
         var queueSlaMap = await BuildQueueSlaMapAsync(pageRows.Select(r => r.QueueName).Distinct(), tenantIdObj, queueStore, ct);
@@ -206,6 +220,8 @@ internal static class AnalyticsEndpoints
         [FromServices] ICallAnalyticsStore qaStore,
         [FromServices] IAgentStore agentStore,
         [FromServices] IQueueStore queueStore,
+        [FromServices] ILicenseStatus licenseStatus,
+        [FromServices] ILicenseGuard licenseGuard,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -233,8 +249,10 @@ internal static class AnalyticsEndpoints
             timeline.Add(new("transferred", row.CompletedAt, $"{MapTransferType(row.TransferType)} to {row.TransferredTo}"));
         timeline.Add(new("ended", row.CompletedAt, MapDisposition(row.HangupCause, row.FinalState)));
 
-        // QA lookup
-        var qa = await qaStore.GetAsync(sessionId, tenantId, ct);
+        // QA lookup. Without the call analytics module no analysis is read: no QA score, QA summary or sentiment.
+        var qa = CallAnalyticsLicensed(licenseStatus, licenseGuard)
+            ? await qaStore.GetAsync(sessionId, tenantId, ct)
+            : null;
         CdrQaSummaryDto? qaSummary = null;
         if (qa is not null)
         {
@@ -578,6 +596,11 @@ internal static class AnalyticsEndpoints
         => analysis?.QualityScore is { MaxPossibleScore: > 0 } qa
             ? qa.TotalScore * 100.0 / qa.MaxPossibleScore
             : null;
+
+    /// <summary>Whether the licence opens the call analytics module, by the same rule the licence gate applies to the
+    /// QA data routes.</summary>
+    private static bool CallAnalyticsLicensed(ILicenseStatus status, ILicenseGuard guard) =>
+        LicenceGateRule.IsLicensed(status, guard, LicenseFeature.CallAnalytics, LicenseGateMiddleware.NeverGuardedFeatures);
 
     private static string? MapSentimentLabel(SentimentLabel? label)
         => label switch
