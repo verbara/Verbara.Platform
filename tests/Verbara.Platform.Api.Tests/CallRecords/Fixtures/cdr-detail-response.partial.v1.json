@@ -60,5 +60,5 @@
   "transferCount": 1,
   "recordingName": "5d2a8c419e074b3fa1c67f80e2d94b15.wav",
   "recordingStreamUrl": "/api/v1/recordings/5d2a8c419e074b3fa1c67f80e2d94b15/stream",
-  "hasTranscript": true
+  "hasTranscript": false
 }

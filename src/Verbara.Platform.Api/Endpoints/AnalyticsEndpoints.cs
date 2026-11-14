@@ -279,7 +279,6 @@ internal static class AnalyticsEndpoints
             Metadata: row.Metadata,
             IsPartial: row.IsPartial);
 
-        var hasTranscript = qa is not null && qa.Summary is not null;
         var recordingStreamUrl = !string.IsNullOrEmpty(row.RecordingName)
             ? $"/api/v1/recordings/{row.SessionId}/stream"
             : null;
@@ -293,7 +292,8 @@ internal static class AnalyticsEndpoints
             TransferCount: row.TransferCount,
             RecordingName: row.RecordingName,
             RecordingStreamUrl: recordingStreamUrl,
-            HasTranscript: hasTranscript));
+            // No transcript route is served, so the detail never advertises one.
+            HasTranscript: false));
     }
 
     // ─── QA List Handler ──────────────────────────────────────────────────────

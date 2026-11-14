@@ -34,6 +34,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `GET /api/v1/analytics/cdr/{sessionId}` always answers `hasTranscript` false. It used to answer true for any call
+  with an analysis summary, although no transcript route is served, so a client that followed it got 404.
 - The analytics endpoints read a date-only `to` (`2026-11-10`) as the whole of that UTC day. Before, it was that day's
   00:00, so the console's default range and its "Today" preset left out every call made that day, and
   `GET /api/v1/analytics/cdr` did not list today's calls. A date-only `from` starts at 00:00 UTC on every host (it
