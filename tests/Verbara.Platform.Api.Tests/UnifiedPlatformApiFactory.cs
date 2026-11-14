@@ -563,10 +563,13 @@ public sealed class InMemoryCallAnalyticsStore : ICallAnalyticsStore
             results = results.Where(r => r.AnalyzedAt >= query.From.Value);
         if (query.To is not null)
             results = results.Where(r => r.AnalyzedAt <= query.To.Value);
+        // Raw total, as the Postgres store and the in-memory store compare it.
         if (query.MinQaScore is not null)
             results = results.Where(r => r.QualityScore is not null &&
-                r.QualityScore.MaxPossibleScore > 0 &&
-                r.QualityScore.TotalScore / r.QualityScore.MaxPossibleScore >= query.MinQaScore.Value);
+                r.QualityScore.TotalScore >= query.MinQaScore.Value);
+        if (query.MaxQaScore is not null)
+            results = results.Where(r => r.QualityScore is not null &&
+                r.QualityScore.TotalScore <= query.MaxQaScore.Value);
         if (query.HasComplianceViolations is not null)
             results = results.Where(r => (r.ComplianceViolations.Count > 0) == query.HasComplianceViolations.Value);
 

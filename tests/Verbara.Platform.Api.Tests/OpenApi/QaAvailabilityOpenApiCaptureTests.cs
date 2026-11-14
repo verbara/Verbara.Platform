@@ -81,6 +81,17 @@ public sealed class QaAvailabilityOpenApiCaptureTests
         Names(listed).Should().Equal(emitted).And.Equal(Members);
     }
 
+    [Fact]
+    public async Task QaListRoute_ShouldDocumentA400_WhenTheDocumentIsEmitted()
+    {
+        var document = await DocumentAsync();
+
+        var responses = document["paths"]!["/api/v{version}/analytics/qa"]!["get"]!["responses"]!;
+
+        responses["400"]!["content"]!["application/json"]!["schema"]!["$ref"]!.GetValue<string>()
+            .Should().Be("#/components/schemas/ErrorResponse", "a minScore outside 0-100 is refused with a 400");
+    }
+
     private static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

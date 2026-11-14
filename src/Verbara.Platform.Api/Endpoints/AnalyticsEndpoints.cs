@@ -161,9 +161,8 @@ internal static class AnalyticsEndpoints
             qaResults.TryGetValue(row.SessionId, out var qa);
             queueSlaMap.TryGetValue(row.QueueName ?? "", out var slaThresholdMsNullable);
             var slaMet = ComputeSlaMet(row.WaitTimeMs, slaThresholdMsNullable ?? 20000L);
-            var (hasScore, score) = qa is not null && qa.QualityScore is not null
-                ? (true, (double?)NormalizeQaScore(qa.QualityScore))
-                : (false, (double?)null);
+            var score = QaScoreOf(qa);
+            var hasScore = score is not null;
 
             return new CdrRowDto(
                 SessionId: row.SessionId,
@@ -239,7 +238,7 @@ internal static class AnalyticsEndpoints
         CdrQaSummaryDto? qaSummary = null;
         if (qa is not null)
         {
-            var normalizedScore = qa.QualityScore is not null ? (double?)NormalizeQaScore(qa.QualityScore) : null;
+            var normalizedScore = QaScoreOf(qa);
             qaSummary = new CdrQaSummaryDto(
                 Reason: qa.Summary?.Reason,
                 Outcome: qa.Summary?.Outcome,
@@ -248,9 +247,8 @@ internal static class AnalyticsEndpoints
                 SentimentLabel: qa.Sentiment?.OverallLabel.ToString());
         }
 
-        var (hasScore, score) = qa is not null && qa.QualityScore is not null
-            ? (true, (double?)NormalizeQaScore(qa.QualityScore))
-            : (false, (double?)null);
+        var score = QaScoreOf(qa);
+        var hasScore = score is not null;
 
         var cdrRow = new CdrRowDto(
             SessionId: row.SessionId,
@@ -300,7 +298,7 @@ internal static class AnalyticsEndpoints
 
     // ─── QA List Handler ──────────────────────────────────────────────────────
 
-    private static async Task<Ok<PagedDataResponse<QaRowDto>>> ListQa(
+    private static async Task<Results<Ok<PagedDataResponse<QaRowDto>>, BadRequest<ErrorResponse>>> ListQa(
         HttpContext context,
         [FromServices] ICallAnalyticsStore qaStore,
         [FromServices] ICompletedSessionStore cdrStore,
@@ -312,13 +310,16 @@ internal static class AnalyticsEndpoints
         int pageSize = 50,
         CancellationToken ct = default)
     {
+        // minScore reads on qaScore's 0-100 scale; anything else (NaN included) is refused before the query is built.
+        if (minScore is { } min && !(min >= 0 && min <= 100))
+            return TypedResults.BadRequest(new ErrorResponse("minScore must be between 0 and 100."));
+
         var tenantId = GetTenantId(context);
         var tenantIdObj = new TenantId(tenantId);
 
         var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
         var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
 
-        // minScore arrives as 0-100; QaResult scores are stored as 0-1 fractions
         var query = new CallAnalyticsQuery
         {
             TenantId = tenantId,
@@ -331,7 +332,8 @@ internal static class AnalyticsEndpoints
 
         var results = await qaStore.QueryAsync(query, ct);
         var hasMore = results.Count > pageSize;
-        var pageResults = hasMore ? results.Take(pageSize).ToList() : results.ToList();
+        // An analysis made with an empty scorecard has no QA score, so it is not a QA row.
+        var pageResults = results.Take(pageSize).Where(r => QaScoreOf(r) is not null).ToList();
 
         // Batch lookup CDR for AgentId / QueueName
         var sessionIds = pageResults.Select(r => r.SessionId).Distinct().ToList();
@@ -350,7 +352,7 @@ internal static class AnalyticsEndpoints
             cdrMap.TryGetValue(r.SessionId, out var cdr);
             agentNames.TryGetValue(cdr?.AgentId ?? "", out var agentName);
 
-            var qaScore = r.QualityScore is not null ? NormalizeQaScore(r.QualityScore) : 0.0;
+            var qaScore = QaScoreOf(r)!.Value;
             var sentimentLabel = MapSentimentLabel(r.Sentiment?.OverallLabel);
             var narrative = r.Summary?.Narrative is { } n && n.Length > 150
                 ? n[..150]
@@ -387,15 +389,15 @@ internal static class AnalyticsEndpoints
         var tenantIdObj = new TenantId(tenantId);
 
         var result = await qaStore.GetAsync(sessionId, tenantId, ct);
-        if (result is null)
+        // An analysis made with an empty scorecard has no QA detail, as it has no QA row.
+        if (result is null || QaScoreOf(result) is not { } qaScore)
             return TypedResults.NotFound();
 
         var cdr = await cdrStore.GetAsync(tenantId, sessionId, ct);
         var agentNames = await BuildAgentNameMapAsync([cdr?.AgentId], tenantIdObj, agentStore, ct);
         agentNames.TryGetValue(cdr?.AgentId ?? "", out var agentName);
 
-        var qaScore = result.QualityScore is not null ? NormalizeQaScore(result.QualityScore) : 0.0;
-        var maxPossibleScore = result.QualityScore?.MaxPossibleScore ?? 0.0;
+        var maxPossibleScore = result.QualityScore!.MaxPossibleScore;
 
         var criteria = result.QualityScore?.Items.Select(item =>
         {
@@ -568,8 +570,14 @@ internal static class AnalyticsEndpoints
         return ring > 0 ? ring : 0;
     }
 
-    private static double NormalizeQaScore(QaResult qa)
-        => qa.MaxPossibleScore <= 0 ? 0.0 : qa.TotalScore * 100.0 / qa.MaxPossibleScore;
+    /// <summary>
+    /// The QA score of an analysis on a 0-100 scale, or <see langword="null"/> when it has none: no analysis, no QA
+    /// result, or a QA result from an empty scorecard (a maximum score of 0), which is never reported as a score of 0.
+    /// </summary>
+    private static double? QaScoreOf(CallAnalysisResult? analysis)
+        => analysis?.QualityScore is { MaxPossibleScore: > 0 } qa
+            ? qa.TotalScore * 100.0 / qa.MaxPossibleScore
+            : null;
 
     private static string? MapSentimentLabel(SentimentLabel? label)
         => label switch

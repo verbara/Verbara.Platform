@@ -22,6 +22,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   configures no transcript source, so the read never answers `available` true yet. The route sits with the other
   analytics reads: supervisors and admins of an operational tenant, with the analytics licence module.
 
+### Changed — BREAKING
+
+- **A call analysed with an empty scorecard has no QA score.** An analysis whose scorecard had no item (a maximum
+  score of 0) used to report `hasQaScore` true with `qaScore` 0. Now `GET /api/v1/analytics/cdr` and
+  `GET /api/v1/analytics/cdr/{sessionId}` answer `hasQaScore` false with `qaScore` null (also on the detail's
+  `qaSummary`), `GET /api/v1/analytics/qa` leaves the analysis out, and `GET /api/v1/analytics/qa/{sessionId}`
+  answers 404. Its sentiment, topics and compliance stay readable on their own routes.
+- **`GET /api/v1/analytics/qa` refuses a `minScore` outside 0-100** with 400 and an `error` naming the parameter,
+  before reading any data.
+
 ### Fixed
 
 - The analytics endpoints read a date-only `to` (`2026-11-10`) as the whole of that UTC day. Before, it was that day's
