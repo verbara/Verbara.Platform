@@ -5,7 +5,7 @@ using Verbara.Sdk.Pro.Licensing;
 namespace Verbara.Platform.Api.DependencyInjection;
 
 /// <summary>
-/// The QA availability read (qa-scores-are-produced-or-not-shown, design D1): <see cref="QaAvailabilityService"/> over
+/// The QA availability read: <see cref="QaAvailabilityService"/> over
 /// the host's <see cref="IQaAnalysisSetup"/>. The host binds no transcript source yet, so the setup is
 /// <see cref="UnconfiguredQaAnalysisSetup"/> unless one is already registered.
 /// </summary>

@@ -7,7 +7,7 @@ namespace Verbara.Platform.Api.DependencyInjection;
 
 /// <summary>
 /// The in-memory analytics stores of a host with no analytics or dialer database, so the analytics routes resolve their
-/// stores either way. Moved out of <c>Program.cs</c> unchanged (qa-scores-are-produced-or-not-shown, task 2.1).
+/// stores either way. Moved out of <c>Program.cs</c> unchanged.
 /// </summary>
 internal static class ProAnalyticsInMemoryFallbackExtensions
 {

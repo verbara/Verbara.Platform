@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Verbara.Platform.Api.Endpoints;
 
-// qa-scores-are-produced-or-not-shown (design D1): the body of the QA availability read. Every nullable member is
+// The body of the QA availability read. Every nullable member is
 // always written as an explicit null (JsonIgnoreCondition.Never), because both of the host's serializers omit nulls
 // and the console reads a missing member and a null one differently. Registered in ApiJsonContext.
 

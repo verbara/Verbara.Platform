@@ -9,7 +9,7 @@ using Verbara.Sdk.Pro.Licensing;
 namespace Verbara.Platform.Api.Tests.QaAvailability;
 
 /// <summary>
-/// qa-scores-are-produced-or-not-shown (design D1): the availability read. <c>reason</c> names the first missing piece in
+/// The availability read. <c>reason</c> names the first missing piece in
 /// the order analysis registered, licensed, transcript source, scorecard; <c>analysisRunning</c> needs the first three,
 /// <c>available</c> all four. The configuration inputs come from the host seam, faked here per tenant; the licence is
 /// asked of the guard on every read.

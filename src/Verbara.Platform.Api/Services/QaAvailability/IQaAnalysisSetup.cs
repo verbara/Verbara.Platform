@@ -1,7 +1,7 @@
 namespace Verbara.Platform.Api.Services.QaAvailability;
 
 /// <summary>
-/// The configuration half of the QA availability (qa-scores-are-produced-or-not-shown, design D1): which transcript
+/// The configuration half of the QA availability: which transcript
 /// source and speaker mode the host runs with, and what applies to one tenant. Computed from configuration, never from a
 /// call; the licence half is asked of the licence guard on each read.
 /// </summary>

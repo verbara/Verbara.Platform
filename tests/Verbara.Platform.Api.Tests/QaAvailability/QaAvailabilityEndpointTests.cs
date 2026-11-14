@@ -12,7 +12,7 @@ using Verbara.Sdk.Pro.Licensing;
 namespace Verbara.Platform.Api.Tests.QaAvailability;
 
 /// <summary>
-/// qa-scores-are-produced-or-not-shown (design D1, task 2.1): <c>GET /api/v1/analytics/qa-availability</c> through the
+/// <c>GET /api/v1/analytics/qa-availability</c> through the
 /// real host. The test host configures no analytics or dialer database, so post-call analysis is not registered there;
 /// the scenarios of a host that registered it swap only that startup fact (<see cref="QaAvailabilityService"/> built
 /// with <c>analysisRegistered: true</c> over the host's own setup and licence guard), and read the body the host writes.
@@ -109,7 +109,7 @@ public sealed class QaAvailabilityEndpointTests
         body["analysisRunning"]!.GetValue<bool>().Should().BeFalse();
         body["reason"]!.GetValue<string>().Should().Be("not_licensed");
         body.ContainsKey("transcriptSource").Should().BeTrue("the member is always written");
-        body["transcriptSource"].Should().BeNull("step 1 configures no transcript source");
+        body["transcriptSource"].Should().BeNull("the host configures no transcript source");
     }
 
     [Fact]

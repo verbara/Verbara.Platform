@@ -8,7 +8,7 @@ using Verbara.Platform.Api.Serialization;
 namespace Verbara.Platform.Api.Tests.QaAvailability;
 
 /// <summary>
-/// qa-scores-are-produced-or-not-shown (design D1): the availability body writes every nullable member as an explicit
+/// The availability body writes every nullable member as an explicit
 /// <c>null</c>, even though both of the host's serializers omit nulls (<c>WhenWritingNull</c>). The options below are the
 /// host's HTTP JSON options (<c>Program.cs</c>, <c>ConfigureHttpJsonOptions</c>); the second test uses the context's own.
 /// </summary>

@@ -10,7 +10,7 @@ using Microsoft.Extensions.Hosting;
 namespace Verbara.Platform.Api.Tests.OpenApi;
 
 /// <summary>
-/// qa-scores-are-produced-or-not-shown (design D1, task 2.1): the emitted OpenAPI document of
+/// The emitted OpenAPI document of
 /// <c>GET /api/v1/analytics/qa-availability</c>. Every member of the body is always written, so the schema lists all of
 /// them as required, and the members that can be null as nullable; the response-schema manifest lists the schema so CI's
 /// <c>verify-openapi-fixture.py</c> guards it for the console's generated client.

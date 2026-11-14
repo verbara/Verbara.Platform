@@ -4,7 +4,7 @@ using Verbara.Sdk.Pro.Licensing;
 namespace Verbara.Platform.Api.Services.QaAvailability;
 
 /// <summary>
-/// Computes the QA availability of one tenant (qa-scores-are-produced-or-not-shown, design D1). <c>reason</c> is the
+/// Computes the QA availability of one tenant. <c>reason</c> is the
 /// first missing piece, in this order: the analysis is registered on this host, the licence grants call analytics, a
 /// transcript source is configured, and a scorecard with at least one item applies to the tenant. Whether the analysis
 /// is registered and the setup are fixed at startup; the licence is asked of <see cref="ILicenseGuard"/> on every read,
