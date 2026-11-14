@@ -8,8 +8,8 @@ namespace Verbara.Platform.Api.Tests.QaAvailability;
 
 /// <summary>
 /// An analysis made with an empty scorecard (no item, so a maximum score of 0) reports no QA score: the CDR list and
-/// detail answer <c>hasQaScore</c> false with <c>qaScore</c> null, the QA list leaves it out and the QA detail answers
-/// 404. Its sentiment stays readable on the CDR surfaces.
+/// detail answer <c>hasQaScore</c> false with <c>qaScore</c> null, the CDR detail has no QA summary, the QA list leaves
+/// it out and the QA detail answers 404. Its sentiment stays readable on the CDR surfaces.
 /// </summary>
 public sealed class EmptyScorecardEndpointTests
 {
@@ -28,7 +28,23 @@ public sealed class EmptyScorecardEndpointTests
         json["cdr"]!["hasQaScore"]!.GetValue<bool>().Should().BeFalse();
         json["cdr"]!["qaScore"].Should().BeNull();
         json["cdr"]!["sentimentLabel"]!.GetValue<string>().Should().Be("Positive");
-        json["qaSummary"]!["qaScore"].Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetCdrDetail_ShouldAnswerNoQaSummary_WhenScorecardWasEmpty()
+    {
+        await using var factory = new UnifiedPlatformApiFactory();
+        using var client = factory.CreateAuthenticatedClient();
+        await factory.CdrStore.UpsertAsync(MakeCdr("empty-summary"));
+        await factory.QaStore.SaveAsync(MakeAnalysis("empty-summary", total: 0, max: 0, SentimentLabel.Positive));
+
+        var response = await client.GetAsync("/api/v1/analytics/cdr/empty-summary");
+
+        // The QA detail of the same call answers 404, so the CDR detail offers no QA summary to open.
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        json["qaSummary"].Should().BeNull();
+        (await client.GetAsync("/api/v1/analytics/qa/empty-summary")).StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]

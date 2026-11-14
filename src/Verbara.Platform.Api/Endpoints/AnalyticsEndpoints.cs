@@ -253,20 +253,19 @@ internal static class AnalyticsEndpoints
         var qa = CallAnalyticsLicensed(licenseStatus, licenseGuard)
             ? await qaStore.GetAsync(sessionId, tenantId, ct)
             : null;
-        CdrQaSummaryDto? qaSummary = null;
-        if (qa is not null)
-        {
-            var normalizedScore = QaScoreOf(qa);
-            qaSummary = new CdrQaSummaryDto(
+        var score = QaScoreOf(qa);
+        var hasScore = score is not null;
+
+        // A QA summary only for an analysis with a QA score: the QA detail answers 404 for any other, so a summary
+        // would point at a QA result that cannot be opened.
+        CdrQaSummaryDto? qaSummary = qa is not null && score is not null
+            ? new CdrQaSummaryDto(
                 Reason: qa.Summary?.Reason,
                 Outcome: qa.Summary?.Outcome,
                 Narrative: qa.Summary?.Narrative,
-                QaScore: normalizedScore,
-                SentimentLabel: qa.Sentiment?.OverallLabel.ToString());
-        }
-
-        var score = QaScoreOf(qa);
-        var hasScore = score is not null;
+                QaScore: score,
+                SentimentLabel: qa.Sentiment?.OverallLabel.ToString())
+            : null;
 
         var cdrRow = new CdrRowDto(
             SessionId: row.SessionId,
@@ -683,7 +682,7 @@ internal static class AnalyticsEndpoints
 
     // ─── QA Availability Handler ───────────────────────────────────────────────
 
-    // qa-scores-are-produced-or-not-shown (design D1): whether post-call analysis runs and QA scores can exist for the
+    // Whether post-call analysis runs and QA scores can exist for the
     // caller's tenant. Same group, so the same role, tenant and licence rules as the QA list.
     private static async Task<Ok<QaAvailabilityDto>> GetQaAvailability(
         HttpContext context,
