@@ -1284,13 +1284,9 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
     builder.Services.AddAgentAssistRetentionTargets();
 }
 
-// ─── Pro Analytics InMemory fallbacks (when no Analytics/Dialer connection string) ──
-if (!builder.Services.Any(d => d.ServiceType == typeof(Verbara.Sdk.Pro.EventStore.ICompletedSessionStore)))
-    builder.Services.AddSingleton<Verbara.Sdk.Pro.EventStore.ICompletedSessionStore, Verbara.Platform.Storage.InMemory.InMemoryCompletedSessionStore>();
-if (!builder.Services.Any(d => d.ServiceType == typeof(Verbara.Sdk.Pro.Analytics.IIntervalSnapshotStore)))
-    builder.Services.AddSingleton<Verbara.Sdk.Pro.Analytics.IIntervalSnapshotStore, Verbara.Platform.Storage.InMemory.InMemoryIntervalSnapshotStore>();
-if (!builder.Services.Any(d => d.ServiceType == typeof(Verbara.Sdk.Pro.CallAnalytics.Store.ICallAnalyticsStore)))
-    builder.Services.AddSingleton<Verbara.Sdk.Pro.CallAnalytics.Store.ICallAnalyticsStore, Verbara.Platform.Storage.InMemory.InMemoryCallAnalyticsStore>();
+// ─── Pro Analytics InMemory fallbacks (when no Analytics/Dialer connection string) + QA availability ──
+builder.Services.AddProAnalyticsInMemoryFallbacks();
+builder.Services.AddQaAvailability(analysisRegistered: !string.IsNullOrEmpty(analyticsConnectionString));
 
 // ─── Recordings ─────────────────────────────────────────────────────────────
 builder.Services.AddPlatformRecordings(builder.Configuration);

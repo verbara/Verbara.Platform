@@ -1237,6 +1237,17 @@
           "total",
           "customers"
         ],
+        "QaAvailabilityDto": [
+          "available",
+          "analysisRunning",
+          "reason",
+          "transcriptSource",
+          "speakerMode",
+          "topicsConfigured",
+          "complianceConfigured",
+          "sentimentSupported",
+          "backlog"
+        ],
         "QaDetailDto": [
           "sessionId",
           "analyzedAt",
