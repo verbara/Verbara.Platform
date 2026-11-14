@@ -158,12 +158,12 @@ internal static class AnalyticsEndpoints
 
         // Batch lookup QA scores. Without the call analytics module no analysis is read, so every row reports no QA
         // score and no sentiment.
-        var qaResults = new Dictionary<string, CallAnalysisResult?>();
+        var qaResults = new Dictionary<string, CallAnalysisResult>();
         if (CallAnalyticsLicensed(licenseStatus, licenseGuard))
         {
             var sessionIds = pageRows.Select(r => r.SessionId).Distinct().ToList();
             var qaList = await qaStore.GetBySessionIdsAsync(sessionIds, tenantId, ct);
-            qaResults = qaList.ToDictionary(q => q.SessionId, q => (CallAnalysisResult?)q);
+            qaResults = qaList.ToDictionary(q => q.SessionId);
         }
 
         // Batch lookup queue SLA targets (by name)
