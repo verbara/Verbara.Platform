@@ -1,0 +1,10 @@
+{
+  "available": false,
+  "analysisRunning": false,
+  "reason": "no_transcript_source",
+  "transcriptSource": null,
+  "speakerMode": null,
+  "topicsConfigured": null,
+  "complianceConfigured": null,
+  "backlog": null
+}

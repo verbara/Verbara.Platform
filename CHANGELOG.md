@@ -9,6 +9,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `GET /api/v1/analytics/qa-availability` says whether post-call QA results can exist for the caller's tenant, so a
+  client can hide QA screens that would stay empty. The body always carries `available`, `analysisRunning`, `reason`,
+  `transcriptSource`, `speakerMode`, `topicsConfigured`, `complianceConfigured` and `backlog`, writing `null` where a
+  member has no value. When `available` is false, `reason` names the first missing piece: `analysis_not_registered`
+  (no analytics or dialer database is configured), `not_licensed` (the licence does not include call analytics; read
+  again on each request, so a renewed licence shows without a restart) or `no_transcript_source`. This release
+  configures no transcript source, so the read never answers `available` true yet. The route sits with the other
+  analytics reads: supervisors and admins of an operational tenant, with the analytics licence module.
+
 ### Fixed
 
 - The analytics endpoints read a date-only `to` (`2026-11-10`) as the whole of that UTC day. Before, it was that day's

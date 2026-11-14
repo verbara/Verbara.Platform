@@ -1,6 +1,7 @@
 using System.Globalization;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Api.Services.QaAvailability;
 using Verbara.Platform.Bot;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
@@ -27,6 +28,7 @@ internal static class AnalyticsEndpoints
         analytics.MapGet("/cdr/{sessionId}", GetCdrDetail);
         analytics.MapGet("/qa", ListQa);
         analytics.MapGet("/qa/{sessionId}", GetQaDetail);
+        analytics.MapGet("/qa-availability", GetQaAvailability);
         analytics.MapGet("/intervals/agents", ListAgentIntervals);
         analytics.MapGet("/intervals", ListIntervals);
         analytics.MapGet("/bot", GetBotAnalytics);
@@ -647,6 +649,16 @@ internal static class AnalyticsEndpoints
             SlaPercent: snapshots.Sum(s => s.SlaMetCount) * 100.0 / Math.Max(totalOfferedMinusShort, 1),
             AbandonRatePercent: (snapshots.Sum(s => s.CallsAbandoned) - snapshots.Sum(s => s.ShortAbandons)) * 100.0 / Math.Max(totalOfferedMinusShort, 1));
     }
+
+    // ─── QA Availability Handler ───────────────────────────────────────────────
+
+    // qa-scores-are-produced-or-not-shown (design D1): whether post-call analysis runs and QA scores can exist for the
+    // caller's tenant. Same group, so the same role, tenant and licence rules as the QA list.
+    private static async Task<Ok<QaAvailabilityDto>> GetQaAvailability(
+        HttpContext context,
+        [FromServices] QaAvailabilityService availability,
+        CancellationToken ct) =>
+        TypedResults.Ok(await availability.GetAsync(GetTenantId(context), ct));
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 

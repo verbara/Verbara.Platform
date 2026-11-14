@@ -50,6 +50,10 @@ public class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
     /// CreateHost so it wins over the realtime-sync decorator's unkeyed alias.</summary>
     protected virtual IAgentStore CreateAgentStore() => AgentStore;
 
+    /// <summary>The Pro features the host's licence status reports as licensed. Defaults to every feature; a subclass
+    /// narrows it to drive a route's licence refusal.</summary>
+    protected virtual LicenseFeature LicensedFeatures => LicenseTestHelpers.AllProFeatures;
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -63,7 +67,7 @@ public class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
             AuthenticatedPlatformApiFactory.StubVerbaraHostedServices(services);
 
             // ── Licensing ─────────────────────────────────────────────────────
-            services.AddAllProFeaturesLicensed();
+            services.AddExactProFeaturesLicensed(LicensedFeatures);
             if (!services.Any(d => d.ServiceType == typeof(byte[])))
                 services.AddSingleton<byte[]>([]);
 
