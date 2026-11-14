@@ -15,7 +15,7 @@ namespace Verbara.Platform.Api.Tests.QaAvailability;
 public sealed class QaAvailabilitySerializationTests
 {
     private static readonly string[] AlwaysWritten =
-        ["available", "analysisRunning", "reason", "transcriptSource", "speakerMode", "topicsConfigured", "complianceConfigured", "backlog"];
+        ["available", "analysisRunning", "reason", "transcriptSource", "speakerMode", "topicsConfigured", "complianceConfigured", "sentimentSupported", "backlog"];
 
     private static JsonSerializerOptions HostOptions()
     {
@@ -29,7 +29,7 @@ public sealed class QaAvailabilitySerializationTests
     }
 
     private static readonly QaAvailabilityDto AllNull =
-        new(false, false, null, null, null, null, null, null);
+        new(false, false, null, null, null, null, null, null, null);
 
     private static void ShouldWriteEveryMember(JsonObject body)
     {
@@ -62,7 +62,7 @@ public sealed class QaAvailabilitySerializationTests
     {
         var since = new DateTimeOffset(2026, 11, 10, 0, 0, 0, TimeSpan.Zero);
         var body = new QaAvailabilityDto(
-            true, true, null, QaAvailabilityDto.TranscriptSourceRecording, QaAvailabilityDto.SpeakerModeTwoTrack, true, false,
+            true, true, null, QaAvailabilityDto.TranscriptSourceRecording, QaAvailabilityDto.SpeakerModeTwoTrack, true, false, true,
             new QaBacklogDto(0, 0, since));
 
         var node = JsonNode.Parse(JsonSerializer.Serialize(body, HostOptions().GetTypeInfo(typeof(QaAvailabilityDto))))!.AsObject();
@@ -74,6 +74,7 @@ public sealed class QaAvailabilitySerializationTests
         node["speakerMode"]!.GetValue<string>().Should().Be("two_track");
         node["topicsConfigured"]!.GetValue<bool>().Should().BeTrue();
         node["complianceConfigured"]!.GetValue<bool>().Should().BeFalse();
+        node["sentimentSupported"]!.GetValue<bool>().Should().BeTrue();
         var backlog = node["backlog"]!.AsObject();
         backlog["waiting"]!.GetValue<long>().Should().Be(0);
         backlog["notAnalysed"]!.GetValue<long>().Should().Be(0);

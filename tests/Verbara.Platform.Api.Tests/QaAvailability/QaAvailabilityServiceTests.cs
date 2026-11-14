@@ -47,7 +47,7 @@ public sealed class QaAvailabilityServiceTests
         }
     }
 
-    private static readonly QaTenantAnalysisSetup Full = new(HasScorecard: true, TopicsConfigured: true, ComplianceConfigured: false);
+    private static readonly QaTenantAnalysisSetup Full = new(HasScorecard: true, TopicsConfigured: true, ComplianceConfigured: false, SentimentSupported: true);
 
     private static FakeSetup Configured() =>
         new(QaAvailabilityDto.TranscriptSourceRecording, QaAvailabilityDto.SpeakerModeTwoTrack, (TenantA, Full));
@@ -67,6 +67,7 @@ public sealed class QaAvailabilityServiceTests
         body.SpeakerMode.Should().BeNull();
         body.TopicsConfigured.Should().BeNull();
         body.ComplianceConfigured.Should().BeNull();
+        body.SentimentSupported.Should().BeNull();
         body.Backlog.Should().BeNull();
         await guard.DidNotReceive().CanExecuteAsync(Arg.Any<LicenseFeature>(), Arg.Any<CancellationToken>());
     }
@@ -86,6 +87,7 @@ public sealed class QaAvailabilityServiceTests
         body.SpeakerMode.Should().BeNull();
         body.TopicsConfigured.Should().BeNull();
         body.ComplianceConfigured.Should().BeNull();
+        body.SentimentSupported.Should().BeNull();
         body.Backlog.Should().BeNull();
         await guard.Received(1).CanExecuteAsync(LicenseFeature.CallAnalytics, Arg.Any<CancellationToken>());
     }
@@ -104,6 +106,7 @@ public sealed class QaAvailabilityServiceTests
         body.SpeakerMode.Should().BeNull();
         body.TopicsConfigured.Should().BeNull();
         body.ComplianceConfigured.Should().BeNull();
+        body.SentimentSupported.Should().BeNull();
         body.Backlog.Should().BeNull();
     }
 
@@ -114,7 +117,7 @@ public sealed class QaAvailabilityServiceTests
             QaAvailabilityDto.TranscriptSourceRecording,
             QaAvailabilityDto.SpeakerModeMono,
             (TenantA, Full),
-            (TenantB, new QaTenantAnalysisSetup(HasScorecard: false, TopicsConfigured: false, ComplianceConfigured: true)));
+            (TenantB, new QaTenantAnalysisSetup(HasScorecard: false, TopicsConfigured: false, ComplianceConfigured: true, SentimentSupported: false)));
         var service = new QaAvailabilityService(analysisRegistered: true, setup, Guard(allowed: true));
 
         var a = await service.GetAsync(TenantA, CancellationToken.None);
@@ -125,6 +128,7 @@ public sealed class QaAvailabilityServiceTests
         a.Reason.Should().BeNull();
         a.TopicsConfigured.Should().BeTrue();
         a.ComplianceConfigured.Should().BeFalse();
+        a.SentimentSupported.Should().BeTrue();
 
         b.Available.Should().BeFalse();
         b.AnalysisRunning.Should().BeTrue();
@@ -133,6 +137,7 @@ public sealed class QaAvailabilityServiceTests
         b.SpeakerMode.Should().Be(QaAvailabilityDto.SpeakerModeMono);
         b.TopicsConfigured.Should().BeFalse();
         b.ComplianceConfigured.Should().BeTrue();
+        b.SentimentSupported.Should().BeFalse("a queue of this tenant is transcribed in a language the sentiment analyser does not support");
     }
 
     [Fact]
@@ -149,6 +154,7 @@ public sealed class QaAvailabilityServiceTests
         body.SpeakerMode.Should().Be(QaAvailabilityDto.SpeakerModeTwoTrack);
         body.TopicsConfigured.Should().BeFalse();
         body.ComplianceConfigured.Should().BeFalse();
+        body.SentimentSupported.Should().BeFalse("nothing applies to the tenant, so sentiment is not reported as supported");
     }
 
     [Fact]
@@ -175,7 +181,7 @@ public sealed class QaAvailabilityServiceTests
 
         var body = await service.GetAsync(TenantA, CancellationToken.None);
 
-        body.Should().Be(new QaAvailabilityDto(false, false, QaAvailabilityDto.ReasonNoTranscriptSource, null, null, null, null, null));
+        body.Should().Be(new QaAvailabilityDto(false, false, QaAvailabilityDto.ReasonNoTranscriptSource, null, null, null, null, null, null));
         UnconfiguredQaAnalysisSetup.Instance.ForTenant(TenantA).Should().Be(QaTenantAnalysisSetup.None);
     }
 }

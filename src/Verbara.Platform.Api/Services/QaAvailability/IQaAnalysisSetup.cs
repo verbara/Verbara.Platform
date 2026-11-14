@@ -19,11 +19,16 @@ internal interface IQaAnalysisSetup
 
 /// <summary>
 /// What applies to one tenant: whether any of its queues resolves to a scorecard with at least one item, a taxonomy with
-/// at least one topic, or a rule set with at least one rule.
+/// at least one topic, or a rule set with at least one rule; and whether every one of its queues is transcribed in a
+/// language the sentiment analysis supports.
 /// </summary>
-internal readonly record struct QaTenantAnalysisSetup(bool HasScorecard, bool TopicsConfigured, bool ComplianceConfigured)
+internal readonly record struct QaTenantAnalysisSetup(
+    bool HasScorecard,
+    bool TopicsConfigured,
+    bool ComplianceConfigured,
+    bool SentimentSupported)
 {
-    /// <summary>Nothing applies.</summary>
+    /// <summary>Nothing applies, and sentiment is not reported as supported.</summary>
     public static QaTenantAnalysisSetup None => default;
 }
 

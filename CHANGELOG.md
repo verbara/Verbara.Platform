@@ -13,8 +13,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `GET /api/v1/analytics/qa-availability` says whether post-call QA results can exist for the caller's tenant, so a
   client can hide QA screens that would stay empty. The body always carries `available`, `analysisRunning`, `reason`,
-  `transcriptSource`, `speakerMode`, `topicsConfigured`, `complianceConfigured` and `backlog`, writing `null` where a
-  member has no value. When `available` is false, `reason` names the first missing piece: `analysis_not_registered`
+  `transcriptSource`, `speakerMode`, `topicsConfigured`, `complianceConfigured`, `sentimentSupported` and `backlog`,
+  writing `null` where a member has no value. `sentimentSupported` is false when the tenant's calls are transcribed in
+  a language the sentiment analysis does not support, so a client hides sentiment there instead of reading every call
+  as neutral. When `available` is false, `reason` names the first missing piece: `analysis_not_registered`
   (no analytics or dialer database is configured), `not_licensed` (the licence does not include call analytics; read
   again on each request, so a renewed licence shows without a restart) or `no_transcript_source`. This release
   configures no transcript source, so the read never answers `available` true yet. The route sits with the other

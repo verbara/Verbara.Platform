@@ -50,9 +50,10 @@ internal sealed class QaAvailabilityService
             SpeakerMode: _setup.SpeakerMode,
             TopicsConfigured: tenant.TopicsConfigured,
             ComplianceConfigured: tenant.ComplianceConfigured,
+            SentimentSupported: tenant.SentimentSupported,
             Backlog: null);
     }
 
     private static QaAvailabilityDto NotRunning(string reason, string? transcriptSource) =>
-        new(false, false, reason, transcriptSource, null, null, null, null);
+        new(false, false, reason, transcriptSource, null, null, null, null, null);
 }

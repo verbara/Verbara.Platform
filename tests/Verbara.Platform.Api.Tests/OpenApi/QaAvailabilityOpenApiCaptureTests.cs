@@ -20,10 +20,10 @@ public sealed class QaAvailabilityOpenApiCaptureTests
     private const string Path = "/api/v{version}/analytics/qa-availability";
 
     private static readonly string[] Members =
-        ["available", "analysisRunning", "reason", "transcriptSource", "speakerMode", "topicsConfigured", "complianceConfigured", "backlog"];
+        ["available", "analysisRunning", "reason", "transcriptSource", "speakerMode", "topicsConfigured", "complianceConfigured", "sentimentSupported", "backlog"];
 
     private static readonly string[] NullableScalars =
-        ["reason", "transcriptSource", "speakerMode", "topicsConfigured", "complianceConfigured"];
+        ["reason", "transcriptSource", "speakerMode", "topicsConfigured", "complianceConfigured", "sentimentSupported"];
 
     private static async Task<JsonNode> DocumentAsync()
     {

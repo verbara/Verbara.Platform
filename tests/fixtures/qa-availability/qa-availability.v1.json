@@ -6,5 +6,6 @@
   "speakerMode": null,
   "topicsConfigured": null,
   "complianceConfigured": null,
+  "sentimentSupported": null,
   "backlog": null
 }

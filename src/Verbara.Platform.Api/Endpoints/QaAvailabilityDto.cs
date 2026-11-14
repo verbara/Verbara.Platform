@@ -11,7 +11,10 @@ namespace Verbara.Platform.Api.Endpoints;
 /// analysis is registered, licensed and has a transcript source; <see cref="Available"/> (QA scores) additionally needs a
 /// scorecard with at least one item for the tenant. <see cref="Reason"/> is the first missing piece, null when
 /// <see cref="Available"/> is true. <see cref="SpeakerMode"/>, <see cref="TopicsConfigured"/>,
-/// <see cref="ComplianceConfigured"/> and <see cref="Backlog"/> are null when <see cref="AnalysisRunning"/> is false.
+/// <see cref="ComplianceConfigured"/>, <see cref="SentimentSupported"/> and <see cref="Backlog"/> are null when
+/// <see cref="AnalysisRunning"/> is false. <see cref="SentimentSupported"/> is false when a queue of the tenant is
+/// transcribed in a language the sentiment analysis does not support, so the console hides sentiment for that tenant
+/// instead of showing every call as neutral.
 /// </summary>
 internal sealed record QaAvailabilityDto(
     bool Available,
@@ -21,6 +24,7 @@ internal sealed record QaAvailabilityDto(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? SpeakerMode,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] bool? TopicsConfigured,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] bool? ComplianceConfigured,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] bool? SentimentSupported,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] QaBacklogDto? Backlog)
 {
     /// <summary>No analytics connection string, so post-call analysis is not part of this host.</summary>
