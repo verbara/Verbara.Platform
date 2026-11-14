@@ -104,7 +104,14 @@ internal sealed class QueueWrapUpEngineRig : IAsyncDisposable, IObserver<Session
 
     private const string Member = "PJSIP/agent1";
 
-    private static readonly TimeSpan Bound = TimeSpan.FromSeconds(10);
+    /// <summary>
+    /// How long a wrap-up event may take to arrive. The Sdk's timer that closes a wrap-up runs on the real clock, and
+    /// on a loaded runner its callback has run more than 7 s late, past the 10 s this was. 111 s is three times the
+    /// slowest CI run of the test that waits on it (37 s), and two such waits plus that run still fit in CI's
+    /// 5-minute hang timeout. A late close never changes the length the event reports, so the duration tolerances
+    /// stay as they are.
+    /// </summary>
+    private static readonly TimeSpan Bound = TimeSpan.FromSeconds(111);
 
     private readonly ServiceProvider _services;
     private readonly VerbaraServer _server;
