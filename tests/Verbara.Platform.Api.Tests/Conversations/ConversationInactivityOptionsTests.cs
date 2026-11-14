@@ -162,9 +162,11 @@ public sealed class ConversationInactivityOptionsTests
     private static IConfiguration Configuration(IReadOnlyDictionary<string, string?> values) =>
         new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 
+    // EntryPointStartPlatformApiFactory, not PlatformApiFactory: a failed start must surface its own exception, which
+    // the factory's deferred start loses to an ObjectDisposedException on a loaded runner.
     private static Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> Factory(
         IReadOnlyDictionary<string, string?> settings, LogRecordCapture? capture = null) =>
-        new PlatformApiFactory().WithWebHostBuilder(builder =>
+        new EntryPointStartPlatformApiFactory().WithWebHostBuilder(builder =>
         {
             foreach (var (key, value) in settings)
                 builder.UseSetting(key, value);
