@@ -243,6 +243,17 @@ jobs:
           path: TestResults/**/Sequence_*.xml
           if-no-files-found: ignore
 
+      - name: Upload MSBuild crash diagnostics
+        # MSB4166 ("Child node exited prematurely") names /tmp/MSBuildTemp*/MSBuild_*.failure.txt as its
+        # diagnostics. Uploaded only on failure; this step cannot run when the runner itself is shut down.
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: msbuild-failure-unit-${{ github.sha }}
+          path: /tmp/MSBuildTemp*/MSBuild_*.failure.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
   # live-postgres-ci-lane: runs the two container-backed test projects build-and-test
   # excludes above (Storage.Postgres.Tests, Identity.Redis.Tests) against real
   # Postgres/Redis Testcontainers. Own job (not a filter flip on build-and-test) so
@@ -455,6 +466,17 @@ jobs:
           name: hang-report-coverage-${{ github.sha }}
           path: coverage/**/Sequence_*.xml
           if-no-files-found: ignore
+
+      - name: Upload MSBuild crash diagnostics
+        # MSB4166 ("Child node exited prematurely") names /tmp/MSBuildTemp*/MSBuild_*.failure.txt as its
+        # diagnostics. Uploaded only on failure; this step cannot run when the runner itself is shut down.
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: msbuild-failure-coverage-${{ github.sha }}
+          path: /tmp/MSBuildTemp*/MSBuild_*.failure.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Merge coverage report
         run: |
