@@ -478,8 +478,8 @@ builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
 // ─── Pro.Routing — Skill Catalog (in-memory, singleton) ─────────────────────
 builder.Services.AddSingleton<SkillCatalogBase>(new InMemorySkillCatalog());
 
-// ─── Agent Assist Config Store (singleton for mutable admin config) ───────────
-builder.Services.AddSingleton<AgentAssistConfigStore>();
+// ─── Agent Assist: config store (mutable admin config) + session read seams ──
+builder.Services.AddSingleton<AgentAssistConfigStore>().AddAgentAssistReadSeams();
 
 // ─── System Settings Store (singleton for mutable system settings) ────────────
 builder.Services.AddSingleton<SystemSettingsStore>();
