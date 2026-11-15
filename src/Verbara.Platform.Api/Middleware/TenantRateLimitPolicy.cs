@@ -3,7 +3,6 @@ using System.Text.Json;
 using System.Threading.RateLimiting;
 using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Core;
-using Microsoft.AspNetCore.RateLimiting;
 
 namespace Verbara.Platform.Api.Middleware;
 
@@ -67,65 +66,86 @@ internal static class TenantRateLimitPolicy
             : (RateLimitPartitionKeys.UnknownTenant, GlobalFallbackPermitLimit);
     }
 
-    public static void ConfigureRateLimiting(RateLimiterOptions options)
+    /// <summary>Policy name of the registered, unattached backstop (no endpoint carries it).</summary>
+    internal const string GlobalSafetyPolicy = "global-safety";
+
+    /// <summary>Policy name of the registered, unattached per-tenant tier policy.</summary>
+    internal const string PerTenantPolicy = "per-tenant";
+
+    /// <summary>Policy name of the per-tenant LLM ceiling, attached with <c>RequireRateLimiting("llm")</c>.</summary>
+    internal const string LlmPolicy = "llm";
+
+    /// <summary>Detail of the 429 problem written when one of these policies rejects a request.</summary>
+    internal const string RejectionDetail = "Tenant rate limit exceeded";
+
+    /// <summary>
+    /// Returns the partition the named policy assigns to <paramref name="context"/>, or <c>null</c> when no
+    /// policy has that name. <see cref="TenantRateLimitingMiddleware"/> evaluates it for the policy an endpoint
+    /// names in its rate-limiting metadata.
+    /// </summary>
+    internal static RateLimitPartition<string>? GetPartition(string policyName, HttpContext context)
     {
-        options.RejectionStatusCode = 429;
-
-        // Registered but attached to no endpoint, and no global limiter is configured: this policy limits nothing.
-        // It is kept until the change wire-api-rate-limiting-enforcement replaces it with a per-IP backstop.
-        options.AddSlidingWindowLimiter("global-safety", o =>
+        switch (policyName)
         {
-            o.Window = TimeSpan.FromMinutes(1);
-            o.SegmentsPerWindow = 6;
-            o.PermitLimit = 3000;
-        });
+            // Registered but attached to no endpoint, and no global limiter is configured: this policy limits
+            // nothing. It is kept until the change wire-api-rate-limiting-enforcement replaces it with a per-IP
+            // backstop. One shared partition, as a named sliding-window policy has.
+            case GlobalSafetyPolicy:
+                return RateLimitPartition.GetSlidingWindowLimiter(string.Empty, _ => new SlidingWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    SegmentsPerWindow = 6,
+                    PermitLimit = 3000,
+                    AutoReplenishment = true,
+                });
 
-        // Per-tenant tier policy: registered but attached to no endpoint, so it limits nothing. Its partition
-        // resolution (ResolvePerTenantTarget, unit-tested) is correct so that whoever attaches it gets a policy that
-        // fails closed. wire-api-rate-limiting-enforcement replaces it with a verified-tenant stage.
-        options.AddPolicy("per-tenant", context =>
-        {
-            var (partitionKey, tier) = ResolvePerTenantTarget(context);
-
-            if (tier.IsUnlimited())
-                return RateLimitPartition.GetNoLimiter(partitionKey);
-
-            return RateLimitPartition.GetSlidingWindowLimiter(partitionKey, _ => new SlidingWindowRateLimiterOptions
+            // Per-tenant tier policy: registered but attached to no endpoint, so it limits nothing. Its partition
+            // resolution (ResolvePerTenantTarget, unit-tested) is correct so that whoever attaches it gets a policy
+            // that fails closed. wire-api-rate-limiting-enforcement replaces it with a verified-tenant stage.
+            case PerTenantPolicy:
             {
-                Window = TimeSpan.FromMinutes(1),
-                SegmentsPerWindow = 6,
-                PermitLimit = tier.GetPermitLimit(),
-                AutoReplenishment = true,
-            });
-        });
+                var (partitionKey, tier) = ResolvePerTenantTarget(context);
 
-        // E3 — the per-tenant LLM policy, attached to the AI-suggestion route only; it is the only policy of this
-        // limiter applied to any endpoint (the anonymous WebChat and webhook routes use the endpoint-filter
-        // AnonymousRateLimitPolicy). It ignores the tier (an Unlimited-tier tenant is throttled too).
-        // ResolveLlmTarget keys it on the API key when one is sent, else on the tenant TenantResolutionMiddleware
-        // resolved before UseRateLimiter(); a request with neither shares the bounded t?: bucket.
-        options.AddPolicy("llm", context =>
-        {
-            var (partitionKey, permitLimit) = ResolveLlmTarget(context);
+                if (tier.IsUnlimited())
+                    return RateLimitPartition.GetNoLimiter(partitionKey);
 
-            return RateLimitPartition.GetSlidingWindowLimiter(partitionKey, _ => new SlidingWindowRateLimiterOptions
+                return RateLimitPartition.GetSlidingWindowLimiter(partitionKey, _ => new SlidingWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    SegmentsPerWindow = 6,
+                    PermitLimit = tier.GetPermitLimit(),
+                    AutoReplenishment = true,
+                });
+            }
+
+            // E3 — the per-tenant LLM policy, attached to the AI-suggestion route only; it is the only policy of
+            // this limiter applied to any endpoint (the anonymous WebChat and webhook routes use the endpoint-filter
+            // AnonymousRateLimitPolicy). It ignores the tier (an Unlimited-tier tenant is throttled too).
+            // ResolveLlmTarget keys it on the API key when one is sent, else on the tenant
+            // TenantResolutionMiddleware resolved before this stage; a request with neither shares the bounded
+            // t?: bucket.
+            case LlmPolicy:
             {
-                Window = LlmWindow,
-                SegmentsPerWindow = 6,
-                PermitLimit = permitLimit,
-                AutoReplenishment = true,
-            });
-        });
+                var (partitionKey, permitLimit) = ResolveLlmTarget(context);
 
-        // Custom 429 response
-        options.OnRejected = (context, ct) =>
-            new ValueTask(WriteTooManyRequestsAsync(context.HttpContext, context.Lease, "Tenant rate limit exceeded", ct));
+                return RateLimitPartition.GetSlidingWindowLimiter(partitionKey, _ => new SlidingWindowRateLimiterOptions
+                {
+                    Window = LlmWindow,
+                    SegmentsPerWindow = 6,
+                    PermitLimit = permitLimit,
+                    AutoReplenishment = true,
+                });
+            }
+
+            default:
+                return null;
+        }
     }
 
     /// <summary>
     /// Writes the shared 429 response for a rejected <paramref name="lease"/>: a <c>rate_limit_exceeded</c>
-    /// problem and a <c>Retry-After</c> header (the lease's, or 30 seconds). Used by the rate-limiting
-    /// middleware and by the limits applied in endpoint filters (<see cref="WebChatRateLimitPolicy"/>).
+    /// problem and a <c>Retry-After</c> header (the lease's, or 30 seconds). Used by
+    /// <see cref="TenantRateLimitingMiddleware"/> and by the limits applied in endpoint filters (<see cref="WebChatRateLimitPolicy"/>).
     /// </summary>
     internal static async Task WriteTooManyRequestsAsync(
         HttpContext httpContext, RateLimitLease lease, string detail, CancellationToken ct)
