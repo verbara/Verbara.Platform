@@ -1,11 +1,14 @@
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Verbara.Platform.Api.Tests.Conversations;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Sdk.Push.Delivery;
+using Verbara.Sdk.Push.Events;
 
 namespace Verbara.Platform.Api.Tests.Sse;
 
@@ -42,6 +45,19 @@ public class ContentDeliveryApiFactory : ConversationOwnershipApiFactory
         services.Remove(real);
         services.AddSingleton<IConversationStore>(provider =>
             new ProbeConversationStore((IConversationStore)real.ImplementationFactory!(provider), DetachedConversations));
+
+        // The live stream resolves its delivery filter from the request's services and calls it only from its bus
+        // subscription; a per-request decorator tells LiveStreamProbe when the probe's subscription sees a marker.
+        var filter = services.Last(descriptor => descriptor.ServiceType == typeof(IEventDeliveryFilter));
+        if (filter.ImplementationType != typeof(PlatformDeliveryFilter))
+            throw new InvalidOperationException(
+                $"the live stream's delivery filter is {filter.ImplementationType}, which StreamProbeDeliveryFilter does not wrap");
+        services.Remove(filter);
+        services.AddHttpContextAccessor();
+        var platformFilter = new PlatformDeliveryFilter();
+        services.AddTransient<IEventDeliveryFilter>(provider => new StreamProbeDeliveryFilter(
+            platformFilter,
+            provider.GetRequiredService<IHttpContextAccessor>().HttpContext?.Request.Headers[LiveStreamProbe.ProbeHeader].ToString()));
     }
 
     /// <summary>Activates WebChat for the customer tenant, which <c>POST /webchat/sessions</c> requires.</summary>
@@ -124,6 +140,23 @@ public class ContentDeliveryApiFactory : ConversationOwnershipApiFactory
         var probe = await LiveStreamProbe.OpenAsync(name, ClientFor(user));
         await LiveStreamProbe.SyncAsync(Bus, Tenant.Value, probe);
         return probe;
+    }
+}
+
+/// <summary>
+/// The host's <see cref="IEventDeliveryFilter"/> with one addition: on the stream opened by a
+/// <see cref="LiveStreamProbe"/> (the request carries <see cref="LiveStreamProbe.ProbeHeader"/>), it reports each
+/// stream marker it evaluates. The stream evaluates the filter only from its bus subscription, so the first report is
+/// the signal that the stream is subscribed.
+/// </summary>
+internal sealed class StreamProbeDeliveryFilter(IEventDeliveryFilter inner, string? probeId) : IEventDeliveryFilter
+{
+    public bool IsDeliverableToSubscriber(PushEvent pushEvent, SubscriberContext subscriber)
+    {
+        var deliverable = inner.IsDeliverableToSubscriber(pushEvent, subscriber);
+        if (!string.IsNullOrEmpty(probeId) && pushEvent is ConversationOfferExpiredEvent { AgentId: LiveStreamProbe.MarkerAgentId })
+            LiveStreamProbe.OnMarkerEvaluated(probeId, deliverable);
+        return deliverable;
     }
 }
 

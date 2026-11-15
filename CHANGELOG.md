@@ -9,8 +9,39 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `GET /api/v1/analytics/qa-availability` says whether post-call QA results can exist for the caller's tenant, so a
+  client can hide QA screens that would stay empty. The body always carries `available`, `analysisRunning`, `reason`,
+  `transcriptSource`, `speakerMode`, `topicsConfigured`, `complianceConfigured`, `sentimentSupported` and `backlog`,
+  writing `null` where a member has no value. `sentimentSupported` is false when the tenant's calls are transcribed in
+  a language the sentiment analysis does not support, so a client hides sentiment there instead of reading every call
+  as neutral. When `available` is false, `reason` names the first missing piece: `analysis_not_registered`
+  (no analytics or dialer database is configured), `not_licensed` (the licence does not include call analytics; read
+  again on each request, so a renewed licence shows without a restart) or `no_transcript_source`. This release
+  configures no transcript source, so the read never answers `available` true yet. The route sits with the other
+  analytics reads: supervisors and admins of an operational tenant, with the analytics licence module.
+
+### Changed — BREAKING
+
+- **A call analysed with an empty scorecard has no QA score.** An analysis whose scorecard had no item (a maximum
+  score of 0) used to report `hasQaScore` true with `qaScore` 0. Now `GET /api/v1/analytics/cdr` and
+  `GET /api/v1/analytics/cdr/{sessionId}` answer `hasQaScore` false with `qaScore` null (the detail answers
+  `qaSummary` null), `GET /api/v1/analytics/qa` leaves the analysis out, and `GET /api/v1/analytics/qa/{sessionId}`
+  answers 404. Its sentiment, topics and compliance stay readable on their own routes.
+- **`GET /api/v1/analytics/qa` refuses a `minScore` outside 0-100** with 400 and an `error` naming the parameter,
+  before reading any data.
+- **The QA data routes require the call analytics licence module.** `GET /api/v1/analytics/qa`,
+  `GET /api/v1/analytics/qa/{sessionId}` and `GET /api/v1/call-analytics/{topics/trends,sentiment/trends,compliance/summary}`
+  now need both the analytics and the call analytics modules, and answer 402 like any other licence-gated route when
+  either is missing. `GET /api/v1/analytics/qa-availability` and the CDR routes still need only the analytics module.
+  Without call analytics, `GET /api/v1/analytics/cdr` and `GET /api/v1/analytics/cdr/{sessionId}` answer
+  `hasQaScore` false, `qaScore` null and `sentimentLabel` null on every row, and the detail answers `qaSummary` null.
+
 ### Fixed
 
+- `GET /api/v1/analytics/cdr/{sessionId}` always answers `hasTranscript` false. It used to answer true for any call
+  with an analysis summary, although no transcript route is served, so a client that followed it got 404.
 - The analytics endpoints read a date-only `to` (`2026-11-10`) as the whole of that UTC day. Before, it was that day's
   00:00, so the console's default range and its "Today" preset left out every call made that day, and
   `GET /api/v1/analytics/cdr` did not list today's calls. A date-only `from` starts at 00:00 UTC on every host (it
@@ -38,6 +69,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that carry no user id get 403 with no body. `GET /api/v1/agent-assist/sessions/{sessionId}/suggestions` and
   `/compliance` return only the caller's tenant's rows, and still answer 200, possibly with `[]`. Same routes, same
   response shapes. (#552)
+- **The Api host is released when it is disposed.** The request rate-limiting stage held each host it ran in, so
+  every test host stayed in memory after its tests ended and a full `Verbara.Platform.Api.Tests` run needed more
+  memory than a hosted CI runner has. The stage is now owned by the host and stops with it, and the unit-test run
+  stays within a hosted runner's memory. Rate limiting behaves the same: the same three policies, partition keys,
+  windows and limits, the same position after tenant resolution and before authentication, and the same 429
+  response with `Retry-After`. The `aspnetcore.rate_limiting.*` metrics are no longer emitted. (#586)
+
+### Dependencies
+
+- **The ASP.NET Core packages move together to `10.0.15`**: `Microsoft.AspNetCore.Authentication.JwtBearer` and
+  `.OpenIdConnect` (`10.0.14`), `Microsoft.AspNetCore.DataProtection` and `.Extensions`, `Microsoft.AspNetCore.SignalR.Client`
+  and `.Common`, `Microsoft.AspNetCore.Mvc.Testing`, `System.Security.Cryptography.Xml` and `.Pkcs` (`10.0.13`), and
+  `Microsoft.AspNetCore.OpenApi` (`10.0.11`). `Microsoft.AspNetCore.OpenApi 10.0.15` needs `Microsoft.OpenApi` `2.13.0` or
+  later in the 2.x line, so that pin moves from `2.9.0` to `2.13.0`. Moved one at a time, several failed restore with `NU1109`,
+  so they ship as one change and replace #568, #576, #577, #578 and #579.
 
 ### Upgrading
 

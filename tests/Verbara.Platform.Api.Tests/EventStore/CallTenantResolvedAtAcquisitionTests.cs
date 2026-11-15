@@ -32,7 +32,14 @@ public sealed class CallTenantResolvedAtAcquisitionTests : IAsyncLifetime
 {
     private const string TenantId = "tenant-acquired";
     private const string ServerId = "srv-acquired";
-    private static readonly TimeSpan Settle = TimeSpan.FromSeconds(15);
+    /// <summary>
+    /// Bound on each positive wait (the stamp, then the record). 57 s is the bound tasks A.6 sized for this test: 3 × its
+    /// longest CI duration (19 s, a red run that hit the old 15 s bound); both waits fit in CI's 5-minute test limit.
+    /// </summary>
+    private static readonly TimeSpan Settle = TimeSpan.FromSeconds(57);
+
+    /// <summary>How long the test watches for a record that must not appear (the 5 s it had before Settle was sized).</summary>
+    private static readonly TimeSpan AbsenceWindow = TimeSpan.FromSeconds(5);
     private static readonly DateTimeOffset BaseTime = DateTimeOffset.UtcNow.AddMinutes(-1);
 
     private IContainer? _postgres;
@@ -127,7 +134,7 @@ public sealed class CallTenantResolvedAtAcquisitionTests : IAsyncLifetime
 
             await HoldVoiceLeaseAsync(host);
             using var client = host.CreateAuthenticatedClient();
-            var status = await WaitForCdrAsync(client, session.SessionId, Settle / 3);
+            var status = await WaitForCdrAsync(client, session.SessionId, AbsenceWindow);
 
             status.Should().Be(HttpStatusCode.NotFound);
             (await CountAsync("completed_sessions")).Should().Be(0, "with no tenant the call gets no record");

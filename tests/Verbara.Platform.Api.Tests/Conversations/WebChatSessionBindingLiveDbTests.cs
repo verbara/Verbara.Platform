@@ -64,11 +64,10 @@ public sealed class WebChatSessionBindingLiveDbTests
         await using var env = await Env.CreateAsync(_postgres);
         var (s1, _) = await env.SeedContactWithTwoSessionsAsync();
         var k1 = s1.ConversationId;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var socket = await env.AttachSocketAsync(s1, timeout.Token);
+        using var socket = await env.AttachSocketAsync(s1);
 
         var frame = JsonSerializer.Serialize(new WebChatClientMessage("message", "por el socket"), WebChatJsonContext.Default.WebChatClientMessage);
-        await socket.SendAsync(Encoding.UTF8.GetBytes(frame), WebSocketMessageType.Text, true, timeout.Token);
+        await socket.SendAsync(Encoding.UTF8.GetBytes(frame), WebSocketMessageType.Text, true, CancellationToken.None);
 
         var holding = await env.WaitForConversationsHoldingAsync("por el socket");
         holding.Should().Equal([k1.Value]);
@@ -85,9 +84,8 @@ public sealed class WebChatSessionBindingLiveDbTests
         await env.GiveToAgentAsync(k2);
         await env.CloseAsync(k1);
         var k2Before = await env.SignatureAsync(k2);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var s1Socket = await env.AttachSocketAsync(s1, timeout.Token);
-        using var s2Socket = await env.AttachSocketAsync(s2, timeout.Token);
+        using var s1Socket = await env.AttachSocketAsync(s1);
+        using var s2Socket = await env.AttachSocketAsync(s2);
 
         await env.PostAsync(s1, "volvi desde la primera");
 
@@ -123,9 +121,8 @@ public sealed class WebChatSessionBindingLiveDbTests
         await env.GiveToAgentAsync(k2);
         await env.CloseAsync(k1);
         var k2Before = await env.SignatureAsync(k2);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var s1Socket = await env.AttachSocketAsync(s1, timeout.Token);
-        using var s2Socket = await env.AttachSocketAsync(s2, timeout.Token);
+        using var s1Socket = await env.AttachSocketAsync(s1);
+        using var s2Socket = await env.AttachSocketAsync(s2);
 
         await env.PostAsync(s1, "volvi con la misma clave");
 
@@ -275,8 +272,7 @@ public sealed class WebChatSessionBindingLiveDbTests
         (await env.Contacts.GetByIdAsync(Env.Tenant, c1, CancellationToken.None)).Should().BeNull();
         ConversationStateMachine.IsTerminal((await env.ConversationAsync(k1)).State).Should().BeFalse("the delete leaves K1 open");
         (await env.ConversationAsync(k1)).ContactId.Should().Be(c1, "the delete leaves K1 naming the deleted contact");
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var socket = await env.AttachSocketAsync(session, timeout.Token);
+        using var socket = await env.AttachSocketAsync(session);
 
         await env.PostAsync(session, "tras el borrado");
 
@@ -375,8 +371,7 @@ public sealed class WebChatSessionBindingLiveDbTests
         if (spokeBefore)
             await env.PostAsync(session, "antes de cerrar");
         await env.CloseAsync(k1);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var socket = await env.AttachSocketAsync(session, timeout.Token);
+        using var socket = await env.AttachSocketAsync(session);
 
         var started = await env.StartAsAgentAsync(contactId, "escribe el agente");
 
@@ -409,8 +404,7 @@ public sealed class WebChatSessionBindingLiveDbTests
         var session = await env.CreateSessionAsync();
         var k1 = session.ConversationId;
         await env.CloseAsync(k1);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var socket = await env.AttachSocketAsync(session, timeout.Token);
+        using var socket = await env.AttachSocketAsync(session);
         var kOut = (await env.StartAsAgentAsync(session.ContactId, "escribe el agente")).Conversation!.ConversationId;
         await env.ResolveAsync(kOut);
 
@@ -435,8 +429,7 @@ public sealed class WebChatSessionBindingLiveDbTests
         var (s1, s2) = await env.SeedVerifiedContactWithTwoSessionsAsync();
         await env.CloseAsync(s1.ConversationId);
         await env.CloseAsync(s2.ConversationId);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var s2Socket = await env.AttachSocketAsync(s2, timeout.Token);
+        using var s2Socket = await env.AttachSocketAsync(s2);
 
         var started = await env.StartAsAgentAsync(s2.ContactId, "para el segundo dispositivo");
 
@@ -454,9 +447,8 @@ public sealed class WebChatSessionBindingLiveDbTests
         var (s1, s2) = await env.SeedVerifiedContactWithTwoSessionsAsync();
         await env.CloseAsync(s1.ConversationId);
         await env.CloseAsync(s2.ConversationId);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var s1Socket = await env.AttachSocketAsync(s1, timeout.Token);
-        using var s2Socket = await env.AttachSocketAsync(s2, timeout.Token);
+        using var s1Socket = await env.AttachSocketAsync(s1);
+        using var s2Socket = await env.AttachSocketAsync(s2);
 
         var kOut = (await env.StartAsAgentAsync(s2.ContactId, "al mas nuevo")).Conversation!.ConversationId;
         (await ReceiveTextAsync(s2Socket, TimeSpan.FromSeconds(3))).Should().Contain("al mas nuevo");
@@ -476,8 +468,7 @@ public sealed class WebChatSessionBindingLiveDbTests
         var (s1, s2) = await env.SeedVerifiedContactWithTwoSessionsAsync();
         await env.CloseAsync(s1.ConversationId);
         await env.CloseAsync(s2.ConversationId);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var s1Socket = await env.AttachSocketAsync(s1, timeout.Token);
+        using var s1Socket = await env.AttachSocketAsync(s1);
 
         var started = await env.StartAsAgentAsync(s1.ContactId, "al unico conectado");
 
@@ -508,9 +499,8 @@ public sealed class WebChatSessionBindingLiveDbTests
         var (s1, s2) = await env.SeedVerifiedContactWithTwoSessionsAsync();
         await env.CloseAsync(s1.ConversationId);
         await env.GiveToAgentAsync(s2.ConversationId);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var s1Socket = await env.AttachSocketAsync(s1, timeout.Token);
-        using var s2Socket = await env.AttachSocketAsync(s2, timeout.Token);
+        using var s1Socket = await env.AttachSocketAsync(s1);
+        using var s2Socket = await env.AttachSocketAsync(s2);
 
         var started = await env.StartAsAgentAsync(s2.ContactId, "en la misma conversacion");
 
@@ -530,8 +520,7 @@ public sealed class WebChatSessionBindingLiveDbTests
         var k1 = s1.ConversationId;
         await env.CloseAsync(k1);
         await env.CloseAsync(s2.ConversationId);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var s2Socket = await env.AttachSocketAsync(s2, timeout.Token);
+        using var s2Socket = await env.AttachSocketAsync(s2);
         var kOut = (await env.StartAsAgentAsync(s2.ContactId, "al segundo")).Conversation!.ConversationId;
 
         await env.PostAsync(s1, "desde el primero");
@@ -557,8 +546,7 @@ public sealed class WebChatSessionBindingLiveDbTests
         await using var env = await Env.CreateAsync(_postgres, level1Enabled);
         var session = await env.CreateSessionAsync(VisitorId);
         await env.CloseAsync(session.ConversationId);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var socket = await env.AttachSocketAsync(session, timeout.Token);
+        using var socket = await env.AttachSocketAsync(session);
 
         var kQueued = await env.PostConversationWithNoMessageAsync(session.ContactId);
 
@@ -620,6 +608,11 @@ public sealed class WebChatSessionBindingLiveDbTests
         public static readonly TenantId Tenant = new(TenantValue);
         private static readonly EntityId Queue = EntityId.From("q-session-binding");
         public static readonly EntityId Agent = EntityId.From("agent-session-binding");
+
+        // Per attach. Twice the longest stall CI showed (60 s), and two attaches in one test still end inside CI's
+        // 5-minute --blame-hang-timeout. It is not a latency budget: three times CI's longest run of these tests, the
+        // usual sizing, does not fit inside those 5 minutes.
+        private static readonly TimeSpan AttachHangGuard = TimeSpan.FromMinutes(2);
 
         private readonly BoundHost _host;
         private readonly HttpClient _client;
@@ -753,10 +746,38 @@ public sealed class WebChatSessionBindingLiveDbTests
             delete.StatusCode.Should().Be(HttpStatusCode.NoContent, await delete.Content.ReadAsStringAsync());
         }
 
-        public async Task<WebSocket> AttachSocketAsync(WebChatSession session, CancellationToken ct)
+        /// <summary>
+        /// Opens the session's socket and waits for the server's <c>connected</c> frame. Each attach owns its wait, and
+        /// no test timer reaches the request: the handshake gets no token. Under load the whole test host can stop for
+        /// tens of seconds before a request reaches the endpoint (CI 2026-11-11 and 2026-11-13: 41 s and 60 s in which the
+        /// test process printed nothing). A test deadline passed to <c>ConnectAsync</c> becomes the request's
+        /// <c>RequestAborted</c>, so such a stall cancelled the server's own accept, which answered 499. The hang guard
+        /// bounds no expected latency: it only turns a host that never answers into a message.
+        /// </summary>
+        public async Task<WebSocket> AttachSocketAsync(WebChatSession session)
         {
-            var socket = await _host.Server.CreateWebSocketClient().ConnectAsync(new Uri($"ws://localhost/ws/webchat/{session.SessionId}"), ct);
-            (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+            try
+            {
+                return await ConnectAndAwaitConnectedAsync(session).WaitAsync(AttachHangGuard);
+            }
+            catch (TimeoutException ex)
+            {
+                throw new TimeoutException(
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"the socket of session {session.SessionId} did not attach within {AttachHangGuard.TotalSeconds} s: the host never answered the upgrade or never sent 'connected'"),
+                    ex);
+            }
+        }
+
+        private async Task<WebSocket> ConnectAndAwaitConnectedAsync(WebChatSession session)
+        {
+            var socket = await _host.Server.CreateWebSocketClient()
+                .ConnectAsync(new Uri($"ws://localhost/ws/webchat/{session.SessionId}"), CancellationToken.None);
+            var buffer = new byte[8192];
+            var first = await socket.ReceiveAsync(buffer, CancellationToken.None);
+            first.MessageType.Should().Be(WebSocketMessageType.Text, "the server's first frame is 'connected'");
+            Encoding.UTF8.GetString(buffer, 0, first.Count).Should().Contain("connected");
             return socket;
         }
 

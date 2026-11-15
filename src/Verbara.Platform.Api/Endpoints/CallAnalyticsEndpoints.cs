@@ -17,7 +17,7 @@ internal static class CallAnalyticsEndpoints
         var group = app.MapGroup("/call-analytics")
             .RequireAuthorization("SupervisorPlus")
             .RequireOperationalTenant()
-            .RequireLicenseFeature(LicenseFeature.Analytics);
+            .RequireLicenseFeature(AnalyticsEndpoints.QaDataFeatures);
 
         group.MapGet("/topics/trends", GetTopicTrends);
         group.MapGet("/sentiment/trends", GetSentimentTrends);

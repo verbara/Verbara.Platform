@@ -108,9 +108,11 @@ public sealed class LastAgentRoutingOptionsTests
                 "a typo must not silently keep the default");
     }
 
+    // EntryPointStartPlatformApiFactory, not PlatformApiFactory: a failed start must surface its own exception, which
+    // the factory's deferred start loses to an ObjectDisposedException on a loaded runner.
     private static Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> Factory(
         IReadOnlyDictionary<string, string?> settings) =>
-        new PlatformApiFactory().WithWebHostBuilder(builder =>
+        new EntryPointStartPlatformApiFactory().WithWebHostBuilder(builder =>
         {
             foreach (var (key, value) in settings)
                 builder.UseSetting(key, value);

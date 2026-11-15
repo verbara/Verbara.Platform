@@ -50,6 +50,10 @@ public class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
     /// CreateHost so it wins over the realtime-sync decorator's unkeyed alias.</summary>
     protected virtual IAgentStore CreateAgentStore() => AgentStore;
 
+    /// <summary>The Pro features the host's licence status reports as licensed. Defaults to every feature; a subclass
+    /// narrows it to drive a route's licence refusal.</summary>
+    protected virtual LicenseFeature LicensedFeatures => LicenseTestHelpers.AllProFeatures;
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -63,7 +67,7 @@ public class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
             AuthenticatedPlatformApiFactory.StubVerbaraHostedServices(services);
 
             // ── Licensing ─────────────────────────────────────────────────────
-            services.AddAllProFeaturesLicensed();
+            services.AddExactProFeaturesLicensed(LicensedFeatures);
             if (!services.Any(d => d.ServiceType == typeof(byte[])))
                 services.AddSingleton<byte[]>([]);
 
@@ -559,10 +563,13 @@ public sealed class InMemoryCallAnalyticsStore : ICallAnalyticsStore
             results = results.Where(r => r.AnalyzedAt >= query.From.Value);
         if (query.To is not null)
             results = results.Where(r => r.AnalyzedAt <= query.To.Value);
+        // Raw total, as the Postgres store and the in-memory store compare it.
         if (query.MinQaScore is not null)
             results = results.Where(r => r.QualityScore is not null &&
-                r.QualityScore.MaxPossibleScore > 0 &&
-                r.QualityScore.TotalScore / r.QualityScore.MaxPossibleScore >= query.MinQaScore.Value);
+                r.QualityScore.TotalScore >= query.MinQaScore.Value);
+        if (query.MaxQaScore is not null)
+            results = results.Where(r => r.QualityScore is not null &&
+                r.QualityScore.TotalScore <= query.MaxQaScore.Value);
         if (query.HasComplianceViolations is not null)
             results = results.Where(r => (r.ComplianceViolations.Count > 0) == query.HasComplianceViolations.Value);
 

@@ -9,6 +9,16 @@ public sealed class PlatformApiFactory : WebApplicationFactory<Program>
 {
     protected override IHost CreateHost(IHostBuilder builder)
     {
+        ConfigureTestHost(builder);
+        return base.CreateHost(builder);
+    }
+
+    /// <summary>
+    /// The Testing environment, the SDK stubs, every Pro feature licensed and the in-memory stores. Shared with
+    /// <see cref="EntryPointStartPlatformApiFactory"/>, which starts the same host through a different builder.
+    /// </summary>
+    internal static void ConfigureTestHost(IHostBuilder builder)
+    {
         builder.UseEnvironment("Testing");
 
         builder.ConfigureServices(services =>
@@ -25,7 +35,5 @@ public sealed class PlatformApiFactory : WebApplicationFactory<Program>
             // All conditionally-registered stores (campaign, dialer config, analytics)
             AuthenticatedPlatformApiFactory.RegisterInMemoryStores(services);
         });
-
-        return base.CreateHost(builder);
     }
 }

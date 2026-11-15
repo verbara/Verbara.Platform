@@ -7,8 +7,11 @@ using Verbara.Platform.Identity;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Time.Testing;
 using OtpNet;
 using Xunit;
 
@@ -23,7 +26,12 @@ namespace Verbara.Platform.Api.Tests.Mfa;
 /// </summary>
 /// <remarks>
 /// Each test builds its own host (<see cref="WebApplicationFactory{TEntryPoint}.WithWebHostBuilder"/>) so the
-/// allowance starts empty, and sets the interval explicitly rather than relying on the default.
+/// allowance starts empty, and sets the interval explicitly rather than relying on the default. The gate reads a
+/// <see cref="FakeTimeProvider"/> that no test advances, so "within the interval" holds however long a request
+/// takes on a loaded runner: on the real clock a first mint slowed past the interval (ten Argon2id derivations
+/// run after the allowance is stamped) let the second mint through with 200 (CI run 43513908243, a 1 m 46 s test
+/// against a 1-minute interval; openspec <c>timed-tests-hold-on-a-loaded-runner</c>, F4a). Only the gate's
+/// clock is replaced: the rest of the host keeps the system clock.
 /// </remarks>
 public sealed class RecoveryCodeMintThrottleTests : IClassFixture<AuthenticatedPlatformApiFactory>
 {
@@ -159,12 +167,25 @@ public sealed class RecoveryCodeMintThrottleTests : IClassFixture<AuthenticatedP
         return seconds;
     }
 
+    /// <summary>
+    /// A host whose mint interval is <paramref name="interval"/> and whose <see cref="RecoveryCodeMintGate"/> runs
+    /// on a frozen <see cref="FakeTimeProvider"/>, so wall-clock time spent inside a request never moves the gate.
+    /// The interval is still read from configuration through <see cref="RecoveryCodeMintOptions.From"/>.
+    /// </summary>
     private AuthenticatedHost WithMintInterval(string interval) =>
-        new(_factory.WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, config) =>
-            config.AddInMemoryCollection(new Dictionary<string, string?>
+        new(_factory.WithWebHostBuilder(builder => builder
+            .ConfigureAppConfiguration((_, config) =>
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Mfa:RecoveryCodeMint:MinInterval"] = interval,
+                }))
+            .ConfigureTestServices(services =>
             {
-                ["Mfa:RecoveryCodeMint:MinInterval"] = interval,
-            }))));
+                services.RemoveAll<RecoveryCodeMintGate>();
+                services.AddSingleton(sp => new RecoveryCodeMintGate(
+                    RecoveryCodeMintOptions.From(sp.GetRequiredService<IConfiguration>()),
+                    new FakeTimeProvider()));
+            })));
 
     private static async Task<User> ResetUserAsync(AuthenticatedHost host)
     {

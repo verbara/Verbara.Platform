@@ -1,9 +1,11 @@
 using System.Globalization;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Api.Middleware;
+using Verbara.Platform.Api.Services.QaAvailability;
 using Verbara.Platform.Bot;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Typification.Licensing;
 using Verbara.Sdk.Pro.Analytics;
 using Verbara.Sdk.Pro.CallAnalytics.Domain;
 using Verbara.Sdk.Pro.CallAnalytics.Store;
@@ -16,6 +18,10 @@ namespace Verbara.Platform.Api.Endpoints;
 
 internal static class AnalyticsEndpoints
 {
+    /// <summary>The modules the QA data routes require: <c>/analytics/qa</c>, <c>/analytics/qa/{sessionId}</c> and the
+    /// <c>/call-analytics/*</c> routes.</summary>
+    internal const LicenseFeature QaDataFeatures = LicenseFeature.Analytics | LicenseFeature.CallAnalytics;
+
     public static void MapAnalyticsEndpoints(this IEndpointRouteBuilder app)
     {
         var analytics = app.MapGroup("/analytics")
@@ -25,8 +31,11 @@ internal static class AnalyticsEndpoints
         analytics.MapGet("/dashboard", GetDashboard);
         analytics.MapGet("/cdr", ListCdr);
         analytics.MapGet("/cdr/{sessionId}", GetCdrDetail);
-        analytics.MapGet("/qa", ListQa);
-        analytics.MapGet("/qa/{sessionId}", GetQaDetail);
+        // The QA data needs the call analytics module as well; the CDR routes and the availability read stay on
+        // Analytics, and the CDR routes leave out every call analytics field when the module is not licensed.
+        analytics.MapGet("/qa", ListQa).RequireLicenseFeature(QaDataFeatures);
+        analytics.MapGet("/qa/{sessionId}", GetQaDetail).RequireLicenseFeature(QaDataFeatures);
+        analytics.MapGet("/qa-availability", GetQaAvailability);
         analytics.MapGet("/intervals/agents", ListAgentIntervals);
         analytics.MapGet("/intervals", ListIntervals);
         analytics.MapGet("/bot", GetBotAnalytics);
@@ -112,6 +121,8 @@ internal static class AnalyticsEndpoints
         [FromServices] ICallAnalyticsStore qaStore,
         [FromServices] IAgentStore agentStore,
         [FromServices] IQueueStore queueStore,
+        [FromServices] ILicenseStatus licenseStatus,
+        [FromServices] ILicenseGuard licenseGuard,
         string? from,
         string? to,
         string? queue,
@@ -145,10 +156,15 @@ internal static class AnalyticsEndpoints
         // Batch enrich agent names
         var agentNames = await BuildAgentNameMapAsync(pageRows.Select(r => r.AgentId).Distinct(), tenantIdObj, agentStore, ct);
 
-        // Batch lookup QA scores
-        var sessionIds = pageRows.Select(r => r.SessionId).Distinct().ToList();
-        var qaList = await qaStore.GetBySessionIdsAsync(sessionIds, tenantId, ct);
-        var qaResults = qaList.ToDictionary(q => q.SessionId, q => (CallAnalysisResult?)q);
+        // Batch lookup QA scores. Without the call analytics module no analysis is read, so every row reports no QA
+        // score and no sentiment.
+        var qaResults = new Dictionary<string, CallAnalysisResult>();
+        if (CallAnalyticsLicensed(licenseStatus, licenseGuard))
+        {
+            var sessionIds = pageRows.Select(r => r.SessionId).Distinct().ToList();
+            var qaList = await qaStore.GetBySessionIdsAsync(sessionIds, tenantId, ct);
+            qaResults = qaList.ToDictionary(q => q.SessionId);
+        }
 
         // Batch lookup queue SLA targets (by name)
         var queueSlaMap = await BuildQueueSlaMapAsync(pageRows.Select(r => r.QueueName).Distinct(), tenantIdObj, queueStore, ct);
@@ -159,9 +175,8 @@ internal static class AnalyticsEndpoints
             qaResults.TryGetValue(row.SessionId, out var qa);
             queueSlaMap.TryGetValue(row.QueueName ?? "", out var slaThresholdMsNullable);
             var slaMet = ComputeSlaMet(row.WaitTimeMs, slaThresholdMsNullable ?? 20000L);
-            var (hasScore, score) = qa is not null && qa.QualityScore is not null
-                ? (true, (double?)NormalizeQaScore(qa.QualityScore))
-                : (false, (double?)null);
+            var score = QaScoreOf(qa);
+            var hasScore = score is not null;
 
             return new CdrRowDto(
                 SessionId: row.SessionId,
@@ -205,6 +220,8 @@ internal static class AnalyticsEndpoints
         [FromServices] ICallAnalyticsStore qaStore,
         [FromServices] IAgentStore agentStore,
         [FromServices] IQueueStore queueStore,
+        [FromServices] ILicenseStatus licenseStatus,
+        [FromServices] ILicenseGuard licenseGuard,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
@@ -232,23 +249,23 @@ internal static class AnalyticsEndpoints
             timeline.Add(new("transferred", row.CompletedAt, $"{MapTransferType(row.TransferType)} to {row.TransferredTo}"));
         timeline.Add(new("ended", row.CompletedAt, MapDisposition(row.HangupCause, row.FinalState)));
 
-        // QA lookup
-        var qa = await qaStore.GetAsync(sessionId, tenantId, ct);
-        CdrQaSummaryDto? qaSummary = null;
-        if (qa is not null)
-        {
-            var normalizedScore = qa.QualityScore is not null ? (double?)NormalizeQaScore(qa.QualityScore) : null;
-            qaSummary = new CdrQaSummaryDto(
+        // QA lookup. Without the call analytics module no analysis is read: no QA score, QA summary or sentiment.
+        var qa = CallAnalyticsLicensed(licenseStatus, licenseGuard)
+            ? await qaStore.GetAsync(sessionId, tenantId, ct)
+            : null;
+        var score = QaScoreOf(qa);
+        var hasScore = score is not null;
+
+        // A QA summary only for an analysis with a QA score: the QA detail answers 404 for any other, so a summary
+        // would point at a QA result that cannot be opened.
+        CdrQaSummaryDto? qaSummary = qa is not null && score is not null
+            ? new CdrQaSummaryDto(
                 Reason: qa.Summary?.Reason,
                 Outcome: qa.Summary?.Outcome,
                 Narrative: qa.Summary?.Narrative,
-                QaScore: normalizedScore,
-                SentimentLabel: qa.Sentiment?.OverallLabel.ToString());
-        }
-
-        var (hasScore, score) = qa is not null && qa.QualityScore is not null
-            ? (true, (double?)NormalizeQaScore(qa.QualityScore))
-            : (false, (double?)null);
+                QaScore: score,
+                SentimentLabel: qa.Sentiment?.OverallLabel.ToString())
+            : null;
 
         var cdrRow = new CdrRowDto(
             SessionId: row.SessionId,
@@ -279,7 +296,6 @@ internal static class AnalyticsEndpoints
             Metadata: row.Metadata,
             IsPartial: row.IsPartial);
 
-        var hasTranscript = qa is not null && qa.Summary is not null;
         var recordingStreamUrl = !string.IsNullOrEmpty(row.RecordingName)
             ? $"/api/v1/recordings/{row.SessionId}/stream"
             : null;
@@ -293,12 +309,13 @@ internal static class AnalyticsEndpoints
             TransferCount: row.TransferCount,
             RecordingName: row.RecordingName,
             RecordingStreamUrl: recordingStreamUrl,
-            HasTranscript: hasTranscript));
+            // No transcript route is served, so the detail never advertises one.
+            HasTranscript: false));
     }
 
     // ─── QA List Handler ──────────────────────────────────────────────────────
 
-    private static async Task<Ok<PagedDataResponse<QaRowDto>>> ListQa(
+    private static async Task<Results<Ok<PagedDataResponse<QaRowDto>>, BadRequest<ErrorResponse>>> ListQa(
         HttpContext context,
         [FromServices] ICallAnalyticsStore qaStore,
         [FromServices] ICompletedSessionStore cdrStore,
@@ -310,13 +327,16 @@ internal static class AnalyticsEndpoints
         int pageSize = 50,
         CancellationToken ct = default)
     {
+        // minScore reads on qaScore's 0-100 scale; anything else (NaN included) is refused before the query is built.
+        if (minScore is { } min && !(min >= 0 && min <= 100))
+            return TypedResults.BadRequest(new ErrorResponse("minScore must be between 0 and 100."));
+
         var tenantId = GetTenantId(context);
         var tenantIdObj = new TenantId(tenantId);
 
         var toDate = DateRangeBound.ParseTo(to) ?? DateTimeOffset.UtcNow;
         var fromDate = DateRangeBound.ParseFrom(from) ?? toDate.AddDays(-7);
 
-        // minScore arrives as 0-100; QaResult scores are stored as 0-1 fractions
         var query = new CallAnalyticsQuery
         {
             TenantId = tenantId,
@@ -329,7 +349,8 @@ internal static class AnalyticsEndpoints
 
         var results = await qaStore.QueryAsync(query, ct);
         var hasMore = results.Count > pageSize;
-        var pageResults = hasMore ? results.Take(pageSize).ToList() : results.ToList();
+        // An analysis made with an empty scorecard has no QA score, so it is not a QA row.
+        var pageResults = results.Take(pageSize).Where(r => QaScoreOf(r) is not null).ToList();
 
         // Batch lookup CDR for AgentId / QueueName
         var sessionIds = pageResults.Select(r => r.SessionId).Distinct().ToList();
@@ -348,7 +369,7 @@ internal static class AnalyticsEndpoints
             cdrMap.TryGetValue(r.SessionId, out var cdr);
             agentNames.TryGetValue(cdr?.AgentId ?? "", out var agentName);
 
-            var qaScore = r.QualityScore is not null ? NormalizeQaScore(r.QualityScore) : 0.0;
+            var qaScore = QaScoreOf(r)!.Value;
             var sentimentLabel = MapSentimentLabel(r.Sentiment?.OverallLabel);
             var narrative = r.Summary?.Narrative is { } n && n.Length > 150
                 ? n[..150]
@@ -385,15 +406,15 @@ internal static class AnalyticsEndpoints
         var tenantIdObj = new TenantId(tenantId);
 
         var result = await qaStore.GetAsync(sessionId, tenantId, ct);
-        if (result is null)
+        // An analysis made with an empty scorecard has no QA detail, as it has no QA row.
+        if (result is null || QaScoreOf(result) is not { } qaScore)
             return TypedResults.NotFound();
 
         var cdr = await cdrStore.GetAsync(tenantId, sessionId, ct);
         var agentNames = await BuildAgentNameMapAsync([cdr?.AgentId], tenantIdObj, agentStore, ct);
         agentNames.TryGetValue(cdr?.AgentId ?? "", out var agentName);
 
-        var qaScore = result.QualityScore is not null ? NormalizeQaScore(result.QualityScore) : 0.0;
-        var maxPossibleScore = result.QualityScore?.MaxPossibleScore ?? 0.0;
+        var maxPossibleScore = result.QualityScore!.MaxPossibleScore;
 
         var criteria = result.QualityScore?.Items.Select(item =>
         {
@@ -566,8 +587,19 @@ internal static class AnalyticsEndpoints
         return ring > 0 ? ring : 0;
     }
 
-    private static double NormalizeQaScore(QaResult qa)
-        => qa.MaxPossibleScore <= 0 ? 0.0 : qa.TotalScore * 100.0 / qa.MaxPossibleScore;
+    /// <summary>
+    /// The QA score of an analysis on a 0-100 scale, or <see langword="null"/> when it has none: no analysis, no QA
+    /// result, or a QA result from an empty scorecard (a maximum score of 0), which is never reported as a score of 0.
+    /// </summary>
+    private static double? QaScoreOf(CallAnalysisResult? analysis)
+        => analysis?.QualityScore is { MaxPossibleScore: > 0 } qa
+            ? qa.TotalScore * 100.0 / qa.MaxPossibleScore
+            : null;
+
+    /// <summary>Whether the licence opens the call analytics module, by the same rule the licence gate applies to the
+    /// QA data routes.</summary>
+    private static bool CallAnalyticsLicensed(ILicenseStatus status, ILicenseGuard guard) =>
+        LicenceGateRule.IsLicensed(status, guard, LicenseFeature.CallAnalytics, LicenseGateMiddleware.NeverGuardedFeatures);
 
     private static string? MapSentimentLabel(SentimentLabel? label)
         => label switch
@@ -647,6 +679,16 @@ internal static class AnalyticsEndpoints
             SlaPercent: snapshots.Sum(s => s.SlaMetCount) * 100.0 / Math.Max(totalOfferedMinusShort, 1),
             AbandonRatePercent: (snapshots.Sum(s => s.CallsAbandoned) - snapshots.Sum(s => s.ShortAbandons)) * 100.0 / Math.Max(totalOfferedMinusShort, 1));
     }
+
+    // ─── QA Availability Handler ───────────────────────────────────────────────
+
+    // Whether post-call analysis runs and QA scores can exist for the
+    // caller's tenant. Same group, so the same role, tenant and licence rules as the QA list.
+    private static async Task<Ok<QaAvailabilityDto>> GetQaAvailability(
+        HttpContext context,
+        [FromServices] QaAvailabilityService availability,
+        CancellationToken ct) =>
+        TypedResults.Ok(await availability.GetAsync(GetTenantId(context), ct));
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
