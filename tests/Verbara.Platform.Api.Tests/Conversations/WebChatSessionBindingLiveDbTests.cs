@@ -614,6 +614,9 @@ public sealed class WebChatSessionBindingLiveDbTests
         // usual sizing, does not fit inside those 5 minutes.
         private static readonly TimeSpan AttachHangGuard = TimeSpan.FromMinutes(2);
 
+        // How long a timed-out attach may take to end once cancelled, before the test reports the timeout anyway.
+        private static readonly TimeSpan AbandonGuard = TimeSpan.FromSeconds(10);
+
         private readonly BoundHost _host;
         private readonly HttpClient _client;
         private readonly NpgsqlDataSource _db;
@@ -747,38 +750,88 @@ public sealed class WebChatSessionBindingLiveDbTests
         }
 
         /// <summary>
-        /// Opens the session's socket and waits for the server's <c>connected</c> frame. Each attach owns its wait, and
-        /// no test timer reaches the request: the handshake gets no token. Under load the whole test host can stop for
-        /// tens of seconds before a request reaches the endpoint (CI 2026-11-11 and 2026-11-13: 41 s and 60 s in which the
-        /// test process printed nothing). A test deadline passed to <c>ConnectAsync</c> becomes the request's
-        /// <c>RequestAborted</c>, so such a stall cancelled the server's own accept, which answered 499. The hang guard
-        /// bounds no expected latency: it only turns a host that never answers into a message.
+        /// Opens the session's socket and returns once the server has registered it for replies. Each attach owns its
+        /// wait, and no test timer reaches the request: the handshake gets no timed token. Under load the whole test host
+        /// can stop for tens of seconds before a request reaches the endpoint (CI 2026-11-11 and 2026-11-13: 41 s and
+        /// 60 s in which the test process printed nothing). A test deadline passed to <c>ConnectAsync</c> becomes the
+        /// request's <c>RequestAborted</c>, so such a stall cancelled the server's own accept, which answered 499. The
+        /// hang guard bounds no expected latency: it only turns a host that never answers into a message, and then it
+        /// cancels the abandoned attach and disposes its socket, so nothing of it outlives the test.
         /// </summary>
         public async Task<WebSocket> AttachSocketAsync(WebChatSession session)
         {
+            // Cancelled only by the hang guard below, never by a timer of its own.
+            using var abandon = new CancellationTokenSource();
+            var attach = ConnectAndAwaitRegisteredAsync(session, abandon.Token);
             try
             {
-                return await ConnectAndAwaitConnectedAsync(session).WaitAsync(AttachHangGuard);
+                return await attach.WaitAsync(AttachHangGuard);
             }
             catch (TimeoutException ex)
             {
+                await abandon.CancelAsync();
+                await AbandonAsync(attach);
                 throw new TimeoutException(
                     string.Create(
                         CultureInfo.InvariantCulture,
-                        $"the socket of session {session.SessionId} did not attach within {AttachHangGuard.TotalSeconds} s: the host never answered the upgrade or never sent 'connected'"),
+                        $"the socket of session {session.SessionId} did not attach within {AttachHangGuard.TotalSeconds} s: the host never answered the upgrade, never sent 'connected' or never registered the socket"),
                     ex);
             }
         }
 
-        private async Task<WebSocket> ConnectAndAwaitConnectedAsync(WebChatSession session)
+        /// <summary>
+        /// Waits for a cancelled attach to end, and disposes the socket it may still have acquired. The wait is bounded
+        /// too: an attach that ignores its cancellation is left behind rather than hanging the failure it reports.
+        /// </summary>
+        private static async Task AbandonAsync(Task<WebSocket> attach)
+        {
+            try
+            {
+                (await attach.WaitAsync(AbandonGuard)).Dispose();
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or WebSocketException or InvalidOperationException)
+            {
+                // The attach ended on its cancellation (and disposed its socket), or it is still stuck: either way the
+                // timeout is what the test reports.
+            }
+        }
+
+        /// <summary>
+        /// The server sends <c>connected</c> before it registers the socket for replies (<c>WebChatEndpoints</c>), so
+        /// <c>connected</c> does not prove that a reply can reach the socket yet. The server reads a frame only in the
+        /// read loop that starts after that registration: the typing indicator it publishes for a <c>typing</c> frame is
+        /// the signal that the socket is registered. The frame is what the widget sends while the visitor types, and it
+        /// changes no row.
+        /// </summary>
+        private async Task<WebSocket> ConnectAndAwaitRegisteredAsync(WebChatSession session, CancellationToken abandon)
         {
             var socket = await _host.Server.CreateWebSocketClient()
-                .ConnectAsync(new Uri($"ws://localhost/ws/webchat/{session.SessionId}"), CancellationToken.None);
-            var buffer = new byte[8192];
-            var first = await socket.ReceiveAsync(buffer, CancellationToken.None);
-            first.MessageType.Should().Be(WebSocketMessageType.Text, "the server's first frame is 'connected'");
-            Encoding.UTF8.GetString(buffer, 0, first.Count).Should().Contain("connected");
-            return socket;
+                .ConnectAsync(new Uri($"ws://localhost/ws/webchat/{session.SessionId}"), abandon);
+            try
+            {
+                var buffer = new byte[8192];
+                var first = await socket.ReceiveAsync(buffer, abandon);
+                first.MessageType.Should().Be(WebSocketMessageType.Text, "the server's first frame is 'connected'");
+                Encoding.UTF8.GetString(buffer, 0, first.Count).Should().Contain("connected");
+
+                var registered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var conversationId = session.ConversationId.Value;
+                using var typingIndicators = Service<PlatformEventBus>().Events.Subscribe(e =>
+                {
+                    if (e is ConversationMessageEvent { Sender: "TypingIndicator" } typing && typing.ConversationId == conversationId)
+                        registered.TrySetResult();
+                });
+                var typingFrame = JsonSerializer.SerializeToUtf8Bytes(
+                    new WebChatClientMessage("typing", ""), WebChatJsonContext.Default.WebChatClientMessage);
+                await socket.SendAsync(typingFrame, WebSocketMessageType.Text, true, abandon);
+                await registered.Task.WaitAsync(abandon);
+                return socket;
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
         }
 
         public Task<Message> ReplyAsync(EntityId conversationId, string text) =>

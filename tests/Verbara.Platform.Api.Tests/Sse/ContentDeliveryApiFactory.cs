@@ -138,8 +138,18 @@ public class ContentDeliveryApiFactory : ConversationOwnershipApiFactory
     internal async Task<LiveStreamProbe> OpenStreamAsync(string name, Identity.User user)
     {
         var probe = await LiveStreamProbe.OpenAsync(name, ClientFor(user));
-        await LiveStreamProbe.SyncAsync(Bus, Tenant.Value, probe);
-        return probe;
+        try
+        {
+            await LiveStreamProbe.SyncAsync(Bus, Tenant.Value, probe);
+            return probe;
+        }
+        catch
+        {
+            // The caller never receives the probe, so it cannot dispose it: release it here, or the static registry of
+            // open probes keeps it, its stream and its reader for the rest of the test process.
+            await probe.DisposeAsync();
+            throw;
+        }
     }
 }
 

@@ -247,6 +247,10 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         var staysRegistered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var typingIndicators = OnTypingIndicator(session, staysRegistered);
         await stays.SendAsync(TypingFrame(), WebSocketMessageType.Text, true, timeout.Token);
+        // Before `leaves` attaches, so the two sockets are registered at once when `leaves` closes: the test is about
+        // a close that leaves an already registered socket in place. Waited after the close instead, `stays` could
+        // register only once `leaves` is gone, and a close that unregistered the whole session would pass unseen.
+        await WaitForSignalAsync(staysRegistered.Task, "the server never read the remaining socket's frame, so it never registered it");
         using (var leaves = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token))
         {
             (await ReceiveTextAsync(leaves, TimeSpan.FromSeconds(5))).Should().Contain("connected");
@@ -256,8 +260,6 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
             await WaitUntilAsync(() => session.AttachedSockets == 1, SignalGuard);
             (await ReceiveTextAsync(leaves, TimeSpan.FromMilliseconds(500))).Should().BeNull();
         }
-
-        await WaitForSignalAsync(staysRegistered.Task, "the server never read the remaining socket's frame, so it never registered it");
 
         const string replyText = "still here?";
         var message = await SendAgentReplyAsync(session, agentId, replyText);
