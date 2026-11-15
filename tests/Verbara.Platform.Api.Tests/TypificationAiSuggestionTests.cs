@@ -761,7 +761,7 @@ public sealed class TypificationAiSuggestionTests : IDisposable
     [Fact]
     public async Task Suggestion_ShouldPartitionPerTenant_WhenTenantResolvedBySubdomainWithoutHeader()
     {
-        // Anonymous on purpose: UseRateLimiter() runs before UseAuthentication(), so the limiter decides
+        // Anonymous on purpose: the rate-limiting stage runs before UseAuthentication(), so the limiter decides
         // before the 401. Tenant A is identified ONLY by its subdomain (no X-Tenant-Id header), so the
         // partition must come from Items["TenantId"] (a boxed TenantId written by TenantResolutionMiddleware).
         using var factory = WithFakeClassifier(new FakeAiClassifier(CannedClassification()));

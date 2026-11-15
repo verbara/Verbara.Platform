@@ -47,10 +47,14 @@ public sealed class RateLimiterHostLifetimeTests
         WeakReference hostServices;
         try
         {
-            using (var client = factory.CreateAuthenticatedClient())
-            using (var response = await client.GetAsync("/health"))
+            // A route with a rate-limiting policy, so the limiter really creates a partition (and its
+            // replenishment timer) for this host. Anonymous on purpose: the limiter grants the permit before
+            // authentication answers 401, so no conversation needs to exist.
+            using (var client = factory.CreateClient())
+            using (var response = await client.PostAsync(
+                $"/api/conversations/{Guid.NewGuid()}/typification-suggestion", content: null))
             {
-                response.StatusCode.Should().Be(HttpStatusCode.OK);
+                response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
             }
 
             hostServices = new WeakReference(factory.Services);
