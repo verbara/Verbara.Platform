@@ -164,4 +164,69 @@ public sealed class TenantRateLimitPolicyTests
 
         target.PartitionKey.Should().Be("t:tenant-a");
     }
+
+    [Fact]
+    public void GetPartition_ShouldLimitEachTenantAtItsTier_WhenThePolicyIsPerTenant()
+    {
+        var cache = new TenantTierCache();
+        cache.SetTier("tenant-a", RateLimitTier.Free);
+
+        var partition = TenantRateLimitPolicy.GetPartition(TenantRateLimitPolicy.PerTenantPolicy, ContextFor("tenant-a", cache));
+
+        partition.Should().NotBeNull();
+        partition!.Value.PartitionKey.Should().Be("t:tenant-a");
+        using var limiter = partition.Value.Factory(partition.Value.PartitionKey);
+        for (var i = 0; i < RateLimitTier.Free.GetPermitLimit(); i++)
+            limiter.AttemptAcquire().IsAcquired.Should().BeTrue();
+        limiter.AttemptAcquire().IsAcquired.Should().BeFalse(
+            because: "the tenant's tier sets how many requests a window admits");
+    }
+
+    [Fact]
+    public void GetPartition_ShouldNotLimit_WhenThePerTenantTierIsUnlimited()
+    {
+        var cache = new TenantTierCache();
+        cache.SetTier("tenant-a", RateLimitTier.Unlimited);
+
+        var partition = TenantRateLimitPolicy.GetPartition(TenantRateLimitPolicy.PerTenantPolicy, ContextFor("tenant-a", cache));
+
+        partition.Should().NotBeNull();
+        using var limiter = partition!.Value.Factory(partition.Value.PartitionKey);
+        for (var i = 0; i < RateLimitTier.Enterprise.GetPermitLimit() + 1; i++)
+            limiter.AttemptAcquire().IsAcquired.Should().BeTrue();
+    }
+
+    [Fact]
+    public void GetPartition_ShouldShareOneBucketAtTheBackstopLimit_WhenThePolicyIsGlobalSafety()
+    {
+        var a = TenantRateLimitPolicy.GetPartition(TenantRateLimitPolicy.GlobalSafetyPolicy, ContextFor("tenant-a"));
+        var b = TenantRateLimitPolicy.GetPartition(TenantRateLimitPolicy.GlobalSafetyPolicy, ContextFor("tenant-b"));
+
+        a.Should().NotBeNull();
+        b.Should().NotBeNull();
+        a!.Value.PartitionKey.Should().Be(b!.Value.PartitionKey, because: "the backstop is one bucket for every caller");
+        using var limiter = a.Value.Factory(a.Value.PartitionKey);
+        for (var i = 0; i < 3000; i++)
+            limiter.AttemptAcquire().IsAcquired.Should().BeTrue();
+        limiter.AttemptAcquire().IsAcquired.Should().BeFalse();
+    }
+
+    [Fact]
+    public void GetPartition_ShouldLimitAtTheLlmCeiling_WhenThePolicyIsLlm()
+    {
+        var partition = TenantRateLimitPolicy.GetPartition(TenantRateLimitPolicy.LlmPolicy, ContextFor("tenant-a"));
+
+        partition.Should().NotBeNull();
+        partition!.Value.PartitionKey.Should().Be("t:tenant-a");
+        using var limiter = partition.Value.Factory(partition.Value.PartitionKey);
+        for (var i = 0; i < TenantRateLimitPolicy.LlmPermitLimit; i++)
+            limiter.AttemptAcquire().IsAcquired.Should().BeTrue();
+        limiter.AttemptAcquire().IsAcquired.Should().BeFalse();
+    }
+
+    [Fact]
+    public void GetPartition_ShouldReturnNull_WhenNoPolicyHasTheName()
+    {
+        TenantRateLimitPolicy.GetPartition("no-such-policy", ContextFor("tenant-a")).Should().BeNull();
+    }
 }
