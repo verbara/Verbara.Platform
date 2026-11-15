@@ -8,7 +8,6 @@ using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.OpenApi;
 using Microsoft.AspNetCore.Authorization;
 using Npgsql;
-using Microsoft.AspNetCore.RateLimiting;
 using Verbara.Platform.Bot;
 using Verbara.Platform.Channels.Core;
 using Verbara.Platform.Conversations;
@@ -1414,7 +1413,7 @@ builder.Services.AddPlatformHealthChecks();
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
-builder.Services.AddRateLimiter(TenantRateLimitPolicy.ConfigureRateLimiting);
+builder.Services.AddTenantRequestRateLimiting();
 builder.Services.AddSingleton<Verbara.Platform.Api.Services.TenantTierCache>();
 builder.Services.AddSingleton<Verbara.Platform.Api.Services.FeatureGateCache>();
 builder.Services.AddSingleton<Verbara.Platform.Core.IFeatureGateService, Verbara.Platform.Api.Services.DefaultFeatureGateService>();
@@ -1562,12 +1561,12 @@ app.UseMiddleware<VersionRedirectMiddleware>();
 app.UseRouting();
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseCors();
-// Middleware-order invariant: TenantResolutionMiddleware runs BEFORE UseRateLimiter() so the "llm" policy
-// partitions on Items["TenantId"]; UseRateLimiter() stays BEFORE UseAuthentication() (throttle before auth work).
+// Middleware-order invariant: TenantResolutionMiddleware runs BEFORE the request rate-limiting stage so the "llm"
+// policy partitions on Items["TenantId"]; that stage stays BEFORE UseAuthentication() (throttle before auth work).
 // RateLimitHeadersMiddleware is deliberately not registered: no tier limiter is attached, so no ceiling to state.
 // ImpersonationGuardMiddleware MUST run AFTER UseAuthentication() (it reads the principal).
 app.UseMiddleware<TenantResolutionMiddleware>();
-app.UseRateLimiter();
+app.UseTenantRequestRateLimiting(); // the host owns its limiter, released when the host stops
 app.UseAuthentication();
 app.UseMiddleware<ImpersonationGuardMiddleware>();
 app.UseAuthorization();
