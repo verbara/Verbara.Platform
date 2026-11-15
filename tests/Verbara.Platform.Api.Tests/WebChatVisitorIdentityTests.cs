@@ -235,26 +235,31 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         var sessionId = await CreateSessionAsync(client);
         var session = await GetSessionAsync(sessionId);
         var agentId = await GiveConversationToAgentAsync(session.ConversationId);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var wsClient = _factory.Server.CreateWebSocketClient();
 
+        // No socket call gets a timed token. The wait on `stays`'s registration below may last up to SignalGuard, so a
+        // test-wide deadline could already be spent when `leaves` connects and closes, and a token passed to
+        // ConnectAsync becomes the request's RequestAborted, which cancels the server's own handler. Each call is
+        // bounded by SignalGuard instead: it reports a host that never answers and bounds no expected latency.
         // Two tabs share the session (the widget restores it from localStorage).
-        using var stays = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token);
+        using var stays = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), CancellationToken.None)
+            .WaitAsync(SignalGuard);
         (await ReceiveTextAsync(stays, TimeSpan.FromSeconds(5))).Should().Contain("connected");
         // `connected` goes out before the server registers the socket for replies, so it does not prove that
         // `stays` can receive one yet. The server reads a frame only in the read loop that starts after that
         // registration: the typing indicator it publishes for this frame is the signal that `stays` is registered.
         var staysRegistered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var typingIndicators = OnTypingIndicator(session, staysRegistered);
-        await stays.SendAsync(TypingFrame(), WebSocketMessageType.Text, true, timeout.Token);
+        await stays.SendAsync(TypingFrame(), WebSocketMessageType.Text, true, CancellationToken.None).WaitAsync(SignalGuard);
         // Before `leaves` attaches, so the two sockets are registered at once when `leaves` closes: the test is about
         // a close that leaves an already registered socket in place. Waited after the close instead, `stays` could
         // register only once `leaves` is gone, and a close that unregistered the whole session would pass unseen.
         await WaitForSignalAsync(staysRegistered.Task, "the server never read the remaining socket's frame, so it never registered it");
-        using (var leaves = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token))
+        using (var leaves = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), CancellationToken.None)
+            .WaitAsync(SignalGuard))
         {
             (await ReceiveTextAsync(leaves, TimeSpan.FromSeconds(5))).Should().Contain("connected");
-            await leaves.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "tab closed", timeout.Token);
+            await leaves.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "tab closed", CancellationToken.None).WaitAsync(SignalGuard);
             // The server sends no close frame back. Its close outcome is the handler's cleanup: the socket is
             // unregistered and detached, so only `stays` is attached again.
             await WaitUntilAsync(() => session.AttachedSockets == 1, SignalGuard);
