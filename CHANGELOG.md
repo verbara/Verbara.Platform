@@ -45,6 +45,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   windows and limits, the same position after tenant resolution and before authentication, and the same 429
   response with `Retry-After`. The `aspnetcore.rate_limiting.*` metrics are no longer emitted. (#586)
 
+### Dependencies
+
+- **The ASP.NET Core packages move together to `10.0.15`**: `Microsoft.AspNetCore.Authentication.JwtBearer` and
+  `.OpenIdConnect` (`10.0.14`), `Microsoft.AspNetCore.DataProtection` and `.Extensions`, `Microsoft.AspNetCore.SignalR.Client`
+  and `.Common`, `Microsoft.AspNetCore.Mvc.Testing`, `System.Security.Cryptography.Xml` and `.Pkcs` (`10.0.13`), and
+  `Microsoft.AspNetCore.OpenApi` (`10.0.11`). `Microsoft.AspNetCore.OpenApi 10.0.15` needs `Microsoft.OpenApi` `2.13.0` or
+  later in the 2.x line, so that pin moves from `2.9.0` to `2.13.0`. Moved one at a time, several failed restore with `NU1109`,
+  so they ship as one change and replace #568, #576, #577, #578 and #579.
+
 ### Upgrading
 
 - **An Agent Assist session whose call carries no tenant is no longer listed.** A call that arrives on a trunk without
