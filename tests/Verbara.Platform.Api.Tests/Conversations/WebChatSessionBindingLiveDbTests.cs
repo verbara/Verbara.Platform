@@ -776,8 +776,8 @@ public sealed class WebChatSessionBindingLiveDbTests
                 .ConnectAsync(new Uri($"ws://localhost/ws/webchat/{session.SessionId}"), CancellationToken.None);
             var buffer = new byte[8192];
             var first = await socket.ReceiveAsync(buffer, CancellationToken.None);
-            var text = first.MessageType == WebSocketMessageType.Text ? Encoding.UTF8.GetString(buffer, 0, first.Count) : null;
-            text.Should().Contain("connected");
+            first.MessageType.Should().Be(WebSocketMessageType.Text, "the server's first frame is 'connected'");
+            Encoding.UTF8.GetString(buffer, 0, first.Count).Should().Contain("connected");
             return socket;
         }
 
