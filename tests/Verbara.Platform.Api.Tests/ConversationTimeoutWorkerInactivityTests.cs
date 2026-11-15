@@ -324,6 +324,13 @@ public sealed partial class ConversationTimeoutWorkerTests
         private int _listInactiveCalls;
         private int _closeAttempts;
 
+        // The in-memory store hands both workers the same Conversation instance, so the unconditional close (the
+        // controls' lost-update stand-in) must not mutate it from two workers at once: its metadata Dictionary is not
+        // thread-safe (PR #588 CI, run 43610082347: "Values differ" at the double-close control's event count, because
+        // one worker's SetMetadata threw "Operations that change non-concurrent collections must have exclusive access"
+        // and the pass skipped that close). Both workers still win; the same guard as HookedConversationStore's.
+        private readonly Lock _unconditionalCloseLock = new();
+
         public InactivityHarness()
         {
             Inner = new InMemoryConversationStore(Messages);
@@ -537,10 +544,14 @@ public sealed partial class ConversationTimeoutWorkerTests
             var reason = clock < request.BacklogCutoff
                 ? ConversationCloseReasons.InactivityBacklog
                 : ConversationCloseReasons.Inactivity;
-            row.State = ConversationState.Closed;
-            row.ClosedAt = request.Now;
-            row.UpdatedAt = request.Now;
-            row.SetMetadata(ConversationCloseReasons.MetadataKey, reason);
+            lock (_unconditionalCloseLock)
+            {
+                row.State = ConversationState.Closed;
+                row.ClosedAt = request.Now;
+                row.UpdatedAt = request.Now;
+                row.SetMetadata(ConversationCloseReasons.MetadataKey, reason);
+            }
+
             await Inner.SaveAsync(row, ct);
             return new InactivityCloseOutcome(reason, clock);
         }

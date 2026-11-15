@@ -241,13 +241,23 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         // Two tabs share the session (the widget restores it from localStorage).
         using var stays = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token);
         (await ReceiveTextAsync(stays, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+        // `connected` goes out before the server registers the socket for replies, so it does not prove that
+        // `stays` can receive one yet. The server reads a frame only in the read loop that starts after that
+        // registration: the typing indicator it publishes for this frame is the signal that `stays` is registered.
+        var staysRegistered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var typingIndicators = OnTypingIndicator(session, staysRegistered);
+        await stays.SendAsync(TypingFrame(), WebSocketMessageType.Text, true, timeout.Token);
         using (var leaves = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token))
         {
             (await ReceiveTextAsync(leaves, TimeSpan.FromSeconds(5))).Should().Contain("connected");
             await leaves.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "tab closed", timeout.Token);
-            // The server acknowledges the close once its read loop and cleanup ran.
-            (await ReceiveTextAsync(leaves, TimeSpan.FromSeconds(5))).Should().BeNull();
+            // The server sends no close frame back. Its close outcome is the handler's cleanup: the socket is
+            // unregistered and detached, so only `stays` is attached again.
+            await WaitUntilAsync(() => session.AttachedSockets == 1, SignalGuard);
+            (await ReceiveTextAsync(leaves, TimeSpan.FromMilliseconds(500))).Should().BeNull();
         }
+
+        await WaitForSignalAsync(staysRegistered.Task, "the server never read the remaining socket's frame, so it never registered it");
 
         const string replyText = "still here?";
         var message = await SendAgentReplyAsync(session, agentId, replyText);
@@ -499,12 +509,45 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
             ConversationOwnerKind.Agent,
             CancellationToken.None);
 
-    private static async Task WaitUntilAsync(Func<bool> condition)
+    private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan? within = null)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        var wait = within ?? TimeSpan.FromSeconds(5);
+        var deadline = DateTimeOffset.UtcNow + wait;
         while (!condition() && DateTimeOffset.UtcNow < deadline)
             await Task.Delay(20); // fence-allow: LOOP-DRIVER — poll pacing until the server-side socket loop catches up
-        condition().Should().BeTrue("the server-side socket loop should have caught up within 5 s");
+        condition().Should().BeTrue("the server-side socket loop should have caught up within {0} s", wait.TotalSeconds);
+    }
+
+    /// <summary>
+    /// How long a wait on a server-side signal may hang before the test reports it. It bounds no expected latency:
+    /// a slow host that raises the signal passes whatever its delay.
+    /// </summary>
+    private static readonly TimeSpan SignalGuard = TimeSpan.FromSeconds(60);
+
+    private static byte[] TypingFrame() =>
+        JsonSerializer.SerializeToUtf8Bytes(new WebChatClientMessage("typing", ""), WebChatJsonContext.Default.WebChatClientMessage);
+
+    /// <summary>Completes <paramref name="published"/> when the server publishes a typing indicator for the session's conversation.</summary>
+    private IDisposable OnTypingIndicator(WebChatSession session, TaskCompletionSource published)
+    {
+        var conversationId = session.ConversationId.Value;
+        return _factory.Services.GetRequiredService<PlatformEventBus>().Events.Subscribe(e =>
+        {
+            if (e is ConversationMessageEvent { Sender: "TypingIndicator" } typing && typing.ConversationId == conversationId)
+                published.TrySetResult();
+        });
+    }
+
+    private static async Task WaitForSignalAsync(Task signal, string onHang)
+    {
+        try
+        {
+            await signal.WaitAsync(SignalGuard);
+        }
+        catch (TimeoutException)
+        {
+            throw new TimeoutException($"{onHang} within {SignalGuard.TotalSeconds} s.");
+        }
     }
 
     private async Task<EntityId> GiveConversationToAgentAsync(EntityId conversationId)
