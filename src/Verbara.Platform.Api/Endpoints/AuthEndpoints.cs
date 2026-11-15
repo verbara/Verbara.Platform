@@ -188,7 +188,7 @@ internal static class AuthEndpoints
         }
 
         // Issue tokens
-        return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, configStore, ct);
+        return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, configStore, tenantStore, ct);
     }
 
     // ─── MFA Verify ──────────────────────────────────────────────────────────────
@@ -360,7 +360,7 @@ internal static class AuthEndpoints
         // locked the account — is taken back here first.
         if (reservation.ReachedThreshold)
             await lockoutService.ReleaseReservedAttemptAsync(user, reservation, CancellationToken.None);
-        return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, configStore, ct);
+        return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, configStore, tenantStore, ct);
     }
 
     /// <summary>
@@ -524,7 +524,9 @@ internal static class AuthEndpoints
             expiresAt,
             new TokenUserDto(user.UserId.Value, user.Email, user.DisplayName, user.Role.ToString().ToLowerInvariant()),
             user.TenantId.Value,
-            EffectivePermissions(permissions, user.Role),
+            ReportedPermissions(
+                EffectivePermissions(permissions, user.Role),
+                await IsPlatformTenantAsync(tenantStore, user.TenantId, ct)),
             features,
             idleMinutes));
     }
@@ -557,6 +559,32 @@ internal static class AuthEndpoints
             _ => [],
         };
     }
+
+    /// <summary>
+    /// Ids whose gate passes only a caller of the Platform tenant, whatever a role elsewhere holds: reporting them
+    /// to a Customer or Partner tenant's user would show console entries that answer 403.
+    /// </summary>
+    private static readonly HashSet<string> HostOnlyPermissions = new(StringComparer.Ordinal)
+    {
+        PlatformAdminPermissions.AgentAssistFeatureManage,
+    };
+
+    /// <summary>
+    /// The permission list the client is told about: <paramref name="effective"/> (the output of
+    /// <see cref="EffectivePermissions"/>) without the host-only ids when the user is not of the Platform tenant.
+    /// </summary>
+    /// <remarks>
+    /// Runs after the role fallback, so a resolved set that held only a host-only id reports nothing rather than the
+    /// role defaults. It filters the response body only; the access token's claims and every gate are unchanged.
+    /// </remarks>
+    internal static string[] ReportedPermissions(string[] effective, bool isPlatformTenant) =>
+        isPlatformTenant ? effective : [.. effective.Where(p => !HostOnlyPermissions.Contains(p))];
+
+    /// <summary>
+    /// Whether <paramref name="tenantId"/> is the Platform tenant. A tenant the store does not know is not.
+    /// </summary>
+    private static async Task<bool> IsPlatformTenantAsync(ITenantStore tenantStore, TenantId tenantId, CancellationToken ct) =>
+        (await tenantStore.GetAsync(tenantId.Value, ct))?.Type == TenantType.Platform;
 
     // ─── Logout ─────────────────────────────────────────────────────────────────
 
@@ -1249,6 +1277,7 @@ internal static class AuthEndpoints
         AccountLockoutService lockoutService,
         AuthEventService authEvents,
         ITenantAuthConfigStore configStore,
+        ITenantStore tenantStore,
         CancellationToken ct)
     {
         // AHH Phase 2 — these two writes used to be synchronous round-trips
@@ -1269,7 +1298,10 @@ internal static class AuthEndpoints
 
         // Fallback: if RBAC store returned empty and user has a privileged role,
         // grant role-based default permissions so the frontend can render correctly.
-        var effectivePermissions = EffectivePermissions(permissions, user.Role);
+        // The body then leaves out the host-only ids outside the Platform tenant; the token below is unfiltered.
+        var effectivePermissions = ReportedPermissions(
+            EffectivePermissions(permissions, user.Role),
+            await IsPlatformTenantAsync(tenantStore, user.TenantId, ct));
 
         var (accessToken, expiresAt) = jwtService.GenerateAccessToken(user, permissions);
 

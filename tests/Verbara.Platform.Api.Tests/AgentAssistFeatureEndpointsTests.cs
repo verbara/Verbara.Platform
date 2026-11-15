@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
+using Verbara.Platform.Api.Tests.AgentAssist;
 using Verbara.Sdk.Pro.AgentAssist.Features;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,20 +13,22 @@ namespace Verbara.Platform.Api.Tests;
 /// HTTP contract tests for the AgentAssist runtime feature endpoint surface
 /// (<c>GET/PUT /api/v1/admin/features/agent-assist</c>) introduced in R5.1 Task J.
 /// Covers happy paths, auth gates, and validation rules — credentials must never
-/// leak through GET, PUT without credentials should be rejected, etc.
+/// leak through GET, PUT without credentials should be rejected, etc. The caller of the
+/// happy paths is the deployment operator (a Platform tenant admin); the Customer-tenant
+/// refusals are in <see cref="AgentAssistAdminScopeTests"/>.
 /// </summary>
-public sealed class AgentAssistFeatureEndpointsTests : IClassFixture<UnifiedPlatformApiFactory>
+public sealed class AgentAssistFeatureEndpointsTests : IClassFixture<AgentAssistTenantScopeApiFactory>
 {
-    private readonly UnifiedPlatformApiFactory _factory;
+    private readonly AgentAssistTenantScopeApiFactory _factory;
 
-    public AgentAssistFeatureEndpointsTests(UnifiedPlatformApiFactory factory) => _factory = factory;
+    public AgentAssistFeatureEndpointsTests(AgentAssistTenantScopeApiFactory factory) => _factory = factory;
 
     // ─── GET ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task GetFeature_ShouldReturn200_WithRedactedCredentials_WhenAdminAuthenticated()
+    public async Task GetFeature_ShouldReturn200_WithRedactedCredentials_WhenPlatformOperatorAuthenticated()
     {
-        using var client = _factory.CreateAuthenticatedClient();
+        using var client = _factory.PlatformOperatorClient();
 
         var response = await client.GetAsync("/api/v1/admin/features/agent-assist");
 
@@ -41,7 +44,7 @@ public sealed class AgentAssistFeatureEndpointsTests : IClassFixture<UnifiedPlat
     [Fact]
     public async Task GetFeature_ShouldReturn401Or403_WhenNotAuthenticated()
     {
-        await using var factory = new UnifiedPlatformApiFactory();
+        await using var factory = new AgentAssistTenantScopeApiFactory();
         using var client = factory.CreateClient(); // no Authorization header
 
         var response = await client.GetAsync("/api/v1/admin/features/agent-assist");
@@ -66,8 +69,8 @@ public sealed class AgentAssistFeatureEndpointsTests : IClassFixture<UnifiedPlat
     [Fact]
     public async Task UpdateFeature_ShouldReturn200_AndPersist_WhenValidDeepgramPayload()
     {
-        await using var factory = new UnifiedPlatformApiFactory();
-        using var client = factory.CreateAuthenticatedClient();
+        await using var factory = new AgentAssistTenantScopeApiFactory();
+        using var client = factory.PlatformOperatorClient();
 
         var body = new
         {
@@ -110,8 +113,8 @@ public sealed class AgentAssistFeatureEndpointsTests : IClassFixture<UnifiedPlat
     [Fact]
     public async Task UpdateFeature_ShouldReturn400_WhenProviderNotWhitelisted()
     {
-        await using var factory = new UnifiedPlatformApiFactory();
-        using var client = factory.CreateAuthenticatedClient();
+        await using var factory = new AgentAssistTenantScopeApiFactory();
+        using var client = factory.PlatformOperatorClient();
 
         var body = new { enabled = true, provider = "not-a-real-provider", credentials = new { apiKey = "x" } };
         var response = await client.PutAsJsonAsync("/api/v1/admin/features/agent-assist", body);
@@ -122,8 +125,8 @@ public sealed class AgentAssistFeatureEndpointsTests : IClassFixture<UnifiedPlat
     [Fact]
     public async Task UpdateFeature_ShouldReturn400_WhenEnabledWithoutCredentials()
     {
-        await using var factory = new UnifiedPlatformApiFactory();
-        using var client = factory.CreateAuthenticatedClient();
+        await using var factory = new AgentAssistTenantScopeApiFactory();
+        using var client = factory.PlatformOperatorClient();
 
         // Deepgram requires apiKey — missing credentials block must fail validation
         var body = new { enabled = true, provider = "deepgram", credentials = (object?)null };

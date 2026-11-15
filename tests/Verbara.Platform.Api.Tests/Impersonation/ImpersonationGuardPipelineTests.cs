@@ -20,12 +20,14 @@ public sealed class ImpersonationGuardPipelineTests : IClassFixture<Impersonatio
     private const string ReadOnlyBody = "Operation not allowed in read-only impersonation mode";
     private const string ContactJson = """{"firstName":"Impersonation","lastName":"Probe"}""";
     private const string FeatureJson = """{"enabled":false,"provider":null,"credentials":null}""";
+    private const string TransferRoute = "/api/v1/conversations/impersonation-probe/transfer";
+    private const string TransferJson = """{"targetQueueId":"impersonation-queue"}""";
 
     // A read-only token of an impersonator who holds these reads; a full token of one who also holds a
     // permission-gated write.
     private static readonly string[] ReadOnlyPermissions = ["contacts:contact:view", "users:user:view"];
     private static readonly string[] FullPermissions =
-        ["contacts:contact:view", "users:user:view", "features:agent-assist:manage"];
+        ["contacts:contact:view", "users:user:view", "contacts:conversation:transfer"];
 
     private readonly ImpersonationApiFactory _factory;
     private readonly List<string> _startedSessions = [];
@@ -38,7 +40,7 @@ public sealed class ImpersonationGuardPipelineTests : IClassFixture<Impersonatio
     [InlineData("POST", "/api/v1/contacts", ContactJson)]                         // authentication only
     [InlineData("POST", "/api/v1.0/contacts", ContactJson)]                       // the same endpoint, version alias
     [InlineData("POST", "/api/contacts", ContactJson)]                            // the same endpoint, unversioned
-    [InlineData("PUT", "/api/v1/admin/features/agent-assist", FeatureJson)]       // permission-gated
+    [InlineData("POST", TransferRoute, TransferJson)]                             // permission-gated
     [InlineData("POST", "/api/v1/admin/queues", """{"name":"impersonation-queue"}""")] // role-gated (AdminOnly)
     [InlineData("POST", "/api/v1/admin/gdpr/export", """{"contactId":"c-1"}""")]  // a personal-data export
     public async Task ReadOnlyImpersonation_ShouldRefuseWrite_WhenAnyWriteIsAttempted(string method, string path, string? json)
@@ -87,10 +89,10 @@ public sealed class ImpersonationGuardPipelineTests : IClassFixture<Impersonatio
     {
         var token = _factory.MintImpersonationToken(_factory.NewPlatformAdmin(), ReadOnlyPermissions, readOnly: true);
 
-        var (status, body) = await SendAsync(token, "GET", "/api/v1/admin/features/agent-assist");
+        var (status, body) = await SendAsync(token, "GET", "/api/v1/transfer-targets/queues");
 
         status.Should().Be(HttpStatusCode.Forbidden,
-            because: "the token's Admin role does not stand in for features:agent-assist:manage, which it does not carry");
+            because: "the token's Admin role does not stand in for contacts:conversation:transfer, which it does not carry");
         body.Should().NotContain(ReadOnlyBody, because: "a read is refused by the permission gate, not by the read-only rule");
     }
 
@@ -168,7 +170,7 @@ public sealed class ImpersonationGuardPipelineTests : IClassFixture<Impersonatio
     {
         var token = _factory.MintImpersonationToken(_factory.NewPlatformAdmin(), ["contacts:contact:view"], readOnly: false);
 
-        var (status, body) = await SendAsync(token, "PUT", "/api/v1/admin/features/agent-assist", FeatureJson);
+        var (status, body) = await SendAsync(token, "POST", TransferRoute, TransferJson);
 
         status.Should().Be(HttpStatusCode.Forbidden,
             because: "a full session holds the impersonator's permissions, not every permission its Admin role would grant");
@@ -180,9 +182,24 @@ public sealed class ImpersonationGuardPipelineTests : IClassFixture<Impersonatio
     {
         var token = _factory.MintImpersonationToken(_factory.NewPlatformAdmin(), FullPermissions, readOnly: false);
 
+        var (status, body) = await SendAsync(token, "POST", TransferRoute, TransferJson);
+
+        status.Should().Be(HttpStatusCode.NotFound,
+            because: $"the minted permission passes its gate, and the handler then finds no such conversation ({body})");
+    }
+
+    [Fact]
+    public async Task FullImpersonation_ShouldRefuseAgentAssistToggle_WhenPermissionWasMinted()
+    {
+        var token = _factory.MintImpersonationToken(
+            _factory.NewPlatformAdmin(), [.. FullPermissions, "features:agent-assist:manage"], readOnly: false);
+
         var (status, body) = await SendAsync(token, "PUT", "/api/v1/admin/features/agent-assist", FeatureJson);
 
-        status.Should().Be(HttpStatusCode.OK, because: $"the minted permission passes its gate ({body})");
+        status.Should().Be(HttpStatusCode.Forbidden,
+            because: "the Agent Assist toggle is one for the whole deployment, so a session acting as a Customer tenant " +
+                     "never reaches it, even with the permission minted");
+        body.Should().NotContain(DuringImpersonationBody);
     }
 
     [Fact]

@@ -73,6 +73,22 @@ public static class PlatformAdminPermissions
     public const string CreditsGrant = "billing:credits:grant";
 
     /// <summary>
+    /// Turn Agent Assist on or off and set its speech provider and credentials —
+    /// <c>GET/PUT /api/v1/admin/features/agent-assist</c>. The setting is one for the whole
+    /// deployment, so the gate is the Platform tenant's: a Customer tenant's <c>admin</c> role holds
+    /// the id but never passes the gate on it.
+    /// </summary>
+    public const string AgentAssistFeatureManage = "features:agent-assist:manage";
+
+    /// <summary>
+    /// Read and change the Agent Assist engine settings and its keyword and compliance rules —
+    /// <c>/api/v1/admin/agent-assist/{config,keyword-rules,compliance-rules}</c>. These are held once
+    /// for the whole deployment, so the gate is the Platform tenant's, like
+    /// <see cref="AgentAssistFeatureManage"/>.
+    /// </summary>
+    public const string AgentAssistConfigManage = "agentassist:config:manage";
+
+    /// <summary>
     /// Every permission id named by a <see cref="PlatformAdminRequirement"/> gate. Each MUST be a
     /// member of the permission catalog (ADR-0037).
     /// </summary>
@@ -86,5 +102,7 @@ public static class PlatformAdminPermissions
         RetentionManage,
         JwtRotate,
         CreditsGrant,
+        AgentAssistFeatureManage,
+        AgentAssistConfigManage,
     ];
 }

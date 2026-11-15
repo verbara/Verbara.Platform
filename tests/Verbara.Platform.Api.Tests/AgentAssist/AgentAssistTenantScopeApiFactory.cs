@@ -43,6 +43,7 @@ public sealed class AgentAssistTenantScopeApiFactory : AccountStatusApiFactory
 
     private readonly Lock _seedLock = new();
     private readonly Dictionary<string, User> _supervisors = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, User> _admins = new(StringComparer.Ordinal);
 
     public FakeLiveSessions Live { get; } = new();
 
@@ -101,6 +102,31 @@ public sealed class AgentAssistTenantScopeApiFactory : AccountStatusApiFactory
 
     /// <summary>A client signed in as <paramref name="tenantId"/>'s supervisor with an access token this host mints.</summary>
     public HttpClient SupervisorClient(string tenantId) => CreateBearerClient(MintAccessToken(SupervisorOf(tenantId)));
+
+    /// <summary>
+    /// A client signed in as an Admin-role user of the Customer tenant <paramref name="tenantId"/>. The user holds no
+    /// tenant role; this host's <see cref="IUserRoleStore"/> answers every Admin-role user with the built-in
+    /// <c>admin</c> template's permissions, which include <c>features:agent-assist:manage</c> and
+    /// <c>agentassist:config:manage</c>.
+    /// </summary>
+    public HttpClient CustomerAdminClient(string tenantId)
+    {
+        User user;
+        lock (_seedLock)
+        {
+            if (!_admins.TryGetValue(tenantId, out user!))
+            {
+                user = SaveUser($"{tenantId}-admin-{Guid.NewGuid():N}", tenantId, UserRole.Admin, UserStatus.Active);
+                _admins[tenantId] = user;
+            }
+        }
+
+        return CreateBearerClient(MintAccessToken(user));
+    }
+
+    /// <summary>A client signed in as the deployment operator: the Admin-role user of the Platform tenant.</summary>
+    public HttpClient PlatformOperatorClient() =>
+        CreateBearerClient(MintAccessToken(GetUser(PlatformAdminUserId, PlatformTenantId)!));
 
     /// <summary>A client whose principal is a Supervisor of <see cref="Acme"/> with no user id claim.</summary>
     public HttpClient SupervisorWithoutUserIdClient()

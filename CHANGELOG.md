@@ -24,6 +24,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed — BREAKING
 
+- **Only the Platform tenant configures Agent Assist.** The Agent Assist feature toggle
+  (`GET/PUT /api/v1/admin/features/agent-assist`: on or off, speech provider, provider API key and endpoint) and the
+  engine settings and rules (`GET/PUT /api/v1/admin/agent-assist/config`, `.../keyword-rules`, `.../compliance-rules`)
+  each hold one state for the whole deployment. They now answer only the deployment operator: an admin of the Platform
+  tenant, a Platform-tenant user holding `features:agent-assist:manage` (toggle) or `agentassist:config:manage`
+  (settings and rules), or a management API key scoped to them. Customer tenants lose these routes. A Customer tenant's
+  admin could read and change this state until now and gets 403, as does any Customer or Partner tenant caller whatever
+  its role holds, an impersonation session included. A tenant integration that calls these routes must stop; the
+  operator makes the change instead. A Platform-tenant operator got 409 `tenant-type-mismatch` there and now reaches
+  them directly without impersonating. Sign-in and token refresh no longer report `features:agent-assist:manage` outside
+  the Platform tenant, so the console hides Features > Agent Assist there. Both states are held in memory, so the
+  restart of this upgrade discards whatever was set through these routes: the toggle and the engine settings start again
+  from the `AgentAssist` configuration section, and the keyword and compliance rules start empty. The Agent Assist
+  session reads under `/api/v1/agent-assist/sessions` are unchanged.
 - **A call analysed with an empty scorecard has no QA score.** An analysis whose scorecard had no item (a maximum
   score of 0) used to report `hasQaScore` true with `qaScore` 0. Now `GET /api/v1/analytics/cdr` and
   `GET /api/v1/analytics/cdr/{sessionId}` answer `hasQaScore` false with `qaScore` null (the detail answers
