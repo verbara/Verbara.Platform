@@ -38,6 +38,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that carry no user id get 403 with no body. `GET /api/v1/agent-assist/sessions/{sessionId}/suggestions` and
   `/compliance` return only the caller's tenant's rows, and still answer 200, possibly with `[]`. Same routes, same
   response shapes. (#552)
+- **The Api host is released when it is disposed.** The request rate-limiting stage held each host it ran in, so
+  every test host stayed in memory after its tests ended and a full `Verbara.Platform.Api.Tests` run needed more
+  memory than a hosted CI runner has. The stage is now owned by the host and stops with it, and the unit-test run
+  stays within a hosted runner's memory. Rate limiting behaves the same: the same three policies, partition keys,
+  windows and limits, the same position after tenant resolution and before authentication, and the same 429
+  response with `Retry-After`. The `aspnetcore.rate_limiting.*` metrics are no longer emitted. (#586)
 
 ### Upgrading
 
