@@ -543,6 +543,23 @@ internal static class AuthEndpoints
     /// mid-session and drops them on /unauthorized. Login applied it; refresh did not, which is the
     /// asymmetry this centralisation removes.
     /// </remarks>
+    internal static string[] EffectivePermissions(IReadOnlySet<string>? resolved, UserRole role)
+    {
+        var permissions = resolved?.ToArray() ?? [];
+        if (permissions.Length > 0)
+        {
+            return permissions;
+        }
+
+        return role switch
+        {
+            UserRole.Admin => RoleDefaultPermissions.Admin,
+            UserRole.Supervisor => RoleDefaultPermissions.Supervisor,
+            UserRole.Agent => RoleDefaultPermissions.Agent,
+            _ => [],
+        };
+    }
+
     /// <summary>
     /// Ids whose gate passes only a caller of the Platform tenant, whatever a role elsewhere holds: reporting them
     /// to a Customer or Partner tenant's user would show console entries that answer 403.
@@ -568,23 +585,6 @@ internal static class AuthEndpoints
     /// </summary>
     private static async Task<bool> IsPlatformTenantAsync(ITenantStore tenantStore, TenantId tenantId, CancellationToken ct) =>
         (await tenantStore.GetAsync(tenantId.Value, ct))?.Type == TenantType.Platform;
-
-    internal static string[] EffectivePermissions(IReadOnlySet<string>? resolved, UserRole role)
-    {
-        var permissions = resolved?.ToArray() ?? [];
-        if (permissions.Length > 0)
-        {
-            return permissions;
-        }
-
-        return role switch
-        {
-            UserRole.Admin => RoleDefaultPermissions.Admin,
-            UserRole.Supervisor => RoleDefaultPermissions.Supervisor,
-            UserRole.Agent => RoleDefaultPermissions.Agent,
-            _ => [],
-        };
-    }
 
     // ─── Logout ─────────────────────────────────────────────────────────────────
 
