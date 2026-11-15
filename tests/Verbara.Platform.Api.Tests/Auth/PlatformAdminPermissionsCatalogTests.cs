@@ -53,6 +53,8 @@ public sealed class PlatformAdminPermissionsCatalogTests
                 PlatformAdminPermissions.RetentionManage,
                 PlatformAdminPermissions.JwtRotate,
                 PlatformAdminPermissions.CreditsGrant,
+                PlatformAdminPermissions.AgentAssistFeatureManage,
+                PlatformAdminPermissions.AgentAssistConfigManage,
             },
             "PlatformAdminPermissions.All is the enumeration the catalog-integrity guard walks; a " +
             "constant missing from it is an ungoverned gate id");

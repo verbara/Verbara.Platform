@@ -1,8 +1,10 @@
+using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Services.AgentAssist;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.AgentAssist.Features;
 using Verbara.Sdk.Pro.MultiTenant;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,6 +16,12 @@ namespace Verbara.Platform.Api.Endpoints;
 /// Credentials are never returned to the client (redacted to <c>"***"</c>) and never
 /// captured in audit rows — only the enabled flag + provider name land in the audit trail.
 /// </summary>
+/// <remarks>
+/// The toggle is one for the whole deployment, so only the Platform tenant reaches it: a Platform
+/// tenant admin, or a user of that tenant holding <c>features:agent-assist:manage</c>, or a
+/// management key scoped to it. A Customer or Partner tenant's caller — an impersonation session
+/// included — is refused with 403, whatever permissions its role holds.
+/// </remarks>
 internal static class AgentAssistFeatureEndpoints
 {
     private static readonly HashSet<string> AllowedProviders = new(StringComparer.OrdinalIgnoreCase)
@@ -21,11 +29,15 @@ internal static class AgentAssistFeatureEndpoints
         "deepgram", "whisper", "azure-whisper", "google",
     };
 
+    /// <summary>The Platform-tenant gate with <c>features:agent-assist:manage</c>.</summary>
+    internal static readonly AuthorizationPolicy ManagePolicy = new AuthorizationPolicyBuilder()
+        .AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.AgentAssistFeatureManage))
+        .Build();
+
     public static void MapAgentAssistFeatureEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/admin/features/agent-assist")
-            .RequireAuthorization("features:agent-assist:manage")
-            .RequireOperationalTenant();
+            .RequireAuthorization(ManagePolicy);
 
         group.MapGet("", GetFeature);
         group.MapPut("", UpdateFeature);

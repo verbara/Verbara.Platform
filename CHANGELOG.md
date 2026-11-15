@@ -24,6 +24,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed — BREAKING
 
+- **Only the Platform tenant configures Agent Assist.** The Agent Assist feature toggle
+  (`GET/PUT /api/v1/admin/features/agent-assist`: on or off, speech provider, provider API key and endpoint) and the
+  engine settings and rules (`GET/PUT /api/v1/admin/agent-assist/config`, `.../keyword-rules`,
+  `.../compliance-rules`) each hold one state for the whole deployment, so they now answer only the deployment
+  operator: an admin of the Platform tenant, a Platform-tenant user holding `features:agent-assist:manage` (toggle)
+  or `agentassist:config:manage` (settings and rules), or a management API key scoped to them. A Customer or Partner
+  tenant's caller now gets 403, whatever its role holds, an impersonation session included; before, a Customer
+  tenant's admin could read and change them. A Platform-tenant operator, who got 409 `tenant-type-mismatch` there,
+  now reaches them directly without impersonating. The Agent Assist session reads under
+  `/api/v1/agent-assist/sessions` are unchanged.
 - **A call analysed with an empty scorecard has no QA score.** An analysis whose scorecard had no item (a maximum
   score of 0) used to report `hasQaScore` true with `qaScore` 0. Now `GET /api/v1/analytics/cdr` and
   `GET /api/v1/analytics/cdr/{sessionId}` answer `hasQaScore` false with `qaScore` null (the detail answers

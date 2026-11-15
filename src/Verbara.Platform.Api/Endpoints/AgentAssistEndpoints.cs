@@ -1,9 +1,11 @@
+using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.Services.AgentAssist;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.AgentAssist.Options;
 using Verbara.Sdk.Pro.AgentAssist.Storage.Postgres.Stores;
 using Verbara.Sdk.Pro.Licensing;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -12,6 +14,15 @@ namespace Verbara.Platform.Api.Endpoints;
 
 internal static class AgentAssistEndpoints
 {
+    /// <summary>
+    /// The Platform-tenant gate with <c>agentassist:config:manage</c>. The engine settings and the keyword and
+    /// compliance rules are held once for the whole deployment (<see cref="AgentAssistConfigStore"/>), so a Customer
+    /// or Partner tenant's caller is refused with 403, whatever permissions its role holds.
+    /// </summary>
+    internal static readonly AuthorizationPolicy ConfigManagePolicy = new AuthorizationPolicyBuilder()
+        .AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.AgentAssistConfigManage))
+        .Build();
+
     public static void MapAgentAssistEndpoints(this IEndpointRouteBuilder app)
     {
         // ── Session query endpoints (SupervisorPlus) ───────────────────────────
@@ -24,10 +35,9 @@ internal static class AgentAssistEndpoints
         sessions.MapGet("/{sessionId}/suggestions", GetSessionSuggestions);
         sessions.MapGet("/{sessionId}/compliance", GetSessionCompliance);
 
-        // ── Admin config endpoints (AdminOnly) ─────────────────────────────────
+        // ── Admin config endpoints (Platform tenant only: one state for the deployment) ──
         var admin = app.MapGroup("/admin/agent-assist")
-            .RequireAuthorization("AdminOnly")
-            .RequireOperationalTenant()
+            .RequireAuthorization(ConfigManagePolicy)
             .RequireLicenseFeature(LicenseFeature.AgentAssist)
             .RequirePlanFeature(PlanFeature.AgentAssist);
         admin.MapGet("/config", GetConfig);
