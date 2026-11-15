@@ -1,3 +1,4 @@
+using Verbara.Platform.Api.Auth;
 using Verbara.Platform.Api.Endpoints;
 using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Identity;
@@ -69,6 +70,51 @@ public sealed class EffectivePermissionsTests
     {
         // Api is a machine-to-machine role — it gets no interactive UI defaults.
         var result = AuthEndpoints.EffectivePermissions(null, UserRole.Api);
+
+        result.Should().BeEmpty();
+    }
+
+    // The Agent Assist toggle's gate passes only the Platform tenant, so the list the console reads is filtered to
+    // match it. The filter runs after the role fallback and on the reported list only; the JWT claim is not touched.
+    [Fact]
+    public void ReportedPermissions_ShouldDropAgentAssistFeatureManage_WhenTenantIsNotPlatform()
+    {
+        string[] effective = [PlatformAdminPermissions.AgentAssistFeatureManage, PlatformAdminPermissions.AgentAssistConfigManage, "queues:queue:view"];
+
+        var result = AuthEndpoints.ReportedPermissions(effective, isPlatformTenant: false);
+
+        result.Should().BeEquivalentTo([PlatformAdminPermissions.AgentAssistConfigManage, "queues:queue:view"]);
+    }
+
+    [Fact]
+    public void ReportedPermissions_ShouldKeepBothAgentAssistIds_WhenTenantIsPlatform()
+    {
+        string[] effective = [PlatformAdminPermissions.AgentAssistFeatureManage, PlatformAdminPermissions.AgentAssistConfigManage];
+
+        var result = AuthEndpoints.ReportedPermissions(effective, isPlatformTenant: true);
+
+        result.Should().BeEquivalentTo(effective);
+    }
+
+    [Fact]
+    public void ReportedPermissions_ShouldLeaveTheAdminFallbackUnchanged_WhenTenantIsNotPlatform()
+    {
+        var effective = AuthEndpoints.EffectivePermissions(null, UserRole.Admin);
+
+        var result = AuthEndpoints.ReportedPermissions(effective, isPlatformTenant: false);
+
+        result.Should().Equal(RoleDefaultPermissions.Admin);
+    }
+
+    [Fact]
+    public void ReportedPermissions_ShouldReportNothing_WhenTheResolvedSetHoldsOnlyTheHostOnlyIdOutsidePlatform()
+    {
+        // The filter runs after the fallback: a resolved set must never turn into the role defaults because the
+        // one id it held was filtered away.
+        var effective = AuthEndpoints.EffectivePermissions(
+            new HashSet<string> { PlatformAdminPermissions.AgentAssistFeatureManage }, UserRole.Admin);
+
+        var result = AuthEndpoints.ReportedPermissions(effective, isPlatformTenant: false);
 
         result.Should().BeEmpty();
     }

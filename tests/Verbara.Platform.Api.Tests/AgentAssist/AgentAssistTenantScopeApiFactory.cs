@@ -104,8 +104,10 @@ public sealed class AgentAssistTenantScopeApiFactory : AccountStatusApiFactory
     public HttpClient SupervisorClient(string tenantId) => CreateBearerClient(MintAccessToken(SupervisorOf(tenantId)));
 
     /// <summary>
-    /// A client signed in as an Admin-role user of the Customer tenant <paramref name="tenantId"/>, who holds the
-    /// built-in <c>admin</c> template's permissions — the role every Customer tenant's administrator is cloned from.
+    /// A client signed in as an Admin-role user of the Customer tenant <paramref name="tenantId"/>. The user holds no
+    /// tenant role; this host's <see cref="IUserRoleStore"/> answers every Admin-role user with the built-in
+    /// <c>admin</c> template's permissions, which include <c>features:agent-assist:manage</c> and
+    /// <c>agentassist:config:manage</c>.
     /// </summary>
     public HttpClient CustomerAdminClient(string tenantId)
     {

@@ -9,9 +9,9 @@ namespace Verbara.Platform.Api.Tests.AgentAssist;
 /// <summary>
 /// The Agent Assist feature toggle (<c>/api/v1/admin/features/agent-assist</c>) and the keyword and compliance rule
 /// store (<c>/api/v1/admin/agent-assist/*</c>) each hold one state for the whole deployment, so they belong to the
-/// deployment operator — a Platform-tenant administrator — and to no Customer tenant's administrator, whose role is
-/// cloned from the <c>admin</c> template and so carries <c>features:agent-assist:manage</c> and
-/// <c>agentassist:config:manage</c>.
+/// deployment operator — a Platform-tenant administrator — and to no Customer tenant's administrator. The Customer
+/// admin here is an Admin-role user whose permissions this host resolves from the built-in <c>admin</c> template, so
+/// it holds <c>features:agent-assist:manage</c> and <c>agentassist:config:manage</c> and is still refused.
 /// </summary>
 public sealed class AgentAssistAdminScopeTests : IClassFixture<AgentAssistTenantScopeApiFactory>
 {
