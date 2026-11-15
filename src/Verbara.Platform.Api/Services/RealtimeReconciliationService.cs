@@ -53,7 +53,9 @@ namespace Verbara.Platform.Api.Services;
 /// <b>Cadence</b>: <see cref="RealtimeOptions.ReconcilerIntervalSeconds"/>
 /// (default 60). Pattern mirrors <see cref="ConversationTimeoutWorker"/> —
 /// <see cref="PeriodicTimer"/> + keyed <see cref="ResiliencePolicy"/> +
-/// <see cref="IServiceHeartbeat"/> + <c>StopHost</c> fatal behavior.
+/// <see cref="IServiceHeartbeat"/> + <c>StopHost</c> fatal behavior. The 10 s stagger and the
+/// <see cref="PeriodicTimer"/> run on the injected <see cref="TimeProvider"/> (the container's, which is
+/// <see cref="TimeProvider.System"/> in the host; the system clock when none is given), so a test can drive them.
 /// </para>
 /// <para>
 /// <b>Queue wrap-ups.</b> This worker also reloads <see cref="QueueWrapUpDurationProvider"/>: once right after
@@ -75,6 +77,9 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
     /// <summary>Public meter name (consumed by the OpenTelemetry registration).</summary>
     public const string MeterName = "Verbara.Platform.Realtime.Reconciliation";
 
+    /// <summary>How long the loop waits after the boot refresh before its first tick.</summary>
+    internal static readonly TimeSpan StartupStagger = TimeSpan.FromSeconds(10);
+
     private readonly IServiceProvider _services;
     private readonly IServiceHeartbeat _heartbeat;
     private readonly TimeSpan _interval;
@@ -82,6 +87,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
     private readonly AgentPauseCoordinator _pauseCoordinator;
     private readonly QueueWrapUpDurationRefresher _wrapUps;
     private readonly ILogger<RealtimeReconciliationService> _logger;
+    private readonly TimeProvider _clock;
 
     private readonly Meter _meter;
     private readonly Counter<long> _tenantsProcessed;
@@ -95,7 +101,8 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         AgentPauseCoordinator pauseCoordinator,
         QueueWrapUpDurationRefresher wrapUps,
         ILogger<RealtimeReconciliationService> logger,
-        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null)
+        [FromKeyedServices(ResiliencePolicyKey)] ResiliencePolicy? policy = null,
+        TimeProvider? clock = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(heartbeat);
@@ -112,6 +119,7 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
         _pauseCoordinator = pauseCoordinator;
         _wrapUps = wrapUps;
         _logger = logger;
+        _clock = clock ?? TimeProvider.System;
 
         _meter = new Meter(MeterName);
         _tenantsProcessed = _meter.CreateCounter<long>("realtime.reconciliation.tenants",
@@ -133,9 +141,9 @@ internal sealed partial class RealtimeReconciliationService : BackgroundService
             // Stagger by 10 s after boot so the foreground sync paths get a
             // chance to land first (QueueMembersEndpoints + AdminEndpoints fire
             // synchronously on every membership write).
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            await Task.Delay(StartupStagger, _clock, stoppingToken);
 
-            using var timer = new PeriodicTimer(_interval);
+            using var timer = new PeriodicTimer(_interval, _clock);
 
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {

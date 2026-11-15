@@ -75,6 +75,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stays within a hosted runner's memory. Rate limiting behaves the same: the same three policies, partition keys,
   windows and limits, the same position after tenant resolution and before authentication, and the same 429
   response with `Retry-After`. The `aspnetcore.rate_limiting.*` metrics are no longer emitted. (#586)
+- **The realtime reconciliation loop runs on the host's clock.** Its 10 s start-up stagger and its tick timer now
+  wait on the `TimeProvider` the host registers, which is the system clock, so its tests can drive them with a fake
+  clock instead of waiting on a loaded CI runner. The loop behaves the same: the same stagger, the same 60 s
+  interval, the same order of work.
 
 ### Dependencies
 

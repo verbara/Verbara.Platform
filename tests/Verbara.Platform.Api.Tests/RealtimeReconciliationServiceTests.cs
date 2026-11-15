@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using Verbara.Platform.Api.Health;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
@@ -9,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 
 namespace Verbara.Platform.Api.Tests;
@@ -366,6 +368,7 @@ public sealed class RealtimeReconciliationServiceTests
             (await rig.AnswersAsync(12, RefreshRig.InsideTheStagger)).Should().BeTrue();
 
             await rig.SaveQueueAsync(18);
+            await rig.AdvanceToTheFirstTickAsync();
 
             (await rig.ReachedAsync(pass: 2, RefreshRig.OverTheStaggerAndOneInterval))
                 .Should().BeTrue("a tick reloads the queues whether or not realtime sync is registered");
@@ -386,6 +389,8 @@ public sealed class RealtimeReconciliationServiceTests
         await rig.Worker.StartAsync(CancellationToken.None);
         try
         {
+            await rig.AdvanceToTheFirstTickAsync();
+
             (await rig.ReachedAsync(pass: 2, RefreshRig.OverTheStaggerAndOneInterval))
                 .Should().BeTrue("the pass after the one that threw must still run");
             rig.Worker.ExecuteTask!.IsFaulted.Should().BeFalse();
@@ -403,7 +408,14 @@ public sealed class RealtimeReconciliationServiceTests
     private sealed class RefreshRig
     {
         public static readonly TimeSpan InsideTheStagger = TimeSpan.FromSeconds(5);
+
+        /// <summary>
+        /// Real-time guard on a pass once fake time has been moved past the stagger and one interval. The loop runs on
+        /// <see cref="Clock"/>, so this no longer races the product's 10 s + 5 s: it only bounds the continuation.
+        /// </summary>
         public static readonly TimeSpan OverTheStaggerAndOneInterval = TimeSpan.FromSeconds(30);
+
+        private static readonly TimeSpan Interval = TimeSpan.FromSeconds(5);
 
         private const string Key = TestTenantId + "-" + TestQueueName;
 
@@ -440,17 +452,32 @@ public sealed class RealtimeReconciliationServiceTests
             Worker = new RealtimeReconciliationService(
                 services.BuildServiceProvider(),
                 new ServiceHeartbeat(),
-                Options.Create(new RealtimeOptions { ReconcilerIntervalSeconds = 5 }),
+                Options.Create(new RealtimeOptions { ReconcilerIntervalSeconds = (int)Interval.TotalSeconds }),
                 new AgentPauseCoordinator(),
                 QueueWrapUpRefresherRig.Build(tenants, _queues, _provider),
-                Log);
+                Log,
+                clock: Clock);
         }
 
         public int ThrowOnPass { get; init; }
 
+        public ArmSignallingTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero));
+
         public WarningLog Log { get; } = new();
 
         public RealtimeReconciliationService Worker { get; }
+
+        /// <summary>
+        /// Moves fake time over the stagger and one interval, each step only after the loop has armed the timer it
+        /// targets, however late the loop is. The first tick then runs pass 2.
+        /// </summary>
+        public async Task AdvanceToTheFirstTickAsync()
+        {
+            await Clock.NextArmAsync(RealtimeReconciliationService.StartupStagger, "the startup stagger");
+            Clock.Advance(RealtimeReconciliationService.StartupStagger);
+            await Clock.NextArmAsync(Interval, "the reconciliation timer");
+            Clock.Advance(Interval);
+        }
 
         public Task SaveQueueAsync(int seconds)
             => _queues.SaveAsync(QueueWrapUpRefresherRig.Queue(TestTenantId, "q-1", TestQueueName, seconds), CancellationToken.None);
@@ -481,6 +508,45 @@ public sealed class RealtimeReconciliationServiceTests
             }
 
             return true;
+        }
+    }
+
+    /// <summary>A fake clock that reports the due time of every timer the worker arms on it.</summary>
+    private sealed class ArmSignallingTimeProvider(DateTimeOffset start) : FakeTimeProvider(start)
+    {
+        /// <summary>
+        /// Real-time guard on one arm; a loop that never arms fails the test here instead of hanging it. 30 s is the
+        /// real bound this test had before it ran on fake time; two arms, the 30 s pass guard and the 5 s answer guard fit
+        /// in CI's 5 minutes (95 s).
+        /// </summary>
+        private static readonly TimeSpan ArmGuard = TimeSpan.FromSeconds(30);
+
+        private readonly Channel<TimeSpan> _arms = Channel.CreateUnbounded<TimeSpan>();
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = base.CreateTimer(callback, state, dueTime, period);
+            _arms.Writer.TryWrite(dueTime);
+            return timer;
+        }
+
+        /// <summary>Waits for the next armed timer of exactly <paramref name="due"/>, passing over any other arm.</summary>
+        public async Task NextArmAsync(TimeSpan due, string what)
+        {
+            using var guard = new CancellationTokenSource(ArmGuard);
+            try
+            {
+                TimeSpan armed;
+                do
+                {
+                    armed = await _arms.Reader.ReadAsync(guard.Token);
+                }
+                while (armed != due);
+            }
+            catch (OperationCanceledException) when (guard.IsCancellationRequested)
+            {
+                throw new TimeoutException($"The worker did not arm {what} within {ArmGuard}.");
+            }
         }
     }
 
