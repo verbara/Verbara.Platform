@@ -27,7 +27,7 @@ public sealed class RateLimiterHostLifetimeTests
         // fresh stack; a limiter whose timer still holds the host keeps it alive on every attempt.
         for (var attempt = 0; attempt < 10 && hostServices.IsAlive; attempt++)
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(100));
+            await Task.Delay(TimeSpan.FromMilliseconds(100)); // fence-allow: SETTLE — collect off the stack that still references the factory
             for (var i = 0; i < 2; i++)
             {
                 GC.Collect(2, GCCollectionMode.Forced, blocking: true);
