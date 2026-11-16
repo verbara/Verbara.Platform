@@ -107,6 +107,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the Graph bump alone failed restore with `NU1109`; the rest of the Kiota packages follow at `2.0.0`. Mailbox behaviour
   (list, send, reply, forward, delete, mark as read, attachments) is unchanged, and only the `mail` image carries Graph.
   Replaces #571.
+- **The Mail service no longer references `Azure.Identity`**, which no Mail code used (it authenticates against Azure AD
+  with its own token request), and its central `1.21.0` pin goes with it, since no other project referenced it.
 
 ### Upgrading
 
