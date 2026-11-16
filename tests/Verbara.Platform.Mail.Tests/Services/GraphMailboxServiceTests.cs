@@ -225,8 +225,68 @@ public sealed class GraphMailboxServiceTests
         root.GetProperty("isRead").GetBoolean().Should().BeTrue();
         // Characterized on Graph 5.105.0: the generated Message constructor also writes its OData type.
         // Nothing else may ride along in the PATCH, or Graph would overwrite those fields.
-        root.EnumerateObject().Select(p => p.Name).Where(n => n != "@odata.type")
-            .Should().Equal("isRead");
+        root.GetProperty("@odata.type").GetString().Should().Be("#microsoft.graph.message");
+        root.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo("@odata.type", "isRead");
+    }
+
+    [Fact]
+    public async Task ReplyMessageAsync_ShouldPostComment_WhenCalled()
+    {
+        var (sut, handler) = BuildSut(body: string.Empty);
+
+        await sut.ReplyMessageAsync(AccessToken, "m-1", new ReplyMailRequest("Thanks, received."), CancellationToken.None);
+
+        var request = handler.Requests.Should().ContainSingle().Subject;
+        request.Method.Should().Be(HttpMethod.Post);
+        request.Uri.AbsolutePath.Should().Be("/v1.0/me/messages/m-1/reply");
+        request.ContentType.Should().Be("application/json");
+
+        using var doc = JsonDocument.Parse(request.Body!);
+        var root = doc.RootElement;
+        // Characterized on Graph 5.105.0: like sendMail, the action parameters are written with the
+        // PascalCase names from the Graph metadata.
+        root.EnumerateObject().Select(p => p.Name).Should().Equal("Comment");
+        root.GetProperty("Comment").GetString().Should().Be("Thanks, received.");
+    }
+
+    [Fact]
+    public async Task ForwardMessageAsync_ShouldPostCommentAndRecipients_WhenCalled()
+    {
+        var (sut, handler) = BuildSut(body: string.Empty);
+
+        await sut.ForwardMessageAsync(AccessToken, "m-1", new ForwardMailRequest(
+            "FYI",
+            [new MailRecipientDto { Email = "dave@contoso.com", Name = "Dave Kim" }]), CancellationToken.None);
+
+        var request = handler.Requests.Should().ContainSingle().Subject;
+        request.Method.Should().Be(HttpMethod.Post);
+        request.Uri.AbsolutePath.Should().Be("/v1.0/me/messages/m-1/forward");
+        request.ContentType.Should().Be("application/json");
+
+        using var doc = JsonDocument.Parse(request.Body!);
+        var root = doc.RootElement;
+        // Characterized on Graph 5.105.0: like sendMail, the action parameters are written with the
+        // PascalCase names from the Graph metadata; the recipients inside keep camelCase.
+        root.EnumerateObject().Select(p => p.Name).Should().Equal("Comment", "ToRecipients");
+        root.GetProperty("Comment").GetString().Should().Be("FYI");
+        var to = root.GetProperty("ToRecipients").EnumerateArray()
+            .Select(r => r.GetProperty("emailAddress")).ToList();
+        to.Should().ContainSingle();
+        to[0].GetProperty("address").GetString().Should().Be("dave@contoso.com");
+        to[0].GetProperty("name").GetString().Should().Be("Dave Kim");
+    }
+
+    [Fact]
+    public async Task DeleteMessageAsync_ShouldSendDeleteToMessagePath_WhenCalled()
+    {
+        var (sut, handler) = BuildSut(body: string.Empty);
+
+        await sut.DeleteMessageAsync(AccessToken, "m-1", CancellationToken.None);
+
+        var request = handler.Requests.Should().ContainSingle().Subject;
+        request.Method.Should().Be(HttpMethod.Delete);
+        request.Uri.AbsolutePath.Should().Be("/v1.0/me/messages/m-1");
+        request.Body.Should().BeNullOrEmpty();
     }
 
     [Fact]
