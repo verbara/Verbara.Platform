@@ -600,11 +600,86 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         rewritten.FindAddress(ChannelType.WebChat).Should().Be(address, "the contact's first WebChat address is now the earlier one");
     }
 
-    private async Task<WebSocket> AttachSocketAsync(string sessionId, CancellationToken ct)
+    /// <summary>
+    /// How long one socket attach may hang before the test reports it. It bounds no expected latency: it only turns a
+    /// host that never answers into a message.
+    /// </summary>
+    private static readonly TimeSpan AttachHangGuard = TimeSpan.FromMinutes(2);
+
+    /// <summary>How long a cancelled attach gets to end before the failure it reports is thrown anyway.</summary>
+    private static readonly TimeSpan AbandonGuard = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Opens the session's socket and returns once the server has registered it for replies. No test timer reaches
+    /// the request: a token passed to <c>ConnectAsync</c> becomes the request's <c>RequestAborted</c>, so a test
+    /// deadline that a slow session setup or a stall of the test host had used up cancelled the server's own accept,
+    /// which answered 499. The hang guard only turns a host that never answers into a message, and then it cancels the
+    /// abandoned attach and disposes its socket, so nothing of it outlives the test.
+    /// </summary>
+    private async Task<WebSocket> AttachSocketAsync(WebChatSession session)
     {
-        var socket = await _factory.Server.CreateWebSocketClient().ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), ct);
-        (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(5))).Should().Contain("connected");
-        return socket;
+        // Cancelled only by the hang guard below, never by a timer of its own.
+        using var abandon = new CancellationTokenSource();
+        var attach = ConnectAndAwaitRegisteredAsync(session, abandon.Token);
+        try
+        {
+            return await attach.WaitAsync(AttachHangGuard);
+        }
+        catch (TimeoutException ex)
+        {
+            await abandon.CancelAsync();
+            await AbandonAsync(attach);
+            throw new TimeoutException(
+                $"the socket of session {session.SessionId} did not attach within {AttachHangGuard.TotalSeconds} s: the host never answered the upgrade, never sent 'connected' or never registered the socket",
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// Waits for a cancelled attach to end, and disposes the socket it may still have acquired. The wait is bounded
+    /// too: an attach that ignores its cancellation is left behind rather than hanging the failure it reports.
+    /// </summary>
+    private static async Task AbandonAsync(Task<WebSocket> attach)
+    {
+        try
+        {
+            (await attach.WaitAsync(AbandonGuard)).Dispose();
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or WebSocketException or InvalidOperationException)
+        {
+            // The attach ended on its cancellation (and disposed its socket), or it is still stuck: either way the
+            // timeout is what the test reports.
+        }
+    }
+
+    /// <summary>
+    /// The server sends <c>connected</c> before it registers the socket for replies, so <c>connected</c> does not
+    /// prove that a reply can reach the socket yet. The server reads a frame only in the read loop that starts after
+    /// that registration: the typing indicator it publishes for a <c>typing</c> frame is the signal that the socket
+    /// is registered. The frame is what the widget sends while the visitor types, and it changes no row.
+    /// </summary>
+    private async Task<WebSocket> ConnectAndAwaitRegisteredAsync(WebChatSession session, CancellationToken abandon)
+    {
+        var socket = await _factory.Server.CreateWebSocketClient()
+            .ConnectAsync(new Uri($"ws://localhost/ws/webchat/{session.SessionId}"), abandon);
+        try
+        {
+            var buffer = new byte[8192];
+            var first = await socket.ReceiveAsync(buffer, abandon);
+            first.MessageType.Should().Be(WebSocketMessageType.Text, "the server's first frame is 'connected'");
+            Encoding.UTF8.GetString(buffer, 0, first.Count).Should().Contain("connected");
+
+            var registered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var typingIndicators = OnTypingIndicator(session, registered);
+            await socket.SendAsync(TypingFrame(), WebSocketMessageType.Text, true, abandon);
+            await registered.Task.WaitAsync(abandon);
+            return socket;
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 
     private Task<Message> ReplyAsync(EntityId conversationId, EntityId agentId, string text) =>
@@ -620,12 +695,11 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
     public async Task AgentReply_ShouldReachLiveSession_WhenContactHoldsAnExpiredSessionAddressFirst()
     {
         using var client = _factory.CreateClient();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var expiredAddress = await ExpiredSessionAddressAsync(client);
         var live = await GetSessionAsync(await CreateSessionAsync(client));
         await PutAddressFirstAsync(live.ConversationId, expiredAddress);
         var agentId = await GiveConversationToAgentAsync(live.ConversationId);
-        using var socket = await AttachSocketAsync(live.SessionId, timeout.Token);
+        using var socket = await AttachSocketAsync(live);
 
         var message = await ReplyAsync(live.ConversationId, agentId, "hello from the agent");
 
@@ -638,7 +712,6 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
     public async Task AgentReply_ShouldReachSession_WhenAVisitorMessageOpenedTheConversation()
     {
         using var client = _factory.CreateClient();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var expiredAddress = await ExpiredSessionAddressAsync(client);
         var live = await GetSessionAsync(await CreateSessionAsync(client));
         var conversations = _factory.Services.GetRequiredService<IConversationStore>();
@@ -655,7 +728,7 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         opened!.Metadata.Should().Contain(SessionAddressKey, live.CustomerAddress.Address);
         await PutAddressFirstAsync(live.ConversationId, expiredAddress);
         var agentId = await GiveConversationToAgentAsync(live.ConversationId);
-        using var socket = await AttachSocketAsync(live.SessionId, timeout.Token);
+        using var socket = await AttachSocketAsync(live);
 
         var message = await ReplyAsync(live.ConversationId, agentId, "hello again");
 
@@ -681,14 +754,13 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
     {
         // Spec "A conversation from before this change still replies".
         using var client = _factory.CreateClient();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var session = await GetSessionAsync(await CreateSessionAsync(client));
         var conversations = _factory.Services.GetRequiredService<IConversationStore>();
         var conversation = await conversations.GetByIdAsync(VisitorTenant, session.ConversationId, CancellationToken.None);
         conversation!.RemoveMetadata(SessionAddressKey);
         await conversations.SaveAsync(conversation, CancellationToken.None);
         var agentId = await GiveConversationToAgentAsync(session.ConversationId);
-        using var socket = await AttachSocketAsync(session.SessionId, timeout.Token);
+        using var socket = await AttachSocketAsync(session);
 
         var message = await ReplyAsync(session.ConversationId, agentId, "hello from before");
 
@@ -701,7 +773,6 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
     {
         // Spec "The key is skipped as a destination".
         using var client = _factory.CreateClient();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var session = await GetSessionAsync(await CreateSessionAsync(client));
         var conversations = _factory.Services.GetRequiredService<IConversationStore>();
         var conversation = await conversations.GetByIdAsync(VisitorTenant, session.ConversationId, CancellationToken.None);
@@ -714,7 +785,7 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         rewritten.AddAddress(session.CustomerAddress);
         await contacts.SaveAsync(rewritten, CancellationToken.None);
         var agentId = await GiveConversationToAgentAsync(session.ConversationId);
-        using var socket = await AttachSocketAsync(session.SessionId, timeout.Token);
+        using var socket = await AttachSocketAsync(session);
 
         var message = await ReplyAsync(session.ConversationId, agentId, "hello past the key");
 
