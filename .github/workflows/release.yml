@@ -153,7 +153,7 @@ jobs:
 
       - name: Log in to GitHub Container Registry
         if: steps.retro.outputs.skip != 'true'
-        uses: docker/login-action@v4.7.0
+        uses: docker/login-action@v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -229,7 +229,7 @@ jobs:
 
       - name: Install cosign
         if: steps.retro.outputs.skip != 'true'
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@v4.1.3
         with:
           # Pin v3.0.6 — matches the maintainer-side cosign on local builds.
           # The prior comment claimed "cosign v3.x changes break the installer
@@ -635,7 +635,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@v4.1.3
         with:
           cosign-release: 'v3.0.6'
 
