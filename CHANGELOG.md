@@ -102,6 +102,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Microsoft.AspNetCore.OpenApi` (`10.0.11`). `Microsoft.AspNetCore.OpenApi 10.0.15` needs `Microsoft.OpenApi` `2.13.0` or
   later in the 2.x line, so that pin moves from `2.9.0` to `2.13.0`. Moved one at a time, several failed restore with `NU1109`,
   so they ship as one change and replace #568, #576, #577, #578 and #579.
+- **The Mail service moves to Microsoft Graph `6.9.0`** (from `5.105.0`), and the `Microsoft.Kiota.Abstractions` pin moves
+  from `1.22.2` to `2.0.0` with it. Graph 6 depends on `Microsoft.Graph.Core` `4.0.1`, which needs Kiota `2.0.0` or later, so
+  the Graph bump alone failed restore with `NU1109`; the rest of the Kiota packages follow at `2.0.0`. Mailbox behaviour
+  (list, send, reply, forward, delete, mark as read, attachments) is unchanged, and only the `mail` image carries Graph.
+  Replaces #571.
 
 ### Upgrading
 
