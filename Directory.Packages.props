@@ -44,6 +44,7 @@
     <PackageVersion Include="Verbara.Sdk.Push" Version="2.9.0" />
     <PackageVersion Include="Verbara.Sdk.Resilience" Version="2.9.0" />
     <PackageVersion Include="Verbara.Sdk.OpenTelemetry" Version="2.9.0" />
+    <PackageVersion Include="Verbara.Sdk.VoiceAi.Stt" Version="2.9.0" />
   </ItemGroup>
 
   <ItemGroup>

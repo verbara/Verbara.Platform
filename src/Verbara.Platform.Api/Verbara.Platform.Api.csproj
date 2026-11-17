@@ -103,6 +103,8 @@
     <PackageReference Include="NCrontab" />
     <PackageReference Include="Verbara.Sdk.Hosting" />
     <PackageReference Include="Verbara.Sdk.Resilience" />
+    <!-- The shared speech-recognizer factory (Services/Speech) builds the Sdk recognizers directly. -->
+    <PackageReference Include="Verbara.Sdk.VoiceAi.Stt" />
     <PackageReference Include="Verbara.Sdk.Pro.EventStore" />
     <PackageReference Include="Verbara.Sdk.Pro.Analytics" />
     <PackageReference Include="Verbara.Sdk.Pro.CallAnalytics" />

@@ -1283,9 +1283,9 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
     builder.Services.AddAgentAssistRetentionTargets();
 }
 
-// ─── Pro Analytics InMemory fallbacks (when no Analytics/Dialer connection string) + QA availability ──
+// ─── Pro Analytics InMemory fallbacks (when no Analytics/Dialer connection string) + QA availability + recognizer factory ─
 builder.Services.AddProAnalyticsInMemoryFallbacks();
-builder.Services.AddQaAvailability(analysisRegistered: !string.IsNullOrEmpty(analyticsConnectionString));
+builder.Services.AddQaAvailability(analysisRegistered: !string.IsNullOrEmpty(analyticsConnectionString)).AddSpeechRecognizerFactory();
 
 // ─── Recordings ─────────────────────────────────────────────────────────────
 builder.Services.AddPlatformRecordings(builder.Configuration);
