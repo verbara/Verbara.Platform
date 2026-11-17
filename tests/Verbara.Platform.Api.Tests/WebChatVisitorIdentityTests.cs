@@ -86,18 +86,10 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         var session = await GetSessionAsync(sessionId);
 
         // An agent owns the session's conversation (as after an offer is accepted).
-        var agentId = EntityId.From($"agent-{Guid.NewGuid():N}");
-        var conversationStore = _factory.Services.GetRequiredService<IConversationStore>();
-        var conversation = await conversationStore.GetByIdAsync(VisitorTenant, session.ConversationId, CancellationToken.None);
-        conversation.Should().NotBeNull();
-        conversation!.State = ConversationState.Active;
-        conversation.Owner = ConversationOwner.ForAgent(agentId);
-        await conversationStore.SaveAsync(conversation, CancellationToken.None);
+        var agentId = await GiveConversationToAgentAsync(session.ConversationId);
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var wsClient = _factory.Server.CreateWebSocketClient();
-        using var socket = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token);
-        (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+        // Returns once the server has registered the socket for replies, not merely sent 'connected'.
+        using var socket = await AttachSocketAsync(session);
 
         const string replyText = "hello from the agent";
         var message = await _factory.Services.GetRequiredService<IConversationService>().SendMessageAsync(
@@ -125,13 +117,8 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         var agentId = await GiveConversationToAgentAsync(session.ConversationId);
 
         // The visitor connects, then leaves: the server marks the session disconnected.
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
-        {
-            var wsClient = _factory.Server.CreateWebSocketClient();
-            using var socket = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token);
-            (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(5))).Should().Contain("connected");
-            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "visitor left", timeout.Token);
-        }
+        using (var socket = await AttachSocketAsync(session))
+            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "visitor left", CancellationToken.None).WaitAsync(SignalGuard);
 
         var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
         while (session.IsConnected && DateTimeOffset.UtcNow < deadline)
@@ -201,21 +188,15 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         var sessionId = await CreateSessionAsync(client);
         var session = await GetSessionAsync(sessionId);
         var agentId = await GiveConversationToAgentAsync(session.ConversationId);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var wsClient = _factory.Server.CreateWebSocketClient();
 
         // First attach, then the visitor drops (network blip, page reload).
-        using (var first = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token))
-        {
-            (await ReceiveTextAsync(first, TimeSpan.FromSeconds(5))).Should().Contain("connected");
-            await first.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "reload", timeout.Token);
-        }
+        using (var first = await AttachSocketAsync(session))
+            await first.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "reload", CancellationToken.None).WaitAsync(SignalGuard);
 
         await WaitUntilAsync(() => !session.IsConnected);
 
-        // The widget re-attaches to the same session.
-        using var second = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token);
-        (await ReceiveTextAsync(second, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+        // The widget re-attaches to the same session. Returns once the server has registered the new socket for replies.
+        using var second = await AttachSocketAsync(session);
 
         const string replyText = "welcome back";
         var message = await SendAgentReplyAsync(session, agentId, replyText);
@@ -283,13 +264,10 @@ public sealed class WebChatVisitorIdentityTests : IDisposable
         using var client = _factory.CreateClient();
         var sessionId = await CreateSessionAsync(client);
         var session = await GetSessionAsync(sessionId);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var wsClient = _factory.Server.CreateWebSocketClient();
-        using var socket = await wsClient.ConnectAsync(new Uri($"ws://localhost/ws/webchat/{sessionId}"), timeout.Token);
-        (await ReceiveTextAsync(socket, TimeSpan.FromSeconds(5))).Should().Contain("connected");
+        using var socket = await AttachSocketAsync(session);
 
         var frame = Encoding.UTF8.GetBytes("""{"type":"message","text":"hola por socket"}""");
-        await socket.SendAsync(frame, WebSocketMessageType.Text, true, timeout.Token);
+        await socket.SendAsync(frame, WebSocketMessageType.Text, true, CancellationToken.None).WaitAsync(SignalGuard);
 
         var messageStore = _factory.Services.GetRequiredService<IMessageStore>();
         IReadOnlyList<Message> messages = [];
