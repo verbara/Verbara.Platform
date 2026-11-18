@@ -118,6 +118,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wait on the `TimeProvider` the host registers, which is the system clock, so its tests can drive them with a fake
   clock instead of waiting on a loaded CI runner. The loop behaves the same: the same stagger, the same 60 s
   interval, the same order of work.
+- **Campaign contact lists and disposition codes stay in their tenant.** The campaign contact-list routes and the
+  disposition-code create and delete routes answer 404 for a campaign, list or code outside the caller's tenant or
+  campaign, and change nothing: `GET` and `POST /api/v1/admin/campaigns/{id}/contact-lists` for a campaign of another
+  tenant; `DELETE .../contact-lists/{listId}`, `POST .../contact-lists/{listId}/import` and
+  `GET .../contact-lists/{listId}/contacts` for a list that is not one of that campaign's lists in the caller's tenant;
+  `POST /api/v1/admin/campaigns/{id}/dispositions` for a campaign of another tenant; and
+  `DELETE .../dispositions/{codeId}` for a code that is not one of that campaign's codes in the caller's tenant.
+  A list or code whose own tenant differs from its campaign's tenant is reached through these routes by neither
+  tenant. The tenant's own campaigns, lists and codes answer as before, with
+  the same response shapes. In the OpenAPI document the seven operations declare 404, and the two create operations
+  declare their 201 body.
 
 ### Dependencies
 
@@ -197,6 +208,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   bridge and the skill-based agent selector, after a separate Platform change stops registering the bridge. Platform
   registers the bridge today, but its agent members are PJSIP only, it registers no skill-based agent selector, and
   the Web console only re-fetches on that event, so the limitation does not change what Platform shows.
+- **Verbara.Sdk.Pro `2.29.0-pro` → `2.30.1-pro`**, the 22 `Verbara.Sdk.Pro.*` pins in one commit, for the scoped
+  contact-list operations the campaign routes above use. Diffed by package name over the 70 `project.assets.json`, the
+  restore moved only the 22 Pro packages: no floor moved, and none appears or drops. What else of `2.30.x` reaches
+  Platform:
+  - The event store's first boot on `2.30.x` runs an additive migration (`V005`, a nullable
+    `completed_sessions.agent_interface` column); nothing is rewritten.
+  - The Platform hub's seven client methods no longer take a `CancellationToken`. Platform has no C# caller of them.
+  - Platform registers no call-agent resolver yet, so the first call answered by a queue member interface that the
+    event store projects logs one Warning per projector and subscriber instance, and its record keeps no agent id
+    (#620 tracks registering one).
 - **The ASP.NET Core packages move together to `10.0.15`**: `Microsoft.AspNetCore.Authentication.JwtBearer` and
   `.OpenIdConnect` (`10.0.14`), `Microsoft.AspNetCore.DataProtection` and `.Extensions`, `Microsoft.AspNetCore.SignalR.Client`
   and `.Common`, `Microsoft.AspNetCore.Mvc.Testing`, `System.Security.Cryptography.Xml` and `.Pkcs` (`10.0.13`), and
