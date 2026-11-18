@@ -356,6 +356,10 @@ internal sealed class InMemoryCampaignStore : CampaignStoreBase
     }
 }
 
+/// <summary>
+/// The in-memory contact-list store: a list belongs to the tenant it was created for, and delete, import and
+/// list-contacts act only on a list of the tenant they are given (a no-op, 0 imported, an empty page otherwise).
+/// </summary>
 internal sealed class InMemoryContactListStore : ContactListStoreBase
 {
     private long _nextListId = 1;
@@ -367,6 +371,8 @@ internal sealed class InMemoryContactListStore : ContactListStoreBase
     {
         var id = Interlocked.Increment(ref _nextListId);
         list.Id = id;
+        list.TenantId = tenantId;
+        list.CampaignId = campaignId;
         _lists[id] = list;
         _contacts[id] = [];
         return new ValueTask<ContactList>(list);
@@ -382,14 +388,18 @@ internal sealed class InMemoryContactListStore : ContactListStoreBase
 
     public override ValueTask DeleteContactListAsync(string tenantId, long listId, CancellationToken ct)
     {
-        _lists.TryRemove(listId, out _);
-        _contacts.TryRemove(listId, out _);
+        if (TenantList(tenantId, listId) is { } list)
+        {
+            _lists.TryRemove(new KeyValuePair<long, ContactList>(listId, list));
+            _contacts.TryRemove(listId, out _);
+        }
         return ValueTask.CompletedTask;
     }
 
     public override ValueTask<int> ImportContactsAsync(string tenantId, long listId, IReadOnlyList<ContactImportRow> rows, CancellationToken ct)
     {
-        var list = _contacts.GetOrAdd(listId, _ => []);
+        if (TenantList(tenantId, listId) is not { } cl || !_contacts.TryGetValue(listId, out var list))
+            return new ValueTask<int>(0);
         foreach (var row in rows)
         {
             var id = Interlocked.Increment(ref _nextContactId);
@@ -401,14 +411,13 @@ internal sealed class InMemoryContactListStore : ContactListStoreBase
                 LastName = row.LastName,
             });
         }
-        if (_lists.TryGetValue(listId, out var cl))
-            cl.TotalContacts += rows.Count;
+        cl.TotalContacts += rows.Count;
         return new ValueTask<int>(rows.Count);
     }
 
     public override ValueTask<(IReadOnlyList<Contact> Items, int TotalCount)> ListContactsAsync(string tenantId, long listId, int page, int pageSize, CancellationToken ct)
     {
-        if (!_contacts.TryGetValue(listId, out var contacts))
+        if (TenantList(tenantId, listId) is null || !_contacts.TryGetValue(listId, out var contacts))
             return new ValueTask<(IReadOnlyList<Contact>, int)>(([], 0));
 
         var total = contacts.Count;
@@ -418,6 +427,9 @@ internal sealed class InMemoryContactListStore : ContactListStoreBase
             .ToList();
         return new ValueTask<(IReadOnlyList<Contact>, int)>((items, total));
     }
+
+    private ContactList? TenantList(string tenantId, long listId) =>
+        _lists.TryGetValue(listId, out var list) && list.TenantId == tenantId ? list : null;
 }
 
 internal sealed class InMemoryDispositionCodeStore : DispositionCodeStoreBase
@@ -442,15 +454,18 @@ internal sealed class InMemoryDispositionCodeStore : DispositionCodeStoreBase
         return new ValueTask<IReadOnlyList<DispositionCode>>(result);
     }
 
+    // Update and delete act only on a code of the tenant they are given, as Pro's Postgres store does.
     public override ValueTask UpdateAsync(string tenantId, DispositionCode code, CancellationToken ct)
     {
-        _codes[code.Id] = code;
+        if (_codes.TryGetValue(code.Id, out var stored) && stored.TenantId == tenantId && code.TenantId == tenantId)
+            _codes[code.Id] = code;
         return ValueTask.CompletedTask;
     }
 
     public override ValueTask DeleteAsync(string tenantId, long dispositionCodeId, CancellationToken ct)
     {
-        _codes.TryRemove(dispositionCodeId, out _);
+        if (_codes.TryGetValue(dispositionCodeId, out var stored) && stored.TenantId == tenantId)
+            _codes.TryRemove(new KeyValuePair<long, DispositionCode>(dispositionCodeId, stored));
         return ValueTask.CompletedTask;
     }
 }
