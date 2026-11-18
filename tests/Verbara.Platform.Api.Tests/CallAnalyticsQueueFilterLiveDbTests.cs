@@ -12,7 +12,7 @@ using Verbara.Sdk.Pro.CallAnalytics.Store;
 namespace Verbara.Platform.Api.Tests;
 
 /// <summary>
-/// Pro <c>2.27.0-pro</c> (#334): the call-analytics Postgres store writes and reads each analysis's queue, so the
+/// Pro <c>2.27.0-pro</c>: the call-analytics Postgres store writes and reads each analysis's queue, so the
 /// queue filter of the sentiment-trends and compliance-summary endpoints matches the analyses stored since the upgrade.
 /// A row stored before it keeps a null queue and still does not match. The real Api <c>Program</c> boots with an
 /// Analytics connection string (a Testcontainers Postgres), so the endpoints read Pro's Postgres store as
