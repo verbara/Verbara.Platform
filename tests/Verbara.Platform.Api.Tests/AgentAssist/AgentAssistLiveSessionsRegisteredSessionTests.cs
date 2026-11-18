@@ -1,5 +1,6 @@
 #pragma warning disable CA2012 // Use ValueTasks correctly: NSubstitute setup chains .Returns() on ValueTask
 
+using System.Collections.Concurrent;
 using System.Reactive.Subjects;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,9 +28,10 @@ namespace Verbara.Platform.Api.Tests.AgentAssist;
 /// <see cref="AgentAssistLiveSessions.Snapshot"/> over a session the real Pro engine registered. Pro's
 /// <c>AgentAssistSession</c> constructor and <c>AgentAssistSupervisor.Add</c> are internal, so the session is made the
 /// way production makes it: Pro's public <c>AddProAgentAssist</c> runs the engine as a hosted service, a
-/// <see cref="CallConnectedEvent"/> starts it, a substituted ARI client answers the snoop requests and two real
-/// <see cref="AudioSocketClient"/> connections stand in for Asterisk's snoop audio. No reflection: every value is
-/// read through public members.
+/// <see cref="CallConnectedEvent"/> starts it, a substituted ARI client answers the snoop requests and, when the engine
+/// continues a snoop into the dialplan, a real <see cref="AudioSocketClient"/> connects with the id the engine set on it
+/// as <c>AUDIOSOCKET_UUID</c>, standing in for Asterisk's snoop audio. No reflection: every value is read through
+/// public members.
 /// <list type="bullet">
 /// <item>Conflict: a session whose start-time snapshot is tenant A, on a call re-stamped to tenant B, is owned by
 /// nobody. Fails if the projection drops <c>s.TenantId</c> (the owner becomes B).</item>
@@ -42,6 +44,7 @@ public sealed class AgentAssistLiveSessionsRegisteredSessionTests
     private const string Acme = "acme";
     private const string Globex = "globex";
     private const string ServerId = "server-1";
+    private const string AudioSocketUuidVariable = "AUDIOSOCKET_UUID";
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(15);
 
     [Fact]
@@ -83,11 +86,11 @@ public sealed class AgentAssistLiveSessionsRegisteredSessionTests
     {
         private readonly ServiceProvider _provider;
         private readonly IReadOnlyList<IHostedService> _hosted;
-        private readonly IReadOnlyList<AudioSocketClient> _clients;
+        private readonly ConcurrentBag<AudioSocketClient> _clients;
         private readonly SubscribedSignal _events;
 
         private RegisteredEngine(
-            ServiceProvider provider, IReadOnlyList<IHostedService> hosted, IReadOnlyList<AudioSocketClient> clients,
+            ServiceProvider provider, IReadOnlyList<IHostedService> hosted, ConcurrentBag<AudioSocketClient> clients,
             SubscribedSignal events)
         {
             _provider = provider;
@@ -108,16 +111,18 @@ public sealed class AgentAssistLiveSessionsRegisteredSessionTests
             sessions.GetById(call.SessionId).Returns(call);
 
             var audio = new AudioSocketServer(new AudioSocketOptions { Port = 0 }, NullLogger<AudioSocketServer>.Instance);
+            var clients = new ConcurrentBag<AudioSocketClient>();
 
             var services = new ServiceCollection();
             services.AddLogging();
             services.AddMetrics();
             services.AddSingleton(sessions);
-            services.AddSingleton(PoolWithAri());
+            services.AddSingleton(PoolWithAri(audio, clients));
             services.AddSingleton(audio);                                  // the engine's TryAdd keeps this one
             services.AddSingleton<ILicenseGuard>(new AllowEverything());   // AddProLicenseGuard's TryAdd keeps this one
             services.AddTransient<SpeechRecognizer, SilentRecognizer>();
-            services.AddProAgentAssist();
+            // Without an advertised address the engine creates no snoop; the fake dialplan below ignores its value.
+            services.AddProAgentAssist(b => b.WithSnoop(o => o.AudioSocketAdvertisedAddress = "127.0.0.1:9093"));
 
             var provider = services.BuildServiceProvider();
             var hosted = provider.GetServices<IHostedService>().ToList();
@@ -126,15 +131,6 @@ public sealed class AgentAssistLiveSessionsRegisteredSessionTests
 
             // The engine subscribes after its AudioSocket server is listening.
             await events.Subscribed.WaitAsync(guard.Token);
-
-            // Asterisk's two snoop connections; the engine queues them until it asks for them.
-            var clients = new List<AudioSocketClient>();
-            for (var i = 0; i < 2; i++)
-            {
-                var client = new AudioSocketClient("127.0.0.1", audio.BoundPort, Guid.NewGuid());
-                await client.ConnectAsync(guard.Token);
-                clients.Add(client);
-            }
 
             var engine = new RegisteredEngine(provider, hosted, clients, events);
             var registered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -161,8 +157,13 @@ public sealed class AgentAssistLiveSessionsRegisteredSessionTests
             _events.Dispose();
         }
 
-        private static VerbaraServerPool PoolWithAri()
+        /// <summary>
+        /// A node whose ARI client answers the snoop requests and plays Asterisk's dialplan: continuing a snoop
+        /// connects one AudioSocket client to <paramref name="audio"/> with the id the engine set on that snoop.
+        /// </summary>
+        private static VerbaraServerPool PoolWithAri(AudioSocketServer audio, ConcurrentBag<AudioSocketClient> clients)
         {
+            var uuids = new ConcurrentDictionary<string, Guid>(StringComparer.Ordinal);
             var pool = new VerbaraServerPool(Substitute.For<IAmiConnectionFactory>(), NullLoggerFactory.Instance);
             var ami = Substitute.For<IAmiConnection>();
             ami.State.Returns(AmiConnectionState.Connected);
@@ -172,9 +173,16 @@ public sealed class AgentAssistLiveSessionsRegisteredSessionTests
             channels.SnoopAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(),
                     Arg.Any<string?>(), Arg.Any<CancellationToken>())
                 .Returns(c => ValueTask.FromResult(new AriChannel { Id = c.ArgAt<string?>(4) ?? "snoop" }));
+            channels.SetVariableAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns(c =>
+                {
+                    if (c.ArgAt<string>(1) == AudioSocketUuidVariable)
+                        uuids[c.ArgAt<string>(0)] = Guid.Parse(c.ArgAt<string>(2));
+                    return ValueTask.CompletedTask;
+                });
             channels.ContinueAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<int?>(),
                     Arg.Any<string?>(), Arg.Any<CancellationToken>())
-                .Returns(ValueTask.CompletedTask);
+                .Returns(c => new ValueTask(ConnectAsync(uuids[c.ArgAt<string>(0)], c.ArgAt<CancellationToken>(5))));
             channels.HangupAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(ValueTask.CompletedTask);
             var ari = Substitute.For<IAriClient>();
             ari.Channels.Returns(channels);
@@ -182,6 +190,13 @@ public sealed class AgentAssistLiveSessionsRegisteredSessionTests
             server.SetAriClient(ari);
             pool.AddExistingServer(ServerId, server);
             return pool;
+
+            async Task ConnectAsync(Guid id, CancellationToken ct)
+            {
+                var client = new AudioSocketClient("127.0.0.1", audio.BoundPort, id);
+                clients.Add(client);
+                await client.ConnectAsync(ct);
+            }
         }
     }
 
