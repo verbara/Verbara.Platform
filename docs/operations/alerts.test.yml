@@ -1,0 +1,118 @@
+# promtool unit tests for the CircuitBreakerOpen rule in alerts.yml.
+#
+# Run from this directory: promtool test rules alerts.test.yml
+# The same rule ships in infra/k8s/manifests/prometheusrules-r55.yaml (a PrometheusRule, rules under `spec`): to
+# test that copy, write its `spec` to an alerts.yml in a scratch directory next to a copy of this file and run the
+# same command there. See alerts-runbook.md#circuitbreakeropen.
+#
+# Every series is sampled every 15 s, so `0x8` is nine samples (0m to 2m). The rule reads
+# max by (key) (increase(circuit_opened_total[10m])) >= 2 with for: 0m.
+
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 15s
+
+tests:
+  - name: sustained outage on one pod pages
+    interval: 15s
+    input_series:
+      - series: 'circuit_opened_total{key="webhook.delivery",pod="api-0"}'
+        values: '0x8 1x3 2x3 3x3 4x3 5x3 6x3'
+    alert_rule_test:
+      - {eval_time: 2m30s, alertname: CircuitBreakerOpen, exp_alerts: []}
+      - eval_time: 4m
+        alertname: CircuitBreakerOpen
+        exp_alerts:
+          - &fired
+            exp_labels:
+              key: webhook.delivery
+              severity: P1
+              service: resilience
+            exp_annotations:
+              summary: "Resilience circuit 'webhook.delivery' tripped twice in 10 min on one instance"
+              description: "A keyed ResiliencePolicy's circuit opened twice inside ten minutes on one instance: either a probe failed after a full open window, or the key recovered and failed past its threshold again. Downstream dependency (channel / Postgres / external provider) likely down. Counted per instance, and the alert carries only the key: find the instance with increase(circuit_opened_total{key=\"webhook.delivery\"}[10m]). See resilience-runbook.md for the policy catalogue."
+              runbook_url: "alerts-runbook.md#circuitbreakeropen"
+
+  - name: one trip on an established series does not page
+    interval: 15s
+    input_series:
+      - series: 'circuit_opened_total{key="webhook.delivery",pod="api-0"}'
+        values: '5x8 6x80'
+    alert_rule_test:
+      - {eval_time: 3m, alertname: CircuitBreakerOpen, exp_alerts: []}
+      - {eval_time: 10m, alertname: CircuitBreakerOpen, exp_alerts: []}
+      - {eval_time: 17m, alertname: CircuitBreakerOpen, exp_alerts: []}
+
+  - name: exactly two trips on one pod page while both increments sit inside the window
+    # 0 from 0m to 2m, 1 from 2m15s, 2 from 4m30s. The last 0 (2m) leaves the 10m window after 11m45s.
+    interval: 15s
+    input_series:
+      - series: 'circuit_opened_total{key="webhook.delivery",pod="api-0"}'
+        values: '0x8 1x8 2x60'
+    alert_rule_test:
+      - {eval_time: 4m15s, alertname: CircuitBreakerOpen, exp_alerts: []}
+      - {eval_time: 4m30s, alertname: CircuitBreakerOpen, exp_alerts: [*fired]}
+      - {eval_time: 11m45s, alertname: CircuitBreakerOpen, exp_alerts: [*fired]}
+      - {eval_time: 12m, alertname: CircuitBreakerOpen, exp_alerts: []}
+
+  - name: two pods with one trip each do not page
+    interval: 15s
+    input_series:
+      - series: 'circuit_opened_total{key="webhook.delivery",pod="api-0"}'
+        values: '5x8 6x80'
+      - series: 'circuit_opened_total{key="webhook.delivery",pod="api-1"}'
+        values: '2x8 3x80'
+    alert_rule_test:
+      - {eval_time: 3m, alertname: CircuitBreakerOpen, exp_alerts: []}
+      - {eval_time: 10m, alertname: CircuitBreakerOpen, exp_alerts: []}
+
+  - name: one pod in an outage pages once while another stays flat
+    interval: 15s
+    input_series:
+      - series: 'circuit_opened_total{key="webhook.delivery",pod="api-0"}'
+        values: '0x8 1x3 2x3 3x3 4x3 5x3 6x3'
+      - series: 'circuit_opened_total{key="webhook.delivery",pod="api-1"}'
+        values: '7x80'
+    alert_rule_test:
+      - {eval_time: 4m, alertname: CircuitBreakerOpen, exp_alerts: [*fired]}
+
+  - name: a series born at its first trip pages one trip late
+    # No sample until the first trip at 2m: Prometheus cannot count that first increment.
+    interval: 15s
+    input_series:
+      - series: 'circuit_opened_total{key="webhook.delivery",pod="api-0"}'
+        values: '_x8 1x3 2x3 3x3'
+    alert_rule_test:
+      - {eval_time: 3m45s, alertname: CircuitBreakerOpen, exp_alerts: []}
+      - {eval_time: 4m, alertname: CircuitBreakerOpen, exp_alerts: [*fired]}
+
+  - name: the alert clears once the outage's trips leave the window
+    interval: 15s
+    input_series:
+      - series: 'circuit_opened_total{key="webhook.delivery",pod="api-0"}'
+        values: '0x8 1x3 2x3 3x3 4x3 5x3 6x3 6x60'
+    alert_rule_test:
+      - {eval_time: 4m, alertname: CircuitBreakerOpen, exp_alerts: [*fired]}
+      - {eval_time: 18m15s, alertname: CircuitBreakerOpen, exp_alerts: []}
+
+  - name: a restart to a lower value is counted as a reset and two trips after it page
+    # 6 until the restart at 10m15s; the new process trips at 10m30s (1) and 12m45s (2).
+    interval: 15s
+    input_series:
+      - series: 'circuit_opened_total{key="webhook.delivery",pod="api-0"}'
+        values: '6x40 stale 1x8 2x40'
+    alert_rule_test:
+      - {eval_time: 12m30s, alertname: CircuitBreakerOpen, exp_alerts: []}
+      - {eval_time: 12m45s, alertname: CircuitBreakerOpen, exp_alerts: [*fired]}
+
+  - name: a restart to an equal value hides the reset and two trips after it do not page
+    # 1 until the restart at 10m15s; the new process trips at 10m30s (1 again) and 12m45s (2). The window sees one
+    # increment, not two.
+    interval: 15s
+    input_series:
+      - series: 'circuit_opened_total{key="webhook.delivery",pod="api-0"}'
+        values: '1x40 stale 1x8 2x40'
+    alert_rule_test:
+      - {eval_time: 12m45s, alertname: CircuitBreakerOpen, exp_alerts: []}
+      - {eval_time: 15m, alertname: CircuitBreakerOpen, exp_alerts: []}

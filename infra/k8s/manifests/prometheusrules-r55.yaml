@@ -141,7 +141,7 @@ spec:
             service: resilience
           annotations:
             summary: "Resilience circuit '{{ $labels.key }}' tripped twice in 10 min on one instance"
-            description: "A keyed ResiliencePolicy's circuit opened twice inside ten minutes on one instance: either a probe failed after a full open window, or the key recovered and failed past its threshold again. Downstream dependency (channel / Postgres / external provider) likely down. Counted per instance, and the alert carries only the key: find the instance with increase(circuit_opened_total{key=\"{{ $labels.key }}\"}[10m])."
+            description: "A keyed ResiliencePolicy's circuit opened twice inside ten minutes on one instance: either a probe failed after a full open window, or the key recovered and failed past its threshold again. Downstream dependency (channel / Postgres / external provider) likely down. Counted per instance, and the alert carries only the key: find the instance with increase(circuit_opened_total{key=\"{{ $labels.key }}\"}[10m]). See resilience-runbook.md for the policy catalogue."
             runbook_url: "alerts-runbook.md#circuitbreakeropen"
 
         - alert: PresenceBacklogGrowing
