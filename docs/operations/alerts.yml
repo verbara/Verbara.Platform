@@ -172,15 +172,15 @@ groups:
           runbook_url: "alerts-runbook.md#slobreachqueueingestion"
 
       - alert: CircuitBreakerOpen
-        # Source: Verbara.Sdk.Resilience · circuit.state (2 = Open)
-        expr: max by (key) (circuit_state) == 2
-        for: 5m
+        # Source: Verbara.Sdk.Resilience · circuit.opened (a counter, one increment per trip)
+        expr: max by (key) (increase(circuit_opened_total[10m])) >= 2
+        for: 0m
         labels:
           severity: P1
           service: resilience
         annotations:
-          summary: "Resilience circuit '{{ $labels.key }}' open > 5min"
-          description: "A keyed ResiliencePolicy is rejecting all traffic. Downstream dependency (channel / Postgres / external provider) likely down. See resilience-runbook.md for the policy catalogue."
+          summary: "Resilience circuit '{{ $labels.key }}' tripped twice in 10 min on one instance"
+          description: "A keyed ResiliencePolicy's circuit opened twice inside ten minutes on one instance: either a probe failed after a full open window, or the key recovered and failed past its threshold again. Downstream dependency (channel / Postgres / external provider) likely down. Counted per instance, and the alert carries only the key: find the instance with increase(circuit_opened_total{key=\"{{ $labels.key }}\"}[10m]). See resilience-runbook.md for the policy catalogue."
           runbook_url: "alerts-runbook.md#circuitbreakeropen"
 
       - alert: PresenceBacklogGrowing

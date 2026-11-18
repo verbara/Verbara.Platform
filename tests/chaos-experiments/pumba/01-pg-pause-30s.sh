@@ -7,7 +7,8 @@
 # (analytics, audit) should drop their pool slot via timeout.
 #
 # Expected: zero data loss; HTTP 5xx blip during the 30 s window;
-# CircuitBreakerOpen alert may fire (P1) but NOT PgConnectionPoolHigh.
+# CircuitBreakerOpen (P1) fires only if one key trips twice within 10 min on
+# one instance; NOT PgConnectionPoolHigh.
 set -euo pipefail
 
 DURATION="${DURATION:-30s}"

@@ -272,7 +272,7 @@ windows breaching a P2 trigger** as the signal to upsize the tier.
 | Postgres slow-query rate > 1% sustained 30 min | `SlowQueriesHigh` (P2) | Review `pg_stat_statements`; add covering index OR upsize disk IOPS |
 | EventStore p99 persist > 200 ms 15 min | `SloBreachQueueIngestion` (P1) | Verify Postgres health, then split EventStore writes onto a dedicated replica |
 | Push backplane backlog > 500 + growing 15 min | `PresenceBacklogGrowing` (P1) | Migrate Pro.Push transport to Redis Cluster (Large+ tier) or shard tenants across two backplane instances |
-| Resilience circuit `Open` > 5 min | `CircuitBreakerOpen` (P1) | Investigate dependency per [`resilience-runbook.md`](resilience-runbook.md); not directly a capacity signal but often co-occurs with saturation |
+| Resilience circuit tripped twice in 10 min on one instance | `CircuitBreakerOpen` (P1) | Investigate dependency per [`resilience-runbook.md`](resilience-runbook.md); not directly a capacity signal but often co-occurs with saturation |
 | Redis memory > 75% sustained 1 h | `RedisMemoryHigh` (P2) | Tune TTL on JTI cache + push backplane channels; if XL tier, shard Redis Cluster |
 | LicenseGuard blocking > 1% pipeline ops 10 min | `LicenseGuardBlockedHigh` (P0) | Not a capacity issue — licensing renewal needed; included here because it presents as missing throughput |
 

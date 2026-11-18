@@ -30,7 +30,7 @@ Custom alert rules deployed alongside the platform:
 | `JwtValidationLatencyP99High` | JWT validate p99 > SLO ceiling | warning |
 | `HealthCheckUnhealthy` | `aspnetcore_healthcheck_status == 0` | critical |
 | `PgConnectionPoolHigh` | Postgres conn pool usage > 80% | warning |
-| `CircuitBreakerOpen` | `max by (key) (circuit_state) == 2` | warning |
+| `CircuitBreakerOpen` | `max by (key) (increase(circuit_opened_total[10m])) >= 2` | warning |
 | `RetentionServiceStalled` | dry-run retention sweeper stopped emitting | warning |
 | `PresenceBacklogGrowing` | SignalR presence-fanout backlog > threshold | warning |
 | `AuditWriteLatencyP99High` | audit write p99 > SLO | warning |

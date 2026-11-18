@@ -65,6 +65,7 @@ each experiment:
 - **PlatformApiUnavailable (P0)** — fires after 2 min `up{job="platform-api"} == 0`. Experiment 06 disrupts platform-api for ~30 s → does NOT fire (correct: brief crash + restart < 2 min threshold). Cross-validated against the smoke test in P0L.4 where the alert DID fire after 165 s of intentional downtime — alert path itself is functional.
 - **HealthCheckUnhealthy (P1)** — depends on the per-package health check meter for the affected service. Did not register a sustained breach during 30 s pauses (heartbeats catch up within the 30 s threshold).
 - **CircuitBreakerOpen (P1)** — `circuit_state == 2` for 5 min. Brief disruptions (≤ 30 s) close the circuit before the 5 min window. No false positives observed; correct behavior for transient blips.
+  - *Note, 2026-11-18:* this run measured the earlier rule. The rule now reads `max by (key) (increase(circuit_opened_total[10m])) >= 2` with `for: 0m`, because since Sdk 2.10 the `circuit.state` gauge reads half-open once the open window ends and an outage no longer holds it at 2 (see [alerts-runbook.md](alerts-runbook.md#circuitbreakeropen)). The measurements above are unchanged.
 - **BlackboxJourneyDown (P0)** — `probe_success == 0` for 5 min. Disruptions ≤ 60 s do not breach the 5 min window. No false positives.
 
 The alert thresholds are correctly tuned to suppress noise from short

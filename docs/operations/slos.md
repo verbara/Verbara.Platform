@@ -167,7 +167,7 @@ v1.13.x patch — JWT-001 in `docs/roadmap.md`).
 
 | Metric | Target | Status | Source meter / instrument |
 |---|---|---|---|
-| Circuit breakers in `Open` state | 0 sustained > 5 min | 🟢 R5.5 C-L: held during all 10 chaos events; closed cleanly post-recovery | `Verbara.Sdk.Resilience` · `circuit.state` (value 2 = Open) |
+| Circuit trips per key on one instance | < 2 in any 10 min | 🟢 R5.5 C-L: held during all 10 chaos events; closed cleanly post-recovery (measured on the earlier reading, `circuit.state` 2 sustained > 5 min) | `Verbara.Sdk.Resilience` · `circuit.opened` (one increment per trip) |
 | Retry attempts rate per policy | < 0.5/s sustained | v1 provisional | `retry.attempts` |
 | Per-attempt timeouts | < 1% of attempts | v1 provisional | `timeout.fired` |
 | Postgres SIGKILL recovery time | ≤ 60 s | 🟢 R5.5 C-L: ~30 s (compose `up -d --wait` gate) | observed via `up{job="platform-api"}` flap |

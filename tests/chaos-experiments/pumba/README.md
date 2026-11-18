@@ -31,7 +31,7 @@ containers by name; this works against the
 | 04 | `04-redis-kill-restart.sh`    | SIGKILL Redis + auto-recover               | None expected (graceful degrade)      |
 | 05 | `05-asterisk-crash.sh`        | SIGKILL Asterisk + auto-recover            | HealthCheckUnhealthy P1               |
 | 06 | `06-platform-api-crash.sh`    | SIGKILL Platform.Api + auto-recover        | PlatformApiUnavailable P0             |
-| 07 | `07-network-partition-pg.sh`  | 100% packet loss to Postgres for 60 s      | CircuitBreakerOpen P1                 |
+| 07 | `07-network-partition-pg.sh`  | 100% packet loss to Postgres for 60 s      | CircuitBreakerOpen P1 (2nd trip)      |
 | 08 | `08-network-delay-pg.sh`      | 200 ms latency on Postgres for 60 s        | SloBreachQueueIngestion P1            |
 | 09 | `09-bandwidth-limit-rtp.sh`   | Asterisk → 200 Kbps for 60 s               | BlackboxJourneyDown P0 may flap       |
 | 10 | `10-packet-loss-rtp.sh`       | 5% packet loss on Asterisk for 60 s        | RTP packet-loss meter elevated        |

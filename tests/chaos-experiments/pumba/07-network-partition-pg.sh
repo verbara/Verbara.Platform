@@ -5,7 +5,9 @@
 # scenario (vs. pause which freezes the process — different recovery path).
 # All Platform.Api -> Postgres traffic times out at the TCP layer.
 #
-# Expected: CircuitBreakerOpen P1 fires within 60 s; PgConnectionPoolHigh
+# Expected: CircuitBreakerOpen P1 fires once a key whose open window is shorter
+# than the partition trips a second time on one instance (its probe fails
+# after the window), within the 60 s; PgConnectionPoolHigh
 # P2 may fire as the pool refuses new acquisitions; auth login latency
 # spikes; recovery once partition lifts < 30 s.
 set -euo pipefail
