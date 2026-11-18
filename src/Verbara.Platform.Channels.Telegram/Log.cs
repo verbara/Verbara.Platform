@@ -13,6 +13,9 @@ internal static partial class Log
     [LoggerMessage(Level = LogLevel.Error, Message = "HTTP error sending Telegram message to {Url}")]
     internal static partial void HttpError(ILogger logger, Exception exception, string url);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Telegram message to {Url} not sent: circuit {Circuit} rejected the call (open, or half-open with its probe in flight)")]
+    internal static partial void CircuitRejected(ILogger logger, string circuit, string url);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "Telegram API error {ErrorCode}: {Description}")]
     internal static partial void ApiError(ILogger logger, int? errorCode, string? description);
 

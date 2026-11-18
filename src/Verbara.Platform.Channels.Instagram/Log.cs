@@ -13,6 +13,9 @@ internal static partial class Log
     [LoggerMessage(Level = LogLevel.Error, Message = "HTTP error sending Instagram message to {Url}")]
     internal static partial void HttpError(ILogger logger, Exception exception, string url);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Instagram message to {Url} not sent: circuit {Circuit} rejected the call (open, or half-open with its probe in flight)")]
+    internal static partial void CircuitRejected(ILogger logger, string circuit, string url);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "Instagram API error {StatusCode}: {Body}")]
     internal static partial void ApiError(ILogger logger, int statusCode, string body);
 
