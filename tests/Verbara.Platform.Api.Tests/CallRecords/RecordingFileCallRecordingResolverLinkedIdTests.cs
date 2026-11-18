@@ -31,8 +31,8 @@ public sealed class RecordingFileCallRecordingResolverLinkedIdTests : IDisposabl
     [Fact]
     public async Task ResolveRecordingNameAsync_ShouldAnswerAsTheSessionIdMember_WhenTheRecordingFileIsPresent()
     {
-        Directory.CreateDirectory(Path.Combine(_basePath, TenantId));
-        await File.WriteAllBytesAsync(Path.Combine(_basePath, TenantId, SessionId + ".wav"), [0x52, 0x49, 0x46, 0x46]);
+        Directory.CreateDirectory(Path.Join(_basePath, TenantId));
+        await File.WriteAllBytesAsync(Path.Join(_basePath, TenantId, SessionId + ".wav"), [0x52, 0x49, 0x46, 0x46]);
         ICallRecordingResolver resolver = CreateResolver(); // asked through the interface, as the event store asks it
 
         var bySession = await resolver.ResolveRecordingNameAsync(TenantId, SessionId, CancellationToken.None);

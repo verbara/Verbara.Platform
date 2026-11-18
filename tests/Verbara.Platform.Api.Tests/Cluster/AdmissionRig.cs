@@ -336,9 +336,9 @@ internal sealed class RecordingEvents(IObservable<SessionDomainEvent> inner, Rec
     /// </summary>
     private static string Identify(IObserver<SessionDomainEvent> observer)
     {
-        foreach (var frame in new StackTrace(1, false).GetFrames())
+        foreach (var declaring in new StackTrace(1, false).GetFrames().Select(f => f.GetMethod()?.DeclaringType))
         {
-            var type = frame.GetMethod()?.DeclaringType;
+            var type = declaring;
             while (type is not null && type.Name.StartsWith('<') && type.DeclaringType is not null)
                 type = type.DeclaringType;
             var ns = type?.Namespace ?? "";

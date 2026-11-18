@@ -265,8 +265,8 @@ public sealed class AdmitExistingCallsReachTests(ITestOutputHelper output) : IAs
             var control = new LiveCall("inbound-trunk-live", "3103.1", "PJSIP/trunk-3103-1", "from-trunk", "500",
                 new Dictionary<string, string> { ["TENANT_ID"] = AdmissionCalls.Tenant });
             node.Start(control);
-            await WaitAsync(() => marks.ContainsKey(control.LinkedId)
-                && ReadsOf(primary.GetVars.Skip(marks[control.LinkedId]), control).Count >= admittedReads.Count,
+            await WaitAsync(() => marks.TryGetValue(control.LinkedId, out var mark)
+                && ReadsOf(primary.GetVars.Skip(mark), control).Count >= admittedReads.Count,
                 "the bridge handled the live control's start");
             var liveReads = ReadsOf(primary.GetVars.Skip(marks[control.LinkedId]), control);
 
