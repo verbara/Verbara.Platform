@@ -119,11 +119,21 @@ public sealed class VoiceLinkedIdAmbiguityTests : IAsyncDisposable
         _manager.GetByLinkedId(SharedLinkedId).Should().BeNull("precondition: the unscoped lookup is ambiguous");
     }
 
-    /// <summary>Delivers a trunk channel with <paramref name="linkedId"/> on <paramref name="serverId"/>, then waits
-    /// until that server's index holds the call.</summary>
+    /// <summary>Delivers a trunk channel with <paramref name="linkedId"/> on <paramref name="serverId"/> and returns the
+    /// call the manager opened for it, once its <see cref="CallStartedEvent"/> is raised.</summary>
     private async Task<CallSession> CallOfAsync(string serverId, string linkedId, string channel)
     {
         var frames = await ServerAsync(serverId);
+        var started = new TaskCompletionSource<CallSession>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var subscription = _manager.Events.Subscribe(e =>
+        {
+            if (e is CallStartedEvent s && s.ServerId == serverId
+                && _manager.GetById(s.SessionId) is { } call && call.LinkedId == linkedId)
+            {
+                started.TrySetResult(call);
+            }
+        });
+
         frames.OnNext(new NewChannelEvent
         {
             EventType = "Newchannel", UniqueId = linkedId, Channel = channel, ChannelState = "Up",
@@ -135,21 +145,9 @@ public sealed class VoiceLinkedIdAmbiguityTests : IAsyncDisposable
             },
         });
 
-        var deadline = DateTimeOffset.UtcNow + Bound;
-        while (true)
-        {
-            if (_manager.GetByLinkedId(serverId, linkedId) is { } call)
-            {
-                return call;
-            }
-
-            if (DateTimeOffset.UtcNow > deadline)
-            {
-                throw new TimeoutException($"{serverId} opened no call for linked id {linkedId} within {Bound}.");
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(20));
-        }
+        var opened = await started.Task.WaitAsync(Bound);
+        _manager.GetByLinkedId(serverId, linkedId).Should().BeSameAs(opened, "the server's own index holds its call");
+        return opened;
     }
 
     private readonly Dictionary<string, IObserver<ManagerEvent>> _frames = new(StringComparer.Ordinal);
