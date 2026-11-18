@@ -336,20 +336,28 @@ internal sealed class RecordingEvents(IObservable<SessionDomainEvent> inner, Rec
     /// </summary>
     private static string Identify(IObserver<SessionDomainEvent> observer)
     {
-        foreach (var declaring in new StackTrace(1, false).GetFrames().Select(f => f.GetMethod()?.DeclaringType))
+        foreach (var type in new StackTrace(1, false).GetFrames().Select(f => Outermost(f.GetMethod()?.DeclaringType)))
         {
-            var type = declaring;
-            while (type is not null && type.Name.StartsWith('<') && type.DeclaringType is not null)
-                type = type.DeclaringType;
+            // The Sdk's agent and queue trackers subscribe from their constructors, inside the Sdk's own namespace.
+            if (type?.Name.EndsWith("SessionTracker", StringComparison.Ordinal) == true)
+                return type.Name;
             var ns = type?.Namespace ?? "";
             if (type is null || type == typeof(RecordingEvents) || ns.StartsWith("System", StringComparison.Ordinal)
-                || ns.StartsWith("Verbara.Sdk.Sessions", StringComparison.Ordinal)
+                || ns.StartsWith("Verbara.Sdk.Sessions.Manager", StringComparison.Ordinal)
+                || ns.StartsWith("Verbara.Sdk.Sessions.Internal", StringComparison.Ordinal)
                 || ns.StartsWith("Microsoft", StringComparison.Ordinal))
                 continue;
             return type.Name;
         }
 
         return observer.GetType().Name;
+
+        static Type? Outermost(Type? type)
+        {
+            while (type is not null && type.Name.StartsWith('<') && type.DeclaringType is not null)
+                type = type.DeclaringType;
+            return type;
+        }
     }
 
     private sealed class CountingObserver(IObserver<SessionDomainEvent> inner, ConcurrentQueue<string> deliveries,
