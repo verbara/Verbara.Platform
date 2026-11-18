@@ -283,25 +283,33 @@ internal static class CampaignEndpoints
 
     // ─── Contact List Handlers ────────────────────────────────────────────────
 
-    private static async Task<Ok<List<ContactListDto>>> ListContactLists(
+    private static async Task<Results<Ok<List<ContactListDto>>, NotFound>> ListContactLists(
         long id,
         HttpContext context,
+        [FromServices] CampaignStoreBase campaignStore,
         [FromServices] ContactListStoreBase contactListStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        // A campaign of another tenant is no campaign of the caller's: 404, as GetCampaign answers.
+        if (await campaignStore.GetCampaignAsync(tenantId, id, ct) is null)
+            return TypedResults.NotFound();
         var lists = await contactListStore.ListContactListsAsync(tenantId, id, ct);
         return TypedResults.Ok(lists.Select(MapToContactListDto).ToList());
     }
 
-    private static async Task<IResult> CreateContactList(
+    private static async Task<Results<Created<ContactListDto>, NotFound>> CreateContactList(
         long id,
         HttpContext context,
         [FromBody] CreateContactListRequest body,
+        CampaignStoreBase campaignStore,
         ContactListStoreBase contactListStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        // A list is created only on a campaign of the caller's tenant; any other campaign id is a 404.
+        if (await campaignStore.GetCampaignAsync(tenantId, id, ct) is null)
+            return TypedResults.NotFound();
         var list = new ContactList
         {
             TenantId = tenantId,
@@ -310,7 +318,7 @@ internal static class CampaignEndpoints
             CreatedAt = DateTimeOffset.UtcNow,
         };
         var created = await contactListStore.CreateContactListAsync(tenantId, id, list, ct);
-        return Results.Created($"/admin/campaigns/{id}/contact-lists/{created.Id}", MapToContactListDto(created));
+        return TypedResults.Created($"/admin/campaigns/{id}/contact-lists/{created.Id}", MapToContactListDto(created));
     }
 
     private static async Task<IResult> DeleteContactList(
@@ -367,14 +375,18 @@ internal static class CampaignEndpoints
         return TypedResults.Ok(codes.Select(MapToDispositionDto).ToList());
     }
 
-    private static async Task<IResult> CreateDisposition(
+    private static async Task<Results<Created<DispositionCodeDto>, NotFound>> CreateDisposition(
         long id,
         HttpContext context,
         [FromBody] CreateDispositionCodeRequest body,
+        CampaignStoreBase campaignStore,
         DispositionCodeStoreBase dispositionStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        // A disposition code is created only on a campaign of the caller's tenant; any other campaign id is a 404.
+        if (await campaignStore.GetCampaignAsync(tenantId, id, ct) is null)
+            return TypedResults.NotFound();
         var code = new DispositionCode
         {
             TenantId = tenantId,
@@ -390,7 +402,7 @@ internal static class CampaignEndpoints
             IsActive = true,
         };
         var created = await dispositionStore.CreateAsync(tenantId, code, ct);
-        return Results.Created($"/admin/campaigns/{id}/dispositions/{created.Id}", MapToDispositionDto(created));
+        return TypedResults.Created($"/admin/campaigns/{id}/dispositions/{created.Id}", MapToDispositionDto(created));
     }
 
     private static async Task<Results<Ok<DispositionCodeDto>, NotFound>> UpdateDisposition(
