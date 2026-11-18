@@ -52,6 +52,30 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Without call analytics, `GET /api/v1/analytics/cdr` and `GET /api/v1/analytics/cdr/{sessionId}` answer
   `hasQaScore` false, `qaScore` null and `sentimentLabel` null on every row, and the detail answers `qaSummary` null.
 
+### Changed
+
+- **The `services` readiness entry stays Degraded while a dependency circuit is half-open.** From Verbara.Sdk `2.10`
+  a tripped circuit reads half-open once its open window ends, with or without a call, so the entry read Healthy
+  while the dependency was still down. A watched circuit that is not closed now keeps `services` Degraded until a call
+  succeeds and the circuit closes; the message reads `Circuit not closed: <key> (<state>)`. Only a circuit read open
+  past a check's threshold escalates (the `postgres` check's rule), so a dependency circuit still never fails
+  `/health/ready`. The `postgres` probe has no circuit of its own: it runs on every evaluation.
+- **The WhatsApp, Instagram, Messenger, Twitter and Telegram connectors return a failed send on a circuit
+  rejection.** From Verbara.Sdk `2.10` a half-open circuit lets one probe through and rejects every other call until
+  the probe's result is recorded. These connectors let that rejection escape; they now return the result of a
+  transport failure (`HTTP_ERROR`) and log a warning naming the circuit. The other outbound clients (mail, PDF
+  rendering, the OIDC token exchange, SMTP, Microsoft Graph, Twilio SMS, video, RCS, S3 and the flow HTTP request node)
+  already pass a failure to their callers, and pass the rejection the same way.
+- **A linked id that two attached servers hold resolves no tenant and no listen leg.** From Verbara.Sdk `2.10` the
+  unscoped linked-id lookup answers nothing when more than one server holds the id. The event store's tenant lookup and
+  the supervisor listen keep that lookup, so such a call gets no tenant and no listen leg instead of the first match.
+- **Cross-node push events reach each node's event bus in publish order** (Verbara.Sdk.Pro `2.28.0-pro`, below).
+- **Calls already up when a server attaches are admitted** at boot, on add-node and on a takeover after a refused
+  reconstruction (Verbara.Sdk.Pro `2.29.0-pro`, below, as measured on each path).
+- **`GET /api/v1/call-analytics/sentiment/trends` and `/compliance/summary` with a queue return the analyses stored
+  after the upgrade for that queue.** They returned none; analyses stored earlier carry no queue and still do not match
+  (Verbara.Sdk.Pro `2.27.0-pro`, below).
+
 ### Fixed
 
 - `GET /api/v1/analytics/cdr/{sessionId}` always answers `hasTranscript` false. It used to answer true for any call
@@ -96,6 +120,81 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Dependencies
 
+- **Verbara.Sdk `2.9.0` → `2.10.1` (`2.10.0` skipped) and Verbara.Sdk.Pro `2.26.0-pro` → `2.29.0-pro`**, the 8
+  `Verbara.Sdk.*` and 22 `Verbara.Sdk.Pro.*` pins in one commit: Pro `2.29.0-pro` is built on Sdk `2.10.1`, so moving
+  one side alone downgrades a transitive Sdk package (`NU1605`). The triple is **Sdk `2.10.1` × Pro `2.29.0-pro` ×
+  Platform (next cut from `main`)**. The hop crosses Pro `2.27.0-pro` and `2.28.0-pro`, and both reach Platform
+  (below). Floors the restore moved, diffed by package name over the 70 `project.assets.json`: `OpenTelemetry`,
+  `.Api`, `.Api.ProviderBuilderExtensions`, `.Exporter.Console`, `.Exporter.OpenTelemetryProtocol` and
+  `.Extensions.Hosting` `1.19.1` → `1.20.1` and `.Exporter.Prometheus.AspNetCore` `1.19.1-beta.1` → `1.20.1-beta.1`
+  (Sdk floors); `Microsoft.Extensions.Diagnostics.HealthChecks` and `.Abstractions` and `System.IO.Hashing` `10.0.14` →
+  `10.0.15` (Pro floors). None of them is pinned centrally, no package resolves lower, and none appears or drops. Twelve
+  test projects now reference `Microsoft.Extensions.TimeProvider.Testing`, already pinned centrally.
+- **Pro `2.27.0-pro` reaches Platform** through the call-analytics store and engine the Api registers when an
+  `Analytics` (or `Dialer`) connection string is set, through the recording resolver and through the call-analytics
+  retention targets:
+  - The first boot runs the `V003__call_analysis_queue` migration (read **Upgrading**), and call analysis gets a
+    durable queue: every call the filters select is queued and waits for a slot instead of being skipped, a failed
+    analysis is retried with backoff, `AnalysisCompleted` is delivered at least once, and a stop waits up to the
+    engine's stop timeout. Measured on a Release boot: schema version 3 and both queue tables are created, and a boot
+    after the rollback statements creates them again.
+  - Metrics only, BREAKING in Pro: `callanalytics.skipped.by_filter` no longer counts saturation, which moves to
+    `callanalytics.saturated` (`outcome` `queued` or `skipped`). Nothing in this repo reads either name, dashboards and
+    alert files included.
+  - The recording resolver interface gains a linked-id member with a default body. Platform's file-based resolver keeps
+    the default, which answers as the session-id member does (`RecordingFileCallRecordingResolverLinkedIdTests`).
+  - The new retention target `call_analysis_queue_ended` (ended queue entries, kept 30 days by default) is listed in the
+    retention overview as the `call_analysis_queue` table, under the schema of the call-analysis results, instead of
+    `unknown.unknown` (`RetentionTargetMetadataTests`).
+  - The `eventstore-subscriber` health check no longer reads Healthy while its inserts fail. It reports on
+    `/health/voice` and does not gate `/health/ready`.
+  - The call-analytics store writes and reads each analysis's queue and agent, so the queue filter of
+    `GET /api/v1/call-analytics/sentiment/trends` and `/compliance/summary` matches the analyses stored after the
+    upgrade; nothing back-fills older rows (`CallAnalyticsQueueFilterLiveDbTests`).
+- **Pro `2.28.0-pro` reaches Platform** through the Agent Assist engine and the Redis push backplane the Api and
+  Realtime register:
+  - The Agent Assist engine stays inert. The Api configures no AudioSocket advertised address, so with the runtime
+    toggle on each connected call stops before any snoop, ARI request or speech recognizer and is counted in
+    `agentassist.sessions.skipped` with `reason` `no_advertised_address`, with one Warning per engine lifetime. Before,
+    it created snoops that never produced a session (`AgentAssistInertOnMainTests`).
+  - Cross-node push events (agent, conversation and cluster state) reach the receiving node's event bus in publish
+    order; before, two events from one node could reach it swapped (`PlatformPushRelayOrderLiveTests`). The order from
+    that bus to SignalR clients is not asserted.
+- **Pro `2.29.0-pro` itself reaches Platform** through the cluster manager and failover the Api registers when
+  `Asterisk:Ami:Hostname` is set, through the originate executor of click-to-dial and callbacks, and through the
+  dialer:
+  - **Calls already up are admitted.** When a server attaches, every live call no session holds gets one (metadata
+    `origin` `reload`) and a `CallStartedEvent`. Measured on the Api's own registration with fake AMI nodes, one arm
+    per path (`AdmitExistingCallsReachTests`):
+    - **At boot** the admission ends before the voice conversation bridge, the event store, call analysis and Agent
+      Assist subscribe, so none of them sees those starts. The conversation-state push sends each one as `started`
+      under `default-tenant`. Whether the dialer's outcome observer sees them depends on which runs first; when it
+      does, it binds none of them to a call attempt. Nothing reads a channel variable for these calls until the AMI
+      owner lease is held; then each one without a tenant gets its tenant exactly once, from its Conversation or else
+      from one `TENANT_ID` read, by the voice bridge's first leader edge or the event store's first pass, whichever
+      runs first. No Conversation is created, linked again or changed, and no tenant is guessed. When an admitted call
+      ends, the event store, call analysis, Agent Assist and the dialer write nothing for it.
+    - **On add-node** (`POST /api/v1/management/cluster/nodes`) every subscriber sees the admitted starts, as it sees
+      calls that start live on that node. The voice bridge reads `VERBARA_OUTBOUND_ID` and `DIALER_CAMPAIGN_ID` per
+      call through the primary server, so for a call on an added node both reads miss and the bridge gives it no
+      outbound link, campaign or tenant, the same as for a live start there. The event store, the call-analysis queue
+      and Agent Assist hold nothing for the admitted calls.
+    - **On a takeover** the dead peer's calls are released and rebuilt from their snapshots, and the admission raises
+      one `CallStartedEvent` only for a call whose rebuilt registration was refused. That call reads the same two
+      variables as a live start, the call that already held its session id is untouched, and the event store, the
+      call-analysis queue and Agent Assist hold nothing for it.
+  - **A cancelled click-to-dial or callback no longer holds the originate circuit for a window.** A dial that holds a
+    half-open circuit's probe and is cancelled hands the probe to the next dial for that node; a probe that fails
+    still keeps the node refused for the window (`ClickToDialProbeCancellationTests`). Nothing in this repo reads the
+    executor's circuit state or its trip counter.
+  - **Campaign outcomes are looked up on the node the call was dialed on.** The dialer's node id and the cluster's
+    server key are the same string, so a single-node deployment finds the same calls (`DialerHostExtensionsTests`).
+  - Inert on Platform: the snoop filter at reconstruction (Platform creates no snoop), the RTP quality conversion (no
+    caller), a call's direction after a rebuild (unchanged), and the release's test-only and pin-only items.
+- **A paused `app_agent_pool` agent is a known limitation of Pro `2.29.0-pro`** (its "Known limitations" entry, Sdk
+  #541), fixed in Pro `2.30.0-pro`. Platform registers the agent-state push bridge, but its agent members are PJSIP
+  only, it registers no skill-based agent selector, and the Web console only re-fetches on that event, so the
+  limitation does not change what Platform shows.
 - **The ASP.NET Core packages move together to `10.0.15`**: `Microsoft.AspNetCore.Authentication.JwtBearer` and
   `.OpenIdConnect` (`10.0.14`), `Microsoft.AspNetCore.DataProtection` and `.Extensions`, `Microsoft.AspNetCore.SignalR.Client`
   and `.Common`, `Microsoft.AspNetCore.Mvc.Testing`, `System.Security.Cryptography.Xml` and `.Pkcs` (`10.0.13`), and
@@ -117,6 +216,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `GET /api/v1/supervisor/sessions/active` and answers 404 to whisper and transcript listen. Set `TENANT_ID` on every
   trunk. A client that registered a transcript listen for another supervisor id now gets the signed-in caller recorded
   instead. (#552)
+- **`CircuitBreakerOpen` now counts trips: reapply the deployed rules.** From Verbara.Sdk `2.10` a tripped circuit
+  reads half-open once its open window ends, so a sustained outage cycles between open and half-open and the old rule,
+  `max by (key) (circuit_state) == 2` for 5 minutes, stopped paging. The rule in
+  `infra/k8s/manifests/prometheusrules-r55.yaml` and `docs/operations/alerts.yml` is now
+  `max by (key) (increase(circuit_opened_total[10m])) >= 2` with `for: 0m`: one key tripped twice in ten minutes on
+  one instance. Reapply the deployed rules after the upgrade, and give a rule copied from the old one into another
+  system the same change. The alert carries only `key`; find the instance with
+  `increase(circuit_opened_total{key="…"}[10m])`.
+- **The first boot runs `V003__call_analysis_queue` on the analytics database** (the `Analytics` connection string,
+  else the one it falls back to). It is additive and idempotent: it creates `call_analysis_queue` and
+  `call_analysis_queue_meta` and records version 3 in `_schema_callanalytics`. To roll back, after rolling the
+  packages back, run in one transaction: `DROP TABLE IF EXISTS call_analysis_queue;
+  DROP TABLE IF EXISTS call_analysis_queue_meta; DELETE FROM _schema_callanalytics WHERE version = 3;`. Entries still
+  pending are not analysed.
+- **Read call-analysis saturation from `callanalytics.saturated`.** An operator dashboard or alert outside this repo
+  that read saturation from `callanalytics.skipped.by_filter` must move to `callanalytics.saturated`.
 
 ## [2.39.1] - 2026-11-10
 
