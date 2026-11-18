@@ -1,15 +1,19 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Conversations;
 using Verbara.Platform.Core;
+using Verbara.Platform.Identity;
 using Verbara.Sdk.Ami.Connection;
 using Verbara.Sdk.Pro.AgentAssist.Engine;
 using Verbara.Sdk.Pro.Cluster;
 using Verbara.Sdk.Pro.Cluster.Leadership;
+using Verbara.Sdk.Pro.MultiTenant;
 using Verbara.Sdk.Push.Bus;
 using Verbara.Sdk.Push.Events;
 using Xunit.Abstractions;
@@ -156,8 +160,16 @@ public sealed class AdmitExistingCallsReachTests(ITestOutputHelper output) : IAs
                 node.Hold(call);
             var primary = factory.Asterisk.Node(AdmissionHostFactory.PrimaryHost);
 
-            // The admission is reached through the cluster manager's add-node, the call ManagementClusterEndpoints makes.
-            await sp.GetRequiredService<ClusterManager>().AddNodeAsync("node-2", NodeOptions("node-2.admission.invalid"));
+            // The admission is reached through the add-node endpoint, called over HTTP as a platform admin calls it.
+            using (var client = await PlatformAdminClientAsync(factory))
+            using (var body = new StringContent(
+                """{"nodeId":"node-2","amiHostname":"node-2.admission.invalid","amiPort":5038,"amiUsername":"admission","amiPassword":"admission"}""",
+                Encoding.UTF8, "application/json"))
+            using (var response = await client.PostAsync("/api/v1/management/cluster/nodes", body))
+            {
+                response.StatusCode.Should().BeOneOf([HttpStatusCode.Created, HttpStatusCode.Accepted],
+                    "the endpoint added the node: {0}", await response.Content.ReadAsStringAsync());
+            }
             await WaitAsync(() => calls.All(c => manager.Recorder.DeliveredTo("VoiceConversationBridge").Contains($"CallStartedEvent:{c.LinkedId}"))
                 && primary.GetVars.Count >= 2 * calls.Count, "the bridge handled every admitted start");
             var admittedReads = primary.GetVars.ToList();
@@ -467,6 +479,41 @@ public sealed class AdmitExistingCallsReachTests(ITestOutputHelper output) : IAs
     {
         Ami = new AmiConnectionOptions { Hostname = hostname, Port = 5038, Username = "admission", Password = "admission" },
     };
+
+    /// <summary>
+    /// A client of the rig's own host that authenticates with a management API key of a platform tenant, the caller the
+    /// <c>PlatformAdminOnly</c> policy admits.
+    /// </summary>
+    private static async Task<HttpClient> PlatformAdminClientAsync(AdmissionHostFactory factory)
+    {
+        const string tenant = "admission-platform";
+        const string rawKey = "admission-mgmt-key";
+        using (var scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<ITenantStore>().UpsertAsync(new Tenant
+            {
+                TenantId = tenant,
+                Name = "Admission platform",
+                Status = TenantStatus.Active,
+                Type = TenantType.Platform,
+                ParentTenantId = null,
+            });
+            await scope.ServiceProvider.GetRequiredService<IApiKeyStore>().SaveAsync(new ApiKey
+            {
+                KeyId = EntityId.From("admission-mgmt-key-id"),
+                TenantId = new TenantId(tenant),
+                Name = "Admission management key",
+                HashedKey = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(rawKey))),
+                Scopes = ["platform:*"],
+                KeyType = ApiKeyType.Management,
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+        }
+
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {rawKey}");
+        return client;
+    }
 
     private static async Task<string> SeedLinkedConversationAsync(IConversationStore conversations, string linkedId)
     {
