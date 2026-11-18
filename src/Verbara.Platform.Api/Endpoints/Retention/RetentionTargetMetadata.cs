@@ -37,6 +37,7 @@ internal static class RetentionTargetMetadata
 
             // Pro.CallAnalytics.Storage.Postgres
             ["call_analysis_results"] = ("pro_callanalytics", "call_analysis_results"),
+            ["call_analysis_queue_ended"] = ("pro_callanalytics", "call_analysis_queue"),   // Pro 2.27.0-pro: ended queue entries
         }
         .ToFrozenDictionary(StringComparer.Ordinal);
 
