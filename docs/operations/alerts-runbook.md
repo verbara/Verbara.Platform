@@ -164,14 +164,17 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 
 ### CircuitBreakerOpen
 
-**What:** One keyed circuit opened at least twice inside ten minutes on one instance: `max by (key) (increase(circuit_opened_total[10m])) >= 2`, firing on the first evaluation that reads it (`for: 0m`). The source is the `Verbara.Sdk.Resilience` `circuit.opened` counter, one increment per trip.
+**What:** One keyed circuit opened at least twice inside the rule's window on one instance: `max by (key) (increase(circuit_opened_total[10m])) >= 2`, firing on the first evaluation that reads it (`for: 0m`). The source is the `Verbara.Sdk.Resilience` `circuit.opened` counter, one increment per trip. The window is about 9 m 45 s, not ten minutes: at a 15 s scrape the `[10m]` range holds 40 samples, and two trips count only while the last sample taken before the first trip is still one of them.
 
 **Why:** A downstream dependency is failing repeatedly: either the probe after a full open window failed and the circuit opened again, or the key recovered and failed past its threshold again. Since Sdk 2.10 the `circuit.state` gauge reads half-open (1) once the open window ends, so a sustained outage cycles between open and half-open and never holds open (2) for five minutes; the rule counts trips instead.
 
-The count is per instance: trips of one key on different pods do not add up, so one blip that trips each replica once does not page, and a key in an outage on several pods pages once. The alert carries only `key`; find the instance with `increase(circuit_opened_total{key="…"}[10m])`. Two cases do not page:
+The count is per instance: trips of one key on different pods do not add up, so one blip that trips each replica once does not page, and a key in an outage on several pods pages once. The alert carries only `key`; find the instance with `increase(circuit_opened_total{key="…"}[10m])`. These cases do not page:
 
 - A series that first appears at its first trip: Prometheus cannot count that first increment, so the alert fires one trip later than it would on an established series.
 - A key that a pod calls less than twice in ten minutes, or whose open window is ten minutes or longer (the hourly worker policy's is 600 s), cannot trip twice in the window.
+- A process restart that keeps the series' labels resets the counter, and Prometheus sees the reset only when the first value after it is lower than the last one before it. A key that had tripped once before the restart starts again at 1, so the reset is not seen and two trips after the restart count as one. A key that had tripped more than once before the restart is counted correctly. A restart under a new pod name is a new series, the first case above.
+
+The rule's tests are in [`alerts.test.yml`](alerts.test.yml): run `promtool test rules alerts.test.yml` from `docs/operations` (its header says how to run them against the r55 manifest).
 
 **First response:**
 - Cross-reference policy key against [`resilience-runbook.md`](resilience-runbook.md) policy catalogue.
