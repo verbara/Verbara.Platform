@@ -432,16 +432,26 @@ internal static class CampaignEndpoints
         return TypedResults.Ok(MapToDispositionDto(existing));
     }
 
-    private static async Task<IResult> DeleteDisposition(
+    private static async Task<Results<NoContent, NotFound>> DeleteDisposition(
         long id,
         long codeId,
         HttpContext context,
+        [FromServices] CampaignStoreBase campaignStore,
         [FromServices] DispositionCodeStoreBase dispositionStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        // The campaign must be the caller tenant's, and the code one of that campaign's codes; otherwise 404 and
+        // nothing is removed. The code lookup alone filters only the code's own tenant and campaign id, so the
+        // campaign check comes first.
+        if (await campaignStore.GetCampaignAsync(tenantId, id, ct) is null)
+            return TypedResults.NotFound();
+        var existing = (await dispositionStore.ListByCampaignAsync(tenantId, id, ct))
+            .FirstOrDefault(d => d.Id == codeId);
+        if (existing is null)
+            return TypedResults.NotFound();
         await dispositionStore.DeleteAsync(tenantId, codeId, ct);
-        return Results.NoContent();
+        return TypedResults.NoContent();
     }
 
     // ─── Callback Handlers ────────────────────────────────────────────────────
