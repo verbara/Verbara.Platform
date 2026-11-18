@@ -317,11 +317,16 @@ internal static class CampaignEndpoints
             Name = body.Name,
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        var created = await contactListStore.CreateContactListAsync(tenantId, id, list, ct);
+        // The store creates the list only on a campaign of the caller's tenant, in the same statement; null is a 404.
+        var created = await contactListStore.TryCreateContactListAsync(tenantId, id, list, ct);
+        if (created is null)
+            return TypedResults.NotFound();
         return TypedResults.Created($"/admin/campaigns/{id}/contact-lists/{created.Id}", MapToContactListDto(created));
     }
 
-    private static async Task<IResult> DeleteContactList(
+    // The three list routes address a list through its campaign: the store acts only on a list of that campaign whose
+    // campaign is the caller tenant's, and answers "no such list" (false / null) otherwise, which is a 404.
+    private static async Task<Results<NoContent, NotFound>> DeleteContactList(
         long id,
         long listId,
         HttpContext context,
@@ -329,11 +334,11 @@ internal static class CampaignEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
-        await contactListStore.DeleteContactListAsync(tenantId, listId, ct);
-        return Results.NoContent();
+        var deleted = await contactListStore.DeleteContactListAsync(tenantId, id, listId, ct);
+        return deleted ? TypedResults.NoContent() : TypedResults.NotFound();
     }
 
-    private static async Task<Ok<ImportResultDto>> ImportContacts(
+    private static async Task<Results<Ok<ImportResultDto>, NotFound>> ImportContacts(
         long id,
         long listId,
         HttpContext context,
@@ -344,11 +349,13 @@ internal static class CampaignEndpoints
         var tenantId = GetTenantId(context);
         var rows = body.Contacts.Select(c => new ContactImportRow(
             c.FirstName, c.LastName, c.Phone, c.PhoneType, c.Metadata)).ToList();
-        var imported = await contactListStore.ImportContactsAsync(tenantId, listId, rows, ct);
-        return TypedResults.Ok(new ImportResultDto(imported, 0, 0));
+        var imported = await contactListStore.ImportContactsAsync(tenantId, id, listId, rows, ct);
+        if (imported is not { } count)
+            return TypedResults.NotFound();
+        return TypedResults.Ok(new ImportResultDto(count, 0, 0));
     }
 
-    private static async Task<IResult> ListContacts(
+    private static async Task<Results<Ok<PagedResult<Contact>>, NotFound>> ListContacts(
         long id,
         long listId,
         HttpContext context,
@@ -358,8 +365,10 @@ internal static class CampaignEndpoints
         CancellationToken ct = default)
     {
         var tenantId = GetTenantId(context);
-        var (items, total) = await contactListStore.ListContactsAsync(tenantId, listId, page, pageSize, ct);
-        return Results.Ok(new PagedResult<Contact>(items, total, page, pageSize));
+        var contacts = await contactListStore.ListContactsAsync(tenantId, id, listId, page, pageSize, ct);
+        if (contacts is not { } found)
+            return TypedResults.NotFound();
+        return TypedResults.Ok(new PagedResult<Contact>(found.Items, found.TotalCount, page, pageSize));
     }
 
     // ─── Disposition Handlers ─────────────────────────────────────────────────

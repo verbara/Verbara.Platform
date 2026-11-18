@@ -359,6 +359,9 @@ internal sealed class InMemoryCampaignStore : CampaignStoreBase
 /// <summary>
 /// The in-memory contact-list store: a list belongs to the tenant it was created for, and delete, import and
 /// list-contacts act only on a list of the tenant they are given (a no-op, 0 imported, an empty page otherwise).
+/// The campaign-addressed members follow Pro's contract: they act only on a list of that tenant and that campaign,
+/// and answer "no such list" (<c>false</c> / <c>null</c>) otherwise. This store cannot see a campaign's own tenant,
+/// so the case of a list whose tenant differs from its campaign's is proven against Pro's Postgres store only.
 /// </summary>
 internal sealed class InMemoryContactListStore : ContactListStoreBase
 {
@@ -366,6 +369,9 @@ internal sealed class InMemoryContactListStore : ContactListStoreBase
     private long _nextContactId = 1;
     private readonly ConcurrentDictionary<long, ContactList> _lists = new();
     private readonly ConcurrentDictionary<long, List<Contact>> _contacts = new();
+
+    public override async ValueTask<ContactList?> TryCreateContactListAsync(string tenantId, long campaignId, ContactList list, CancellationToken ct) =>
+        await CreateContactListAsync(tenantId, campaignId, list, ct);
 
     public override ValueTask<ContactList> CreateContactListAsync(string tenantId, long campaignId, ContactList list, CancellationToken ct)
     {
@@ -389,17 +395,41 @@ internal sealed class InMemoryContactListStore : ContactListStoreBase
     public override ValueTask DeleteContactListAsync(string tenantId, long listId, CancellationToken ct)
     {
         if (TenantList(tenantId, listId) is { } list)
-        {
-            _lists.TryRemove(new KeyValuePair<long, ContactList>(listId, list));
-            _contacts.TryRemove(listId, out _);
-        }
+            Remove(list);
         return ValueTask.CompletedTask;
     }
 
-    public override ValueTask<int> ImportContactsAsync(string tenantId, long listId, IReadOnlyList<ContactImportRow> rows, CancellationToken ct)
+    public override ValueTask<bool> DeleteContactListAsync(string tenantId, long campaignId, long listId, CancellationToken ct)
     {
-        if (TenantList(tenantId, listId) is not { } cl || !_contacts.TryGetValue(listId, out var list))
-            return new ValueTask<int>(0);
+        if (CampaignList(tenantId, campaignId, listId) is not { } list)
+            return new ValueTask<bool>(false);
+        Remove(list);
+        return new ValueTask<bool>(true);
+    }
+
+    public override ValueTask<int> ImportContactsAsync(string tenantId, long listId, IReadOnlyList<ContactImportRow> rows, CancellationToken ct) =>
+        new(TenantList(tenantId, listId) is { } cl ? Import(cl, rows) : 0);
+
+    public override ValueTask<int?> ImportContactsAsync(string tenantId, long campaignId, long listId, IReadOnlyList<ContactImportRow> rows, CancellationToken ct) =>
+        new(CampaignList(tenantId, campaignId, listId) is { } cl ? Import(cl, rows) : null);
+
+    public override ValueTask<(IReadOnlyList<Contact> Items, int TotalCount)> ListContactsAsync(string tenantId, long listId, int page, int pageSize, CancellationToken ct) =>
+        new(TenantList(tenantId, listId) is { } cl ? Page(cl, page, pageSize) : ([], 0));
+
+    public override ValueTask<(IReadOnlyList<Contact> Items, int TotalCount)?> ListContactsAsync(string tenantId, long campaignId, long listId, int page, int pageSize, CancellationToken ct) =>
+        new(CampaignList(tenantId, campaignId, listId) is { } cl ? Page(cl, page, pageSize) : null);
+
+    private void Remove(ContactList list)
+    {
+        _lists.TryRemove(new KeyValuePair<long, ContactList>(list.Id, list));
+        _contacts.TryRemove(list.Id, out _);
+    }
+
+    private int Import(ContactList cl, IReadOnlyList<ContactImportRow> rows)
+    {
+        var listId = cl.Id;
+        if (!_contacts.TryGetValue(listId, out var list))
+            return 0;
         foreach (var row in rows)
         {
             var id = Interlocked.Increment(ref _nextContactId);
@@ -412,24 +442,25 @@ internal sealed class InMemoryContactListStore : ContactListStoreBase
             });
         }
         cl.TotalContacts += rows.Count;
-        return new ValueTask<int>(rows.Count);
+        return rows.Count;
     }
 
-    public override ValueTask<(IReadOnlyList<Contact> Items, int TotalCount)> ListContactsAsync(string tenantId, long listId, int page, int pageSize, CancellationToken ct)
+    private (IReadOnlyList<Contact> Items, int TotalCount) Page(ContactList cl, int page, int pageSize)
     {
-        if (TenantList(tenantId, listId) is null || !_contacts.TryGetValue(listId, out var contacts))
-            return new ValueTask<(IReadOnlyList<Contact>, int)>(([], 0));
-
-        var total = contacts.Count;
+        if (!_contacts.TryGetValue(cl.Id, out var contacts))
+            return ([], 0);
         IReadOnlyList<Contact> items = contacts
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToList();
-        return new ValueTask<(IReadOnlyList<Contact>, int)>((items, total));
+        return (items, contacts.Count);
     }
 
     private ContactList? TenantList(string tenantId, long listId) =>
         _lists.TryGetValue(listId, out var list) && list.TenantId == tenantId ? list : null;
+
+    private ContactList? CampaignList(string tenantId, long campaignId, long listId) =>
+        TenantList(tenantId, listId) is { } list && list.CampaignId == campaignId ? list : null;
 }
 
 internal sealed class InMemoryDispositionCodeStore : DispositionCodeStoreBase
