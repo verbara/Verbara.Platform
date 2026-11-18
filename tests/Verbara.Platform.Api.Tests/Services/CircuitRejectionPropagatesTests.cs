@@ -1,4 +1,3 @@
-using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
@@ -54,7 +53,7 @@ public sealed class CircuitRejectionPropagatesTests
     public async Task HttpEmailService_SendAsync_ShouldPropagateTheRejection_WhenTheCircuitRejectsTheCall()
     {
         var (policy, probeOutcome, probe) = await HoldProbeAsync(HttpEmailService.ResiliencePolicyKey);
-        var handler = new CountingHandler(HttpStatusCode.OK);
+        var handler = new CountingHandler();
         var sut = new HttpEmailService(
             FactoryFor(handler), NullLogger<HttpEmailService>.Instance, policy);
 
@@ -74,7 +73,7 @@ public sealed class CircuitRejectionPropagatesTests
     public async Task HttpEmailTemplateService_Render_ShouldPropagateTheRejection_WhenTheCircuitRejectsTheCall()
     {
         var (policy, probeOutcome, probe) = await HoldProbeAsync(HttpEmailTemplateService.ResiliencePolicyKey);
-        var handler = new CountingHandler(HttpStatusCode.OK, """{"html":"<p>x</p>"}""");
+        var handler = new CountingHandler();
         var sut = new HttpEmailTemplateService(
             FactoryFor(handler), NullLogger<HttpEmailTemplateService>.Instance, policy);
         var branding = new BrandingContext(
@@ -94,7 +93,7 @@ public sealed class CircuitRejectionPropagatesTests
     public async Task HttpPdfReportRenderer_RenderAsync_ShouldPropagateTheRejection_WhenTheCircuitRejectsTheCall()
     {
         var (policy, probeOutcome, probe) = await HoldProbeAsync(HttpPdfReportRenderer.ResiliencePolicyKey);
-        var handler = new CountingHandler(HttpStatusCode.OK);
+        var handler = new CountingHandler();
         var sut = new HttpPdfReportRenderer(
             FactoryFor(handler), NullLogger<HttpPdfReportRenderer>.Instance, policy);
         var data = new ReportData
@@ -118,7 +117,8 @@ public sealed class CircuitRejectionPropagatesTests
     }
 }
 
-file sealed class CountingHandler(HttpStatusCode status, string body = "{}") : HttpMessageHandler
+/// <summary>Counts the sends that reach the transport; a rejected call must never reach it, so a send fails.</summary>
+file sealed class CountingHandler : HttpMessageHandler
 {
     private int _attempts;
 
@@ -127,6 +127,6 @@ file sealed class CountingHandler(HttpStatusCode status, string body = "{}") : H
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _attempts);
-        return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body) });
+        throw new InvalidOperationException("a call the circuit rejected reached the transport");
     }
 }

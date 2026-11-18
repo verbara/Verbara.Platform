@@ -1,4 +1,3 @@
-using System.Net;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
@@ -43,7 +42,7 @@ public sealed class TwilioSmsProviderCircuitRejectionTests
     public async Task SendAsync_ShouldPropagateTheRejection_WhenTheCircuitRejectsTheCall()
     {
         var (policy, probeOutcome, probe) = await HoldProbeAsync(TwilioSmsProvider.ResiliencePolicyKey);
-        var handler = new CountingHandler(HttpStatusCode.Created, """{"sid":"SMxxxxxx","status":"queued"}""");
+        var handler = new CountingHandler();
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(Arg.Any<string>()).Returns(_ => new HttpClient(handler, disposeHandler: false));
         var sut = new TwilioSmsProvider(
@@ -60,7 +59,8 @@ public sealed class TwilioSmsProviderCircuitRejectionTests
     }
 }
 
-file sealed class CountingHandler(HttpStatusCode status, string body = "{}") : HttpMessageHandler
+/// <summary>Counts the sends that reach the transport; a rejected call must never reach it, so a send fails.</summary>
+file sealed class CountingHandler : HttpMessageHandler
 {
     private int _attempts;
 
@@ -69,6 +69,6 @@ file sealed class CountingHandler(HttpStatusCode status, string body = "{}") : H
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _attempts);
-        return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body) });
+        throw new InvalidOperationException("a call the circuit rejected reached the transport");
     }
 }

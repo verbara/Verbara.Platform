@@ -42,7 +42,8 @@ public sealed class WhatsAppConnectorCircuitRejectionTests
             _ => new ValueTask<int>(probeOutcome.Task),
             CancellationToken.None).AsTask();
 
-        var handler = new FakeHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK));
+        using var response = new HttpResponseMessage(HttpStatusCode.OK);
+        var handler = new FakeHttpMessageHandler(response);
         var logger = new RecordingLogger<WhatsAppConnector>();
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(WhatsAppConnector.HttpClientName)

@@ -41,7 +41,8 @@ public sealed class TelegramConnectorCircuitRejectionTests
             _ => new ValueTask<int>(probeOutcome.Task),
             CancellationToken.None).AsTask();
 
-        var handler = new FakeTelegramHttpHandler(new HttpResponseMessage(HttpStatusCode.OK));
+        using var response = new HttpResponseMessage(HttpStatusCode.OK);
+        var handler = new FakeTelegramHttpHandler(response);
         var logger = new RecordingLogger<TelegramConnector>();
         using var httpClient = new HttpClient(handler, disposeHandler: false);
         var connector = new TelegramConnector(

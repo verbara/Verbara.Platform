@@ -1,4 +1,3 @@
-using System.Net;
 using Microsoft.Extensions.Time.Testing;
 using Verbara.Platform.Core;
 using Verbara.Platform.Flows;
@@ -44,7 +43,7 @@ public sealed class HttpRequestNodeHandlerCircuitRejectionTests
     public async Task ExecuteAsync_ShouldPropagateTheRejection_WhenTheCircuitRejectsTheCall()
     {
         var (policy, probeOutcome, probe) = await HoldProbeAsync(HttpRequestNodeHandler.ResiliencePolicyKey);
-        var handler = new CountingHandler(HttpStatusCode.OK, "ok");
+        var handler = new CountingHandler();
         var sut = new HttpRequestNodeHandler(
             new HttpClient(handler) { BaseAddress = new Uri("http://test/") }, new TemplateRenderer(), policy);
         var node = FlowTestHelpers.MakeNode(EntityId.New(), "http_request",
@@ -62,7 +61,8 @@ public sealed class HttpRequestNodeHandlerCircuitRejectionTests
     }
 }
 
-file sealed class CountingHandler(HttpStatusCode status, string body = "{}") : HttpMessageHandler
+/// <summary>Counts the sends that reach the transport; a rejected call must never reach it, so a send fails.</summary>
+file sealed class CountingHandler : HttpMessageHandler
 {
     private int _attempts;
 
@@ -71,6 +71,6 @@ file sealed class CountingHandler(HttpStatusCode status, string body = "{}") : H
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _attempts);
-        return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body) });
+        throw new InvalidOperationException("a call the circuit rejected reached the transport");
     }
 }

@@ -41,7 +41,8 @@ public sealed class InstagramConnectorCircuitRejectionTests
             _ => new ValueTask<int>(probeOutcome.Task),
             CancellationToken.None).AsTask();
 
-        var handler = new FakeHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK));
+        using var response = new HttpResponseMessage(HttpStatusCode.OK);
+        var handler = new FakeHttpMessageHandler(response);
         var logger = new RecordingLogger<InstagramConnector>();
         using var httpClient = new HttpClient(handler, disposeHandler: false);
         var connector = new InstagramConnector(

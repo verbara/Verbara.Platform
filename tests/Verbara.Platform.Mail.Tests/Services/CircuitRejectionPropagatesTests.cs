@@ -1,4 +1,3 @@
-using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
@@ -79,7 +78,7 @@ public sealed class CircuitRejectionPropagatesTests
     public async Task GraphMailboxService_ListMessagesAsync_ShouldPropagateTheRejection_WhenTheCircuitRejectsTheCall()
     {
         var (policy, probeOutcome, probe) = await HoldProbeAsync(GraphMailboxService.ResiliencePolicyKey);
-        var handler = new CountingHandler(HttpStatusCode.OK, """{"value":[]}""");
+        var handler = new CountingHandler();
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient(Arg.Any<string>())
             .Returns(_ => new HttpClient(handler, disposeHandler: false) { BaseAddress = new Uri("https://graph.microsoft.com/v1.0/") });
@@ -97,7 +96,8 @@ public sealed class CircuitRejectionPropagatesTests
     }
 }
 
-file sealed class CountingHandler(HttpStatusCode status, string body = "{}") : HttpMessageHandler
+/// <summary>Counts the sends that reach the transport; a rejected call must never reach it, so a send fails.</summary>
+file sealed class CountingHandler : HttpMessageHandler
 {
     private int _attempts;
 
@@ -106,6 +106,6 @@ file sealed class CountingHandler(HttpStatusCode status, string body = "{}") : H
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _attempts);
-        return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body) });
+        throw new InvalidOperationException("a call the circuit rejected reached the transport");
     }
 }
