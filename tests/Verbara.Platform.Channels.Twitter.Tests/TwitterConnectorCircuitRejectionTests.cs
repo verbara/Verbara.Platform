@@ -61,7 +61,7 @@ public sealed class TwitterConnectorCircuitRejectionTests
 
         var result = await connector.SendAsync(
             new OutboundMessage(
-                new ChannelAddress(ChannelType.Twitter, "participant-1"),
+                new ChannelAddress(ChannelType.Twitter, ParticipantId),
                 new MessageEnvelope([new TextBlock("hello")]),
                 new TenantId("tenant-a"),
                 EntityId.From("conv-1")),
@@ -73,10 +73,57 @@ public sealed class TwitterConnectorCircuitRejectionTests
         logger.Messages.Should().Contain(
             m => m.Contains(TwitterConnector.ResiliencePolicyKey, StringComparison.Ordinal),
             "the log line names the circuit");
+        logger.Messages.Should().NotContain(
+            m => m.Contains(ParticipantId, StringComparison.Ordinal),
+            "the request path carries the recipient's user id, so the log leaves the path out");
 
         probeOutcome.SetResult(0);
         await probe;
     }
+
+    [Fact]
+    public async Task SendAsync_ShouldLogWithoutTheRecipientId_WhenTheTransportFails()
+    {
+        var logger = new RecordingLogger<TwitterConnector>();
+        using var httpClient = new HttpClient(new ThrowingHttpHandler(), disposeHandler: true);
+        var connector = new TwitterConnector(
+            httpClient,
+            Options.Create(new TwitterOptions
+            {
+                ApiKey = "api-key",
+                ApiSecret = "api-secret",
+                AccessToken = "access-token",
+                AccessTokenSecret = "access-token-secret",
+                BearerToken = "my-bearer-token",
+                BaseUrl = "https://api.x.com",
+            }),
+            logger);
+
+        var result = await connector.SendAsync(
+            new OutboundMessage(
+                new ChannelAddress(ChannelType.Twitter, ParticipantId),
+                new MessageEnvelope([new TextBlock("hello")]),
+                new TenantId("tenant-a"),
+                EntityId.From("conv-1")),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be("HTTP_ERROR");
+        logger.Messages.Should().ContainSingle("the transport failure is logged once");
+        logger.Messages.Should().NotContain(
+            m => m.Contains(ParticipantId, StringComparison.Ordinal),
+            "the request path carries the recipient's user id, so the log leaves the path out");
+    }
+
+    private const string ParticipantId = "participant-1";
+}
+
+file sealed class ThrowingHttpHandler : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken) =>
+        throw new HttpRequestException("connection refused");
 }
 
 file sealed class RecordingLogger<T> : ILogger<T>

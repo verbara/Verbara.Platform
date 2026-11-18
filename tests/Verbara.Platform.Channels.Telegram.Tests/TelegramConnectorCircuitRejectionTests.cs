@@ -49,7 +49,7 @@ public sealed class TelegramConnectorCircuitRejectionTests
             httpClient,
             Options.Create(new TelegramOptions
             {
-                BotToken = "123456:ABCdefGHI",
+                BotToken = BotToken,
                 BaseUrl = "https://api.telegram.org",
             }),
             logger,
@@ -69,10 +69,58 @@ public sealed class TelegramConnectorCircuitRejectionTests
         logger.Messages.Should().Contain(
             m => m.Contains(TelegramConnector.ResiliencePolicyKey, StringComparison.Ordinal),
             "the log line names the circuit");
+        logger.Messages.Should().Contain(
+            m => m.Contains("sendMessage", StringComparison.Ordinal),
+            "the log line names the API method");
+        logger.Messages.Should().NotContain(
+            m => m.Contains(BotToken, StringComparison.Ordinal),
+            "the request URL embeds the bot token, so the log names the method instead of the URL");
 
         probeOutcome.SetResult(0);
         await probe;
     }
+
+    [Fact]
+    public async Task SendAsync_ShouldLogTheMethodWithoutTheBotToken_WhenTheTransportFails()
+    {
+        var logger = new RecordingLogger<TelegramConnector>();
+        using var httpClient = new HttpClient(new ThrowingHttpHandler(), disposeHandler: true);
+        var connector = new TelegramConnector(
+            httpClient,
+            Options.Create(new TelegramOptions
+            {
+                BotToken = BotToken,
+                BaseUrl = "https://api.telegram.org",
+            }),
+            logger);
+
+        var result = await connector.SendAsync(
+            new OutboundMessage(
+                new ChannelAddress(ChannelType.Telegram, "987654321"),
+                new MessageEnvelope([new TextBlock("hello")]),
+                new TenantId("tenant-a"),
+                EntityId.From("conv-1")),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be("HTTP_ERROR");
+        logger.Messages.Should().Contain(
+            m => m.Contains("sendMessage", StringComparison.Ordinal),
+            "the log line names the API method");
+        logger.Messages.Should().NotContain(
+            m => m.Contains(BotToken, StringComparison.Ordinal),
+            "the request URL embeds the bot token, so the log names the method instead of the URL");
+    }
+
+    private const string BotToken = "123456:ABCdefGHI";
+}
+
+file sealed class ThrowingHttpHandler : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken) =>
+        throw new HttpRequestException("connection refused");
 }
 
 file sealed class RecordingLogger<T> : ILogger<T>

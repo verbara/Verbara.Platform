@@ -122,12 +122,12 @@ public sealed class TwitterConnector : IChannelConnector
         {
             // The circuit is open, or half-open with its one probe in flight: the send never reached the provider.
             // Same result as a transport failure, so the caller retries it the same way.
-            Log.CircuitRejected(_logger, ex.Key, url);
+            Log.CircuitRejected(_logger, ex.Key);
             return new SendResult(false, null, "HTTP_ERROR", ex.Message);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            Log.HttpError(_logger, ex, url);
+            Log.HttpError(_logger, ex, (int?)(ex as HttpRequestException)?.StatusCode);
             return new SendResult(false, null, "HTTP_ERROR", ex.Message);
         }
 
