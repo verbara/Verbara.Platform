@@ -1,0 +1,282 @@
+using System.Net;
+using System.Net.Http.Json;
+using Npgsql;
+using static Verbara.Platform.Api.Tests.Dialer.ContactListTenantScopeTests;
+
+namespace Verbara.Platform.Api.Tests.Dialer;
+
+/// <summary>
+/// contact-lists-stay-in-their-tenant, against Pro's Postgres stores: the real Api <c>Program</c> with the dialer
+/// registered over a Testcontainers Postgres (<see cref="DialerTenantScopeFactory"/> in live-DB mode keeps Pro's
+/// contact-list and disposition-code stores). The campaign contact-list routes and the disposition-code create and
+/// delete routes answer 404 for a campaign, list or code outside the caller's tenant or campaign and change nothing,
+/// and a list or code whose own tenant differs from its campaign's tenant is reached by neither tenant.
+/// </summary>
+public sealed class ContactListTenantScopeLiveDbTests : IClassFixture<DialerTenantScopeLiveDbFixture>
+{
+    private const string CampaignsPath = "/api/admin/campaigns";
+    private const string Acme = DialerTenantScopeFactory.AcmeTenantId;
+    private const string Globex = DialerTenantScopeFactory.GlobexTenantId;
+
+    private readonly DialerTenantScopeLiveDbFixture _fixture;
+
+    public ContactListTenantScopeLiveDbTests(DialerTenantScopeLiveDbFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    private DialerTenantScopeFactory Factory => _fixture.Factory;
+
+    /// <summary>Each list route, called by the list's own tenant and by the campaign's tenant.</summary>
+    public static TheoryData<string, string> ListRoutesByCaller => new()
+    {
+        { "delete", Globex }, { "import", Globex }, { "contacts", Globex },
+        { "delete", Acme }, { "import", Acme }, { "contacts", Acme },
+    };
+
+    // ─── Contact lists ───────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateContactList_ShouldReturn404AndCreateNoList_WhenTheCampaignBelongsToAnotherTenant()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+
+        using var response = await globex.PostAsync($"{CampaignsPath}/{campaignId}/contact-lists",
+            JsonContent.Create(new { name = "not mine" }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "campaign {0} belongs to acme, so it is no campaign of globex's", campaignId);
+        (await CountAsync("SELECT COUNT(*) FROM contact_lists WHERE campaign_id = @Id", campaignId))
+            .Should().Be(0, "no list is written on acme's campaign");
+    }
+
+    [Fact]
+    public async Task ListContactLists_ShouldReturn404AndCarryNoList_WhenTheCampaignBelongsToAnotherTenant()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var listName = $"acme-list-{Guid.NewGuid():N}";
+        await CreateContactListAsync(acme, campaignId, listName);
+
+        using var response = await globex.GetAsync($"{CampaignsPath}/{campaignId}/contact-lists");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "campaign {0} belongs to acme, so globex has no contact lists of it to show", campaignId);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain(listName);
+    }
+
+    [Theory]
+    [MemberData(nameof(ListRoutesByCampaign), MemberType = typeof(ContactListTenantScopeTests))]
+    public async Task ListRoute_ShouldReturn404AndLeaveTheListUnchanged_WhenTheListBelongsToAnotherTenant(
+        string route, bool throughCallerCampaign)
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var listId = await CreateListWithContactAsync(acme, campaignId);
+        var routeCampaignId = throughCallerCampaign ? await CreateCampaignAsync(globex) : campaignId;
+
+        using var response = await SendListRouteAsync(globex, route, routeCampaignId, listId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "list {0} belongs to acme, so it is no list of globex's (through campaign {1})", listId, routeCampaignId);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain(ContactFirstName);
+        await AssertListUnchangedAsync(acme, campaignId, listId);
+    }
+
+    [Theory]
+    [MemberData(nameof(ListRoutes), MemberType = typeof(ContactListTenantScopeTests))]
+    public async Task ListRoute_ShouldReturn404AndLeaveTheListUnchanged_WhenTheListBelongsToAnotherCampaign(string route)
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        var campaignId = await CreateCampaignAsync(acme);
+        var otherCampaignId = await CreateCampaignAsync(acme);
+        var listId = await CreateListWithContactAsync(acme, campaignId);
+
+        using var response = await SendListRouteAsync(acme, route, otherCampaignId, listId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "list {0} belongs to campaign {1}, not to campaign {2}", listId, campaignId, otherCampaignId);
+        await AssertListUnchangedAsync(acme, campaignId, listId);
+    }
+
+    [Theory]
+    [MemberData(nameof(ListRoutesByCaller))]
+    public async Task ListRoute_ShouldReturn404AndLeaveTheListUnchanged_WhenTheListTenantDiffersFromItsCampaignTenant(
+        string route, string caller)
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        var campaignId = await CreateCampaignAsync(acme);
+        var listId = await SeedListAsync(Globex, campaignId);
+        using var client = Factory.CreateAdminClient(caller);
+
+        using var response = await SendListRouteAsync(client, route, campaignId, listId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "list {0} is globex's but campaign {1} is acme's, so neither tenant reaches it (caller {2})",
+            listId, campaignId, caller);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain(ContactFirstName);
+        (await CountAsync("SELECT COUNT(*) FROM contact_lists WHERE id = @Id", listId)).Should().Be(1, "the list still exists");
+        (await ContactFirstNamesAsync(listId)).Should().Equal([ContactFirstName], "the list still holds exactly its contact");
+    }
+
+    [Fact]
+    public async Task ContactListRoutes_ShouldAnswerAsBefore_WhenTheCampaignAndListBelongToTheTenant()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        var campaignId = await CreateCampaignAsync(acme);
+        var listId = await CreateListWithContactAsync(acme, campaignId);
+
+        await AssertListUnchangedAsync(acme, campaignId, listId);
+        using var delete = await acme.DeleteAsync($"{CampaignsPath}/{campaignId}/contact-lists/{listId}");
+
+        delete.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        (await CountAsync("SELECT COUNT(*) FROM contact_lists WHERE id = @Id", listId)).Should().Be(0);
+    }
+
+    // ─── Disposition codes ───────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateDisposition_ShouldReturn404AndCreateNoCode_WhenTheCampaignBelongsToAnotherTenant()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+
+        using var response = await globex.PostAsync($"{CampaignsPath}/{campaignId}/dispositions", JsonContent.Create(new
+        {
+            code = "NOT-MINE",
+            label = "Not mine",
+            category = "failure",
+            isSuccess = false,
+            triggerRetry = false,
+            triggerCallback = false,
+        }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "campaign {0} belongs to acme, so it is no campaign of globex's", campaignId);
+        (await CountAsync("SELECT COUNT(*) FROM disposition_codes WHERE campaign_id = @Id", campaignId))
+            .Should().Be(0, "no code is written on acme's campaign");
+    }
+
+    [Theory]
+    [MemberData(nameof(ThroughOwnCampaign), MemberType = typeof(ContactListTenantScopeTests))]
+    public async Task DeleteDisposition_ShouldReturn404AndKeepTheCode_WhenTheCodeBelongsToAnotherTenant(
+        bool throughCallerCampaign)
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var codeId = await CreateDispositionAsync(acme, campaignId);
+        var routeCampaignId = throughCallerCampaign ? await CreateCampaignAsync(globex) : campaignId;
+
+        using var response = await globex.DeleteAsync($"{CampaignsPath}/{routeCampaignId}/dispositions/{codeId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "code {0} belongs to acme, so it is no code of globex's (through campaign {1})", codeId, routeCampaignId);
+        (await DispositionIdsAsync(acme, campaignId)).Should().Contain(codeId);
+    }
+
+    [Fact]
+    public async Task DeleteDisposition_ShouldReturn404AndKeepTheCode_WhenTheCodeTenantDiffersFromItsCampaignTenant()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var codeId = await SeedDispositionAsync(Globex, campaignId);
+
+        using var response = await globex.DeleteAsync($"{CampaignsPath}/{campaignId}/dispositions/{codeId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "campaign {0} belongs to acme, so no code of it is globex's, whatever the code's own tenant", campaignId);
+        (await DispositionRowAsync(codeId)).Should().Be((Globex, campaignId, "MISMATCHED"), "the row is unchanged");
+    }
+
+    [Fact]
+    public async Task DispositionRoutes_ShouldAnswerAsBefore_WhenTheCampaignAndCodeBelongToTheTenant()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        var campaignId = await CreateCampaignAsync(acme);
+        var codeId = await CreateDispositionAsync(acme, campaignId);
+
+        using var delete = await acme.DeleteAsync($"{CampaignsPath}/{campaignId}/dispositions/{codeId}");
+
+        delete.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        (await DispositionIdsAsync(acme, campaignId)).Should().NotContain(codeId);
+    }
+
+    // ─── Postgres seeding and reads ──────────────────────────────────────────────
+
+    /// <summary>A list of <paramref name="tenantId"/> on <paramref name="campaignId"/>, holding one contact.</summary>
+    private async Task<long> SeedListAsync(string tenantId, long campaignId)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = new NpgsqlCommand("""
+            WITH l AS (INSERT INTO contact_lists (tenant_id, campaign_id, name) VALUES (@T, @C, 'mismatched') RETURNING id),
+                 k AS (INSERT INTO dialer_contacts (tenant_id, contact_list_id, first_name)
+                       SELECT @T, l.id, @F FROM l RETURNING id)
+            INSERT INTO contact_phones (contact_id, phone_number) SELECT k.id, '+15551110000' FROM k
+            RETURNING (SELECT id FROM l)
+            """, conn);
+        cmd.Parameters.AddWithValue("T", tenantId);
+        cmd.Parameters.AddWithValue("C", campaignId);
+        cmd.Parameters.AddWithValue("F", ContactFirstName);
+        return (long)(await cmd.ExecuteScalarAsync())!;
+    }
+
+    /// <summary>A disposition code of <paramref name="tenantId"/> on <paramref name="campaignId"/>.</summary>
+    private async Task<long> SeedDispositionAsync(string tenantId, long campaignId)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = new NpgsqlCommand("""
+            INSERT INTO disposition_codes (tenant_id, campaign_id, code, label) VALUES (@T, @C, 'MISMATCHED', 'Mismatched')
+            RETURNING id
+            """, conn);
+        cmd.Parameters.AddWithValue("T", tenantId);
+        cmd.Parameters.AddWithValue("C", campaignId);
+        return (long)(await cmd.ExecuteScalarAsync())!;
+    }
+
+    private async Task<long> CountAsync(string sql, long id)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("Id", id);
+        return (long)(await cmd.ExecuteScalarAsync())!;
+    }
+
+    private async Task<IReadOnlyList<string>> ContactFirstNamesAsync(long listId)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            "SELECT first_name FROM dialer_contacts WHERE contact_list_id = @Id ORDER BY id", conn);
+        cmd.Parameters.AddWithValue("Id", listId);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        var names = new List<string>();
+        while (await reader.ReadAsync())
+            names.Add(reader.GetString(0));
+        return names;
+    }
+
+    private async Task<(string TenantId, long CampaignId, string Code)?> DispositionRowAsync(long codeId)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            "SELECT tenant_id, campaign_id, code FROM disposition_codes WHERE id = @Id", conn);
+        cmd.Parameters.AddWithValue("Id", codeId);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+            return null;
+        return (reader.GetString(0), reader.GetInt64(1), reader.GetString(2));
+    }
+
+    private async Task<NpgsqlConnection> OpenAsync()
+    {
+        var conn = new NpgsqlConnection(_fixture.ConnectionString);
+        await conn.OpenAsync();
+        return conn;
+    }
+}

@@ -8,6 +8,8 @@ using Verbara.Platform.Core;
 using Verbara.Platform.Identity;
 using Verbara.Sdk.Pro.Dialer.Campaign;
 using Verbara.Sdk.Pro.Dialer.Compliance;
+using Verbara.Sdk.Pro.Dialer.Contacts;
+using Verbara.Sdk.Pro.Dialer.Dispositions;
 using Verbara.Sdk.Pro.Licensing;
 using Verbara.Sdk.Pro.MultiTenant;
 
@@ -21,10 +23,11 @@ namespace Verbara.Platform.Api.Tests.Dialer;
 /// </summary>
 /// <remarks>
 /// With a dialer connection string (a Testcontainers Postgres) <c>Program.cs</c> registers the dialer over it, and
-/// this host keeps the <see cref="DncListStoreBase"/> and <see cref="CampaignStoreBase"/> descriptors
+/// this host keeps the <see cref="DncListStoreBase"/>, <see cref="CampaignStoreBase"/>,
+/// <see cref="ContactListStoreBase"/> and <see cref="DispositionCodeStoreBase"/> descriptors
 /// <c>UsePostgresDialerStorage</c> registered, re-adding them after
 /// <see cref="AuthenticatedPlatformApiFactory.RegisterInMemoryStores"/>, so the routes run against Pro's Postgres
-/// stores. Without one, the in-memory stores answer, which follow the Pro <c>2.20.3-pro</c> contract.
+/// stores. Without one, the in-memory stores answer, which follow the Pro <c>2.30.1-pro</c> contract.
 /// </remarks>
 public sealed class DialerTenantScopeFactory : WebApplicationFactory<Program>
 {
@@ -58,6 +61,12 @@ public sealed class DialerTenantScopeFactory : WebApplicationFactory<Program>
             builder.UseSetting("ConnectionStrings:Dialer", _dialerConnectionString);
     }
 
+    /// <summary>
+    /// The contact-list and disposition-code store descriptors, kept only in live-DB mode: the in-memory suite reads
+    /// the <see cref="InMemoryContactListStore"/> and <see cref="InMemoryDispositionCodeStore"/> directly.
+    /// </summary>
+    private static readonly HashSet<Type> LiveDbOnlyStores = [typeof(ContactListStoreBase), typeof(DispositionCodeStoreBase)];
+
     /// <inheritdoc />
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -66,7 +75,8 @@ public sealed class DialerTenantScopeFactory : WebApplicationFactory<Program>
         builder.ConfigureServices(services =>
         {
             var postgresStores = services
-                .Where(d => d.ServiceType == typeof(DncListStoreBase) || d.ServiceType == typeof(CampaignStoreBase))
+                .Where(d => d.ServiceType == typeof(DncListStoreBase) || d.ServiceType == typeof(CampaignStoreBase)
+                    || (_dialerConnectionString is not null && LiveDbOnlyStores.Contains(d.ServiceType)))
                 .ToList();
 
             AuthenticatedPlatformApiFactory.StubVerbaraHostedServices(services);
