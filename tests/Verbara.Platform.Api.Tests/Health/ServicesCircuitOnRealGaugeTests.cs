@@ -86,4 +86,24 @@ public sealed class ServicesCircuitOnRealGaugeTests
         status.Should().Be(HealthStatus.Degraded, "a half-open key is not closed, and only an Open key escalates");
         message.Should().Contain(key);
     }
+
+    [Fact]
+    public void EvaluateCircuits_ShouldNameEachNotClosedKeyWithItsState_WhenNoThresholdIsGiven()
+    {
+        var open = UniqueKey();
+        var halfOpen = UniqueKey();
+        var closed = UniqueKey();
+        var observer = new ResilienceStateObserver();
+        observer.SetForTest(open, ResilienceCircuitState.Open, DateTimeOffset.UtcNow - TimeSpan.FromMinutes(10));
+        observer.SetForTest(halfOpen, ResilienceCircuitState.HalfOpen, DateTimeOffset.UtcNow - TimeSpan.FromMinutes(1));
+        observer.SetForTest(closed, ResilienceCircuitState.Closed, DateTimeOffset.UtcNow - TimeSpan.FromMinutes(1));
+
+        var (status, message, _) = CircuitHealthEvaluator.EvaluateCircuits(
+            [open, halfOpen, closed], unhealthyThreshold: null, observer);
+
+        status.Should().Be(HealthStatus.Degraded, "with no threshold a key that is not closed is Degraded at most");
+        message.Should().Be(
+            $"Circuit not closed: {open} (Open), {halfOpen} (HalfOpen)",
+            "the message names every key that is not closed, with its state, and leaves the closed key out");
+    }
 }
