@@ -192,9 +192,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Inert on Platform: the snoop filter at reconstruction (Platform creates no snoop), the RTP quality conversion (no
     caller), a call's direction after a rebuild (unchanged), and the release's test-only and pin-only items.
 - **A paused `app_agent_pool` agent is a known limitation of Pro `2.29.0-pro`** (its "Known limitations" entry, Sdk
-  #541), fixed in Pro `2.30.0-pro`. Platform registers the agent-state push bridge, but its agent members are PJSIP
-  only, it registers no skill-based agent selector, and the Web console only re-fetches on that event, so the
-  limitation does not change what Platform shows.
+  #541), and the limitation stays: no Pro release fixes it. A later Pro release removes both the agent-state push
+  bridge and the skill-based agent selector, after a separate Platform change stops registering the bridge. Platform
+  registers the bridge today, but its agent members are PJSIP only, it registers no skill-based agent selector, and
+  the Web console only re-fetches on that event, so the limitation does not change what Platform shows.
 - **The ASP.NET Core packages move together to `10.0.15`**: `Microsoft.AspNetCore.Authentication.JwtBearer` and
   `.OpenIdConnect` (`10.0.14`), `Microsoft.AspNetCore.DataProtection` and `.Extensions`, `Microsoft.AspNetCore.SignalR.Client`
   and `.Common`, `Microsoft.AspNetCore.Mvc.Testing`, `System.Security.Cryptography.Xml` and `.Pkcs` (`10.0.13`), and
