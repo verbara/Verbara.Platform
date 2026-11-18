@@ -30,6 +30,10 @@ internal sealed partial class VoiceCallTenantResolver(
         if (conversation is not null)
             return conversation.TenantId.Value;
 
+        // The unscoped lookup is kept on purpose: the resolver is handed a linked id only, with no server id. From
+        // Sdk 2.10 an id two or more attached servers hold answers null, so such a call gets no tenant here (logged
+        // below) instead of whichever server's call last wrote a shared index. The chart gives each pod's Asterisk
+        // its own systemname, which keeps linked ids unique across servers.
         if (sessions.GetByLinkedId(linkedId) is not { } session || !VoiceCallTenant.IsLive(session))
         {
             LogNoSource(linkedId);
