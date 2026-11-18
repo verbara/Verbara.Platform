@@ -60,7 +60,7 @@ public sealed class AdmitExistingCallsReachTests(ITestOutputHelper output) : IAs
             "outbound-linked: dir=Inbound tenant=- meta=[origin=reload]",
             "campaign: dir=Inbound tenant=- meta=[origin=reload]",
             "trunk-not-campaign: dir=Inbound tenant=- meta=[origin=reload]",
-            "not-inbound: dir=Outbound tenant=- meta=[origin=reload]"), "no admitted session carries a tenant before the lease");
+            "not-inbound: dir=Outbound tenant=- meta=[origin=reload]"), "no admitted session carries a tenant when the bridge starts");
 
         // Who had subscribed when the admission ran (CallOutcomeObserver is a thread-pool race: boot-a and boot-b).
         Phase(boot, "ConversationStatePushBridge").Should().Be(AdmissionPhase.Before);
@@ -73,7 +73,7 @@ public sealed class AdmitExistingCallsReachTests(ITestOutputHelper output) : IAs
         foreach (var later in new[] { "VoiceConversationBridge", "EventStoreSubscriber", "CallAnalyticsEngine", "AgentAssistEngine" })
             boot.Recorder.DeliveredTo(later).Should().NotContain(d => d.StartsWith("CallStartedEvent", StringComparison.Ordinal),
                 "{0} subscribed after the boot admission returned", later);
-        boot.GetVarsBeforeEdge.Should().BeEmpty("nothing reads a channel variable for a boot start before the lease");
+        boot.GetVarsBeforeEdge.Should().BeEmpty("nothing reads a channel variable for a boot start before the bridge starts");
 
         // Once the lease is held each tenant-less admitted session gets its tenant once, from its Conversation, else one
         // TENANT_ID read: by the voice bridge's first leader edge or the event store's acquisition pass, whichever runs
@@ -355,12 +355,19 @@ public sealed class AdmitExistingCallsReachTests(ITestOutputHelper output) : IAs
 
         int Reloaded() => manager.ActiveSessions.Count(s => s.Metadata.TryGetValue("origin", out var o) && o == "reload");
         var beforeBridge = -1;
+        var sessionsBeforeEdge = "";
+        var getVarsBeforeEdge = new List<string>();
         var hosted = await HostedServices.StartAsync(sp, output, async service =>
         {
             if (service is ClusterManager && order == BootOrder.ObserverFirst)
                 await WaitAsync(() => manager.Recorder.HasSubscribed("CallOutcomeObserver"), "boot-a: the observer subscribed");
             if (service is VoiceConversationBridge)
+            {
+                // Before the bridge and the event store start, nothing that stamps a tenant or reads a variable runs.
                 beforeBridge = Reloaded();
+                sessionsBeforeEdge = AdmissionReport.Sessions(manager, calls);
+                getVarsBeforeEdge = [.. primary.GetVars];
+            }
         });
         try
         {
@@ -379,9 +386,6 @@ public sealed class AdmitExistingCallsReachTests(ITestOutputHelper output) : IAs
                 .GroupBy(p => p.Name).Select(g => g.First()).OrderBy(p => p.Index).ToList();
             output.WriteLine("== subscriber positions: " + string.Join(", ", positions.Select(p => $"{p.Name}@{p.Index}")));
 
-            var leader = sp.GetRequiredKeyedService<IClusterLeader>(VoiceLeaderResources.AmiOwner);
-            var sessionsBeforeEdge = leader.IsLeader ? "lease already held at host start" : AdmissionReport.Sessions(manager, calls);
-            var getVarsBeforeEdge = primary.GetVars.ToList();
             await WaitReadyAsync(sp, manager);
 
             // The first leader edge, run by the test, and the bridge's own one-second leader poll, whichever comes first.

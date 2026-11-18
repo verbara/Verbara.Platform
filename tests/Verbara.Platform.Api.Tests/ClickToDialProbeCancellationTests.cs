@@ -83,8 +83,10 @@ public sealed class ClickToDialProbeCancellationTests : IAsyncDisposable
         _answers.Enqueue(async ct =>
         {
             probeStarted.TrySetResult();
-            await Task.Delay(Timeout.Infinite, ct); // the probe's originate is in flight until its caller cancels
-            return new ManagerResponse { Response = "Success" };
+            // The probe's originate is in flight until its caller cancels it.
+            var inFlight = new TaskCompletionSource<ManagerResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using (ct.Register(() => inFlight.TrySetCanceled(ct)))
+                return await inFlight.Task;
         });
         using var cancel = new CancellationTokenSource();
         var probe = sut.DialAsync(TenantId, _agentId, "+15551234567", null, cancel.Token);
