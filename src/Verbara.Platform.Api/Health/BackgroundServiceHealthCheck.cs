@@ -13,9 +13,11 @@ namespace Verbara.Platform.Api.Health;
 /// naming the worker, and dominates any circuit.</item>
 /// <item>The voice-plane heartbeats (<see cref="VoicePlaneHeartbeats"/>) are left out of its status and its data; the
 /// <c>asterisk</c> check on <c>/health/voice</c> reports them.</item>
-/// <item>An open dependency circuit (<see cref="PlatformHealthCheckOptions.WorkerWatchedPolicyKeys"/>) makes it
-/// Degraded at most, whatever its duration, because draining the pod heals no outbound integration, the keys are
-/// global to every tenant, and the Sdk gauge reads Open until a call succeeds. Each key's state stays in the data.</item>
+/// <item>A dependency circuit (<see cref="PlatformHealthCheckOptions.WorkerWatchedPolicyKeys"/>) that is not closed,
+/// open or half-open, makes it Degraded at most, whatever its duration, because draining the pod heals no outbound
+/// integration and the keys are global to every tenant. It stays Degraded until the circuit reads Closed, after a
+/// successful call; the Sdk gauge reads HalfOpen once the open window ends, with or without a call. Each key's state
+/// stays in the data.</item>
 /// </list>
 /// </remarks>
 internal sealed class BackgroundServiceHealthCheck : IHealthCheck
@@ -70,7 +72,7 @@ internal sealed class BackgroundServiceHealthCheck : IHealthCheck
                 $"Background services unhealthy: {names}", data: data));
         }
 
-        // Any open circuit is capped at Degraded here as well, so the check never gates readiness on one.
+        // Any circuit that is not closed is capped at Degraded here as well, so the check never gates readiness on one.
         if (circuitStatus != HealthStatus.Healthy)
         {
             return Task.FromResult(HealthCheckResult.Degraded(

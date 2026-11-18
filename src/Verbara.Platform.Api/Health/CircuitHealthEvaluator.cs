@@ -10,12 +10,14 @@ namespace Verbara.Platform.Api.Health;
 internal static class CircuitHealthEvaluator
 {
     /// <summary>
-    /// Healthy when every watched key is closed or unobserved, Degraded when one is open for less than
-    /// <paramref name="unhealthyThreshold"/>, Unhealthy when one has been open for longer. With no threshold
-    /// (<see langword="null"/>), an open key is Degraded at most, whatever its duration, and the message names every
-    /// open key: the <c>services</c> check passes that, because a dependency circuit never gates readiness
-    /// (readiness-without-asterisk, design D3). The data carries each key's state, <c>stateSince</c> and duration, or
-    /// <c>unobserved</c>.
+    /// Healthy when every watched key is closed or unobserved, Degraded when one is not closed (open or half-open),
+    /// Unhealthy only when one has read <c>Open</c> for <paramref name="unhealthyThreshold"/> or longer. A half-open
+    /// key never escalates: since Sdk 2.10 the gauge reads the breaker's current state, so a tripped circuit reads
+    /// <c>HalfOpen</c> once its open window ends, and a circuit that keeps cycling never gives an unbroken <c>Open</c>
+    /// reading. With no threshold (<see langword="null"/>), a key that is not closed is Degraded at most, whatever its
+    /// duration, and the message names every such key with its state: the <c>services</c> check passes that, because a
+    /// dependency circuit never gates readiness (readiness-without-asterisk, design D3). The data carries each key's
+    /// state, <c>stateSince</c> and duration, or <c>unobserved</c>.
     /// </summary>
     internal static (HealthStatus Status, string Message, IReadOnlyDictionary<string, object> Data)
         EvaluateCircuits(
@@ -43,13 +45,13 @@ internal static class CircuitHealthEvaluator
                 durationSeconds = Math.Round(snap.Duration.TotalSeconds, 1),
             };
 
-            if (!snap.IsOpen)
+            if (snap.State == ResilienceCircuitState.Closed)
                 continue;
 
-            if (unhealthyThreshold is { } threshold && snap.Duration >= threshold)
+            if (snap.IsOpen && unhealthyThreshold is { } threshold && snap.Duration >= threshold)
                 openLong.Add(key);
             else
-                openRecent.Add(key);
+                openRecent.Add($"{key} ({snap.State})");
         }
 
         // openLong is filled only when a threshold was given.
@@ -65,7 +67,7 @@ internal static class CircuitHealthEvaluator
         {
             return (
                 HealthStatus.Degraded,
-                $"Circuit open: {string.Join(", ", openRecent)}",
+                $"Circuit not closed: {string.Join(", ", openRecent)}",
                 data);
         }
 

@@ -208,7 +208,7 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 - **Readiness, the HTTP plane, on `/health/ready`:** `postgres`, `retention`, `services` (the digital background-service heartbeats), `dialer-engine`, `csatrunner-orchestrator` and `analytics-live-queue-writer`. One of them Unhealthy makes the readiness probe answer 503, and the pod leaves the Service.
 - **The voice plane, on `/health/voice`:** `asterisk` (this pod's primary AMI connection and the Stasis inbound worker's heartbeat) and the session-fed Pro engines `eventstore-subscriber`, `analytics-aggregator`, `callanalytics-engine` and `agentassist-engine`. No probe reads this endpoint, so a voice-plane check never drains the pod. While AMI is down, voice transfer and click-to-dial answer 503 `voice-unavailable` with `Retry-After: 30`.
 
-A dependency circuit (`webhook.delivery`, `oidc.token-exchange`) never makes a check Unhealthy: an open one shows as `services` `Degraded` (see [CircuitBreakerOpen](#circuitbreakeropen)).
+A dependency circuit (`webhook.delivery`, `oidc.token-exchange`) never makes a check Unhealthy: an open or half-open one shows as `services` `Degraded` until a successful call closes it (see [CircuitBreakerOpen](#circuitbreakeropen)).
 
 **First response:**
 - Look up the health check by `name` label.

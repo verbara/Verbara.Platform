@@ -71,8 +71,8 @@ public static class PlatformHealthExtensions
         // Frente D (v1.9.1): resilience-state-aware health checks. The observer listens
         // to the Verbara.Sdk.Resilience meter's circuit.state observable gauge and
         // caches per-policy-key state + timestamp so HealthCheck implementations can
-        // distinguish Healthy / Degraded / Unhealthy based on how long a circuit has
-        // been open.
+        // tell Healthy (closed) from Degraded (open or half-open); only a key read Open
+        // past a check's threshold escalates to Unhealthy.
         services.Configure<PlatformHealthCheckOptions>(_ => { });
         services.AddSingleton<ResilienceStateObserver>();
         services.AddSingleton<IResilienceStateObserver>(

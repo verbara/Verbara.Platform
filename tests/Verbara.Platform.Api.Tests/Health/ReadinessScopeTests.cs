@@ -175,6 +175,24 @@ public sealed class ReadinessScopeTests
     }
 
     [Fact]
+    public async Task HealthReady_ShouldReturn200WithServicesDegraded_WhenWebhookDeliveryCircuitHalfOpenForSixMinutes()
+    {
+        // On Sdk 2.10.x the gauge reads HalfOpen once a tripped circuit's open window ends, with no call since. The
+        // circuit is not closed, so it stays visible as Degraded, and it still never gates readiness.
+        await using var factory = new ReadinessFactory();
+        factory.Observer.SetForTest(
+            "webhook.delivery", ResilienceCircuitState.HalfOpen, DateTimeOffset.UtcNow - PastEscalationThreshold);
+
+        var (status, body) = await GetReadyAsync(factory);
+
+        status.Should().Be(HttpStatusCode.OK,
+            "a half-open dependency circuit makes services Degraded at most; body: {0}", body);
+        using var doc = JsonDocument.Parse(body);
+        Checks(doc).GetProperty("services").GetProperty("status").GetString().Should().Be("Degraded",
+            "a circuit that is not closed stays visible as Degraded; body: {0}", body);
+    }
+
+    [Fact]
     public async Task HealthReady_ShouldReturn200_WhenVoiceInboundHeartbeatStale()
     {
         // T5 — the Stasis worker's heartbeat is voice-plane. A digital heartbeat is recorded fresh (a one-hour
