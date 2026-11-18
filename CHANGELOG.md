@@ -63,7 +63,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The WhatsApp, Instagram, Messenger, Twitter and Telegram connectors return a failed send on a circuit
   rejection.** From Verbara.Sdk `2.10` a half-open circuit lets one probe through and rejects every other call until
   the probe's result is recorded. These connectors let that rejection escape; they now return the result of a
-  transport failure (`HTTP_ERROR`) and log a warning naming the circuit. The other outbound clients (mail, PDF
+  transport failure (`HTTP_ERROR`) and log a warning naming the circuit. The Telegram and Twitter warning and error
+  lines no longer include the request URL: Telegram logs the API method and the status, Twitter the status. The other outbound clients (mail, PDF
   rendering, the OIDC token exchange, SMTP, Microsoft Graph, Twilio SMS, video, RCS, S3 and the flow HTTP request node)
   already pass a failure to their callers, and pass the rejection the same way.
 - **A linked id that two attached servers hold resolves no tenant and no listen leg.** From Verbara.Sdk `2.10` the
