@@ -167,7 +167,7 @@ public sealed class AdmitExistingCallsReachTests(ITestOutputHelper output) : IAs
                 Encoding.UTF8, "application/json"))
             using (var response = await client.PostAsync("/api/v1/management/cluster/nodes", body))
             {
-                response.StatusCode.Should().BeOneOf([HttpStatusCode.Created, HttpStatusCode.Accepted],
+                response.StatusCode.Should().Be(HttpStatusCode.Created,
                     "the endpoint added the node: {0}", await response.Content.ReadAsStringAsync());
             }
             await WaitAsync(() => calls.All(c => manager.Recorder.DeliveredTo("VoiceConversationBridge").Contains($"CallStartedEvent:{c.LinkedId}"))
