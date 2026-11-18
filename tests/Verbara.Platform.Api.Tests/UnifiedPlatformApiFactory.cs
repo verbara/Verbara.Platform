@@ -54,6 +54,11 @@ public class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
     /// narrows it to drive a route's licence refusal.</summary>
     protected virtual LicenseFeature LicensedFeatures => LicenseTestHelpers.AllProFeatures;
 
+    /// <summary>Registers the <see cref="ICallAnalyticsStore"/> the host serves. Defaults to the seedable
+    /// <see cref="QaStore"/>; a subclass that boots with an Analytics connection string can keep Pro's Postgres store.</summary>
+    protected virtual void ConfigureCallAnalyticsStore(IServiceCollection services) =>
+        UpsertStore<ICallAnalyticsStore>(services, QaStore);
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -79,7 +84,7 @@ public class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
 
             // ── Analytics stores (override with test-accessible instances) ────
             UpsertStore<ICompletedSessionStore>(services, CdrStore);
-            UpsertStore<ICallAnalyticsStore>(services, QaStore);
+            ConfigureCallAnalyticsStore(services);
             UpsertStore<IIntervalSnapshotStore>(services, SnapshotStore);
 
             // ── Agent store (override the realtime-sync decorator's unkeyed alias with a
