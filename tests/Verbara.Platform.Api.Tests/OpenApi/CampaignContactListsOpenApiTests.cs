@@ -17,7 +17,7 @@ public sealed class CampaignContactListsOpenApiTests : IClassFixture<SupervisorL
 
     public CampaignContactListsOpenApiTests(SupervisorListenOpenApiTests.OpenApiFactory factory) => _factory = factory;
 
-    /// <summary>The seven operations, as path and lower-case method.</summary>
+    /// <summary>The nine operations, as path and lower-case method.</summary>
     public static TheoryData<string, string> NotFoundOperations => new()
     {
         { $"{CampaignPath}/contact-lists", "get" },
@@ -25,6 +25,7 @@ public sealed class CampaignContactListsOpenApiTests : IClassFixture<SupervisorL
         { $"{CampaignPath}/contact-lists/{{listId}}", "delete" },
         { $"{CampaignPath}/contact-lists/{{listId}}/import", "post" },
         { $"{CampaignPath}/contact-lists/{{listId}}/contacts", "get" },
+        { $"{CampaignPath}/dispositions", "get" },
         { $"{CampaignPath}/dispositions", "post" },
         { $"{CampaignPath}/dispositions/{{codeId}}", "put" },
         { $"{CampaignPath}/dispositions/{{codeId}}", "delete" },

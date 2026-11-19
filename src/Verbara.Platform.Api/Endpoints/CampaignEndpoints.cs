@@ -383,13 +383,17 @@ internal static class CampaignEndpoints
 
     // ─── Disposition Handlers ─────────────────────────────────────────────────
 
-    private static async Task<Ok<List<DispositionCodeDto>>> ListDispositions(
+    private static async Task<Results<Ok<List<DispositionCodeDto>>, NotFound>> ListDispositions(
         long id,
         HttpContext context,
+        [FromServices] CampaignStoreBase campaignStore,
         [FromServices] DispositionCodeStoreBase dispositionStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        // A campaign of another tenant is no campaign of the caller's: 404, as the other disposition routes answer.
+        if (await campaignStore.GetCampaignAsync(tenantId, id, ct) is null)
+            return TypedResults.NotFound();
         var codes = await dispositionStore.ListByCampaignAsync(tenantId, id, ct);
         return TypedResults.Ok(codes.Select(MapToDispositionDto).ToList());
     }

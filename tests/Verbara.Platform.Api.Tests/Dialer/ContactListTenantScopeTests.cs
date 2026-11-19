@@ -7,8 +7,8 @@ using Verbara.Sdk.Pro.Dialer.Models;
 namespace Verbara.Platform.Api.Tests.Dialer;
 
 /// <summary>
-/// contact-lists-stay-in-their-tenant: the campaign contact-list routes and the disposition-code create, update and
-/// delete routes act only on a campaign, list or code of the caller's tenant, through the HTTP pipeline with two Customer
+/// contact-lists-stay-in-their-tenant: the campaign contact-list routes and the disposition-code listing, create,
+/// update and delete routes act only on a campaign, list or code of the caller's tenant, through the HTTP pipeline with two Customer
 /// tenants (<c>acme</c>, <c>globex</c>) authenticated by real JWTs (<see cref="DialerTenantScopeFactory"/>). The stores
 /// are the in-memory ones; a list or code whose own tenant differs from its campaign's tenant is reached through the
 /// list routes only against Pro's Postgres stores, in the live-DB suite.
@@ -294,6 +294,76 @@ public sealed class ContactListTenantScopeTests : IClassFixture<DialerTenantScop
     }
 
     [Fact]
+    public async Task ListDispositions_ShouldReturn404AndCarryNoCode_WhenTheCodeTenantDiffersFromItsCampaignTenant()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        using var globex = _factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var seeded = await SeedMismatchedDispositionAsync(campaignId);
+
+        using var response = await globex.GetAsync($"{CampaignsPath}/{campaignId}/dispositions");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "campaign {0} belongs to acme, so globex has no codes of it to show (code {1} is globex's)",
+            campaignId, seeded.Id);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("Mismatched");
+    }
+
+    [Fact]
+    public async Task ListDispositions_ShouldListOnlyItsOwnCode_WhenTheCampaignCarriesACodeOfAnotherTenant()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        var campaignId = await CreateCampaignAsync(acme);
+        var seeded = await SeedMismatchedDispositionAsync(campaignId);
+        var codeId = await CreateDispositionAsync(acme, campaignId);
+
+        var ids = await DispositionIdsAsync(acme, campaignId);
+
+        ids.Should().Equal([codeId], "acme sees its own code of campaign {0} and not globex's code {1}",
+            campaignId, seeded.Id);
+    }
+
+    [Fact]
+    public async Task ListDispositions_ShouldReturn404AndCarryNoCode_WhenTheCampaignBelongsToAnotherTenant()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        using var globex = _factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var codeId = await CreateDispositionAsync(acme, campaignId);
+        var label = await DispositionLabelAsync(acme, campaignId, codeId);
+
+        using var response = await globex.GetAsync($"{CampaignsPath}/{campaignId}/dispositions");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "campaign {0} belongs to acme, so it is no campaign of globex's", campaignId);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain(label);
+    }
+
+    [Fact]
+    public async Task ListDispositions_ShouldReturn404_WhenTheCampaignDoesNotExist()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+
+        using var response = await acme.GetAsync($"{CampaignsPath}/{UnknownCampaignId}/dispositions");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "no store holds campaign {0}", UnknownCampaignId);
+    }
+
+    [Fact]
+    public async Task ListDispositions_ShouldNotListTheCode_WhenTheCodeBelongsToAnotherCampaign()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        var campaignId = await CreateCampaignAsync(acme);
+        var otherCampaignId = await CreateCampaignAsync(acme);
+        var codeId = await CreateDispositionAsync(acme, campaignId);
+
+        var ids = await DispositionIdsAsync(acme, otherCampaignId);
+
+        ids.Should().NotContain(codeId, "code {0} belongs to campaign {1}, not to campaign {2}",
+            codeId, campaignId, otherCampaignId);
+    }
+
+    [Fact]
     public async Task DispositionRoutes_ShouldAnswerAsBefore_WhenTheCampaignAndCodeBelongToTheTenant()
     {
         using var acme = _factory.CreateAdminClient(Acme);
@@ -302,6 +372,11 @@ public sealed class ContactListTenantScopeTests : IClassFixture<DialerTenantScop
         using var create = await acme.PostAsync($"{CampaignsPath}/{campaignId}/dispositions", DispositionBody("SALE"));
         create.StatusCode.Should().Be(HttpStatusCode.Created);
         var codeId = JsonNode.Parse(await create.Content.ReadAsStringAsync())!["id"]!.GetValue<long>();
+
+        using var list = await acme.GetAsync($"{CampaignsPath}/{campaignId}/dispositions");
+        list.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode.Parse(await list.Content.ReadAsStringAsync())!.AsArray()
+            .Select(n => n!["id"]!.GetValue<long>()).Should().Equal([codeId]);
 
         using var update = await acme.PutAsync($"{CampaignsPath}/{campaignId}/dispositions/{codeId}", RenameBody);
         update.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -315,6 +390,20 @@ public sealed class ContactListTenantScopeTests : IClassFixture<DialerTenantScop
     // ─── Helpers (shared with the live-DB suite) ─────────────────────────────────
 
     internal const string ContactFirstName = "Original";
+
+    /// <summary>A campaign id that no store holds.</summary>
+    internal const long UnknownCampaignId = 9_000_000_000_000L;
+
+    /// <summary>A code of globex, <c>MISMATCHED</c> / <c>Mismatched</c>, stored on <paramref name="campaignId"/>.</summary>
+    private async Task<DispositionCode> SeedMismatchedDispositionAsync(long campaignId) =>
+        await _factory.Services.GetRequiredService<InMemoryDispositionCodeStore>().CreateAsync(Globex, new DispositionCode
+        {
+            TenantId = Globex,
+            CampaignId = campaignId,
+            Code = "MISMATCHED",
+            Label = "Mismatched",
+            IsActive = true,
+        }, CancellationToken.None);
 
     internal static async Task<HttpResponseMessage> SendListRouteAsync(
         HttpClient client, string route, long campaignId, long listId) =>
