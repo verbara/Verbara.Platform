@@ -36,7 +36,8 @@ real run deletes from that table. The caller needs `system:retention:manage`. Yo
 ## 3. Know what the first real run deletes
 
 The first real run deletes, in batches of 10 000 rows per statement, **every row already past its table's window** —
-not only one day's worth. With an analytics database configured, the purge covers:
+not only one day's worth. With an analytics database configured, the purge covers the first six tables below; with
+the dialer configured, also the last two:
 
 | Target | Window |
 |---|---|
@@ -46,6 +47,8 @@ not only one day's worth. With an analytics database configured, the purge cover
 | `agent_assist_sessions` (with their suggestions and compliance alerts) | 180 days |
 | `analytics_interval_snapshots` | 365 days |
 | `call_analysis_results` | 365 days |
+| `call_attempts` (dialer) | 60 days |
+| `dialer_contacts` (dialer; only contacts in a final status, with their attempts and phones) | 90 days |
 
 So the windows run from 30 days to 365 days. Live queue snapshots (a 24-hour table) are not among them: this host does
 not register their retention target, so the purge never touches them, in either mode.

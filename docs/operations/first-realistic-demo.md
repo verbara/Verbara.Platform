@@ -219,7 +219,8 @@ Web UI → **Admin → Retention**. Three sections:
 1. **Targets.** Lists every registered `IRetentionTarget` (with an
    analytics database: session_events, completed_sessions,
    analytics_interval_snapshots, call_analysis_results,
-   call_analysis_queue_ended, agent_assist_sessions). Each shows
+   call_analysis_queue_ended, agent_assist_sessions; with the dialer:
+   call_attempts, dialer_contacts). Each shows
    `windowDays` + `lastRunAt` + `rowsPurged` + `dryRun`.
 2. **Purge mode.** Read-only. One deployment key decides it for every
    target: `Retention:DryRun` (environment variable `Retention__DryRun`),
