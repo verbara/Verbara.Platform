@@ -54,6 +54,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **An answered queue call's record names the agent who took it** (#620). Verbara.Sdk.Pro `2.30.0-pro` asks the host
+  to name the agent of a call taken by a queue member, and the Api now does: the member interface
+  `PJSIP/{tenant}-agent-{agentId}` names that agent, so the CDR list and detail show it and
+  `GET /api/v1/analytics/cdr?agent=` finds the call. An interface of another tenant, a supervisor's listen slot or any
+  other member keeps the agent the Sdk recorded. A call taken in two queue visits names its first agent. The Api no
+  longer logs Pro's warning that no `ICallAgentResolver` is registered.
+  **Upgrade note:** answered queue calls recorded before this release, since the Verbara.Sdk.Pro `2.30.1-pro` pin
+  (#621) or before, keep no agent and are not repaired, so the `?agent=` filter omits them. To count them, run on the
+  event-store database (`ConnectionStrings:Analytics`, else the dialer's database; not necessarily the core one):
+
+  ```sql
+  SELECT count(*) FROM completed_sessions
+  WHERE queue_name IS NOT NULL AND connected_at IS NOT NULL
+    AND agent_id IS NULL AND linked_id IS NOT NULL;
+  ```
+
+  It counts the records written since Verbara.Sdk.Pro `2.26.0-pro` (older records have no `linked_id`).
 - **The `services` readiness entry stays Degraded while a dependency circuit is half-open.** From Verbara.Sdk `2.10`
   a tripped circuit reads half-open once its open window ends, with or without a call, so the entry read Healthy
   while the dependency was still down. A watched circuit that is not closed now keeps `services` Degraded until a call
