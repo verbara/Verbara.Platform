@@ -200,7 +200,11 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(CreateContactListRequest))]
 [JsonSerializable(typeof(ImportContactsRequest))]
 [JsonSerializable(typeof(ImportResultDto))]
-[JsonSerializable(typeof(PagedResult<Contact>))]
+// GET .../contact-lists/{listId}/contacts answers a page of the dialer's Contact, not of Core's Contact (registered
+// with the conversation types); its typed Ok<PagedResult<...>> has no metadata at run time without this line (AOT).
+[JsonSerializable(typeof(PagedResult<Verbara.Sdk.Pro.Dialer.Models.Contact>), TypeInfoPropertyName = "PagedResultDialerContact")]
+[JsonSerializable(typeof(IReadOnlyList<Verbara.Sdk.Pro.Dialer.Models.Contact>), TypeInfoPropertyName = "IReadOnlyListDialerContact")]
+[JsonSerializable(typeof(Verbara.Sdk.Pro.Dialer.Models.Contact), TypeInfoPropertyName = "DialerContact")]
 [JsonSerializable(typeof(DispositionCodeDto))]
 [JsonSerializable(typeof(List<DispositionCodeDto>))]
 [JsonSerializable(typeof(CreateDispositionCodeRequest))]
