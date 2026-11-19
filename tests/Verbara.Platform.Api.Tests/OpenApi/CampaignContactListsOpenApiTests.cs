@@ -26,6 +26,7 @@ public sealed class CampaignContactListsOpenApiTests : IClassFixture<SupervisorL
         { $"{CampaignPath}/contact-lists/{{listId}}/import", "post" },
         { $"{CampaignPath}/contact-lists/{{listId}}/contacts", "get" },
         { $"{CampaignPath}/dispositions", "post" },
+        { $"{CampaignPath}/dispositions/{{codeId}}", "put" },
         { $"{CampaignPath}/dispositions/{{codeId}}", "delete" },
     };
 

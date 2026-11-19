@@ -8,8 +8,8 @@ namespace Verbara.Platform.Api.Tests.Dialer;
 /// <summary>
 /// contact-lists-stay-in-their-tenant, against Pro's Postgres stores: the real Api <c>Program</c> with the dialer
 /// registered over a Testcontainers Postgres (<see cref="DialerTenantScopeFactory"/> in live-DB mode keeps Pro's
-/// contact-list and disposition-code stores). The campaign contact-list routes and the disposition-code create and
-/// delete routes answer 404 for a campaign, list or code outside the caller's tenant or campaign and change nothing,
+/// contact-list and disposition-code stores). The campaign contact-list routes and the disposition-code create,
+/// update and delete routes answer 404 for a campaign, list or code outside the caller's tenant or campaign and change nothing,
 /// and a list or code whose own tenant differs from its campaign's tenant is reached by neither tenant.
 /// </summary>
 public sealed class ContactListTenantScopeLiveDbTests : IClassFixture<DialerTenantScopeLiveDbFixture>
@@ -198,7 +198,65 @@ public sealed class ContactListTenantScopeLiveDbTests : IClassFixture<DialerTena
         response.StatusCode.Should().Be(HttpStatusCode.NotFound,
             "code {0} is globex's on acme's campaign {1}, so it is a code of neither tenant (caller {2})",
             codeId, campaignId, callerIsCampaignTenant ? Acme : Globex);
-        (await DispositionRowAsync(codeId)).Should().Be((Globex, campaignId, "MISMATCHED"), "the row is unchanged");
+        (await DispositionRowAsync(codeId)).Should().Be((Globex, campaignId, "MISMATCHED", "Mismatched"),
+            "the row is unchanged");
+    }
+
+    /// <summary>Neither tenant updates the code: not the code's tenant (globex), not the campaign's tenant (acme).</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UpdateDisposition_ShouldReturn404AndKeepTheCode_WhenTheCodeTenantDiffersFromItsCampaignTenant(
+        bool callerIsCampaignTenant)
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var codeId = await SeedDispositionAsync(Globex, campaignId);
+        var caller = callerIsCampaignTenant ? acme : globex;
+
+        using var response = await caller.PutAsync($"{CampaignsPath}/{campaignId}/dispositions/{codeId}", RenameBody);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "code {0} is globex's on acme's campaign {1}, so it is a code of neither tenant (caller {2})",
+            codeId, campaignId, callerIsCampaignTenant ? Acme : Globex);
+        (await DispositionRowAsync(codeId)).Should().Be((Globex, campaignId, "MISMATCHED", "Mismatched"),
+            "the row is unchanged");
+    }
+
+    [Theory]
+    [MemberData(nameof(ThroughOwnCampaign), MemberType = typeof(ContactListTenantScopeTests))]
+    public async Task UpdateDisposition_ShouldReturn404AndKeepTheCode_WhenTheCodeBelongsToAnotherTenant(
+        bool throughCallerCampaign)
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var codeId = await CreateDispositionAsync(acme, campaignId);
+        var label = await DispositionLabelAsync(acme, campaignId, codeId);
+        var routeCampaignId = throughCallerCampaign ? await CreateCampaignAsync(globex) : campaignId;
+
+        using var response = await globex.PutAsync($"{CampaignsPath}/{routeCampaignId}/dispositions/{codeId}", RenameBody);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "code {0} belongs to acme, so it is no code of globex's (through campaign {1})", codeId, routeCampaignId);
+        (await DispositionLabelAsync(acme, campaignId, codeId)).Should().Be(label, "the code keeps its label");
+    }
+
+    [Fact]
+    public async Task UpdateDisposition_ShouldReturn404AndKeepTheCode_WhenTheCodeBelongsToAnotherCampaign()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        var campaignId = await CreateCampaignAsync(acme);
+        var otherCampaignId = await CreateCampaignAsync(acme);
+        var codeId = await CreateDispositionAsync(acme, campaignId);
+        var label = await DispositionLabelAsync(acme, campaignId, codeId);
+
+        using var response = await acme.PutAsync($"{CampaignsPath}/{otherCampaignId}/dispositions/{codeId}", RenameBody);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "code {0} belongs to campaign {1}, not to campaign {2}", codeId, campaignId, otherCampaignId);
+        (await DispositionLabelAsync(acme, campaignId, codeId)).Should().Be(label, "the code keeps its label");
     }
 
     [Fact]
@@ -207,6 +265,10 @@ public sealed class ContactListTenantScopeLiveDbTests : IClassFixture<DialerTena
         using var acme = Factory.CreateAdminClient(Acme);
         var campaignId = await CreateCampaignAsync(acme);
         var codeId = await CreateDispositionAsync(acme, campaignId);
+
+        using var update = await acme.PutAsync($"{CampaignsPath}/{campaignId}/dispositions/{codeId}", RenameBody);
+        update.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await DispositionLabelAsync(acme, campaignId, codeId)).Should().Be(RenamedLabel);
 
         using var delete = await acme.DeleteAsync($"{CampaignsPath}/{campaignId}/dispositions/{codeId}");
 
@@ -267,16 +329,16 @@ public sealed class ContactListTenantScopeLiveDbTests : IClassFixture<DialerTena
         return names;
     }
 
-    private async Task<(string TenantId, long CampaignId, string Code)?> DispositionRowAsync(long codeId)
+    private async Task<(string TenantId, long CampaignId, string Code, string Label)?> DispositionRowAsync(long codeId)
     {
         await using var conn = await OpenAsync();
         await using var cmd = new NpgsqlCommand(
-            "SELECT tenant_id, campaign_id, code FROM disposition_codes WHERE id = @Id", conn);
+            "SELECT tenant_id, campaign_id, code, label FROM disposition_codes WHERE id = @Id", conn);
         cmd.Parameters.AddWithValue("Id", codeId);
         await using var reader = await cmd.ExecuteReaderAsync();
         if (!await reader.ReadAsync())
             return null;
-        return (reader.GetString(0), reader.GetInt64(1), reader.GetString(2));
+        return (reader.GetString(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3));
     }
 
     private async Task<NpgsqlConnection> OpenAsync()

@@ -95,6 +95,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `PUT /api/v1/admin/campaigns/{id}/dispositions/{codeId}` checks that the campaign belongs to the caller before it
+  updates the disposition code, as creating and deleting a code already do. A campaign of another tenant answers 404
+  and nothing is written.
 - `GET /api/v1/analytics/cdr/{sessionId}` always answers `hasTranscript` false. It used to answer true for any call
   with an analysis summary, although no transcript route is served, so a client that followed it got 404.
 - The analytics endpoints read a date-only `to` (`2026-11-10`) as the whole of that UTC day. Before, it was that day's

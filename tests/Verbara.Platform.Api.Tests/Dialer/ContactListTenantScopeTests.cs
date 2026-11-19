@@ -7,8 +7,8 @@ using Verbara.Sdk.Pro.Dialer.Models;
 namespace Verbara.Platform.Api.Tests.Dialer;
 
 /// <summary>
-/// contact-lists-stay-in-their-tenant: the campaign contact-list routes and the disposition-code create and delete
-/// routes act only on a campaign, list or code of the caller's tenant, through the HTTP pipeline with two Customer
+/// contact-lists-stay-in-their-tenant: the campaign contact-list routes and the disposition-code create, update and
+/// delete routes act only on a campaign, list or code of the caller's tenant, through the HTTP pipeline with two Customer
 /// tenants (<c>acme</c>, <c>globex</c>) authenticated by real JWTs (<see cref="DialerTenantScopeFactory"/>). The stores
 /// are the in-memory ones; a list or code whose own tenant differs from its campaign's tenant is reached through the
 /// list routes only against Pro's Postgres stores, in the live-DB suite.
@@ -225,6 +225,74 @@ public sealed class ContactListTenantScopeTests : IClassFixture<DialerTenantScop
             .Select(d => d.Id).Should().Contain(seeded.Id, "the code is still stored");
     }
 
+    /// <summary>Neither tenant updates the code: not the code's tenant (globex), not the campaign's tenant (acme).</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UpdateDisposition_ShouldReturn404AndKeepTheCode_WhenTheCodeTenantDiffersFromItsCampaignTenant(
+        bool callerIsCampaignTenant)
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        using var globex = _factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var store = _factory.Services.GetRequiredService<InMemoryDispositionCodeStore>();
+        var seeded = await store.CreateAsync(Globex, new DispositionCode
+        {
+            TenantId = Globex,
+            CampaignId = campaignId,
+            Code = "MISMATCHED",
+            Label = "Mismatched",
+            IsActive = true,
+        }, CancellationToken.None);
+        var caller = callerIsCampaignTenant ? acme : globex;
+
+        using var response = await caller.PutAsync($"{CampaignsPath}/{campaignId}/dispositions/{seeded.Id}",
+            RenameBody);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "code {0} is globex's on acme's campaign {1}, so it is a code of neither tenant (caller {2})",
+            seeded.Id, campaignId, callerIsCampaignTenant ? Acme : Globex);
+        var stored = (await store.ListByCampaignAsync(Globex, campaignId, CancellationToken.None))
+            .Single(d => d.Id == seeded.Id);
+        (stored.TenantId, stored.CampaignId, stored.Code, stored.Label)
+            .Should().Be((Globex, campaignId, "MISMATCHED", "Mismatched"), "the code is unchanged");
+    }
+
+    [Theory]
+    [MemberData(nameof(ThroughOwnCampaign))]
+    public async Task UpdateDisposition_ShouldReturn404AndKeepTheCode_WhenTheCodeBelongsToAnotherTenant(
+        bool throughCallerCampaign)
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        using var globex = _factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var codeId = await CreateDispositionAsync(acme, campaignId);
+        var label = await DispositionLabelAsync(acme, campaignId, codeId);
+        var routeCampaignId = throughCallerCampaign ? await CreateCampaignAsync(globex) : campaignId;
+
+        using var response = await globex.PutAsync($"{CampaignsPath}/{routeCampaignId}/dispositions/{codeId}", RenameBody);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "code {0} belongs to acme, so it is no code of globex's (through campaign {1})", codeId, routeCampaignId);
+        (await DispositionLabelAsync(acme, campaignId, codeId)).Should().Be(label, "the code keeps its label");
+    }
+
+    [Fact]
+    public async Task UpdateDisposition_ShouldReturn404AndKeepTheCode_WhenTheCodeBelongsToAnotherCampaign()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        var campaignId = await CreateCampaignAsync(acme);
+        var otherCampaignId = await CreateCampaignAsync(acme);
+        var codeId = await CreateDispositionAsync(acme, campaignId);
+        var label = await DispositionLabelAsync(acme, campaignId, codeId);
+
+        using var response = await acme.PutAsync($"{CampaignsPath}/{otherCampaignId}/dispositions/{codeId}", RenameBody);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "code {0} belongs to campaign {1}, not to campaign {2}", codeId, campaignId, otherCampaignId);
+        (await DispositionLabelAsync(acme, campaignId, codeId)).Should().Be(label, "the code keeps its label");
+    }
+
     [Fact]
     public async Task DispositionRoutes_ShouldAnswerAsBefore_WhenTheCampaignAndCodeBelongToTheTenant()
     {
@@ -234,6 +302,10 @@ public sealed class ContactListTenantScopeTests : IClassFixture<DialerTenantScop
         using var create = await acme.PostAsync($"{CampaignsPath}/{campaignId}/dispositions", DispositionBody("SALE"));
         create.StatusCode.Should().Be(HttpStatusCode.Created);
         var codeId = JsonNode.Parse(await create.Content.ReadAsStringAsync())!["id"]!.GetValue<long>();
+
+        using var update = await acme.PutAsync($"{CampaignsPath}/{campaignId}/dispositions/{codeId}", RenameBody);
+        update.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await DispositionLabelAsync(acme, campaignId, codeId)).Should().Be(RenamedLabel);
 
         using var delete = await acme.DeleteAsync($"{CampaignsPath}/{campaignId}/dispositions/{codeId}");
         delete.StatusCode.Should().Be(HttpStatusCode.NoContent);
@@ -316,6 +388,18 @@ public sealed class ContactListTenantScopeTests : IClassFixture<DialerTenantScop
     {
         var codes = JsonNode.Parse(await client.GetStringAsync($"{CampaignsPath}/{campaignId}/dispositions"))!.AsArray();
         return codes.Select(n => n!["id"]!.GetValue<long>()).ToList();
+    }
+
+    internal const string RenamedLabel = "Renamed";
+
+    /// <summary>A disposition-code update that renames the code to <see cref="RenamedLabel"/>.</summary>
+    internal static JsonContent RenameBody => JsonContent.Create(new { label = RenamedLabel });
+
+    /// <summary>The label of <paramref name="codeId"/> in its campaign's listing, as <paramref name="client"/> sees it.</summary>
+    internal static async Task<string> DispositionLabelAsync(HttpClient client, long campaignId, long codeId)
+    {
+        var codes = JsonNode.Parse(await client.GetStringAsync($"{CampaignsPath}/{campaignId}/dispositions"))!.AsArray();
+        return codes.Single(n => n!["id"]!.GetValue<long>() == codeId)!["label"]!.GetValue<string>();
     }
 
     private static JsonContent DispositionBody(string code) => JsonContent.Create(new

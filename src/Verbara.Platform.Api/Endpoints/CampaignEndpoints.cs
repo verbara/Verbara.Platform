@@ -429,10 +429,15 @@ internal static class CampaignEndpoints
         long codeId,
         HttpContext context,
         [FromBody] UpdateDispositionCodeRequest body,
+        CampaignStoreBase campaignStore,
         DispositionCodeStoreBase dispositionStore,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        // As on delete: the campaign must be the caller tenant's before the code is looked up, since the code lookup
+        // alone filters only the code's own tenant and campaign id; otherwise 404 and nothing is written.
+        if (await campaignStore.GetCampaignAsync(tenantId, id, ct) is null)
+            return TypedResults.NotFound();
         var existing = (await dispositionStore.ListByCampaignAsync(tenantId, id, ct))
             .FirstOrDefault(d => d.Id == codeId);
         if (existing is null) return TypedResults.NotFound();
