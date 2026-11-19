@@ -47,12 +47,15 @@ public sealed record RetentionTargetDto
 }
 
 /// <summary>
-/// Global retention configuration snapshot returned by GET /management/retention/config
-/// and accepted (partial) by PATCH /management/retention/config.
+/// Global retention configuration snapshot returned by GET /management/retention/config.
+/// Read-only: every value is fixed at startup and changes only with a configuration change and a restart.
 /// </summary>
 public sealed record RetentionConfigDto
 {
-    /// <summary>True when targets count rows instead of deleting.</summary>
+    /// <summary>
+    /// True when the scheduled purge of the answering replica counts rows instead of deleting them
+    /// (configuration key <c>Retention:DryRun</c>, default true).
+    /// </summary>
     public required bool DryRun { get; init; }
 
     /// <summary>Default retention window in days.</summary>
@@ -66,21 +69,6 @@ public sealed record RetentionConfigDto
 
     /// <summary>Number of targets currently registered.</summary>
     public required int RegisteredTargetCount { get; init; }
-}
-
-/// <summary>
-/// PATCH body for <c>/management/retention/config</c>. Only <c>DryRun</c> can be
-/// flipped at runtime in v1 — window / batch / cron require process restart per
-/// the underlying <c>IOptions&lt;RetentionOptions&gt;</c> snapshot semantics.
-/// </summary>
-public sealed record RetentionConfigPatchDto
-{
-    /// <summary>
-    /// New value for <c>DryRun</c>. <see langword="null"/> = leave unchanged.
-    /// Toggling emits an <c>retention.dryrun_toggled</c> audit entry with the
-    /// previous + new value in metadata.
-    /// </summary>
-    public bool? DryRun { get; init; }
 }
 
 /// <summary>

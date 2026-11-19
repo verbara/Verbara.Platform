@@ -99,7 +99,8 @@ entry below following the same `### <AlertName>` format with **What** / **Why**
 **First response:**
 - Check the `retention` health check entry in `/health/ready`.
 - Tail platform-api logs grep `RetentionService`.
-- Verify cron expression in `Asterisk__Pro__Retention__CronExpression` (default `0 2 * * *`).
+- The cron is the Pro default `0 2 * * *` (02:00 UTC daily) and is not configurable: the host binds no retention
+  cron setting.
 - Manually trigger retention via maintenance endpoint or restart the BackgroundService.
 - Check disk free on Postgres host — if already < 20%, file P0 storage ticket immediately.
 
@@ -264,7 +265,12 @@ A dependency circuit (`webhook.delivery`, `oidc.token-exchange`) never makes a c
 **Why:** Either `DryRun` flag was flipped silently (deploy or env var change), or the retention window definitions are inconsistent between targets.
 
 **First response:**
-- Check Pro retention config — `AddProRetention(opt => opt.DryRun = ?)` value in `Program.cs`.
+- Check the purge mode on each replica: the configuration key `Retention:DryRun` (environment variable
+  `Retention__DryRun`; absent means `true`), the startup log line "Pro retention purge runs in dry-run mode" or
+  "Pro retention purge deletes expired rows", and `GET /api/v1/management/retention/config` (`dryRun`). Every replica
+  must carry the same value. This alert sums both counters over all replicas by target, so it does not by itself
+  detect replicas that disagree (no expired rows, or a difference under 100 rows, keeps it silent): compare the key
+  on each replica.
 - Verify all `IRetentionTarget` implementations honour the same `Cutoff` semantics (default = `UtcNow - Window`).
 - If divergence is intentional (operator just flipped DryRun off), suppress alert for 7 days with rationale.
 

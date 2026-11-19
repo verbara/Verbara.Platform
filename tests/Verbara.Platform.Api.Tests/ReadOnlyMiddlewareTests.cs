@@ -25,7 +25,7 @@ public sealed class ReadOnlyMiddlewareTests
     [Theory]
     [InlineData("PUT", Api + "/admin/queues/{id}")]
     [InlineData("DELETE", Api + "/admin/users/{id}")]
-    [InlineData("PATCH", Api + "/management/retention/config")]
+    [InlineData("PATCH", Api + "/queues/{queueId}/members/{agentId}")]
     [InlineData("POST", Api + "/admin/queues")]
     [InlineData("POST", Api + "/contacts/")]
     public void ReadOnlyMode_ShouldBlockWriteMethods(string method, string template)

@@ -1,7 +1,8 @@
 namespace Verbara.Platform.Api.Endpoints.Retention;
 
 /// <summary>
-/// Query + mutation surface for the retention admin view (R5.2 PC.1).
+/// Query + manual-run surface for the retention admin view (R5.2 PC.1). The scheduled purge mode is
+/// read-only here (<see cref="IRetentionPurgeMode"/>).
 /// </summary>
 public interface IRetentionAdminService
 {
@@ -12,7 +13,8 @@ public interface IRetentionAdminService
     IReadOnlyList<RetentionTargetDto> ListTargets();
 
     /// <summary>
-    /// Returns the current global retention configuration snapshot.
+    /// Returns the current global retention configuration snapshot; its <c>DryRun</c> is the mode the
+    /// scheduled purge of this process runs with.
     /// </summary>
     RetentionConfigDto GetConfig();
 
@@ -26,10 +28,4 @@ public interface IRetentionAdminService
         bool dryRunOverride,
         string? targetName,
         CancellationToken ct);
-
-    /// <summary>
-    /// Sets the runtime <c>DryRun</c> flag. Returns the previous value so the
-    /// caller can include it in the audit metadata.
-    /// </summary>
-    bool SetDryRun(bool value);
 }

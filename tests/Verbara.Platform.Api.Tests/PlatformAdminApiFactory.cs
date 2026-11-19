@@ -87,9 +87,16 @@ public sealed class PlatformAdminApiFactory : WebApplicationFactory<Program>
         return host;
     }
 
-    public HttpClient CreatePlatformAdminClient()
+    public HttpClient CreatePlatformAdminClient() => CreatePlatformAdminClient(this);
+
+    /// <summary>
+    /// The platform-admin client of a factory derived from this one with <c>WithWebHostBuilder</c> (which reuses
+    /// this factory's seeding through <see cref="CreateHost"/>).
+    /// </summary>
+    public static HttpClient CreatePlatformAdminClient(WebApplicationFactory<Program> factory)
     {
-        var client = CreateClient();
+        ArgumentNullException.ThrowIfNull(factory);
+        var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {TestMgmtApiKey}");
         return client;
     }

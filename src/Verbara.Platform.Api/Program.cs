@@ -434,11 +434,16 @@ builder.Services.AddVerbaraResilience();
 // LicenseGuard: runtime feature check (10s cache + 7d grace by default)
 builder.Services.AddProLicenseGuard();
 
-// Retention: orchestrator (DryRun=true by default — flip off in production)
-builder.Services.AddProRetention();
+// Retention: the Pro purge orchestrator. Its mode is deployment configuration, `Retention:DryRun` (default true:
+// count, never delete; false: delete expired rows), read by hand (AOT-safe) and fixed for the process lifetime —
+// changing it takes a restart (Platform/ADR-0052). A value that is not a boolean stops the host here.
+var retentionDryRun = Verbara.Platform.Api.Endpoints.Retention.RetentionPurgeModeConfiguration.Read(builder.Configuration);
+builder.Services.AddProRetention(o => o.DryRun = retentionDryRun);
+builder.Services.AddSingleton<
+    Verbara.Platform.Api.Endpoints.Retention.IRetentionPurgeMode,
+    Verbara.Platform.Api.Endpoints.Retention.RetentionPurgeMode>();
 
-// R5.2 PC.1 — admin retention surface (in-process tracker + DryRun toggle).
-builder.Services.AddSingleton<Verbara.Platform.Api.Endpoints.Retention.RetentionAdminState>();
+// R5.2 PC.1 — admin retention surface (in-process tracker; the mode is read-only).
 builder.Services.AddSingleton<Verbara.Platform.Api.Endpoints.Retention.RetentionExecutionTracker>();
 builder.Services.AddSingleton<
     Verbara.Platform.Api.Endpoints.Retention.IRetentionAdminService,
@@ -1276,7 +1281,7 @@ if (!string.IsNullOrEmpty(analyticsConnectionString))
     // Shares analyticsDataSource per ADR-0015 Phase 2.
     builder.Services.AddProAgentAssistPostgres(analyticsDataSource);
 
-    // Pro Retention targets (v1.8.0-pro) — DryRun=true default via AddProRetention
+    // Pro Retention targets (v1.8.0-pro) — their mode comes from Retention:DryRun via AddProRetention above
     builder.Services.AddEventStoreRetentionTargets();
     builder.Services.AddAnalyticsRetentionTargets();
     builder.Services.AddCallAnalyticsRetentionTargets();
@@ -1375,7 +1380,7 @@ builder.Services.AddAuthorization(options =>
         p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.ImpersonationManage)));
 
     // R5.2 PC.1 — retention admin surface: view (overview + config) split from
-    // manage (DryRun toggle + manual run-now).
+    // manage (manual run-now; the scheduled mode is the Retention:DryRun configuration key).
     options.AddPolicy(
         Verbara.Platform.Api.Endpoints.Retention.RetentionAdminEndpoints.ReadPolicy,
         p => p.AddRequirements(new PlatformAdminRequirement(PlatformAdminPermissions.RetentionView)));
@@ -1466,6 +1471,9 @@ builder.Services.AddVerbaraOpenApi(openApiEnabled);
 
 var app = builder.Build();
 app.Services.EnsureEmbeddedLicenceTrustAnchor();
+Verbara.Platform.Api.Endpoints.Retention.RetentionPurgeModeLog.LogStartupMode(
+    app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Verbara.Platform.Api.Endpoints.Retention.RetentionPurgeMode"),
+    app.Services.GetRequiredService<Verbara.Platform.Api.Endpoints.Retention.IRetentionPurgeMode>().ScheduledDryRun);
 
 // ─── Phase 2.2 — ensure cluster_distributed_lock schema (leader election) ────
 // AddPostgresDistributedLock registers the lock primitive but does NOT create its

@@ -11,6 +11,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **The nightly Pro retention purge can delete.** The configuration key `Retention:DryRun` (environment variable
+  `Retention__DryRun`) sets its mode on startup: `true`, the default when the key is absent or empty, counts the rows
+  past each table's window and deletes none, as every release did until now; `false` deletes them. A value that is not
+  a boolean stops the Api at startup with an error naming the key. The Api logs the mode once at startup, and
+  `GET /api/v1/management/retention/config` reports in `dryRun` the mode of the replica that answers. The key does not
+  govern the per-tenant conversation retention. Read
+  [Turning on the Pro retention purge](docs/operations/upgrade-retention-dry-run.md) before setting `false`.
 - `GET /api/v1/analytics/qa-availability` says whether post-call QA results can exist for the caller's tenant, so a
   client can hide QA screens that would stay empty. The body always carries `available`, `analysisRunning`, `reason`,
   `transcriptSource`, `speakerMode`, `topicsConfigured`, `complianceConfigured`, `sentimentSupported` and `backlog`,
@@ -76,6 +83,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`GET /api/v1/call-analytics/sentiment/trends` and `/compliance/summary` with a queue return the analyses stored
   after the upgrade for that queue.** They returned none; analyses stored earlier carry no queue and still do not match
   (Verbara.Sdk.Pro `2.27.0-pro`, below).
+
+### Removed
+
+- **BREAKING for scripts: `PATCH /api/v1/management/retention/config`, the runtime DryRun toggle.** It flipped a
+  per-process flag that `GET .../config` reported; it never changed the nightly purge, which always ran dry. Changing
+  the mode is now a configuration change plus a restart (`Retention:DryRun`, above). A script that calls the PATCH gets
+  `405 Method Not Allowed`, and so does the console's DryRun checkbox until the console release that removes it; ship
+  that console release with this one or first. `POST /api/v1/management/retention/run-now` is unchanged: it runs dry
+  unless called with `dryRun=false`, whatever the configured mode.
 
 ### Fixed
 
@@ -236,6 +252,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Upgrading
 
+- **Turning on the Pro retention purge: dry run first, backup, then `Retention__DryRun=false` on every replica.**
+  Nothing changes on upgrade (absent key = dry). The first run with `false` deletes, in batches, every row already
+  past its table's window, not one day's worth: from 30 days (failed and not-analysed analysis queue entries) to
+  365 days (analytics snapshots, call analysis results), 180 days for Agent Assist sessions and completed sessions.
+  Live queue snapshots (24 hours) are not purged by this host in either mode. Preview the counts with
+  `POST /api/v1/management/retention/run-now` (no `dryRun`) and read `targets[].rowsPurged`, take a backup, then set
+  the key on every replica and restart; confirm the startup log line and `dryRun: false` on each. Remove any script
+  that calls `PATCH /api/v1/management/retention/config`. Steps:
+  [Turning on the Pro retention purge](docs/operations/upgrade-retention-dry-run.md).
 - **An Agent Assist session whose call carries no tenant is no longer listed.** A call that arrives on a trunk without
   the `TENANT_ID` channel variable has no tenant, so its Agent Assist session is missing from
   `GET /api/v1/supervisor/sessions/active` and answers 404 to whisper and transcript listen. Set `TENANT_ID` on every
