@@ -193,8 +193,12 @@ public sealed class ContactListTenantScopeTests : IClassFixture<DialerTenantScop
         (await DispositionIdsAsync(acme, campaignId)).Should().Contain(codeId);
     }
 
-    [Fact]
-    public async Task DeleteDisposition_ShouldReturn404AndKeepTheCode_WhenTheCodeTenantDiffersFromItsCampaignTenant()
+    /// <summary>Neither tenant removes the code: not the code's tenant (globex), not the campaign's tenant (acme).</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeleteDisposition_ShouldReturn404AndKeepTheCode_WhenTheCodeTenantDiffersFromItsCampaignTenant(
+        bool callerIsCampaignTenant)
     {
         using var acme = _factory.CreateAdminClient(Acme);
         using var globex = _factory.CreateAdminClient(Globex);
@@ -209,10 +213,14 @@ public sealed class ContactListTenantScopeTests : IClassFixture<DialerTenantScop
             IsActive = true,
         }, CancellationToken.None);
 
-        using var response = await globex.DeleteAsync($"{CampaignsPath}/{campaignId}/dispositions/{seeded.Id}");
+        var codeId = seeded.Id;
+        var caller = callerIsCampaignTenant ? acme : globex;
+
+        using var response = await caller.DeleteAsync($"{CampaignsPath}/{campaignId}/dispositions/{codeId}");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "campaign {0} belongs to acme, so no code of it is globex's, whatever the code's own tenant", campaignId);
+            "code {0} is globex's on acme's campaign {1}, so it is a code of neither tenant (caller {2})",
+            codeId, campaignId, callerIsCampaignTenant ? Acme : Globex);
         (await store.ListByCampaignAsync(Globex, campaignId, CancellationToken.None))
             .Select(d => d.Id).Should().Contain(seeded.Id, "the code is still stored");
     }
