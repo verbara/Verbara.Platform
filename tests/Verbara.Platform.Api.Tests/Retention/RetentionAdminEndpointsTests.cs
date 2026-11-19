@@ -98,10 +98,9 @@ public sealed class RetentionAdminEndpointsTests : IClassFixture<PlatformAdminAp
         // The admin holds system:retention:manage; the route answers 405 before any authorization runs because
         // no PATCH endpoint matches the path any more (design → Risks, measured here).
         var client = _factory.CreatePlatformAdminClient();
+        using var body = new StringContent("""{"dryRun":false}""", System.Text.Encoding.UTF8, "application/json");
 
-        var patch = await client.PatchAsync(
-            "/api/v1/management/retention/config",
-            new StringContent("""{"dryRun":false}""", System.Text.Encoding.UTF8, "application/json"));
+        var patch = await client.PatchAsync("/api/v1/management/retention/config", body);
 
         patch.StatusCode.Should().Be(HttpStatusCode.MethodNotAllowed);
         var config = await client.GetFromJsonAsync<RetentionConfigDto>("/api/v1/management/retention/config");
