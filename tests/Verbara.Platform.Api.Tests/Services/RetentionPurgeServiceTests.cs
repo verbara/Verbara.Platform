@@ -78,8 +78,31 @@ public sealed class RetentionPurgeServiceTests
             Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData("true")]
+    [InlineData("false")]
+    public async Task RunRetentionPurgeAsync_ShouldPurgeClosedConversation_WhenProRetentionDryRunConfigured(string dryRun)
+    {
+        // retention-dry-run-is-configurable, spec scenario "Conversation retention is not affected": the
+        // Retention:DryRun key sets the Pro purge mode only; this per-tenant purge deletes what its own rules select
+        // whatever the key says.
+        var conversations = new InMemoryConversationStore();
+        var closed = Make(ConversationState.Closed, closedAt: Now.AddDays(-120));
+        await conversations.SaveAsync(closed, CancellationToken.None);
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Retention:DryRun"] = dryRun })
+            .Build();
+        var sut = NewService(conversations, Substitute.For<IMessageStore>(), Substitute.For<IPurgeLogStore>(), configuration);
+
+        await sut.RunRetentionPurgeAsync(CancellationToken.None);
+
+        (await conversations.GetByIdAsync(Tenant, closed.ConversationId, CancellationToken.None))
+            .Should().BeNull("Retention:DryRun does not govern the per-tenant conversation purge");
+    }
+
     private static RetentionPurgeService NewService(
-        IConversationStore conversations, IMessageStore messages, IPurgeLogStore purgeLog)
+        IConversationStore conversations, IMessageStore messages, IPurgeLogStore purgeLog,
+        IConfiguration? configuration = null)
     {
         var policies = Substitute.For<ITenantRetentionPolicyStore>();
         policies.ListActiveAsync(Arg.Any<CancellationToken>()).Returns(
@@ -99,7 +122,7 @@ public sealed class RetentionPurgeServiceTests
             purgeLog,
             clock,
             NullLogger<RetentionPurgeService>.Instance,
-            new ConfigurationBuilder().Build());
+            configuration ?? new ConfigurationBuilder().Build());
     }
 
     private static Conversation Make(ConversationState state, DateTimeOffset? closedAt) => new()

@@ -377,7 +377,6 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(IReadOnlyList<RetentionTargetDto>))]
 [JsonSerializable(typeof(List<RetentionTargetDto>))]
 [JsonSerializable(typeof(RetentionConfigDto))]
-[JsonSerializable(typeof(RetentionConfigPatchDto))]
 [JsonSerializable(typeof(RetentionRunResultDto))]
 [JsonSerializable(typeof(RetentionRunTargetOutcomeDto))]
 // Management API Keys

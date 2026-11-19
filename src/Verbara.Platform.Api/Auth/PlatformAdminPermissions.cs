@@ -49,8 +49,8 @@ public static class PlatformAdminPermissions
     public const string RetentionView = "system:retention:view";
 
     /// <summary>
-    /// Change retention configuration (DryRun toggle) and trigger a manual run —
-    /// <c>PATCH /api/v1/management/retention/config</c>, <c>POST .../run-now</c>.
+    /// Trigger a manual retention run — <c>POST /api/v1/management/retention/run-now</c>. The scheduled
+    /// purge mode is deployment configuration (<c>Retention:DryRun</c>), not an API action.
     /// </summary>
     public const string RetentionManage = "system:retention:manage";
 

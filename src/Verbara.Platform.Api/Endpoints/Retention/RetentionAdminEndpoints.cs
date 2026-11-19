@@ -8,9 +8,10 @@ namespace Verbara.Platform.Api.Endpoints.Retention;
 
 /// <summary>
 /// R5.2 PC.1 — admin retention policy surface. Exposes the existing
-/// <c>Pro.Storage.Common.Retention</c> infrastructure (DryRun toggle, per-target
-/// overview, manual run-now) behind the <c>system:retention:view</c> /
-/// <c>system:retention:manage</c> permissions.
+/// <c>Pro.Storage.Common.Retention</c> infrastructure (per-target overview, the configured
+/// purge mode read-only, manual run-now) behind the <c>system:retention:view</c> /
+/// <c>system:retention:manage</c> permissions. The scheduled purge mode is deployment
+/// configuration (<c>Retention:DryRun</c>, Platform/ADR-0052); no request changes it.
 /// </summary>
 /// <remarks>
 /// Wired in <c>Program.cs</c> via:
@@ -37,7 +38,6 @@ public static class RetentionAdminEndpoints
         group.MapGet("/targets", ListTargets).RequireAuthorization(ReadPolicy);
         group.MapGet("/config", GetConfig).RequireAuthorization(ReadPolicy);
         group.MapPost("/run-now", RunNow).RequireAuthorization(ManagePolicy);
-        group.MapPatch("/config", PatchConfig).RequireAuthorization(ManagePolicy);
     }
 
     private static IResult ListTargets([FromServices] IRetentionAdminService service)
@@ -61,8 +61,8 @@ public static class RetentionAdminEndpoints
         CancellationToken ct = default)
     {
         // Default dry-run posture is the safer choice: callers must explicitly
-        // pass ?dryRun=false to actually purge data. This mirrors the
-        // RetentionOptions.DryRun = true safe default.
+        // pass ?dryRun=false to actually purge data. The manual run states its own
+        // mode, independently of the configured scheduled mode (Retention:DryRun).
         var effectiveDryRun = dryRun ?? true;
 
         var result = await service.RunNowAsync(effectiveDryRun, target, ct);
@@ -87,67 +87,6 @@ public static class RetentionAdminEndpoints
             ct: ct);
 
         return Results.Ok(result);
-    }
-
-    private static async Task<IResult> PatchConfig(
-        HttpContext context,
-        [FromServices] IRetentionAdminService service,
-        [FromServices] IAuditService audit,
-        [FromBody] RetentionConfigPatchDto body,
-        CancellationToken ct)
-    {
-        if (body is null)
-            return Results.BadRequest(new { error = "Body required." });
-
-        var actor = ResolveActor(context);
-
-        // DryRun toggle (only mutable property in v1).
-        if (body.DryRun is bool newDryRun)
-        {
-            var previous = service.SetDryRun(newDryRun);
-            if (previous != newDryRun)
-            {
-                await audit.RecordAsync(
-                    actor.TenantId,
-                    category: "admin",
-                    action: "retention.dryrun_toggled",
-                    severity: newDryRun ? "info" : "warning",
-                    actorId: actor.UserId,
-                    actorType: "user",
-                    targetId: "global",
-                    targetType: "retention_config",
-                    metadata: BuildMetadata(
-                        context,
-                        actor.TenantId.Value,
-                        ("previous_dry_run", previous ? "true" : "false"),
-                        ("new_dry_run", newDryRun ? "true" : "false")),
-                    ct: ct);
-            }
-        }
-
-        // Generic config-changed audit when ANY field was patched (covers
-        // future expansion; in v1 only DryRun mutates so this overlaps with
-        // the dryrun_toggled entry — intentional, the dryrun_toggled is the
-        // "interesting" one for compliance review).
-        if (body.DryRun is not null)
-        {
-            await audit.RecordAsync(
-                actor.TenantId,
-                category: "admin",
-                action: "retention.config_changed",
-                severity: "info",
-                actorId: actor.UserId,
-                actorType: "user",
-                targetId: "global",
-                targetType: "retention_config",
-                metadata: BuildMetadata(
-                    context,
-                    actor.TenantId.Value,
-                    ("fields_changed", "dry_run")),
-                ct: ct);
-        }
-
-        return Results.Ok(service.GetConfig());
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

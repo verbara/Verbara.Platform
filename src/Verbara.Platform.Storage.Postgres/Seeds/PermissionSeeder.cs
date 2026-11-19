@@ -238,7 +238,7 @@ internal static class PermissionSeeder
         yield return P("system:retention:view", "system", "retention", "view",
             "View data-retention configuration and the per-target retention overview");
         yield return P("system:retention:manage", "system", "retention", "manage",
-            "Change data-retention configuration (DryRun toggle) and trigger a manual retention run",
+            "Trigger a manual data-retention run (the scheduled purge mode is deployment configuration)",
             ["system:retention:view"]);
 
         // ── agentassist (2) ──

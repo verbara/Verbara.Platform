@@ -16,7 +16,7 @@ public sealed partial class RetentionAdminService : IRetentionAdminService
 {
     private readonly IRetentionTarget[] _targets;
     private readonly RetentionOptions _options;
-    private readonly RetentionAdminState _state;
+    private readonly IRetentionPurgeMode _mode;
     private readonly RetentionExecutionTracker _tracker;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RetentionAdminService> _logger;
@@ -24,21 +24,21 @@ public sealed partial class RetentionAdminService : IRetentionAdminService
     public RetentionAdminService(
         IEnumerable<IRetentionTarget> targets,
         IOptions<RetentionOptions> options,
-        RetentionAdminState state,
+        IRetentionPurgeMode mode,
         RetentionExecutionTracker tracker,
         TimeProvider timeProvider,
         ILogger<RetentionAdminService> logger)
     {
         ArgumentNullException.ThrowIfNull(targets);
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(mode);
         ArgumentNullException.ThrowIfNull(tracker);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
 
         _targets = targets.ToArray();
         _options = options.Value;
-        _state = state;
+        _mode = mode;
         _tracker = tracker;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -69,7 +69,7 @@ public sealed partial class RetentionAdminService : IRetentionAdminService
 
     public RetentionConfigDto GetConfig() => new()
     {
-        DryRun = _state.DryRun,
+        DryRun = _mode.ScheduledDryRun,
         DefaultWindowDays = (int)Math.Round(_options.DefaultWindow.TotalDays),
         BatchSize = _options.BatchSize,
         CronExpression = _options.CronExpression,
@@ -152,8 +152,6 @@ public sealed partial class RetentionAdminService : IRetentionAdminService
             Targets = outcomes,
         };
     }
-
-    public bool SetDryRun(bool value) => _state.SetDryRun(value);
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Information,
         Message = "Retention manual run target={Target} rows={Rows} dryRun={DryRun}.")]

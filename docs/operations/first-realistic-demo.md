@@ -216,21 +216,26 @@ non-nullable; backed by the `sub` JWT claim).
 
 Web UI → **Admin → Retention**. Three sections:
 
-1. **Targets.** Lists all `IRetentionTarget` registered (session_events,
-   completed_sessions, call_attempts, dialer_contacts,
-   analytics_interval_snapshots, agent_assist_sessions,
-   call_analysis_results). Each shows `windowDays` + `lastRunAt` +
-   `rowsPurged` + `dryRun`.
-2. **Toggle DryRun.** Default is `true` (safe). Flip per-target to
-   `false` to enable real purges.
-3. **Run now.** Manually trigger the next scheduled cron tick for one
-   target.
+1. **Targets.** Lists every registered `IRetentionTarget` (with an
+   analytics database: session_events, completed_sessions,
+   analytics_interval_snapshots, call_analysis_results,
+   call_analysis_queue_ended, agent_assist_sessions; with the dialer:
+   call_attempts, dialer_contacts). Each shows
+   `windowDays` + `lastRunAt` + `rowsPurged` + `dryRun`.
+2. **Purge mode.** Read-only. One deployment key decides it for every
+   target: `Retention:DryRun` (environment variable `Retention__DryRun`),
+   default `true` (count only, nothing is deleted). Set it to `false` and
+   restart the Api to make the nightly purge delete expired rows. There is
+   no per-target flag and no runtime switch.
+3. **Run now.** Manually run the purge for one target or all of them. It
+   runs dry unless you ask for a real purge, whatever the configured mode.
 
-> **Production tip:** Leave `DryRun=true` for the first week to confirm
-> the purge counts match your expectation, then flip targets one at a
-> time. The purge meter
-> (`asterisk_sdk_pro_storage_common_retention_rows_purged_total`) is
-> exposed at `/metrics`.
+> **Production tip:** Leave `Retention:DryRun` unset (dry) for the first
+> week, read the per-target counts of a manual dry run, take a backup, then
+> set `Retention__DryRun=false` on every replica and restart. See
+> [Turning on the Pro retention purge](upgrade-retention-dry-run.md). The
+> purge meter (`retention_purged_total`, and
+> `retention_dry_run_would_purge_total` while dry) is exposed at `/metrics`.
 
 ### License panel
 
