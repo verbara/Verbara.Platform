@@ -144,10 +144,7 @@ if (!string.IsNullOrWhiteSpace(pushBackplaneRedis))
     // silent message drop.
     builder.Services.Configure<Verbara.Sdk.Pro.Push.Options.PushProOptions>(o =>
     {
-        o.PayloadSerializerOptions = new System.Text.Json.JsonSerializerOptions
-        {
-            TypeInfoResolver = Verbara.Platform.Core.Push.PlatformPushJsonContext.Default,
-        };
+        o.PayloadSerializerOptions = Verbara.Platform.Api.Serialization.PushRelayPayloadSerialization.CreateOptions();
     });
 }
 

@@ -102,6 +102,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Events relayed between Api replicas carry their payload.** The Redis push relay sends every event on an
+  Api replica's push bus to the other replicas, but the Api only described the payloads of the five cross-replica
+  events (agent state, pending agent state, conversation state, typification, account revocation). Every other event
+  (screen pops, agent hangups, the Pro conversation, agent and cluster-node state events, Agent Assist, campaign and
+  notification events, among others) failed to serialize: it was counted in `push_relay_dropped_total` with
+  `reason="serialization_error"`, logged a warning, and reached the other replicas with an empty payload. The Api
+  now describes every event type that can reach its push bus, and a test fails when a new one is missing.
 - `PUT /api/v1/admin/campaigns/{id}/dispositions/{codeId}` checks that the campaign belongs to the caller before it
   updates the disposition code, as creating and deleting a code already do. A campaign of another tenant answers 404
   and nothing is written.
