@@ -4,6 +4,7 @@ using Verbara.Platform.Api.DependencyInjection;
 using Verbara.Platform.Identity.Auth;
 using Microsoft.AspNetCore.DataProtection;
 using Verbara.Platform.Api.Endpoints;
+using Verbara.Platform.Api.Endpoints.Retention;
 using Verbara.Platform.Api.Middleware;
 using Verbara.Platform.Api.OpenApi;
 using Microsoft.AspNetCore.Authorization;
@@ -434,20 +435,8 @@ builder.Services.AddVerbaraResilience();
 // LicenseGuard: runtime feature check (10s cache + 7d grace by default)
 builder.Services.AddProLicenseGuard();
 
-// Retention: the Pro purge orchestrator. Its mode is deployment configuration, `Retention:DryRun` (default true:
-// count, never delete; false: delete expired rows), read by hand (AOT-safe) and fixed for the process lifetime —
-// changing it takes a restart (Platform/ADR-0052). A value that is not a boolean stops the host here.
-var retentionDryRun = Verbara.Platform.Api.Endpoints.Retention.RetentionPurgeModeConfiguration.Read(builder.Configuration);
-builder.Services.AddProRetention(o => o.DryRun = retentionDryRun);
-builder.Services.AddSingleton<
-    Verbara.Platform.Api.Endpoints.Retention.IRetentionPurgeMode,
-    Verbara.Platform.Api.Endpoints.Retention.RetentionPurgeMode>();
-
-// R5.2 PC.1 — admin retention surface (in-process tracker; the mode is read-only).
-builder.Services.AddSingleton<Verbara.Platform.Api.Endpoints.Retention.RetentionExecutionTracker>();
-builder.Services.AddSingleton<
-    Verbara.Platform.Api.Endpoints.Retention.IRetentionAdminService,
-    Verbara.Platform.Api.Endpoints.Retention.RetentionAdminService>();
+// Retention: the Pro purge orchestrator + admin surface; its mode is `Retention:DryRun` (Platform/ADR-0052).
+builder.Services.AddPlatformProRetention(builder.Configuration);
 
 // ─── Resilience Policies (v1.9.1 — Frente B/E wraps) ────────────────────────
 // flow.http-request: circuit 3/60s + retry 2/500ms + timeout 60s (upper bound).
@@ -1471,9 +1460,7 @@ builder.Services.AddVerbaraOpenApi(openApiEnabled);
 
 var app = builder.Build();
 app.Services.EnsureEmbeddedLicenceTrustAnchor();
-Verbara.Platform.Api.Endpoints.Retention.RetentionPurgeModeLog.LogStartupMode(
-    app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Verbara.Platform.Api.Endpoints.Retention.RetentionPurgeMode"),
-    app.Services.GetRequiredService<Verbara.Platform.Api.Endpoints.Retention.IRetentionPurgeMode>().ScheduledDryRun);
+RetentionPurgeModeLog.LogStartupMode(app.Services);
 
 // ─── Phase 2.2 — ensure cluster_distributed_lock schema (leader election) ────
 // AddPostgresDistributedLock registers the lock primitive but does NOT create its

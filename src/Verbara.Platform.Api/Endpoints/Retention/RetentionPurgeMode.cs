@@ -37,6 +37,15 @@ public sealed class RetentionPurgeMode : IRetentionPurgeMode
 /// <summary>Source-generated startup log line that states the scheduled purge mode.</summary>
 public static partial class RetentionPurgeModeLog
 {
+    /// <summary>Logs, once at startup, the mode of the host's <see cref="IRetentionPurgeMode"/>.</summary>
+    public static void LogStartupMode(IServiceProvider services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        LogStartupMode(
+            services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(RetentionPurgeMode).FullName!),
+            services.GetRequiredService<IRetentionPurgeMode>().ScheduledDryRun);
+    }
+
     /// <summary>Logs the mode once: Information when dry, Warning when the purge deletes.</summary>
     public static void LogStartupMode(ILogger logger, bool dryRun)
     {
