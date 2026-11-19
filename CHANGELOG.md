@@ -130,7 +130,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the same response shapes. In the OpenAPI document the seven operations declare 404, the two create operations
   declare their 201 body, and `GET .../contact-lists/{listId}/contacts` declares its 200 body as
   `PagedResultOfCampaignContactDto`: the dialer's contact (list, status, attempts, phone numbers), a schema of its own
-  rather than the CRM `Contact` of `/api/v1/contacts`. The JSON body itself is unchanged.
+  rather than the CRM `Contact` of `/api/v1/contacts`. The JSON body itself is unchanged. (#621)
 
 ### Dependencies
 
@@ -219,7 +219,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - The Platform hub's seven client methods no longer take a `CancellationToken`. Platform has no C# caller of them.
   - Platform registers no call-agent resolver yet, so the first call answered by a queue member interface that the
     event store projects logs one Warning per projector and subscriber instance, and its record keeps no agent id
-    (#620 tracks registering one).
+    (#620 tracks registering one). (#621)
 - **The ASP.NET Core packages move together to `10.0.15`**: `Microsoft.AspNetCore.Authentication.JwtBearer` and
   `.OpenIdConnect` (`10.0.14`), `Microsoft.AspNetCore.DataProtection` and `.Extensions`, `Microsoft.AspNetCore.SignalR.Client`
   and `.Common`, `Microsoft.AspNetCore.Mvc.Testing`, `System.Security.Cryptography.Xml` and `.Pkcs` (`10.0.13`), and
