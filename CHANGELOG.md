@@ -59,18 +59,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PJSIP/{tenant}-agent-{agentId}` names that agent, so the CDR list and detail show it and
   `GET /api/v1/analytics/cdr?agent=` finds the call. An interface of another tenant, a supervisor's listen slot or any
   other member keeps the agent the Sdk recorded. A call taken in two queue visits names its first agent. The Api no
-  longer logs Pro's warning that no `ICallAgentResolver` is registered.
-  **Upgrade note:** answered queue calls recorded before this release, since the Verbara.Sdk.Pro `2.30.1-pro` pin
-  (#621) or before, keep no agent and are not repaired, so the `?agent=` filter omits them. To count them, run on the
-  event-store database (`ConnectionStrings:Analytics`, else the dialer's database; not necessarily the core one):
-
-  ```sql
-  SELECT count(*) FROM completed_sessions
-  WHERE queue_name IS NOT NULL AND connected_at IS NOT NULL
-    AND agent_id IS NULL AND linked_id IS NOT NULL;
-  ```
-
-  It counts the records written since Verbara.Sdk.Pro `2.26.0-pro` (older records have no `linked_id`).
+  longer logs Pro's warning that no `ICallAgentResolver` is registered. Records written before this release are not
+  repaired (read **Upgrading**).
 - **The `services` readiness entry stays Degraded while a dependency circuit is half-open.** From Verbara.Sdk `2.10`
   a tripped circuit reads half-open once its open window ends, with or without a call, so the entry read Healthy
   while the dependency was still down. A watched circuit that is not closed now keeps `services` Degraded until a call
@@ -234,9 +224,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - The event store's first boot on `2.30.x` runs an additive migration (`V005`, a nullable
     `completed_sessions.agent_interface` column); nothing is rewritten.
   - The Platform hub's seven client methods no longer take a `CancellationToken`. Platform has no C# caller of them.
-  - Platform registers no call-agent resolver yet, so the first call answered by a queue member interface that the
-    event store projects logs one Warning per projector and subscriber instance, and its record keeps no agent id
-    (#620 tracks registering one). (#621)
+  - The event store asks the host for a call-agent resolver; this release registers Platform's (#620), so no Warning
+    is logged and an answered queue call's record names its agent. (#621)
 - **The ASP.NET Core packages move together to `10.0.15`**: `Microsoft.AspNetCore.Authentication.JwtBearer` and
   `.OpenIdConnect` (`10.0.14`), `Microsoft.AspNetCore.DataProtection` and `.Extensions`, `Microsoft.AspNetCore.SignalR.Client`
   and `.Common`, `Microsoft.AspNetCore.Mvc.Testing`, `System.Security.Cryptography.Xml` and `.Pkcs` (`10.0.13`), and
@@ -253,6 +242,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Upgrading
 
+- **Answered queue calls recorded before this release keep no agent** (#620). Records written while Platform
+  registered no call-agent resolver, since the Verbara.Sdk.Pro `2.30.1-pro` pin (#621) or before, are not repaired,
+  so `GET /api/v1/analytics/cdr?agent=` omits them. To count them, run on the event-store database
+  (`ConnectionStrings:Analytics`, else the dialer's database; not necessarily the core one):
+
+  ```sql
+  SELECT count(*) FROM completed_sessions
+  WHERE queue_name IS NOT NULL AND connected_at IS NOT NULL
+    AND agent_id IS NULL AND linked_id IS NOT NULL;
+  ```
+
+  It counts the records written since Verbara.Sdk.Pro `2.26.0-pro` (older records have no `linked_id`). The query
+  has no time bound, so after the upgrade it also counts new answered queue calls whose member is not a Platform
+  agent (another tenant's interface, a supervisor's listen slot, a `Local/` member) when the Sdk recorded no agent
+  for them; add `AND completed_at < '<upgrade time>'` to count only the older records.
 - **An Agent Assist session whose call carries no tenant is no longer listed.** A call that arrives on a trunk without
   the `TENANT_ID` channel variable has no tenant, so its Agent Assist session is missing from
   `GET /api/v1/supervisor/sessions/active` and answers 404 to whisper and transcript listen. Set `TENANT_ID` on every
