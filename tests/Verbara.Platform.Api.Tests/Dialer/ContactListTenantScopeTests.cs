@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
@@ -7,8 +8,9 @@ using Verbara.Sdk.Pro.Dialer.Models;
 namespace Verbara.Platform.Api.Tests.Dialer;
 
 /// <summary>
-/// contact-lists-stay-in-their-tenant: the campaign contact-list routes and the disposition-code listing, create,
-/// update and delete routes act only on a campaign, list or code of the caller's tenant, through the HTTP pipeline with two Customer
+/// contact-lists-stay-in-their-tenant: the campaign contact-list routes, the disposition-code listing, create,
+/// update and delete routes and the scheduled-callback listing and create routes act only on a campaign, list or code
+/// of the caller's tenant, through the HTTP pipeline with two Customer
 /// tenants (<c>acme</c>, <c>globex</c>) authenticated by real JWTs (<see cref="DialerTenantScopeFactory"/>). The stores
 /// are the in-memory ones; a list or code whose own tenant differs from its campaign's tenant is reached through the
 /// list routes only against Pro's Postgres stores, in the live-DB suite.
@@ -387,7 +389,202 @@ public sealed class ContactListTenantScopeTests : IClassFixture<DialerTenantScop
         (await DispositionIdsAsync(acme, campaignId)).Should().NotContain(codeId);
     }
 
+    // ─── Scheduled callbacks ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ListCallbacks_ShouldReturn404AndCarryNoCallback_WhenTheCallbackTenantDiffersFromItsCampaignTenant()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        using var globex = _factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var contactId = NextContactId();
+        await SeedCallbackAsync(Globex, campaignId, contactId);
+
+        using var response = await globex.GetAsync($"{CampaignsPath}/{campaignId}/callbacks");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "campaign {0} belongs to acme, so globex has no callbacks of it to show (contact {1} is globex's)",
+            campaignId, contactId);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain(contactId.ToString(CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task ListCallbacks_ShouldListOnlyItsOwnCallback_WhenTheCampaignCarriesACallbackOfAnotherTenant()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        var campaignId = await CreateCampaignAsync(acme);
+        var foreignContactId = NextContactId();
+        var ownContactId = NextContactId();
+        await SeedCallbackAsync(Globex, campaignId, foreignContactId);
+        await SeedCallbackAsync(Acme, campaignId, ownContactId);
+
+        var contactIds = await CallbackContactIdsAsync(acme, campaignId);
+
+        contactIds.Should().Equal([ownContactId], "acme sees its own callback of campaign {0} and not globex's of contact {1}",
+            campaignId, foreignContactId);
+    }
+
+    [Fact]
+    public async Task ListCallbacks_ShouldReturn404AndCarryNoCallback_WhenTheCampaignBelongsToAnotherTenant()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        using var globex = _factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var contactId = NextContactId();
+        await SeedCallbackAsync(Acme, campaignId, contactId);
+
+        using var response = await globex.GetAsync($"{CampaignsPath}/{campaignId}/callbacks");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "campaign {0} belongs to acme, so it is no campaign of globex's", campaignId);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain(contactId.ToString(CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task ListCallbacks_ShouldNotListTheCallback_WhenTheCallbackBelongsToAnotherCampaign()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        var campaignId = await CreateCampaignAsync(acme);
+        var otherCampaignId = await CreateCampaignAsync(acme);
+        var contactId = NextContactId();
+        await SeedCallbackAsync(Acme, campaignId, contactId);
+
+        var contactIds = await CallbackContactIdsAsync(acme, otherCampaignId);
+
+        contactIds.Should().NotContain(contactId, "the callback of contact {0} belongs to campaign {1}, not to campaign {2}",
+            contactId, campaignId, otherCampaignId);
+    }
+
+    [Fact]
+    public async Task ListCallbacks_ShouldReturn404_WhenTheCampaignDoesNotExist()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+
+        using var response = await acme.GetAsync($"{CampaignsPath}/{UnknownCampaignId}/callbacks");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "no store holds campaign {0}", UnknownCampaignId);
+    }
+
+    [Fact]
+    public async Task CreateCallback_ShouldReturn404AndScheduleNothing_WhenTheContactListTenantDiffersFromItsCampaignTenant()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        using var globex = _factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var contactId = NextContactId();
+        Campaigns.SeedCampaignContact(Globex, campaignId, contactId);
+
+        using var response = await globex.PostAsync($"{CampaignsPath}/{campaignId}/callbacks", CallbackBody(contactId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "contact {0} is of a globex list on acme's campaign {1}, so it is no contact of globex's campaign",
+            contactId, campaignId);
+        (await ScheduledCallbacksAsync(campaignId, contactId)).Should().BeEmpty("nothing is scheduled");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateCallback_ShouldReturn404AndScheduleNothing_WhenTheCampaignBelongsToAnotherTenant(
+        bool dateIsUnreadable)
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        using var globex = _factory.CreateAdminClient(Globex);
+        var campaignId = await CreateCampaignAsync(acme);
+        var contactId = NextContactId();
+        Campaigns.SeedCampaignContact(Acme, campaignId, contactId);
+
+        using var response = await globex.PostAsync($"{CampaignsPath}/{campaignId}/callbacks",
+            CallbackBody(contactId, dateIsUnreadable ? UnreadableDate : null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "campaign {0} belongs to acme, so it is no campaign of globex's (unreadable date: {1})",
+            campaignId, dateIsUnreadable);
+        (await ScheduledCallbacksAsync(campaignId, contactId)).Should().BeEmpty("nothing is scheduled");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateCallback_ShouldReturn404AndScheduleNothing_WhenTheCampaignDoesNotExist(bool dateIsUnreadable)
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        var contactId = NextContactId();
+        // The contact is registered on the unknown id, so only the campaign check can refuse it.
+        Campaigns.SeedCampaignContact(Acme, UnknownCampaignId, contactId);
+
+        using var response = await acme.PostAsync($"{CampaignsPath}/{UnknownCampaignId}/callbacks",
+            CallbackBody(contactId, dateIsUnreadable ? UnreadableDate : null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "no store holds campaign {0} (unreadable date: {1})", UnknownCampaignId, dateIsUnreadable);
+        (await ScheduledCallbacksAsync(UnknownCampaignId, contactId)).Should().BeEmpty("nothing is scheduled");
+    }
+
+    [Fact]
+    public async Task CallbackRoutes_ShouldAnswerAsBefore_WhenTheCampaignAndContactBelongToTheTenant()
+    {
+        using var acme = _factory.CreateAdminClient(Acme);
+        var campaignId = await CreateCampaignAsync(acme);
+        var contactId = NextContactId();
+        Campaigns.SeedCampaignContact(Acme, campaignId, contactId);
+
+        using var create = await acme.PostAsync($"{CampaignsPath}/{campaignId}/callbacks", CallbackBody(contactId));
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        create.Headers.Location!.OriginalString.Should().Be($"/admin/campaigns/{campaignId}/callbacks");
+
+        (await CallbackContactIdsAsync(acme, campaignId)).Should().Equal([contactId]);
+
+        using var unreadable = await acme.PostAsync($"{CampaignsPath}/{campaignId}/callbacks",
+            CallbackBody(contactId, UnreadableDate));
+        unreadable.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ScheduledCallbacksAsync(campaignId, contactId)).Should().ContainSingle("only the first POST scheduled");
+    }
+
+    private InMemoryCampaignStore Campaigns => _factory.Services.GetRequiredService<InMemoryCampaignStore>();
+
+    /// <summary>A callback of <paramref name="tenantId"/> for <paramref name="contactId"/> on <paramref name="campaignId"/>, one day ahead.</summary>
+    private async Task SeedCallbackAsync(string tenantId, long campaignId, long contactId) =>
+        await Campaigns.SaveCallbackAsync(tenantId, campaignId, contactId, DateTimeOffset.UtcNow.AddDays(1), null,
+            CancellationToken.None);
+
+    /// <summary>The pending callbacks of either tenant for this campaign and contact.</summary>
+    private async Task<IReadOnlyList<long>> ScheduledCallbacksAsync(long campaignId, long contactId)
+    {
+        var found = new List<long>();
+        foreach (var tenant in new[] { Acme, Globex })
+        {
+            var pending = await Campaigns.GetPendingCallbacksAsync(tenant, DateTimeOffset.MaxValue, CancellationToken.None);
+            found.AddRange(pending.Where(c => c.CampaignId == campaignId && c.ContactId == contactId).Select(c => c.ContactId));
+        }
+
+        return found;
+    }
+
     // ─── Helpers (shared with the live-DB suite) ─────────────────────────────────
+
+    /// <summary>A <c>scheduledAt</c> no date parser reads.</summary>
+    internal const string UnreadableDate = "not-a-date";
+
+    /// <summary>A contact id of this test alone, so tests sharing one store never see each other's callbacks.</summary>
+    internal static long NextContactId() => Random.Shared.NextInt64(1_000_000_000L, 1L << 52);
+
+    /// <summary>A callback POST body for <paramref name="contactId"/>, one day ahead unless <paramref name="scheduledAt"/> is given.</summary>
+    internal static JsonContent CallbackBody(long contactId, string? scheduledAt = null) => JsonContent.Create(new
+    {
+        contactId,
+        phone = "+15551110000",
+        scheduledAt = scheduledAt ?? DateTimeOffset.UtcNow.AddDays(1).ToString("O", CultureInfo.InvariantCulture),
+    });
+
+    /// <summary>The contact ids of <paramref name="campaignId"/>'s pending callbacks, as <paramref name="client"/> lists them (200).</summary>
+    internal static async Task<IReadOnlyList<long>> CallbackContactIdsAsync(HttpClient client, long campaignId)
+    {
+        using var response = await client.GetAsync($"{CampaignsPath}/{campaignId}/callbacks");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var callbacks = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsArray();
+        return callbacks.Select(n => n!["contactId"]!.GetValue<long>()).ToList();
+    }
 
     internal const string ContactFirstName = "Original";
 

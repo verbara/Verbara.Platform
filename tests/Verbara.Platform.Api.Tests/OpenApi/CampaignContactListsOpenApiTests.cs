@@ -4,8 +4,9 @@ using System.Text.Json.Nodes;
 namespace Verbara.Platform.Api.Tests.OpenApi;
 
 /// <summary>
-/// contact-lists-stay-in-their-tenant task 3.3: the campaign contact-list and disposition-code operations that answer
-/// 404 for a campaign, list or code outside the caller's tenant or campaign declare that 404 in the emitted document.
+/// contact-lists-stay-in-their-tenant task 3.3: the campaign contact-list, disposition-code and scheduled-callback
+/// operations that answer 404 for a campaign, list or code outside the caller's tenant or campaign declare that 404 in
+/// the emitted document.
 /// The schema checks of the exported document read only <c>components.schemas</c>, so only this operation test sees a
 /// response code. One row per operation, so a missing 404 names the operation that lost it.
 /// </summary>
@@ -17,7 +18,7 @@ public sealed class CampaignContactListsOpenApiTests : IClassFixture<SupervisorL
 
     public CampaignContactListsOpenApiTests(SupervisorListenOpenApiTests.OpenApiFactory factory) => _factory = factory;
 
-    /// <summary>The nine operations, as path and lower-case method.</summary>
+    /// <summary>The eleven operations, as path and lower-case method.</summary>
     public static TheoryData<string, string> NotFoundOperations => new()
     {
         { $"{CampaignPath}/contact-lists", "get" },
@@ -29,6 +30,8 @@ public sealed class CampaignContactListsOpenApiTests : IClassFixture<SupervisorL
         { $"{CampaignPath}/dispositions", "post" },
         { $"{CampaignPath}/dispositions/{{codeId}}", "put" },
         { $"{CampaignPath}/dispositions/{{codeId}}", "delete" },
+        { $"{CampaignPath}/callbacks", "get" },
+        { $"{CampaignPath}/callbacks", "post" },
     };
 
     [Theory]
@@ -47,6 +50,23 @@ public sealed class CampaignContactListsOpenApiTests : IClassFixture<SupervisorL
         var responses = operation!["responses"]!.AsObject();
         responses.ContainsKey("404").Should().BeTrue(
             $"{method} {path} answers 404 outside the caller's tenant or campaign; the operation declares {string.Join(", ", responses.Select(kv => kv.Key))}");
+    }
+
+    /// <summary>
+    /// The callback POST answers 201 when it schedules, 400 for an unreadable date and 404 outside the caller's campaign;
+    /// the document declares exactly those three, not the bare 200 an untyped result declares.
+    /// </summary>
+    [Fact]
+    public async Task CreateCallback_ShouldDeclare201And400And404_WhenTheDocumentIsEmitted()
+    {
+        using var client = _factory.CreateClient();
+        using var response = await client.GetAsync("/openapi/v1.json");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var paths = JsonNode.Parse(await response.Content.ReadAsStringAsync())!["paths"]!.AsObject();
+
+        var responses = paths[$"{CampaignPath}/callbacks"]!["post"]!["responses"]!.AsObject();
+
+        responses.Select(kv => kv.Key).Should().BeEquivalentTo(["201", "400", "404"]);
     }
 
     /// <summary>

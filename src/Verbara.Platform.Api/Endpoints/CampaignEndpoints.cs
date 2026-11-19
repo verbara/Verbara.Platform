@@ -484,10 +484,13 @@ internal static class CampaignEndpoints
 
     // ─── Callback Handlers ────────────────────────────────────────────────────
 
-    private static async Task<Ok<List<CallbackDto>>> ListCallbacks(
+    private static async Task<Results<Ok<List<CallbackDto>>, NotFound>> ListCallbacks(
         long id, HttpContext context, [FromServices] CampaignStoreBase store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        // A campaign of another tenant is no campaign of the caller's: 404, as the disposition and contact-list routes answer.
+        if (await store.GetCampaignAsync(tenantId, id, ct) is null)
+            return TypedResults.NotFound();
         var callbacks = await store.GetPendingCallbacksAsync(tenantId, DateTimeOffset.UtcNow.AddDays(30), ct);
         var filtered = callbacks
             .Where(c => c.CampaignId == id)
@@ -496,20 +499,24 @@ internal static class CampaignEndpoints
         return TypedResults.Ok(filtered);
     }
 
-    private static async Task<IResult> CreateCallback(
+    private static async Task<Results<Created, BadRequest<string>, NotFound>> CreateCallback(
         long id, CreateCallbackRequest request, HttpContext context,
         CampaignStoreBase store, CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        // The campaign must be the caller tenant's before anything else is read, as on the disposition and contact-list
+        // routes; the contact check below filters only the contact's own list tenant. Otherwise 404, nothing scheduled.
+        if (await store.GetCampaignAsync(tenantId, id, ct) is null)
+            return TypedResults.NotFound();
         if (!DateTimeOffset.TryParse(request.ScheduledAt, out var scheduledAt))
-            return Results.BadRequest("Invalid date format");
+            return TypedResults.BadRequest("Invalid date format");
         // design D7 C1: the callback holds its contact from the moment it is written, so it is written only for a
         // contact of this campaign and tenant; any other contact id is a 404 and nothing is scheduled.
         var saved = await store.TrySaveCallbackAsync(
             tenantId, id, request.ContactId, scheduledAt.ToUtcInstant(), request.AgentId, ct);
         if (!saved)
-            return Results.NotFound();
-        return Results.Created($"/admin/campaigns/{id}/callbacks", null);
+            return TypedResults.NotFound();
+        return TypedResults.Created($"/admin/campaigns/{id}/callbacks");
     }
 
     // ─── Metrics Handlers ─────────────────────────────────────────────────────
