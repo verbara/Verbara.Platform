@@ -46,4 +46,32 @@ public sealed class CampaignContactListsOpenApiTests : IClassFixture<SupervisorL
         responses.ContainsKey("404").Should().BeTrue(
             $"{method} {path} answers 404 outside the caller's tenant or campaign; the operation declares {string.Join(", ", responses.Select(kv => kv.Key))}");
     }
+
+    /// <summary>
+    /// The contacts page answers the dialer's contact (list membership, status, attempts), not the CRM contact of
+    /// <c>/contacts</c>; the two must not share one schema, or the document describes the wrong body.
+    /// </summary>
+    [Fact]
+    public async Task ListContacts_ShouldDescribeTheDialerContact_WhenTheDocumentIsEmitted()
+    {
+        using var client = _factory.CreateClient();
+        using var response = await client.GetAsync("/openapi/v1.json");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var document = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        var schemas = document["components"]!["schemas"]!.AsObject();
+
+        var page = Resolve(schemas, document["paths"]![$"{CampaignPath}/contact-lists/{{listId}}/contacts"]!["get"]!
+            ["responses"]!["200"]!["content"]!["application/json"]!["schema"]!);
+        var item = Resolve(schemas, page["properties"]!["items"]!["items"]!);
+        var properties = item["properties"]!.AsObject().Select(kv => kv.Key).ToList();
+
+        properties.Should().Contain(["contactListId", "status", "attempts", "lastPhoneDialed", "phoneNumbers"]);
+        properties.Should().NotContain("channelConsent", "the CRM contact's members are not in the contacts page");
+    }
+
+    private static JsonNode Resolve(JsonObject schemas, JsonNode schema)
+    {
+        var reference = schema["$ref"]?.GetValue<string>();
+        return reference is null ? schema : schemas[reference["#/components/schemas/".Length..]]!;
+    }
 }

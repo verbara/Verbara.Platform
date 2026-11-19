@@ -127,8 +127,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `DELETE .../dispositions/{codeId}` for a code that is not one of that campaign's codes in the caller's tenant.
   A list or code whose own tenant differs from its campaign's tenant is reached through these routes by neither
   tenant. The tenant's own campaigns, lists and codes answer as before, with
-  the same response shapes. In the OpenAPI document the seven operations declare 404, and the two create operations
-  declare their 201 body.
+  the same response shapes. In the OpenAPI document the seven operations declare 404, the two create operations
+  declare their 201 body, and `GET .../contact-lists/{listId}/contacts` declares its 200 body as
+  `PagedResultOfCampaignContactDto`: the dialer's contact (list, status, attempts, phone numbers), a schema of its own
+  rather than the CRM `Contact` of `/api/v1/contacts`. The JSON body itself is unchanged.
 
 ### Dependencies
 

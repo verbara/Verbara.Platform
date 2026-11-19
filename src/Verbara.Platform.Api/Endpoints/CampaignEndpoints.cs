@@ -317,7 +317,8 @@ internal static class CampaignEndpoints
             Name = body.Name,
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        // The store creates the list only on a campaign of the caller's tenant, in the same statement; null is a 404.
+        // Defense in depth: the store also creates the list only on a campaign of the caller's tenant, in the same
+        // statement, so a campaign that stops being the caller's after the check above is still a 404 (null).
         var created = await contactListStore.TryCreateContactListAsync(tenantId, id, list, ct);
         if (created is null)
             return TypedResults.NotFound();
@@ -355,7 +356,7 @@ internal static class CampaignEndpoints
         return TypedResults.Ok(new ImportResultDto(count, 0, 0));
     }
 
-    private static async Task<Results<Ok<PagedResult<Contact>>, NotFound>> ListContacts(
+    private static async Task<Results<Ok<PagedResult<CampaignContactDto>>, NotFound>> ListContacts(
         long id,
         long listId,
         HttpContext context,
@@ -368,8 +369,17 @@ internal static class CampaignEndpoints
         var contacts = await contactListStore.ListContactsAsync(tenantId, id, listId, page, pageSize, ct);
         if (contacts is not { } found)
             return TypedResults.NotFound();
-        return TypedResults.Ok(new PagedResult<Contact>(found.Items, found.TotalCount, page, pageSize));
+        return TypedResults.Ok(new PagedResult<CampaignContactDto>(
+            found.Items.Select(MapToCampaignContactDto).ToList(), found.TotalCount, page, pageSize));
     }
+
+    private static CampaignContactDto MapToCampaignContactDto(Contact c) => new(
+        c.Id, c.ContactListId, c.ExternalId, c.FirstName, c.LastName, c.Status, c.Successful, c.RetryEnabled,
+        c.Attempts, c.LastAttemptAt, c.LastPhoneDialed, c.LastPhoneIndex, c.LastCallUniqueId, c.LastCallAttemptId,
+        c.LastDispositionId, c.LastComment, c.Priority, c.IsScheduledCallback, c.ScheduledCallbackAt,
+        c.EarliestNextAttemptAt, c.AssignedAgentId, c.Timezone, c.CreatedAt, c.ExpiresAt, c.Metadata,
+        c.PhoneNumbers.Select(p => new CampaignContactPhoneDto(
+            p.Id, p.ContactId, p.PhoneNumber, p.Type, p.Priority, p.Attempts, p.LastAttemptAt, p.Status)).ToList());
 
     // ─── Disposition Handlers ─────────────────────────────────────────────────
 
@@ -723,6 +733,19 @@ internal sealed record ContactListDto(long Id, string Name, int TotalContacts, i
 internal sealed record ImportContactsRequest(ContactImportRowDto[] Contacts);
 internal sealed record ContactImportRowDto(string FirstName, string? LastName, string Phone, string? PhoneType, Dictionary<string, string>? Metadata);
 internal sealed record ImportResultDto(int Imported, int Skipped, int Duplicates);
+
+// A contact of a campaign's list, as the dialer keeps it. Its own type so the OpenAPI document does not describe it
+// with the CRM contact of /contacts, which shares the dialer model's class name.
+internal sealed record CampaignContactDto(
+    long Id, long ContactListId, string? ExternalId, string? FirstName, string? LastName, ContactStatus Status,
+    bool Successful, bool RetryEnabled, int Attempts, DateTimeOffset? LastAttemptAt, string? LastPhoneDialed,
+    int LastPhoneIndex, string? LastCallUniqueId, long? LastCallAttemptId, long? LastDispositionId, string? LastComment,
+    int Priority, bool IsScheduledCallback, DateTimeOffset? ScheduledCallbackAt, DateTimeOffset? EarliestNextAttemptAt,
+    string? AssignedAgentId, string? Timezone, DateTimeOffset CreatedAt, DateTimeOffset? ExpiresAt,
+    Dictionary<string, string>? Metadata, IReadOnlyList<CampaignContactPhoneDto> PhoneNumbers);
+internal sealed record CampaignContactPhoneDto(
+    long Id, long ContactId, string PhoneNumber, PhoneType Type, int Priority, int Attempts,
+    DateTimeOffset? LastAttemptAt, ContactPhoneStatus Status);
 
 // ─── Disposition DTOs ──────────────────────────────────────────────────────────
 
