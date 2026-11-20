@@ -172,6 +172,36 @@ single-replica-only despite the multi-replica gate ADRs.
   `ArgumentException: Implementation type cannot be ... indistinguishable`.
   Pre-v1.14.1 multi-replica deployment was wholly blocked by this bug.
 
+## Password hashing concurrency
+
+Each password check is deliberate CPU work (Argon2id m = 12 MiB, t = 3; BCrypt cost 12 for a hash not yet migrated),
+and the library call is synchronous. A replica computes at most `Identity:PasswordHashing:MaxConcurrency` of them at
+once (environment variable `Identity__PasswordHashing__MaxConcurrency`). Unset, `0` or negative means half the
+processors the process may use (`Environment.ProcessorCount / 2`, which follows a container CPU limit), at least one.
+A sign-in over the bound waits for a slot without holding a thread, and is never refused for lack of one. Sign-in
+(including the BCrypt-to-Argon2id rehash), password change, MFA disable and recovery-code regeneration go through it.
+
+Without the bound, a burst of sign-ins in the same second (a shift opening the console) ran one hash per request on
+the thread pool: every pool thread hashed, and every other request on the replica (`/health`, token refresh, the push
+follower) queued behind the burst.
+
+Measured locally, 2026-11-20: the Api built in Release (JIT, not the AOT image), pinned with `taskset` to 4 or 2
+processors, Postgres 18 in Docker, 250 sign-ins released together after 5 warm-up sign-ins, `/health` probed every
+50 ms from the same client. All 250 sign-ins returned 200 in every row.
+
+| Processors | Bound | Burst wall | Sign-in p50 | Sign-in p95 | `/health` p50 / p95 / max during the burst |
+|---|---|---|---|---|---|
+| 4 | none (before) | 5.8 s | 5.7 s | 5.7 s | 234 / 531 / 1043 ms |
+| 4 | 2 (default) | 6.4 s | 3.8 s | 6.2 s | 0.7 / 6.1 / 38 ms |
+| 4 | 4 | 5.8 s | 4.4 s | 5.6 s | 1.8 / 960 / 2083 ms |
+| 2 | none (before) | 7.0 s | 6.9 s | 7.0 s | 214 / 332 / 955 ms |
+| 2 | 1 (default) | 10.3 s | 6.0 s | 9.9 s | 0.9 / 6.6 / 81 ms |
+
+Reading it: the default keeps the rest of the replica responsive during a burst, at the price of hashing on half the
+processors, so the last sign-in of a large burst can finish later (on 2 processors, 10.3 s instead of 7.0 s). A bound
+equal to the processor count gives the burst every processor back and the stall with it. Raise the bound only on a
+replica that serves sign-ins and little else; to absorb a large shift start, add replicas instead.
+
 ## Postgres pool tuning
 
 `AddPostgresStorage` accepts the connection string verbatim plus an

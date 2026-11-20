@@ -121,7 +121,10 @@ internal static class AuthEndpoints
             return Results.Json(new ErrorResponse("Account is locked"),
                 ApiJsonContext.Default.ErrorResponse, statusCode: 423);
 
-        if (!PasswordService.VerifyPassword(body.Password, user.PasswordHash))
+        // The hash runs inside the replica's hashing bound: a sign-in burst waits for a slot without holding
+        // a thread, so the rest of the replica keeps serving (PasswordHashingGate).
+        var hashingGate = PasswordHashingGate.For(context);
+        if (!await hashingGate.VerifyAsync(body.Password, user.PasswordHash, ct))
         {
             await lockoutService.RecordFailedAttemptAsync(user, ip, ua, ct);
             await authEvents.LogAsync(rawTenantId!, user.UserId.Value, AuthEventTypes.LoginFailure, ip, ua,
@@ -146,7 +149,7 @@ internal static class AuthEndpoints
         // BCrypt12's ~162 ms — the dominant Phase 4 perf win).
         if (authWriteQueue is not null && PasswordService.IsBcryptHash(user.PasswordHash))
         {
-            var newHash = PasswordService.HashPassword(body.Password);
+            var newHash = await hashingGate.HashAsync(body.Password, ct);
             // The verified hash travels with the rehash: it lands only while that is still the
             // stored hash, so a password changed before the queue drains is never replaced by a
             // hash of this (old) password.
@@ -751,7 +754,9 @@ internal static class AuthEndpoints
             }
         }
 
-        if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(body.OldPassword, user.PasswordHash))
+        var hashingGate = PasswordHashingGate.For(context);
+        if (string.IsNullOrEmpty(user.PasswordHash)
+            || !await hashingGate.VerifyAsync(body.OldPassword, user.PasswordHash, ct))
             return Results.BadRequest(new ErrorResponse("Current password is incorrect"));
 
         var config = await configStore.GetAsync(tenantId, ct) ?? new TenantAuthConfig { TenantId = tenantId };
@@ -763,7 +768,7 @@ internal static class AuthEndpoints
         // stored one: a change proven with a password that was replaced meanwhile (a reset, another
         // change) does not land.
         if (!await userStore.SetPasswordHashAsync(
-                user.TenantId, user.UserId, PasswordService.HashPassword(body.NewPassword), DateTimeOffset.UtcNow,
+                user.TenantId, user.UserId, await hashingGate.HashAsync(body.NewPassword, ct), DateTimeOffset.UtcNow,
                 clearLockout: false, expectedCurrentHash: user.PasswordHash, ct))
             return Results.BadRequest(new ErrorResponse("Current password is incorrect"));
 
@@ -1064,7 +1069,8 @@ internal static class AuthEndpoints
                 statusCode: 403);
         }
 
-        if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(body.Password, user.PasswordHash))
+        if (string.IsNullOrEmpty(user.PasswordHash)
+            || !await PasswordHashingGate.For(context).VerifyAsync(body.Password, user.PasswordHash, ct))
             return Results.BadRequest(new ErrorResponse("Invalid password"));
 
         if (!await userStore.ClearMfaAsync(user.TenantId, user.UserId, clearLockout: false, DateTimeOffset.UtcNow, ct))
@@ -1105,7 +1111,8 @@ internal static class AuthEndpoints
         if (!user.MfaEnabled)
             return Results.BadRequest(new ErrorResponse("MFA is not enabled for this user."));
 
-        if (string.IsNullOrEmpty(user.PasswordHash) || !PasswordService.VerifyPassword(request.Password, user.PasswordHash))
+        if (string.IsNullOrEmpty(user.PasswordHash)
+            || !await PasswordHashingGate.For(context).VerifyAsync(request.Password, user.PasswordHash, ct))
             return Results.BadRequest(new ErrorResponse("Invalid password"));
 
         if (!mintGate.TryAcquire(user.TenantId, user.UserId, out var retryAfter))

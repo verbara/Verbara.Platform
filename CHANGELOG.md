@@ -102,6 +102,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A burst of sign-ins no longer stalls the rest of an Api replica.** Each password check (Argon2id, or BCrypt for a
+  hash not yet migrated) is deliberate CPU work, and every sign-in ran its own at once on the shared thread pool: when a
+  shift's agents all signed in within the same second, every pool thread was busy hashing and every other request on
+  that replica waited behind them. The replica now computes at most `Identity:PasswordHashing:MaxConcurrency`
+  password hashes at a time (environment variable `Identity__PasswordHashing__MaxConcurrency`; unset or `0` means half
+  the processors the process may use, at least one). Sign-ins over the bound wait for a slot without holding a thread;
+  none is refused. Sign-in, password change, MFA disable and recovery-code regeneration go through the bound. On a
+  4-processor replica, a burst of 250 sign-ins kept `/health` at 6 ms (95th percentile) instead of 531 ms, with every
+  sign-in succeeding. Total time for the burst can grow when the bound leaves processors unused for hashing: read
+  [Password hashing concurrency](docs/operations/auth-horizontal-scaling.md#password-hashing-concurrency).
+
 - **The shipped Docker stacks no longer run the Api and Asterisk out of open files under load.** Docker starts a
   container with a soft limit of 1024 open files, and neither the native-AOT Api nor Asterisk raised it. With Agent
   Assist listening, each call holds about four descriptors in the Api (two AudioSocket streams, two speech-to-text
