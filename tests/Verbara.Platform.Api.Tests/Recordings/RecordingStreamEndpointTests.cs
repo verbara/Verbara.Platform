@@ -271,7 +271,7 @@ public sealed class RecordingStreamEndpointTests : IClassFixture<RecordingStream
         public string MintPartnerAdminJwt()
         {
             using var scope = Services.CreateScope();
-            var (token, _) = scope.ServiceProvider.GetRequiredService<JwtTokenService>().GenerateAccessToken(PartnerAdmin());
+            var (token, _) = scope.ServiceProvider.GetRequiredService<JwtTokenService>().GenerateAccessTokenAsync(PartnerAdmin()).GetAwaiter().GetResult();
             return token;
         }
 

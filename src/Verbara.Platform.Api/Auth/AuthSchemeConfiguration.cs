@@ -90,7 +90,13 @@ internal static class AuthSchemeConfiguration
                             if (token is not null)
                                 context.Token = token;
                         }
-                        return Task.CompletedTask;
+
+                        // The token check that follows reads the validation keys from memory and
+                        // never waits on the key pool. Here, before it, a replica's first requests
+                        // await the first load asynchronously (no thread held); afterwards this only
+                        // starts a background refresh when one is due.
+                        return context.HttpContext.RequestServices.GetRequiredService<JwtTokenService>()
+                            .EnsureValidationKeysAsync(context.HttpContext.RequestAborted);
                     },
                     OnTokenValidated = async context =>
                     {

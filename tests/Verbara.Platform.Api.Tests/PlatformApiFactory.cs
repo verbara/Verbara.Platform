@@ -7,8 +7,23 @@ namespace Verbara.Platform.Api.Tests;
 
 public sealed class PlatformApiFactory : WebApplicationFactory<Program>
 {
+    /// <summary>
+    /// The full type name of every <see cref="IHostedService"/> registration <c>Program.cs</c> made, in registration
+    /// order, read before <see cref="AuthenticatedPlatformApiFactory.StubVerbaraHostedServices"/> removes them. A
+    /// factory registration reads <c>"factory"</c>.
+    /// </summary>
+    public IReadOnlyList<string> ProgramHostedServiceTypeNames { get; private set; } = [];
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
+        // Read-only capture: it removes and adds nothing, and runs before the test stubs strip the hosted services.
+        builder.ConfigureServices(services =>
+            ProgramHostedServiceTypeNames = services
+                .Where(d => d.ServiceType == typeof(IHostedService))
+                .Select(d => d.ImplementationType?.FullName
+                    ?? d.ImplementationInstance?.GetType().FullName
+                    ?? "factory")
+                .ToList());
         ConfigureTestHost(builder);
         return base.CreateHost(builder);
     }

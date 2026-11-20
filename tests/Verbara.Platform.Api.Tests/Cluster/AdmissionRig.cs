@@ -23,7 +23,6 @@ using Verbara.Sdk.Ami.Events;
 using Verbara.Sdk.Ami.Responses;
 using Verbara.Sdk.Enums;
 using Verbara.Sdk.Live.Server;
-using Verbara.Sdk.Pro.Push.SignalR.Events;
 using Verbara.Sdk.Push.Events;
 using Verbara.Sdk.Sessions;
 using Verbara.Sdk.Sessions.Manager;
@@ -611,7 +610,12 @@ internal static class AdmissionReport
             $"{kv.Key}: {string.Join(",", kv.Value.Select(d => d.Split(':') is [var type, var linked] ? $"{type}({Label(linked)})" : d))}"));
     }
 
+    /// <summary>
+    /// Every push on the Api's bus, by its <see cref="PushEvent.EventType"/> string, with its <c>NewState</c> when it
+    /// has one. Read by name, not by type, so the rig names no Pro event type (the Pro conversation bridge's
+    /// <c>conversation.state.changed</c> included) and keeps compiling when Pro deletes one. Test-only reflection.
+    /// </summary>
     public static string Pushes(IEnumerable<PushEvent> pushes) =>
-        string.Join(Environment.NewLine, pushes.OfType<ConversationStateChangedEvent>()
-            .Select(p => $"push {p.NewState} tenant={p.Metadata.TenantId}"));
+        string.Join(Environment.NewLine, pushes.Select(p =>
+            $"push {p.EventType}{(p.GetType().GetProperty("NewState")?.GetValue(p) is string state ? " " + state : "")} tenant={p.Metadata?.TenantId ?? "-"}"));
 }

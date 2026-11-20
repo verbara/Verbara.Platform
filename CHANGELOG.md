@@ -99,9 +99,30 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `405 Method Not Allowed`, and so does the console's DryRun checkbox until the console release that removes it; ship
   that console release with this one or first. `POST /api/v1/management/retention/run-now` is unchanged: it runs dry
   unless called with `dryRun=false`, whatever the configured mode. (#623)
+- **The Api no longer registers Pro's agent-state and conversation-state bridges, and the realtime relay no longer
+  listens for their events.** Agent-state and conversation-state updates on the realtime hub (`OnAgentStateChanged`,
+  `OnConversationStateChanged`) come from Platform's own agent and conversation state changes, as they already did:
+  none of the bridges' events reached a hub client (the agent bridge only saw voice agent-pool logins; the
+  conversation bridge published every call under a fixed default tenant). Nothing changes for consoles, the API, the
+  hub contract or configuration. The cluster-event bridge stays. This lets Pro remove both bridges.
 
 ### Fixed
 
+- **A token check no longer waits on the key pool inside a request.** With the JWT key-rotation pool on
+  (`Identity:JwtKeyRotation:UseRotationPool`), every five minutes one request per replica read the pool's keys from
+  Redis while holding a lock, blocking a thread-pool thread; the requests behind it blocked on the lock. Under a
+  burst of signed-in requests the replica ran out of threads and stopped answering for minutes, and Redis calls on the
+  same replica timed out because their own replies needed a thread too. When that read failed, every waiting request
+  read Redis again in turn. When it returned no keys (a Redis server not connected at that moment), the empty set was
+  kept and every token was refused (`IDX10500`) for up to five minutes. A sign-in that refreshed the signing key also
+  cleared the validation keys, so a failed read right after it refused every token. Now the Api and Realtime check
+  tokens against keys held in memory; reads of the pool run in the background, one at a time, with a pause after a
+  failure. A replica's first requests wait for the first read without holding a thread, at most 5 seconds. A read that
+  returns no key keeps the keys already held; a read that leaves out keys that have not expired keeps them too and is
+  retried. A token signed with a key the replica has not read yet starts a read (at most one every 10 seconds) and is
+  refused at once rather than waiting. A sign-in refreshes the signing key in the background and adds it to the
+  validation keys. The counters `jwt.key.cache_misses`, `jwt.key.stale_cache_fallbacks` and `jwt.key.fail_closed` stay
+  on `/metrics`; they now count background reads.
 - **The shipped Docker stacks no longer run the Api and Asterisk out of open files under load.** Docker starts a
   container with a soft limit of 1024 open files, and neither the native-AOT Api nor Asterisk raised it. With Agent
   Assist listening, each call holds about four descriptors in the Api (two AudioSocket streams, two speech-to-text

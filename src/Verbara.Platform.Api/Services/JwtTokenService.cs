@@ -32,9 +32,11 @@ namespace Verbara.Platform.Api.Services;
 ///   <item>
 ///     <description><b>Rotation pool</b> (AHH Phase 3.B) — consumes
 ///     <see cref="IJwtKeyRotationService"/>. The active signing entry is
-///     cached for 60 s (<c>Lazy</c>-style with semaphore guard) so we do not
-///     hit Redis on every issuance. Validation uses a multi-key resolver so
-///     tokens issued under prior keys still verify during the grace window.
+///     cached for 5 minutes and refreshed in the background, so issuance waits
+///     on the pool only for its first key. Validation reads an in-memory
+///     <see cref="JwtValidationKeySnapshot"/> holding every pool key, so tokens
+///     issued under prior keys still verify during the grace window and a token
+///     check never waits on the pool.
 ///     A migration shim imports the legacy file as an <c>RS256</c> entry on
 ///     first boot when the pool is empty + the file exists.</description>
 ///   </item>
@@ -82,6 +84,10 @@ internal sealed partial class JwtTokenService
     // investigation-presence-vu1500.md § "Recommended fix path Tier 1".
     private static readonly TimeSpan ActiveKeyCacheTtl = TimeSpan.FromMinutes(5);
 
+    // After a failed signing-key refresh with a cached key still in hand, wait this long before
+    // trying again rather than starting one per issuance.
+    private static readonly TimeSpan SigningRetryAfterFailure = TimeSpan.FromSeconds(5);
+
     // ─── File-based path (R5.4 + earlier; tests; single-process bootstrap) ──
     private readonly RsaSecurityKey? _fileSigningKey;
     private readonly SigningCredentials? _fileSigningCredentials;
@@ -90,9 +96,11 @@ internal sealed partial class JwtTokenService
     // ─── Rotation-pool path (AHH Phase 3.B; production multi-replica) ───────
     private readonly IJwtKeyRotationService? _rotationService;
     private readonly TokenValidationParameters? _poolValidationParameters;
-    private readonly Lock _cacheLock;
+    private readonly JwtValidationKeySnapshot? _validationKeys;
+    private readonly TimeProvider _time;
     private CachedActive? _cachedActive;
-    private CachedValidationKeys? _cachedValidation;
+    private Task<Exception?>? _signingRefresh;
+    private long _signingRetryAtTicks;
 
     // ─── Observability (R5.5 Phase C-LK Tier-1 hardening) ──────────────────
     private readonly ILogger<JwtTokenService> _logger;
@@ -112,7 +120,7 @@ internal sealed partial class JwtTokenService
         ArgumentNullException.ThrowIfNull(dataDirectory);
         ArgumentNullException.ThrowIfNull(dataProtection);
 
-        _cacheLock = new Lock();
+        _time = TimeProvider.System;
         (_logger, _meter, _cacheMisses, _staleCacheFallbacks, _failClosedThrows) = InitObservability(logger, meterFactory);
 
         var rsa = LoadOrCreateFileBasedKey(dataDirectory, dataProtection);
@@ -140,16 +148,47 @@ internal sealed partial class JwtTokenService
     public JwtTokenService(
         IJwtKeyRotationService rotationService,
         ILogger<JwtTokenService>? logger = null,
-        IMeterFactory? meterFactory = null)
+        IMeterFactory? meterFactory = null,
+        TimeProvider? timeProvider = null,
+        JwtValidationKeySnapshotOptions? validationKeyOptions = null)
     {
         ArgumentNullException.ThrowIfNull(rotationService);
 
         _rotationService = rotationService;
-        _cacheLock = new Lock();
+        _time = timeProvider ?? TimeProvider.System;
         (_logger, _meter, _cacheMisses, _staleCacheFallbacks, _failClosedThrows) = InitObservability(logger, meterFactory);
 
-        // Validation parameters use a delegate resolver so each call sees the
-        // currently-cached set without re-creating the parameters object.
+        _validationKeys = new JwtValidationKeySnapshot(
+            ct => rotationService.GetValidationKeysAsync(ct),
+            entry => BuildSigningCredentials(entry).Key,
+            (validationKeyOptions ?? new JwtValidationKeySnapshotOptions()) with { RefreshInterval = ActiveKeyCacheTtl },
+            _time,
+            new JwtValidationKeySnapshotEvents
+            {
+                ReloadStarted = () =>
+                {
+                    _cacheMisses.Add(1, new KeyValuePair<string, object?>("path", "validation"));
+                    LogValidationKeyCacheMiss(_logger);
+                },
+                ReloadFailed = (ex, stillServing) =>
+                {
+                    if (stillServing)
+                    {
+                        _staleCacheFallbacks.Add(1, new KeyValuePair<string, object?>("path", "validation"));
+                        LogStaleCacheFallback(_logger, "validation", ex);
+                    }
+                    else
+                    {
+                        _failClosedThrows.Add(1, new KeyValuePair<string, object?>("path", "validation"));
+                        LogFailClosedNoCacheYet(_logger, "validation", ex);
+                    }
+                },
+            });
+
+        // The resolver runs inside the token handler, synchronously, on every request: it reads the
+        // in-memory snapshot only. Loads run in the background (EnsureValidationKeysAsync awaits the
+        // first one from the JwtBearer OnMessageReceived event).
+        var validationKeys = _validationKeys;
         _poolValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -158,7 +197,7 @@ internal sealed partial class JwtTokenService
             ValidAudience = Audience,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKeyResolver = (_, _, _, _) => GetCachedValidationKeys(),
+            IssuerSigningKeyResolver = (_, _, kid, _) => validationKeys.Resolve(kid),
             ClockSkew = TimeSpan.FromSeconds(30),
             RoleClaimType = "role",
             NameClaimType = "sub",
@@ -170,12 +209,34 @@ internal sealed partial class JwtTokenService
     public TokenValidationParameters ValidationParameters =>
         _rotationService is not null ? _poolValidationParameters! : _fileValidationParameters!;
 
-    public string KeyId => GetActiveSigningCredentials().Key.KeyId!;
+    /// <summary>
+    /// The key id tokens are signed with: the file key's, or the cached pool key's (<see langword="null"/>
+    /// before this replica has signed with the pool). Never reads the pool.
+    /// </summary>
+    public string? KeyId => _rotationService is null
+        ? _fileSigningKey!.KeyId
+        : Volatile.Read(ref _cachedActive)?.Credentials.Key.KeyId;
 
-    public (string Token, DateTimeOffset ExpiresAt) GenerateAccessToken(User user)
-        => GenerateAccessToken(user, null);
+    /// <summary>
+    /// Awaits the validation keys' first load; afterwards starts a background refresh when one is due.
+    /// Called from the JwtBearer <c>OnMessageReceived</c> event, before the token is checked. A no-op
+    /// on the file-key path.
+    /// </summary>
+    public Task EnsureValidationKeysAsync(CancellationToken cancellationToken) =>
+        _validationKeys?.EnsureLoadedAsync(cancellationToken) ?? Task.CompletedTask;
 
-    public (string Token, DateTimeOffset ExpiresAt) GenerateAccessToken(User user, IReadOnlySet<string>? permissions)
+    /// <summary>The validation-key reload running now, or a completed task. For tests.</summary>
+    internal Task ValidationKeyReloadInFlight => _validationKeys?.ReloadInFlight ?? Task.CompletedTask;
+
+    /// <summary>The signing-key refresh running now, or a completed task. For tests.</summary>
+    internal Task SigningKeyRefreshInFlight => Volatile.Read(ref _signingRefresh) ?? Task.CompletedTask;
+
+    public Task<(string Token, DateTimeOffset ExpiresAt)> GenerateAccessTokenAsync(
+        User user, CancellationToken cancellationToken = default)
+        => GenerateAccessTokenAsync(user, null, cancellationToken);
+
+    public async Task<(string Token, DateTimeOffset ExpiresAt)> GenerateAccessTokenAsync(
+        User user, IReadOnlySet<string>? permissions, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(user);
 
@@ -200,7 +261,7 @@ internal sealed partial class JwtTokenService
             }
         }
 
-        return SignToken(claims, now, expiresAt);
+        return await SignTokenAsync(claims, now, expiresAt, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -212,9 +273,9 @@ internal sealed partial class JwtTokenService
     /// The token, its expiry, and its <c>jti</c> (<c>TokenId</c>) — the handle its session keeps so
     /// that revoking or timing out the session can revoke the token.
     /// </returns>
-    public (string Token, DateTimeOffset ExpiresAt, string TokenId) GenerateImpersonationToken(
+    public async Task<(string Token, DateTimeOffset ExpiresAt, string TokenId)> GenerateImpersonationTokenAsync(
         User admin, string targetTenantId, IReadOnlySet<string> targetPermissions, bool readOnly = false,
-        string? impersonationSessionId = null)
+        string? impersonationSessionId = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(admin);
         ArgumentNullException.ThrowIfNull(targetTenantId);
@@ -251,16 +312,16 @@ internal sealed partial class JwtTokenService
             claims.Add(new Claim("permissions", permission));
         }
 
-        var (token, signedExpiresAt) = SignToken(claims, now, expiresAt);
+        var (token, signedExpiresAt) = await SignTokenAsync(claims, now, expiresAt, cancellationToken).ConfigureAwait(false);
         return (token, signedExpiresAt, tokenId);
     }
 
     // ─── Private — token signing dispatch ───────────────────────────────────
 
-    private (string Token, DateTimeOffset ExpiresAt) SignToken(
-        List<Claim> claims, DateTimeOffset now, DateTimeOffset expiresAt)
+    private async Task<(string Token, DateTimeOffset ExpiresAt)> SignTokenAsync(
+        List<Claim> claims, DateTimeOffset now, DateTimeOffset expiresAt, CancellationToken cancellationToken)
     {
-        var credentials = GetActiveSigningCredentials();
+        var credentials = await GetActiveSigningCredentialsAsync(cancellationToken).ConfigureAwait(false);
         var descriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
@@ -276,101 +337,94 @@ internal sealed partial class JwtTokenService
         return (token, expiresAt);
     }
 
-    private SigningCredentials GetActiveSigningCredentials()
+    /// <summary>
+    /// The credentials to sign with. A cached pool key is returned at once; when it is older than
+    /// <see cref="ActiveKeyCacheTtl"/> a background refresh replaces it. Only the first issuance on a
+    /// replica awaits the pool (asynchronously), and it fails closed when that read fails.
+    /// </summary>
+    private async ValueTask<SigningCredentials> GetActiveSigningCredentialsAsync(CancellationToken cancellationToken)
     {
         if (_rotationService is null)
             return _fileSigningCredentials!;
 
-        var cached = _cachedActive;
-        if (cached is not null && DateTimeOffset.UtcNow - cached.CachedAt < ActiveKeyCacheTtl)
+        var cached = Volatile.Read(ref _cachedActive);
+        if (cached is not null)
+        {
+            var nowTicks = _time.GetUtcNow().UtcTicks;
+            if (nowTicks - cached.CachedAt.UtcTicks >= ActiveKeyCacheTtl.Ticks
+                && nowTicks >= Interlocked.Read(ref _signingRetryAtTicks))
+            {
+                _ = StartSigningRefresh();
+            }
+            return cached.Credentials;
+        }
+
+        var failure = await StartSigningRefresh().WaitAsync(cancellationToken).ConfigureAwait(false);
+        cached = Volatile.Read(ref _cachedActive);
+        if (cached is not null)
             return cached.Credentials;
 
-        lock (_cacheLock)
-        {
-            cached = _cachedActive;
-            if (cached is not null && DateTimeOffset.UtcNow - cached.CachedAt < ActiveKeyCacheTtl)
-                return cached.Credentials;
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(
+            failure ?? new InvalidOperationException("No JWT signing key could be loaded."));
+        return null!; // unreachable
+    }
 
+    /// <summary>Starts a signing-key refresh unless one is running; its result is the failure, if any.</summary>
+    private Task<Exception?> StartSigningRefresh()
+    {
+        var running = Volatile.Read(ref _signingRefresh);
+        if (running is not null)
+            return running;
+
+        var done = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        running = Interlocked.CompareExchange(ref _signingRefresh, done.Task, null);
+        if (running is not null)
+            return running;
+
+        _ = Task.Run(() => RefreshSigningKeyAsync(done));
+        return done.Task;
+    }
+
+    private async Task RefreshSigningKeyAsync(TaskCompletionSource<Exception?> done)
+    {
+        Exception? failure = null;
+        var previous = Volatile.Read(ref _cachedActive);
+        try
+        {
             _cacheMisses.Add(1, new KeyValuePair<string, object?>("path", "signing"));
             LogActiveKeyCacheMiss(_logger);
-            try
+
+            var entry = await _rotationService!.GetActiveSigningKeyAsync().ConfigureAwait(false);
+            var credentials = BuildSigningCredentials(entry);
+            // Validation must accept what this replica now signs with: add the key to the snapshot
+            // (never clear it) before any token signed with it leaves.
+            _validationKeys!.Add(entry);
+            Volatile.Write(ref _cachedActive, new CachedActive(entry, credentials, _time.GetUtcNow()));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Reported to the awaiting caller (first issuance) or absorbed by the stale key.
+            failure = ex;
+            Interlocked.Exchange(ref _signingRetryAtTicks, _time.GetUtcNow().Add(SigningRetryAfterFailure).UtcTicks);
+            if (previous is not null)
             {
-                var entry = _rotationService.GetActiveSigningKeyAsync().GetAwaiter().GetResult();
-                var credentials = BuildSigningCredentials(entry);
-                _cachedActive = new CachedActive(entry, credentials, DateTimeOffset.UtcNow);
-                // Validation keys must include this entry — invalidate cache so
-                // the next validation pull picks it up.
-                _cachedValidation = null;
-                return credentials;
-            }
-            catch (Exception ex) when (cached is not null)
-            {
-                // Stale-cache fallback (R5.5 Phase C-LK Tier-1 hardening):
-                // a Redis blip or transient timeout in GetActiveSigningKeyAsync
-                // would otherwise 401 every in-flight token issuance request on
-                // this pod. Reuse the previously-cached active key (its
-                // validation entry is still within the 48h rotation window).
-                // Worst case: we sign with a key that has been demoted to the
-                // grace pool while we couldn't refresh — every validator still
-                // accepts it because validation pulls the full grace pool.
+                // Stale-cache fallback (R5.5 Phase C-LK Tier-1 hardening): a Redis blip or
+                // transient timeout keeps signing with the previously-cached active key (its
+                // validation entry is still within the 48h rotation window, and every validator
+                // still accepts it because validation holds the full grace pool).
                 _staleCacheFallbacks.Add(1, new KeyValuePair<string, object?>("path", "signing"));
                 LogStaleCacheFallback(_logger, "signing", ex);
-                return cached.Credentials;
             }
-            catch (Exception ex)
+            else
             {
                 _failClosedThrows.Add(1, new KeyValuePair<string, object?>("path", "signing"));
                 LogFailClosedNoCacheYet(_logger, "signing", ex);
-                throw;
             }
         }
-    }
-
-    private IEnumerable<SecurityKey> GetCachedValidationKeys()
-    {
-        if (_rotationService is null)
-            return [_fileSigningKey!];
-
-        var cached = _cachedValidation;
-        if (cached is not null && DateTimeOffset.UtcNow - cached.CachedAt < ActiveKeyCacheTtl)
-            return cached.Keys;
-
-        lock (_cacheLock)
+        finally
         {
-            cached = _cachedValidation;
-            if (cached is not null && DateTimeOffset.UtcNow - cached.CachedAt < ActiveKeyCacheTtl)
-                return cached.Keys;
-
-            _cacheMisses.Add(1, new KeyValuePair<string, object?>("path", "validation"));
-            LogValidationKeyCacheMiss(_logger);
-            try
-            {
-                var entries = _rotationService.GetValidationKeysAsync().GetAwaiter().GetResult();
-                var keys = entries.Select(e => BuildSigningCredentials(e).Key).ToArray();
-                _cachedValidation = new CachedValidationKeys(keys, DateTimeOffset.UtcNow);
-                return keys;
-            }
-            catch (Exception ex) when (cached is not null)
-            {
-                // Stale-cache fallback (R5.5 Phase C-LK Tier-1 hardening):
-                // a Redis blip in GetValidationKeysAsync would otherwise 401
-                // every JwtBearer-authenticated request on this pod. Reusing
-                // the previous validation-key set is safe because key
-                // rotation is 24h cadence with 24h grace — a momentary
-                // failure to refresh cannot expose a missing-key edge case
-                // within the 48h validation window. Without this fallback
-                // even a 1s Redis timeout cascades to per-pod cold-cache
-                // 401 storms during HPA scale-up bursts.
-                _staleCacheFallbacks.Add(1, new KeyValuePair<string, object?>("path", "validation"));
-                LogStaleCacheFallback(_logger, "validation", ex);
-                return cached.Keys;
-            }
-            catch (Exception ex)
-            {
-                _failClosedThrows.Add(1, new KeyValuePair<string, object?>("path", "validation"));
-                LogFailClosedNoCacheYet(_logger, "validation", ex);
-                throw;
-            }
+            Volatile.Write(ref _signingRefresh, null);
+            done.TrySetResult(failure);
         }
     }
 
@@ -383,13 +437,13 @@ internal sealed partial class JwtTokenService
         var meter = meterFactory is null ? new Meter(MeterName) : meterFactory.Create(MeterName);
         var cacheMisses = meter.CreateCounter<long>(
             "jwt.key.cache_misses",
-            description: "Count of JWT key cache misses triggering a Redis refresh (tagged by path=signing|validation).");
+            description: "Count of JWT key refreshes started against the key pool, off the request path (tagged by path=signing|validation).");
         var staleFallbacks = meter.CreateCounter<long>(
             "jwt.key.stale_cache_fallbacks",
-            description: "Count of stale-cache fallback events (Tier-1 hardening: refresh threw but a cached value existed → reused it).");
+            description: "Count of failed or rejected key refreshes while a cached value kept serving (an empty or shrunken validation key set counts here).");
         var failClosed = meter.CreateCounter<long>(
             "jwt.key.fail_closed",
-            description: "Count of fail-closed throws (refresh threw and no cached value existed yet → exception rethrown).");
+            description: "Count of failed key refreshes with no cached value yet (signing: the issuance fails; validation: tokens are refused until a load succeeds).");
         return (resolvedLogger, meter, cacheMisses, staleFallbacks, failClosed);
     }
 
@@ -406,7 +460,7 @@ internal sealed partial class JwtTokenService
     private static partial void LogStaleCacheFallback(ILogger logger, string path, Exception exception);
 
     [LoggerMessage(EventId = 6104, Level = LogLevel.Error,
-        Message = "JWT key cache refresh failed on path={Path} with no prior cache to fall back to — rethrowing (fail-closed). New pod cold-start under Redis pressure or first-ever request.")]
+        Message = "JWT key cache refresh failed on path={Path} with no prior cache to fall back to (fail-closed: signing fails, tokens are refused until a load succeeds). New pod cold-start under Redis pressure or first-ever request.")]
     private static partial void LogFailClosedNoCacheYet(ILogger logger, string path, Exception exception);
 
     // ─── Private — credential construction per algorithm ────────────────────
@@ -530,7 +584,4 @@ internal sealed partial class JwtTokenService
         SigningCredentials Credentials,
         DateTimeOffset CachedAt);
 
-    private sealed record CachedValidationKeys(
-        IReadOnlyList<SecurityKey> Keys,
-        DateTimeOffset CachedAt);
 }

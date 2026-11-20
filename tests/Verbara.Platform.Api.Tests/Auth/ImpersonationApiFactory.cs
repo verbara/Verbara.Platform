@@ -230,12 +230,12 @@ public class ImpersonationApiFactory : AccountStatusApiFactory
         User admin, IEnumerable<string> permissions, bool readOnly, string targetTenantId = CustomerTenantId)
     {
         using var scope = Services.CreateScope();
-        var (token, _, _) = scope.ServiceProvider.GetRequiredService<JwtTokenService>().GenerateImpersonationToken(
+        var (token, _, _) = scope.ServiceProvider.GetRequiredService<JwtTokenService>().GenerateImpersonationTokenAsync(
             admin,
             targetTenantId,
             new HashSet<string>(permissions, StringComparer.Ordinal),
             readOnly,
-            impersonationSessionId: Guid.NewGuid().ToString("N"));
+            impersonationSessionId: Guid.NewGuid().ToString("N")).GetAwaiter().GetResult();
         return token;
     }
 
