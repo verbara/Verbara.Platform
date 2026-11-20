@@ -122,8 +122,8 @@ builder.Services.AddLiveConnectionRevocation();
 // PushToHubRelay) moved to Verbara.Platform.Realtime. Platform.Api keeps the
 // one remaining Pro event bridge, WithClusterEventBridge, because it depends on
 // ClusterTransportBase, which lives here. It publishes cluster node events to
-// IPushEventBus and the Pro.Push Redis backplane; Realtime has no decoder or
-// relay subscription for them today (follow-up of platform-drops-the-pro-agent-bridge).
+// IPushEventBus and the Pro.Push Redis backplane; Realtime's relay subscribes to them but its
+// RemoteEventDispatcher cannot decode them yet (follow-up of platform-drops-the-pro-agent-bridge).
 // Hub agent and conversation frames come from Platform's own Core events
 // (agent.state_changed, conversation.state_changed): the Api's bus → Pro.Push
 // Redis backplane → Realtime's RemoteEventDispatcher → PushToHubRelay → SignalR clients.
