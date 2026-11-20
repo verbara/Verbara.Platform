@@ -3,7 +3,8 @@ using Verbara.Platform.E2E.Harness.Reports;
 using Verbara.Platform.E2E.Harness.Scenarios;
 
 // Entrypoint. HARNESS_SCENARIO picks the scenario: "exactly-once" (default) or
-// "conversation-frames" (platform-drops-the-pro-agent-bridge, tasks 1.1 and 4.1).
+// "conversation-frames" (platform-drops-the-pro-agent-bridge, tasks 1.1 and 4.1), or
+// "conversation-frames-selfcheck" (that scenario's evaluator against synthetic records, offline).
 // Wrapper script (scripts/run-harness-talos.sh) populates the HARNESS_* env
 // vars after preparing kubectl port-forwards for each Realtime pod.
 //
@@ -14,6 +15,19 @@ using Verbara.Platform.E2E.Harness.Scenarios;
 //
 // Reports are written to ${HARNESS_REPORT_DIR}/<timestamp>/exactly-once.{json,md}
 // (default: ./harness-reports/<timestamp>/).
+
+// Offline negative controls of the conversation-frames evaluator; needs no lab and no other HARNESS_* variable.
+if (string.Equals(Environment.GetEnvironmentVariable("HARNESS_SCENARIO"), ConversationFramesSelfCheck.Name, StringComparison.Ordinal))
+{
+    var selfCheckFailures = ConversationFramesSelfCheck.Run();
+    foreach (var failure in selfCheckFailures)
+    {
+        Console.Error.WriteLine($"SELF-CHECK FAIL: {failure}");
+    }
+
+    Console.WriteLine(selfCheckFailures.Count == 0 ? "SELF-CHECK PASS" : $"SELF-CHECK FAIL ({selfCheckFailures.Count})");
+    return selfCheckFailures.Count == 0 ? 0 : 1;
+}
 
 try
 {
@@ -49,7 +63,7 @@ try
 
     if (!string.Equals(config.Scenario, ExactlyOnceScenario.Name, StringComparison.Ordinal))
     {
-        throw new InvalidOperationException($"Unknown HARNESS_SCENARIO '{config.Scenario}' (exactly-once | conversation-frames).");
+        throw new InvalidOperationException($"Unknown HARNESS_SCENARIO '{config.Scenario}' (exactly-once | conversation-frames | conversation-frames-selfcheck).");
     }
 
     using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));

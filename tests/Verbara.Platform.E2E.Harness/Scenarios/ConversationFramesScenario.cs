@@ -82,7 +82,8 @@ internal sealed record ConversationFramesReport(
 /// <remarks>
 /// <list type="number">
 /// <item><description><b>Declared frames.</b> Every tenant-A client holds, per WebChat conversation, exactly the six
-/// declared frames in order, and per voice call the three declared first frames.</description></item>
+/// declared frames in order, and per voice call the three declared first frames, followed by nothing or by the
+/// timed close once.</description></item>
 /// <item><description><b>Exactly once.</b> Every tenant-A client's total frame count is the same and equals the
 /// <c>conversation.state_changed</c> Forwarded rows of the tenant in the window.</description></item>
 /// <item><description><b>Negative control.</b> The other tenant's client holds 0 frames, and the declared-frames
@@ -117,6 +118,12 @@ internal static class ConversationFramesScenario
         new("Queued", "Active"),
         new("Active", "WrapUp"),
     ];
+
+    /// <summary>
+    /// The one frame allowed after the voice call's declared three: the wrap-up timer's close, inside the window or
+    /// not. It is recorded as undeclared; a second one, or any other later frame, fails the voice check.
+    /// </summary>
+    public static readonly FrameTransition VoiceTimedClose = new("WrapUp", "Closed");
 
     public static async Task<(ConversationFramesReport? Report, string? Error)> RunAsync(HarnessConfig config, CancellationToken ct)
     {
@@ -269,7 +276,8 @@ internal static class ConversationFramesScenario
     /// <summary>
     /// The declared-frames verdict computed on one client's record alone. A WebChat conversation passes only with
     /// exactly its six declared frames in order; a voice call passes when its first three frames are the declared
-    /// ones (later frames are listed as undeclared). Frames on any other conversation are listed, not judged.
+    /// ones and at most the timed close <see cref="VoiceTimedClose"/> follows them, once (it is listed as undeclared;
+    /// any other later frame fails). Frames on any other conversation are listed, not judged.
     /// </summary>
     internal static ClientRecord Evaluate(
         string client,
@@ -292,11 +300,14 @@ internal static class ConversationFramesScenario
         foreach (var id in workload.VoiceConversationIds)
         {
             var actual = frames.Where(f => f.ConversationId == id).Select(f => new FrameTransition(f.PreviousState, f.NewState)).ToList();
-            var passed = actual.Count >= DeclaredVoicePrefix.Count && actual.Take(DeclaredVoicePrefix.Count).SequenceEqual(DeclaredVoicePrefix);
+            var undeclared = actual.Skip(DeclaredVoicePrefix.Count).ToList();
+            var passed = actual.Count >= DeclaredVoicePrefix.Count
+                && actual.Take(DeclaredVoicePrefix.Count).SequenceEqual(DeclaredVoicePrefix)
+                && (undeclared.Count == 0 || undeclared.SequenceEqual([VoiceTimedClose]));
             checks.Add(new ConversationCheck(id, "voice", passed,
                 DeclaredVoicePrefix.Select(t => t.ToString()).ToList(),
                 actual.Select(t => t.ToString()).ToList(),
-                Undeclared: actual.Skip(DeclaredVoicePrefix.Count).Select(t => t.ToString()).ToList()));
+                Undeclared: undeclared.Select(t => t.ToString()).ToList()));
         }
 
         var known = workload.WebChatConversationIds.Concat(workload.VoiceConversationIds).ToHashSet(StringComparer.Ordinal);
