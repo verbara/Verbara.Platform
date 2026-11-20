@@ -219,7 +219,7 @@ internal static class SetupEndpoints
         await apiKeyStore.SaveAsync(mgmtKey, ct);
 
         // 5. Generate JWT for the new platform admin
-        var (accessToken, _) = jwtTokenService.GenerateAccessToken(user);
+        var (accessToken, _) = await jwtTokenService.GenerateAccessTokenAsync(user, ct);
 
         // 6. Create the operational Customer tenant (Type=Customer, parent=platform), born on the host's plan
         //    (design D15: a tenant created without a plan inherits its parent's).

@@ -99,7 +99,7 @@ public sealed class DialerTenantScopeFactory : WebApplicationFactory<Program>
     {
         using var scope = Services.CreateScope();
         var jwt = scope.ServiceProvider.GetRequiredService<JwtTokenService>();
-        var (token, _) = jwt.GenerateAccessToken(Admin(tenantId));
+        var (token, _) = jwt.GenerateAccessTokenAsync(Admin(tenantId)).GetAwaiter().GetResult();
         var client = CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return client;

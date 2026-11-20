@@ -274,9 +274,9 @@ internal static class ManagementImpersonationEndpoints
 
         // Generate shadow JWT (claims include the session id so EndImpersonation
         // can locate + close the matching record).
-        var (token, expiresAt, tokenId) = jwtTokenService.GenerateImpersonationToken(
+        var (token, expiresAt, tokenId) = await jwtTokenService.GenerateImpersonationTokenAsync(
             adminUser, body.TargetTenantId, targetPermissions, body.ReadOnly,
-            impersonationSessionId: sessionId);
+            impersonationSessionId: sessionId, cancellationToken: ct);
 
         // Record an admin-visible session so the management UI can list it,
         // the timeout sweep can revoke it, and the manual-revoke endpoint has

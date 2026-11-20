@@ -36,6 +36,9 @@ internal static class ExactlyOnceScenario
 {
     public const string Name = "exactly-once";
 
+    /// <summary>The event type the Pro agent-state bridge publishes (never forwarded to a hub group).</summary>
+    public const string ProAgentEventType = "agent.state.changed";
+
     public static async Task<ScenarioReport> RunAsync(HarnessConfig config, CancellationToken ct)
     {
         var startedAt = DateTimeOffset.UtcNow;
@@ -115,6 +118,16 @@ internal static class ExactlyOnceScenario
                 failures.Add($"{aggregate.ForwardErrorCount} ForwardError outcome(s) observed — Redis backplane / group serialisation issue.");
             }
 
+            // platform-drops-the-pro-agent-bridge (tasks 1.1 and 4.1): the Pro agent bridge's event type,
+            // agent.state.changed, must never be forwarded to a hub group; the frames come from Platform's own
+            // agent.state_changed.
+            var proAgentForwards = aggregate.OutcomesByEventType.TryGetValue(
+                $"{ProAgentEventType}|{RelayOutcomeKind.Forwarded}", out var paf) ? paf : 0;
+            if (proAgentForwards != 0)
+            {
+                failures.Add($"{proAgentForwards} Forwarded outcome(s) of the Pro event type '{ProAgentEventType}' — expected 0.");
+            }
+
             if (aggregate.SkippedNullTenantCount > 0)
             {
                 warnings.Add($"{aggregate.SkippedNullTenantCount} SkippedNullTenant outcome(s) observed — agent JWT may be missing tid claim.");
@@ -152,7 +165,8 @@ internal static class ExactlyOnceScenario
                 LeaderPodInstanceIds: aggregate.LeaderPodInstanceIds,
                 PerPodForwarded: aggregate.PerPodForwardedCount,
                 PerPodSkippedNotLeader: aggregate.PerPodSkippedNotLeaderCount,
-                AuditBaseUrls: config.AuditBaseUrls);
+                AuditBaseUrls: config.AuditBaseUrls,
+                OutcomesByEventType: aggregate.OutcomesByEventType);
 
             return report;
         }

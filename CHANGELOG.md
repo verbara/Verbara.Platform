@@ -17,7 +17,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a boolean stops the Api at startup with an error naming the key. The Api logs the mode once at startup, and
   `GET /api/v1/management/retention/config` reports in `dryRun` the mode of the replica that answers. The key does not
   govern the per-tenant conversation retention. Read
-  [Turning on the Pro retention purge](docs/operations/upgrade-retention-dry-run.md) before setting `false`.
+  [Turning on the Pro retention purge](docs/operations/upgrade-retention-dry-run.md) before setting `false`. (#623)
 - `GET /api/v1/analytics/qa-availability` says whether post-call QA results can exist for the caller's tenant, so a
   client can hide QA screens that would stay empty. The body always carries `available`, `analysisRunning`, `reason`,
   `transcriptSource`, `speakerMode`, `topicsConfigured`, `complianceConfigured`, `sentimentSupported` and `backlog`,
@@ -126,7 +126,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the mode is now a configuration change plus a restart (`Retention:DryRun`, above). A script that calls the PATCH gets
   `405 Method Not Allowed`, and so does the console's DryRun checkbox until the console release that removes it; ship
   that console release with this one or first. `POST /api/v1/management/retention/run-now` is unchanged: it runs dry
-  unless called with `dryRun=false`, whatever the configured mode.
+  unless called with `dryRun=false`, whatever the configured mode. (#623)
+- **The Api no longer registers Pro's agent-state and conversation-state bridges, and the realtime relay no longer
+  listens for their events.** Agent-state and conversation-state updates on the realtime hub (`OnAgentStateChanged`,
+  `OnConversationStateChanged`) come from Platform's own agent and conversation state changes, as they already did:
+  none of the bridges' events reached a hub client (the agent bridge only saw voice agent-pool logins; the
+  conversation bridge published every call under a fixed default tenant). Nothing changes for consoles, the API, the
+  hub contract or configuration. The cluster-event bridge stays. This lets Pro remove both bridges.
 
 ### Fixed
 
@@ -181,6 +187,32 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `docs/operations/agentassist-setup.md`.
 - New counters on `/metrics`: `platform_agentassist_call_claim_total{outcome}`,
   `platform_agentassist_toggle_stale_total{path}` and `platform_agentassist_recognizer_unavailable_total{reason}`.
+- **A burst of sign-ins no longer stalls the rest of an Api replica.** Each password check (Argon2id, or BCrypt for a
+  hash not yet migrated) is deliberate CPU work, and every sign-in ran its own at once on the shared thread pool: when a
+  shift's agents all signed in within the same second, every pool thread was busy hashing and every other request on
+  that replica waited behind them. The replica now computes at most `Identity:PasswordHashing:MaxConcurrency`
+  password hashes at a time (environment variable `Identity__PasswordHashing__MaxConcurrency`; unset or `0` means half
+  the processors the process may use, at least one). Sign-ins over the bound wait for a slot without holding a thread;
+  none is refused. Sign-in, password change, MFA disable and recovery-code regeneration go through the bound. On a
+  4-processor replica, a burst of 250 sign-ins kept `/health` at 6 ms (95th percentile) instead of 531 ms, with every
+  sign-in succeeding. Total time for the burst can grow when the bound leaves processors unused for hashing: read
+  [Password hashing concurrency](docs/operations/auth-horizontal-scaling.md#password-hashing-concurrency).
+
+- **A token check no longer waits on the key pool inside a request.** With the JWT key-rotation pool on
+  (`Identity:JwtKeyRotation:UseRotationPool`), every five minutes one request per replica read the pool's keys from
+  Redis while holding a lock, blocking a thread-pool thread; the requests behind it blocked on the lock. Under a
+  burst of signed-in requests the replica ran out of threads and stopped answering for minutes, and Redis calls on the
+  same replica timed out because their own replies needed a thread too. When that read failed, every waiting request
+  read Redis again in turn. When it returned no keys (a Redis server not connected at that moment), the empty set was
+  kept and every token was refused (`IDX10500`) for up to five minutes. A sign-in that refreshed the signing key also
+  cleared the validation keys, so a failed read right after it refused every token. Now the Api and Realtime check
+  tokens against keys held in memory; reads of the pool run in the background, one at a time, with a pause after a
+  failure. A replica's first requests wait for the first read without holding a thread, at most 5 seconds. A read that
+  returns no key keeps the keys already held; a read that leaves out keys that have not expired keeps them too and is
+  retried. A token signed with a key the replica has not read yet starts a read (at most one every 10 seconds) and is
+  refused at once rather than waiting. A sign-in refreshes the signing key in the background and adds it to the
+  validation keys. The counters `jwt.key.cache_misses`, `jwt.key.stale_cache_fallbacks` and `jwt.key.fail_closed` stay
+  on `/metrics`; they now count background reads.
 - **The shipped Docker stacks no longer run the Api and Asterisk out of open files under load.** Docker starts a
   container with a soft limit of 1024 open files, and neither the native-AOT Api nor Asterisk raised it. With Agent
   Assist listening, each call holds about four descriptors in the Api (two AudioSocket streams, two speech-to-text
@@ -431,7 +463,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `POST /api/v1/management/retention/run-now` (no `dryRun`) and read `targets[].rowsPurged`, take a backup, then set
   the key on every replica and restart; confirm the startup log line and `dryRun: false` on each. Remove any script
   that calls `PATCH /api/v1/management/retention/config`. Steps:
-  [Turning on the Pro retention purge](docs/operations/upgrade-retention-dry-run.md).
+  [Turning on the Pro retention purge](docs/operations/upgrade-retention-dry-run.md). (#623)
 - **An Agent Assist session whose call carries no tenant is no longer listed.** A call that arrives on a trunk without
   the `TENANT_ID` channel variable has no tenant, so its Agent Assist session is missing from
   `GET /api/v1/supervisor/sessions/active` and answers 404 to whisper and transcript listen. Set `TENANT_ID` on every

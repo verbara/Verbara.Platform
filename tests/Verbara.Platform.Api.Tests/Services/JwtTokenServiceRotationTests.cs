@@ -8,6 +8,7 @@ using Verbara.Platform.Identity.Auth.Jwt;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Verbara.Platform.Api.Tests.Services;
@@ -57,7 +58,7 @@ public sealed class JwtTokenServiceRotationTests
 
         var sut = new JwtTokenService(rotation);
 
-        var (token, _) = sut.GenerateAccessToken(MakeUser());
+        var (token, _) = await sut.GenerateAccessTokenAsync(MakeUser());
         var principal = await TokenValidation.ValidateAsync(sut, token);
 
         principal.Should().NotBeNull();
@@ -72,7 +73,7 @@ public sealed class JwtTokenServiceRotationTests
 
         var sut = new JwtTokenService(rotation);
 
-        var (token, _) = sut.GenerateAccessToken(MakeUser());
+        var (token, _) = await sut.GenerateAccessTokenAsync(MakeUser());
 
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
         jwt.Header.Kid.Should().Be(entry.KeyId);
@@ -90,7 +91,7 @@ public sealed class JwtTokenServiceRotationTests
         var firstKey = await rotation.RotateAsync();
         var sut = new JwtTokenService(rotation);
 
-        var (firstToken, _) = sut.GenerateAccessToken(MakeUser());
+        var (firstToken, _) = await sut.GenerateAccessTokenAsync(MakeUser());
 
         // Force cache invalidation by rotating; the new key takes over signing.
         _ = await rotation.RotateAsync();
@@ -98,7 +99,7 @@ public sealed class JwtTokenServiceRotationTests
         // Issue a fresh JwtTokenService to bypass the 60 s active-key cache so
         // the next sign uses the second key.
         var sutAfterRotation = new JwtTokenService(rotation);
-        var (secondToken, _) = sutAfterRotation.GenerateAccessToken(MakeUser());
+        var (secondToken, _) = await sutAfterRotation.GenerateAccessTokenAsync(MakeUser());
 
         // The original token (signed by firstKey) MUST still validate because
         // firstKey is in the grace window.
@@ -140,7 +141,7 @@ public sealed class JwtTokenServiceRotationTests
         using var rotation = NewRotationService(store);
         var sut = new JwtTokenService(rotation);
 
-        var (token, _) = sut.GenerateAccessToken(MakeUser());
+        var (token, _) = await sut.GenerateAccessTokenAsync(MakeUser());
         var principal = await TokenValidation.ValidateAsync(sut, token);
 
         principal.Should().NotBeNull();
@@ -161,7 +162,7 @@ public sealed class JwtTokenServiceRotationTests
 
         var admin = MakeUser();
         var permissions = new HashSet<string>(["platform:tenant:impersonate"], StringComparer.Ordinal);
-        var (token, _, tokenId) = sut.GenerateImpersonationToken(admin, "target-tenant", permissions, readOnly: true);
+        var (token, _, tokenId) = await sut.GenerateImpersonationTokenAsync(admin, "target-tenant", permissions, readOnly: true);
         var principal = await TokenValidation.ValidateAsync(sut, token);
 
         principal.Should().NotBeNull();
@@ -221,7 +222,7 @@ public sealed class JwtTokenServiceRotationTests
             // is exactly the artifact the migration shim should pick up.
             var dp = DataProtectionProvider.Create("Verbara.Platform.Tests");
             var fileSeeded = new JwtTokenService(tempDir, dp);
-            _ = fileSeeded.GenerateAccessToken(MakeUser()); // sanity
+            _ = await fileSeeded.GenerateAccessTokenAsync(MakeUser()); // sanity
             File.Exists(Path.Combine(tempDir, "jwt-signing-key.xml")).Should().BeTrue();
 
             var store = new InMemoryJwtKeyStore();
@@ -261,7 +262,7 @@ public sealed class JwtTokenServiceRotationTests
 
             // Seed a legacy file too — the migration should ignore it.
             var fileSeeded = new JwtTokenService(tempDir, dp);
-            _ = fileSeeded.GenerateAccessToken(MakeUser());
+            _ = await fileSeeded.GenerateAccessTokenAsync(MakeUser());
 
             var migration = new JwtLegacyKeyMigrationService(
                 store,
@@ -309,10 +310,8 @@ public sealed class JwtTokenServiceRotationTests
     }
 
     // ─── R5.5 Phase C-LK Tier-1 hardening: stale-cache fallback ─────────────
-    // Cover the catch-when-cached path added to GetCachedValidationKeys +
-    // GetActiveSigningCredentials. Forcing cache staleness uses reflection
-    // because TTL is a private const and a real 5-min wait is unfit for a
-    // unit test.
+    // A refresh that fails keeps the cached keys serving. Both refreshes run off the request path, so
+    // each test advances a fake clock past the 5-minute cache and awaits the background refresh.
 
     private sealed class ToggleableRotationService : IJwtKeyRotationService
     {
@@ -337,52 +336,29 @@ public sealed class JwtTokenServiceRotationTests
             _inner.RotateAsync(ct);
     }
 
-    private static void MarkCacheFieldStale(JwtTokenService sut, string fieldName)
-    {
-        // Replace _cachedActive / _cachedValidation with a copy whose CachedAt
-        // is 10 minutes ago (well past the 5-min ActiveKeyCacheTtl). This
-        // forces the refresh path on the next call without sleeping.
-        var field = typeof(JwtTokenService).GetField(fieldName,
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        var current = field.GetValue(sut);
-        if (current is null) return; // nothing cached yet
-
-        var cachedAt = current.GetType().GetProperty("CachedAt")!;
-        var stale = (DateTimeOffset)cachedAt.GetValue(current)! - TimeSpan.FromMinutes(10);
-
-        // Records: use the compile-generated Clone via reflection (it's a
-        // protected member named "<Clone>$"). Falling back to a manual copy
-        // via the constructor.
-        var ctor = current.GetType().GetConstructors()[0];
-        var args = ctor.GetParameters().Select(p =>
-            p.Name == "CachedAt"
-                ? stale
-                : current.GetType().GetProperty(p.Name!)!.GetValue(current)).ToArray();
-        var newInstance = ctor.Invoke(args);
-        field.SetValue(sut, newInstance);
-    }
+    private static readonly TimeSpan PastTheKeyCache = TimeSpan.FromMinutes(6);
 
     [Fact]
     public async Task ValidateToken_ShouldReuseStaleCache_WhenGetValidationKeysAsyncThrows()
     {
-        // Setup: build a real rotation service + wrap with toggleable.
         using var realRotation = NewRotationService();
         _ = await realRotation.RotateAsync();
         var toggleable = new ToggleableRotationService(realRotation);
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
 
-        var sut = new JwtTokenService(toggleable);
+        var sut = new JwtTokenService(toggleable, timeProvider: clock);
 
-        // First call populates _cachedValidation via successful refresh.
-        var (token, _) = sut.GenerateAccessToken(MakeUser());
+        var (token, _) = await sut.GenerateAccessTokenAsync(MakeUser());
         var firstPrincipal = await TokenValidation.ValidateAsync(sut, token);
         firstPrincipal.Should().NotBeNull(because: "the cache should be warm after first validation");
 
-        // Force the validation cache stale + arm the rotation service to throw.
-        MarkCacheFieldStale(sut, "_cachedValidation");
+        clock.Advance(PastTheKeyCache);
         toggleable.ThrowOnNext = true;
 
-        // Second validation: refresh path will throw → catch path returns the
-        // stale-but-valid cached keys → token still validates successfully.
+        // The check due for a refresh starts it in the background and answers from the held keys;
+        // the refresh fails, and the held keys keep serving.
+        (await TokenValidation.ValidateAsync(sut, token)).Should().NotBeNull();
+        await sut.ValidationKeyReloadInFlight;
         var secondPrincipal = await TokenValidation.ValidateAsync(sut, token);
         secondPrincipal.Should().NotBeNull(because: "stale-cache fallback should keep token validation working through transient Redis failures");
     }
@@ -393,43 +369,38 @@ public sealed class JwtTokenServiceRotationTests
         using var realRotation = NewRotationService();
         _ = await realRotation.RotateAsync();
         var toggleable = new ToggleableRotationService(realRotation);
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
 
-        var sut = new JwtTokenService(toggleable);
+        var sut = new JwtTokenService(toggleable, timeProvider: clock);
 
-        // First token populates _cachedActive.
-        var (firstToken, _) = sut.GenerateAccessToken(MakeUser());
+        var (firstToken, _) = await sut.GenerateAccessTokenAsync(MakeUser());
         firstToken.Should().NotBeNullOrEmpty();
 
-        // Force the active cache stale + arm the rotation service to throw.
-        MarkCacheFieldStale(sut, "_cachedActive");
+        clock.Advance(PastTheKeyCache);
         toggleable.ThrowOnNext = true;
 
-        // Second issuance: refresh would throw → catch path uses the stale
-        // credentials → token is still issued (and still validates because
-        // _cachedValidation already holds the same key).
-        var (secondToken, _) = sut.GenerateAccessToken(MakeUser());
+        var (secondToken, _) = await sut.GenerateAccessTokenAsync(MakeUser());
+        await sut.SigningKeyRefreshInFlight;
+        var (thirdToken, _) = await sut.GenerateAccessTokenAsync(MakeUser());
         secondToken.Should().NotBeNullOrEmpty(because: "stale-cache fallback should keep token issuance working through transient Redis failures");
 
-        // The two tokens use the same kid because we reused the cached active key.
         var firstJwt = new JwtSecurityTokenHandler().ReadJwtToken(firstToken);
-        var secondJwt = new JwtSecurityTokenHandler().ReadJwtToken(secondToken);
-        secondJwt.Header.Kid.Should().Be(firstJwt.Header.Kid);
+        new JwtSecurityTokenHandler().ReadJwtToken(secondToken).Header.Kid.Should().Be(firstJwt.Header.Kid);
+        new JwtSecurityTokenHandler().ReadJwtToken(thirdToken).Header.Kid.Should().Be(firstJwt.Header.Kid);
     }
 
     [Fact]
-    public void GenerateAccessToken_ShouldFailClosed_WhenRotationServiceAlwaysThrowsAndNoCacheYet()
+    public async Task GenerateAccessToken_ShouldFailClosed_WhenRotationServiceAlwaysThrowsAndNoCacheYet()
     {
-        // No prior successful call → _cachedActive is null. The catch-when
-        // clause requires `cached is not null` so the exception should
-        // propagate (fail-closed semantics: better 500 than issue a token
-        // with no signing key at all).
+        // No prior successful read: there is no key to sign with, so issuance fails (fail-closed:
+        // better a 500 than a token with no signing key at all).
         using var realRotation = NewRotationService();
         var toggleable = new ToggleableRotationService(realRotation) { ThrowOnNext = true };
 
         var sut = new JwtTokenService(toggleable);
 
-        Action act = () => sut.GenerateAccessToken(MakeUser());
-        act.Should().Throw<InvalidOperationException>()
+        Func<Task> act = () => sut.GenerateAccessTokenAsync(MakeUser());
+        await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("simulated Redis blip",
                 because: "fail-closed when no stale cache to fall back to");
     }
@@ -469,18 +440,20 @@ public sealed class JwtTokenServiceRotationTests
         _ = await realRotation.RotateAsync();
         var toggleable = new ToggleableRotationService(realRotation);
 
-        var sut = new JwtTokenService(toggleable);
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var sut = new JwtTokenService(toggleable, timeProvider: clock);
 
         // Warm the validation cache (1 cache-miss expected during this call).
-        var (token, _) = sut.GenerateAccessToken(MakeUser());
+        var (token, _) = await sut.GenerateAccessTokenAsync(MakeUser());
         _ = await TokenValidation.ValidateAsync(sut, token);
 
-        MarkCacheFieldStale(sut, "_cachedValidation");
+        clock.Advance(PastTheKeyCache);
         toggleable.ThrowOnNext = true;
 
-        // Trigger refresh → throws → catch → stale fallback (1 cache-miss +
+        // Trigger refresh → throws → stale fallback (1 cache-miss +
         // 1 stale-cache-fallback expected).
         _ = await TokenValidation.ValidateAsync(sut, token);
+        await sut.ValidationKeyReloadInFlight;
 
         // Allow the meter listener to flush its callback queue.
         listener.Counters.Should().ContainKey("jwt.key.cache_misses");
@@ -490,7 +463,7 @@ public sealed class JwtTokenServiceRotationTests
     }
 
     [Fact]
-    public void GenerateAccessToken_ShouldEmitFailClosedCounter_WhenNoCacheAndRefreshThrows()
+    public async Task GenerateAccessToken_ShouldEmitFailClosedCounter_WhenNoCacheAndRefreshThrows()
     {
         using var listener = new CollectingMeterListener("verbara.platform.jwt");
         using var realRotation = NewRotationService();
@@ -498,8 +471,8 @@ public sealed class JwtTokenServiceRotationTests
 
         var sut = new JwtTokenService(toggleable);
 
-        Action act = () => sut.GenerateAccessToken(MakeUser());
-        act.Should().Throw<InvalidOperationException>();
+        Func<Task> act = () => sut.GenerateAccessTokenAsync(MakeUser());
+        await act.Should().ThrowAsync<InvalidOperationException>();
 
         listener.Counters.Should().ContainKey("jwt.key.fail_closed");
         listener.Counters["jwt.key.fail_closed"].Should().Be(1);
