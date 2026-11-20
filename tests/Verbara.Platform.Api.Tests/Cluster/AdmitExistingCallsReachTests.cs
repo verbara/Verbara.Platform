@@ -38,8 +38,8 @@ public sealed class AdmitExistingCallsReachTests(ITestOutputHelper output) : IAs
     /// <summary>Every subscriber of the session-event stream the Api registers.</summary>
     private static readonly string[] Subscribers =
     [
-        "ConversationStatePushBridge", "CallOutcomeObserver", "VoiceConversationBridge", "EventStoreSubscriber",
-        "CallAnalyticsEngine", "AgentAssistEngine",
+        "CallOutcomeObserver", "VoiceConversationBridge", "EventStoreSubscriber", "CallAnalyticsEngine",
+        "AgentAssistEngine",
     ];
 
     private readonly AdmissionPostgres _postgres = new();
@@ -54,7 +54,7 @@ public sealed class AdmitExistingCallsReachTests(ITestOutputHelper output) : IAs
         // Control (i): the resolved hosted-service order, every session-event subscriber's position in it.
         boot.Positions.Should().BeInAscendingOrder(p => p.Index);
         boot.Positions.Select(p => p.Name).Should().Equal(
-            "ConversationStatePushBridge", "CallOutcomeObserver", "ClusterManager", "LeaderElectionService",
+            "CallOutcomeObserver", "ClusterManager", "LeaderElectionService",
             "VoiceConversationBridge", "EventStoreSubscriber", "CallAnalyticsEngine", "AgentAssistEngine");
 
         // Control (ii): the admitted sessions exist before VoiceConversationBridge.StartAsync runs.
@@ -67,13 +67,12 @@ public sealed class AdmitExistingCallsReachTests(ITestOutputHelper output) : IAs
             "not-inbound: dir=Outbound tenant=- meta=[origin=reload]"), "no admitted session carries a tenant when the bridge starts");
 
         // Who had subscribed when the admission ran (CallOutcomeObserver is a thread-pool race: boot-a and boot-b).
-        Phase(boot, "ConversationStatePushBridge").Should().Be(AdmissionPhase.Before);
         foreach (var later in new[] { "VoiceConversationBridge", "EventStoreSubscriber", "CallAnalyticsEngine", "AgentAssistEngine" })
             Phase(boot, later).Should().Be(AdmissionPhase.After, "{0} starts after the cluster manager's awaited start", later);
 
         // What each did with the five admitted starts.
-        boot.Pushes.Should().Equal([.. Enumerable.Repeat("push started tenant=default-tenant", 5), "push ended tenant=default-tenant"],
-            "the push bridge pushes each admitted start, and the end of the one call that ended, under its default tenant");
+        boot.Pushes.Should().NotContain(p => p.StartsWith("push conversation.state.changed ", StringComparison.Ordinal),
+            "the Api registers no Pro conversation bridge, so no admitted start or end is pushed as conversation.state.changed");
         foreach (var later in new[] { "VoiceConversationBridge", "EventStoreSubscriber", "CallAnalyticsEngine", "AgentAssistEngine" })
             boot.Recorder.DeliveredTo(later).Should().NotContain(d => d.StartsWith("CallStartedEvent", StringComparison.Ordinal),
                 "{0} subscribed after the boot admission returned", later);
