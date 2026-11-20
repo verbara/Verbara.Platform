@@ -514,7 +514,7 @@ internal static class AuthEndpoints
             catch { /* permissions will be resolved at authorization time instead */ }
         }
 
-        var (accessToken, expiresAt) = jwtService.GenerateAccessToken(user, permissions);
+        var (accessToken, expiresAt) = await jwtService.GenerateAccessTokenAsync(user, permissions, ct);
         SetRefreshCookie(context, newRawToken);
 
         var featureRegistry = context.RequestServices.GetService<IFeatureRegistry>();
@@ -701,7 +701,7 @@ internal static class AuthEndpoints
             catch { /* permissions will be resolved at authorization time instead */ }
         }
 
-        var (accessToken, expiresAt) = jwtService.GenerateAccessToken(user, permissions);
+        var (accessToken, expiresAt) = await jwtService.GenerateAccessTokenAsync(user, permissions, ct);
         return Results.Ok(new TokenResponse(accessToken, expiresAt));
     }
 
@@ -1310,7 +1310,7 @@ internal static class AuthEndpoints
             EffectivePermissions(permissions, user.Role),
             await IsPlatformTenantAsync(tenantStore, user.TenantId, ct));
 
-        var (accessToken, expiresAt) = jwtService.GenerateAccessToken(user, permissions);
+        var (accessToken, expiresAt) = await jwtService.GenerateAccessTokenAsync(user, permissions, ct);
 
         var ip = GetIpAddress(context);
         var ua = GetUserAgent(context);

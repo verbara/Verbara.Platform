@@ -171,7 +171,7 @@ public class AccountStatusApiFactory : WebApplicationFactory<Program>
     public string MintAccessToken(User user)
     {
         using var scope = Services.CreateScope();
-        var (token, _) = scope.ServiceProvider.GetRequiredService<JwtTokenService>().GenerateAccessToken(user);
+        var (token, _) = scope.ServiceProvider.GetRequiredService<JwtTokenService>().GenerateAccessTokenAsync(user).GetAwaiter().GetResult();
         return token;
     }
 

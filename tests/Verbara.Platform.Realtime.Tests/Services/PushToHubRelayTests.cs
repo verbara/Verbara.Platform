@@ -119,61 +119,31 @@ public sealed class PushToHubRelayTests
         return (relay, bus, mocks, leader, sink);
     }
 
-    private static PushEventMetadata MakeMetadata(string tenantId) =>
-        new(TenantId: tenantId, UserId: null, OccurredAt: DateTimeOffset.UtcNow, CorrelationId: null);
-
     // Deterministic replacement for wall-clock sync fences: awaits the relay's most
     // recently started fire-and-forget send (or a completed Task for synchronous skip
     // outcomes) under a bounded timeout, instead of Task.Delay.
     private static Task WaitForDispatch(PushToHubRelay relay) =>
         relay.WaitForDispatchAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
 
-    [Fact]
-    public async Task StartAsync_ShouldForwardToTenantGroup_WhenConversationStateChangedEventIsPublished()
-    {
-        var (relay, bus, mocks, _, _) = BuildSut("tenant:acme");
-        await relay.StartAsync(CancellationToken.None);
+    // -----------------------------------------------------------------------
+    // Platform's own agent state (Verbara.Platform.Core.AgentStateChangedEvent, "agent.state_changed") is the only
+    // source of OnAgentStateChanged frames (Pro/ADR-0026 point 4 removes the Pro agent bridge).
+    // -----------------------------------------------------------------------
 
-        var evt = new ConversationStateChangedEvent
+    private static Verbara.Platform.Core.AgentStateChangedEvent CoreAgentEvent(string tenantId, DateTimeOffset at) =>
+        new Verbara.Platform.Core.AgentStateChangedEvent(tenantId, "agent-42", "Agent 42", "Available", "Break")
         {
-            ConversationId = "conv-1",
-            PreviousState = "queued",
-            NewState = "active",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata("acme")
+            Timestamp = at,
         };
 
-        bus.Emit(evt);
-        await WaitForDispatch(relay);
-
-        mocks.HubClients.Received(1).Group("tenant:acme");
-        await mocks.GroupClient.Received(1).OnConversationStateChanged(
-            Arg.Is<ConversationStatePayload>(p => p != null &&
-                p.ConversationId == "conv-1" &&
-                p.TenantId == "acme" &&
-                p.PreviousState == "queued" &&
-                p.NewState == "active"));
-
-        await relay.StopAsync(CancellationToken.None);
-    }
-
     [Fact]
-    public async Task StartAsync_ShouldForwardToTenantGroup_WhenAgentStateChangedEventIsPublished()
+    public async Task StartAsync_ShouldForwardCoreAgentStateToTenantGroup_WhenCoreAgentStateChangedEventIsPublished()
     {
-        var (relay, bus, mocks, _, _) = BuildSut("tenant:acme");
+        var (relay, bus, mocks, _, sink) = BuildSut("tenant:acme");
         await relay.StartAsync(CancellationToken.None);
+        var at = new DateTimeOffset(2026, 11, 20, 9, 30, 0, TimeSpan.Zero);
 
-        var evt = new AgentStateChangedEvent
-        {
-            AgentId = "agent-42",
-            PreviousState = "ready",
-            NewState = "paused",
-            ReasonCode = "break",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata("acme")
-        };
-
-        bus.Emit(evt);
+        bus.Emit(CoreAgentEvent("acme", at));
         await WaitForDispatch(relay);
 
         mocks.HubClients.Received(1).Group("tenant:acme");
@@ -181,9 +151,125 @@ public sealed class PushToHubRelayTests
             Arg.Is<AgentStatePayload>(p => p != null &&
                 p.AgentId == "agent-42" &&
                 p.TenantId == "acme" &&
-                p.ReasonCode == "break" &&
-                p.PreviousState == "ready" &&
-                p.NewState == "paused"));
+                p.PreviousState == "Available" &&
+                p.NewState == "Break" &&
+                p.ReasonCode == null &&
+                p.ChangedAt == at));
+        sink.Snapshot(since: null, limit: 100).Entries.Should().ContainSingle(e =>
+            e.EventType == "agent.state_changed" &&
+            e.TenantId == "acme" &&
+            e.Outcome == RelayOutcomeKind.Forwarded);
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldSkipForward_WhenCoreAgentEventTenantIdIsEmpty()
+    {
+        var (relay, bus, mocks, _, sink) = BuildSut("tenant:");
+        await relay.StartAsync(CancellationToken.None);
+
+        bus.Emit(CoreAgentEvent(string.Empty, DateTimeOffset.UtcNow));
+        await WaitForDispatch(relay);
+
+        await mocks.GroupClient.DidNotReceive().OnAgentStateChanged(Arg.Any<AgentStatePayload>());
+        sink.Snapshot(since: null, limit: 100).Entries.Should().ContainSingle(e =>
+            e.EventType == "agent.state_changed" &&
+            e.Outcome == RelayOutcomeKind.SkippedNullTenant);
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Forward_ShouldNotSendCoreAgentState_WhenNotLeader()
+    {
+        var (relay, bus, mocks, _, sink) = BuildSut("tenant:acme", isLeader: false);
+        await relay.StartAsync(CancellationToken.None);
+
+        bus.Emit(CoreAgentEvent("acme", DateTimeOffset.UtcNow));
+        await WaitForDispatch(relay);
+
+        mocks.HubClients.DidNotReceive().Group(Arg.Any<string>());
+        await mocks.GroupClient.DidNotReceive().OnAgentStateChanged(Arg.Any<AgentStatePayload>());
+        sink.Snapshot(since: null, limit: 100).Entries.Should().ContainSingle(e =>
+            e.EventType == "agent.state_changed" &&
+            e.TenantId == "acme" &&
+            e.Outcome == RelayOutcomeKind.SkippedNotLeader);
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Platform's own conversation state (Verbara.Platform.Core.ConversationStateChangedEvent,
+    // "conversation.state_changed") is the only source of OnConversationStateChanged frames: the Pro
+    // conversation bridge is not wired (owner Q8 = A, 2026-11-18).
+    // -----------------------------------------------------------------------
+
+    private static Verbara.Platform.Core.ConversationStateChangedEvent CoreConversationEvent(
+        string tenantId, string conversationId, DateTimeOffset at) =>
+        new Verbara.Platform.Core.ConversationStateChangedEvent(tenantId, conversationId, "Queued", "Active")
+        {
+            Timestamp = at,
+        };
+
+    [Fact]
+    public async Task StartAsync_ShouldForwardCoreConversationStateToTenantGroup_WhenCoreConversationStateChangedEventIsPublished()
+    {
+        var (relay, bus, mocks, _, sink) = BuildSut("tenant:acme");
+        await relay.StartAsync(CancellationToken.None);
+        var at = new DateTimeOffset(2026, 11, 20, 9, 45, 0, TimeSpan.Zero);
+
+        bus.Emit(CoreConversationEvent("acme", "conv-core-1", at));
+        await WaitForDispatch(relay);
+
+        mocks.HubClients.Received(1).Group("tenant:acme");
+        await mocks.GroupClient.Received(1).OnConversationStateChanged(
+            Arg.Is<ConversationStatePayload>(p => p != null &&
+                p.ConversationId == "conv-core-1" &&
+                p.TenantId == "acme" &&
+                p.PreviousState == "Queued" &&
+                p.NewState == "Active" &&
+                p.ChangedAt == at));
+        sink.Snapshot(since: null, limit: 100).Entries.Should().ContainSingle(e =>
+            e.EventType == "conversation.state_changed" &&
+            e.TenantId == "acme" &&
+            e.Outcome == RelayOutcomeKind.Forwarded);
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldSkipForward_WhenCoreConversationEventTenantIdIsEmpty()
+    {
+        var (relay, bus, mocks, _, sink) = BuildSut("tenant:");
+        await relay.StartAsync(CancellationToken.None);
+
+        bus.Emit(CoreConversationEvent(string.Empty, "conv-core-2", DateTimeOffset.UtcNow));
+        await WaitForDispatch(relay);
+
+        await mocks.GroupClient.DidNotReceive().OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
+        sink.Snapshot(since: null, limit: 100).Entries.Should().ContainSingle(e =>
+            e.EventType == "conversation.state_changed" &&
+            e.Outcome == RelayOutcomeKind.SkippedNullTenant);
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Forward_ShouldNotSendCoreConversationState_WhenNotLeader()
+    {
+        var (relay, bus, mocks, _, sink) = BuildSut("tenant:acme", isLeader: false);
+        await relay.StartAsync(CancellationToken.None);
+
+        bus.Emit(CoreConversationEvent("acme", "conv-core-3", DateTimeOffset.UtcNow));
+        await WaitForDispatch(relay);
+
+        mocks.HubClients.DidNotReceive().Group(Arg.Any<string>());
+        await mocks.GroupClient.DidNotReceive().OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
+        sink.Snapshot(since: null, limit: 100).Entries.Should().ContainSingle(e =>
+            e.EventType == "conversation.state_changed" &&
+            e.TenantId == "acme" &&
+            e.Outcome == RelayOutcomeKind.SkippedNotLeader);
 
         await relay.StopAsync(CancellationToken.None);
     }
@@ -255,67 +341,13 @@ public sealed class PushToHubRelayTests
     }
 
     [Fact]
-    public async Task StartAsync_ShouldSkipForward_WhenConversationEventTenantIdIsNullOrEmpty()
-    {
-        var (relay, bus, mocks, _, _) = BuildSut("tenant:");
-        await relay.StartAsync(CancellationToken.None);
-
-        var evt = new ConversationStateChangedEvent
-        {
-            ConversationId = "conv-2",
-            PreviousState = "queued",
-            NewState = "active",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata(string.Empty)
-        };
-
-        bus.Emit(evt);
-        await WaitForDispatch(relay);
-
-        await mocks.GroupClient.DidNotReceive().OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
-
-        await relay.StopAsync(CancellationToken.None);
-    }
-
-    [Fact]
-    public async Task StartAsync_ShouldSkipForward_WhenAgentEventTenantIdIsNullOrEmpty()
-    {
-        var (relay, bus, mocks, _, _) = BuildSut("tenant:");
-        await relay.StartAsync(CancellationToken.None);
-
-        var evt = new AgentStateChangedEvent
-        {
-            AgentId = "agent-99",
-            PreviousState = "ready",
-            NewState = "offline",
-            ReasonCode = null,
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata(string.Empty)
-        };
-
-        bus.Emit(evt);
-        await WaitForDispatch(relay);
-
-        await mocks.GroupClient.DidNotReceive().OnAgentStateChanged(Arg.Any<AgentStatePayload>());
-
-        await relay.StopAsync(CancellationToken.None);
-    }
-
-    [Fact]
     public async Task StopAsync_ShouldDisposeSubscriptions_SoNoMoreForwardingAfterStop()
     {
         var (relay, bus, mocks, _, _) = BuildSut("tenant:tenant-x");
         await relay.StartAsync(CancellationToken.None);
         await relay.StopAsync(CancellationToken.None);
 
-        var evt = new ConversationStateChangedEvent
-        {
-            ConversationId = "conv-3",
-            PreviousState = "active",
-            NewState = "closed",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata("tenant-x")
-        };
+        var evt = new Verbara.Platform.Core.ConversationStateChangedEvent("tenant-x", "conv-3", "active", "closed");
 
         bus.Emit(evt);
         await WaitForDispatch(relay);
@@ -382,14 +414,7 @@ public sealed class PushToHubRelayTests
         var (relay, bus, mocks, _, _) = BuildSut("tenant:acme", isLeader: false);
         await relay.StartAsync(CancellationToken.None);
 
-        var evt = new ConversationStateChangedEvent
-        {
-            ConversationId = "conv-leader-1",
-            PreviousState = "queued",
-            NewState = "active",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata("acme")
-        };
+        var evt = new Verbara.Platform.Core.ConversationStateChangedEvent("acme", "conv-leader-1", "queued", "active");
 
         bus.Emit(evt);
         await WaitForDispatch(relay);
@@ -406,14 +431,7 @@ public sealed class PushToHubRelayTests
         var (relay, bus, mocks, _, _) = BuildSut("tenant:acme", isLeader: true);
         await relay.StartAsync(CancellationToken.None);
 
-        var evt = new ConversationStateChangedEvent
-        {
-            ConversationId = "conv-leader-2",
-            PreviousState = "queued",
-            NewState = "active",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata("acme")
-        };
+        var evt = new Verbara.Platform.Core.ConversationStateChangedEvent("acme", "conv-leader-2", "queued", "active");
 
         bus.Emit(evt);
         await WaitForDispatch(relay);
@@ -430,14 +448,7 @@ public sealed class PushToHubRelayTests
         var (relay, bus, mocks, leader, _) = BuildSut("tenant:acme", isLeader: false);
         await relay.StartAsync(CancellationToken.None);
 
-        var template = new ConversationStateChangedEvent
-        {
-            ConversationId = "conv-recover",
-            PreviousState = "queued",
-            NewState = "active",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata("acme")
-        };
+        var template = new Verbara.Platform.Core.ConversationStateChangedEvent("acme", "conv-recover", "queued", "active");
 
         // 1) not-leader → must not invoke
         bus.Emit(template);
@@ -467,14 +478,7 @@ public sealed class PushToHubRelayTests
         var (relay, bus, _, _, _) = BuildSut("tenant:acme", isLeader: false, logger: capturingLogger);
         await relay.StartAsync(CancellationToken.None);
 
-        var evt = new ConversationStateChangedEvent
-        {
-            ConversationId = "conv-log",
-            PreviousState = "queued",
-            NewState = "active",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata("acme")
-        };
+        var evt = new Verbara.Platform.Core.ConversationStateChangedEvent("acme", "conv-log", "queued", "active");
 
         bus.Emit(evt);
         await WaitForDispatch(relay);
@@ -487,7 +491,7 @@ public sealed class PushToHubRelayTests
         capturingLogger.Entries.Should().ContainSingle(e =>
             e.Level == LogLevel.Trace &&
             e.EventId.Id == 3001 &&
-            e.Message.Contains(evt.EventType, StringComparison.Ordinal) &&
+            e.Message.Contains(evt.Type, StringComparison.Ordinal) &&
             e.Message.Contains(RealtimeLeaderResources.Fanout, StringComparison.Ordinal));
 
         await relay.StopAsync(CancellationToken.None);
@@ -503,14 +507,7 @@ public sealed class PushToHubRelayTests
         var (relay, bus, _, _, sink) = BuildSut("tenant:acme", isLeader: true);
         await relay.StartAsync(CancellationToken.None);
 
-        var evt = new ConversationStateChangedEvent
-        {
-            ConversationId = "conv-sink-1",
-            PreviousState = "queued",
-            NewState = "active",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata("acme")
-        };
+        var evt = new Verbara.Platform.Core.ConversationStateChangedEvent("acme", "conv-sink-1", "queued", "active");
 
         bus.Emit(evt);
         await WaitForDispatch(relay);
@@ -518,7 +515,7 @@ public sealed class PushToHubRelayTests
         var page = sink.Snapshot(since: null, limit: 100);
         page.PodInstanceId.Should().Be("test-pod");
         page.Entries.Should().ContainSingle(e =>
-            e.EventType == evt.EventType &&
+            e.EventType == "conversation.state_changed" &&
             e.TenantId == "acme" &&
             e.Outcome == RelayOutcomeKind.Forwarded &&
             e.IsLeaderAtTime &&
@@ -534,21 +531,14 @@ public sealed class PushToHubRelayTests
         var (relay, bus, _, _, sink) = BuildSut("tenant:acme", isLeader: false);
         await relay.StartAsync(CancellationToken.None);
 
-        var evt = new ConversationStateChangedEvent
-        {
-            ConversationId = "conv-sink-2",
-            PreviousState = "queued",
-            NewState = "active",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata("acme")
-        };
+        var evt = new Verbara.Platform.Core.ConversationStateChangedEvent("acme", "conv-sink-2", "queued", "active");
 
         bus.Emit(evt);
         await WaitForDispatch(relay);
 
         var page = sink.Snapshot(since: null, limit: 100);
         page.Entries.Should().ContainSingle(e =>
-            e.EventType == evt.EventType &&
+            e.EventType == "conversation.state_changed" &&
             e.TenantId == "acme" &&
             e.Outcome == RelayOutcomeKind.SkippedNotLeader &&
             !e.IsLeaderAtTime &&
@@ -563,21 +553,14 @@ public sealed class PushToHubRelayTests
         var (relay, bus, _, _, sink) = BuildSut("tenant:acme", isLeader: true);
         await relay.StartAsync(CancellationToken.None);
 
-        var evt = new ConversationStateChangedEvent
-        {
-            ConversationId = "conv-sink-3",
-            PreviousState = "queued",
-            NewState = "active",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata(string.Empty)
-        };
+        var evt = new Verbara.Platform.Core.ConversationStateChangedEvent(string.Empty, "conv-sink-3", "queued", "active");
 
         bus.Emit(evt);
         await WaitForDispatch(relay);
 
         var page = sink.Snapshot(since: null, limit: 100);
         page.Entries.Should().ContainSingle(e =>
-            e.EventType == evt.EventType &&
+            e.EventType == "conversation.state_changed" &&
             string.IsNullOrEmpty(e.TenantId) &&
             e.Outcome == RelayOutcomeKind.SkippedNullTenant &&
             e.IsLeaderAtTime);

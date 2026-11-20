@@ -315,7 +315,7 @@ internal static class OidcEndpoints
             catch { /* permissions resolved at authorization time */ }
         }
 
-        var (accessToken, expiresAt) = jwtService.GenerateAccessToken(user, permissions);
+        var (accessToken, expiresAt) = await jwtService.GenerateAccessTokenAsync(user, permissions, ct);
         var (rawRefreshToken, _) = await refreshService.GenerateAsync(
             user.UserId.Value, user.TenantId.Value, ip, ua, ct);
 

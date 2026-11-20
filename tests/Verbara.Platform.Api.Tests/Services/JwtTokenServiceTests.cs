@@ -47,9 +47,9 @@ public sealed class JwtTokenServiceTests : IDisposable
     // ── Existing tests (updated for new constructor) ─────────────────────────
 
     [Fact]
-    public void GenerateAccessToken_ShouldReturnValidJwt()
+    public async Task GenerateAccessToken_ShouldReturnValidJwt()
     {
-        var (token, expiresAt) = _sut.GenerateAccessToken(MakeUser());
+        var (token, expiresAt) = await _sut.GenerateAccessTokenAsync(MakeUser());
 
         token.Should().NotBeNullOrWhiteSpace();
         expiresAt.Should().BeAfter(DateTimeOffset.UtcNow);
@@ -68,7 +68,7 @@ public sealed class JwtTokenServiceTests : IDisposable
     [Fact]
     public async Task ValidationParameters_ShouldAcceptToken_WhenIssuedByTheSameService()
     {
-        var (token, _) = _sut.GenerateAccessToken(MakeUser());
+        var (token, _) = await _sut.GenerateAccessTokenAsync(MakeUser());
 
         var principal = await TokenValidation.ValidateAsync(_sut, token);
 
@@ -91,7 +91,7 @@ public sealed class JwtTokenServiceTests : IDisposable
         try
         {
             var otherService = new JwtTokenService(otherDir, _dataProtection);
-            var (token, _) = otherService.GenerateAccessToken(MakeUser());
+            var (token, _) = await otherService.GenerateAccessTokenAsync(MakeUser());
 
             var result = await TokenValidation.ValidateAsync(_sut, token);
 
@@ -109,7 +109,7 @@ public sealed class JwtTokenServiceTests : IDisposable
     {
         var secondService = new JwtTokenService(_tempDir, _dataProtection);
 
-        var (token, _) = _sut.GenerateAccessToken(MakeUser());
+        var (token, _) = await _sut.GenerateAccessTokenAsync(MakeUser());
         var principal = await TokenValidation.ValidateAsync(secondService, token);
 
         principal.Should().NotBeNull();
@@ -118,9 +118,9 @@ public sealed class JwtTokenServiceTests : IDisposable
     // ── New B.1 tests — jti claim ─────────────────────────────────────────────
 
     [Fact]
-    public void GenerateAccessToken_ShouldIncludeJtiClaim_WhenCalled()
+    public async Task GenerateAccessToken_ShouldIncludeJtiClaim_WhenCalled()
     {
-        var (token, _) = _sut.GenerateAccessToken(MakeUser());
+        var (token, _) = await _sut.GenerateAccessTokenAsync(MakeUser());
 
         var handler = new JwtSecurityTokenHandler();
         var jwt = handler.ReadJwtToken(token);
@@ -131,10 +131,10 @@ public sealed class JwtTokenServiceTests : IDisposable
     }
 
     [Fact]
-    public void GenerateImpersonationToken_ShouldIncludeJtiClaim_WhenCalled()
+    public async Task GenerateImpersonationToken_ShouldIncludeJtiClaim_WhenCalled()
     {
         var permissions = new HashSet<string> { "read:agents" };
-        var (token, _, _) = _sut.GenerateImpersonationToken(MakeUser(), "t2", permissions);
+        var (token, _, _) = await _sut.GenerateImpersonationTokenAsync(MakeUser(), "t2", permissions);
 
         var handler = new JwtSecurityTokenHandler();
         var jwt = handler.ReadJwtToken(token);
@@ -145,10 +145,10 @@ public sealed class JwtTokenServiceTests : IDisposable
     }
 
     [Fact]
-    public void GenerateImpersonationToken_ShouldReturnTokenIdMatchingJtiClaim()
+    public async Task GenerateImpersonationToken_ShouldReturnTokenIdMatchingJtiClaim()
     {
         // The session keeps this handle; revoking the session revokes exactly this jti.
-        var (token, expiresAt, tokenId) = _sut.GenerateImpersonationToken(
+        var (token, expiresAt, tokenId) = await _sut.GenerateImpersonationTokenAsync(
             MakeUser(), "t2", new HashSet<string> { "read:agents" });
 
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
@@ -159,12 +159,12 @@ public sealed class JwtTokenServiceTests : IDisposable
     }
 
     [Fact]
-    public void GenerateImpersonationToken_ShouldMintADistinctTokenId_WhenCalledTwice()
+    public async Task GenerateImpersonationToken_ShouldMintADistinctTokenId_WhenCalledTwice()
     {
         var permissions = new HashSet<string> { "read:agents" };
 
-        var (_, _, first) = _sut.GenerateImpersonationToken(MakeUser(), "t2", permissions);
-        var (_, _, second) = _sut.GenerateImpersonationToken(MakeUser(), "t2", permissions);
+        var (_, _, first) = await _sut.GenerateImpersonationTokenAsync(MakeUser(), "t2", permissions);
+        var (_, _, second) = await _sut.GenerateImpersonationTokenAsync(MakeUser(), "t2", permissions);
 
         first.Should().NotBe(second, because: "revoking one session must never revoke another session's token");
     }
@@ -172,14 +172,14 @@ public sealed class JwtTokenServiceTests : IDisposable
     [Theory]
     [InlineData(UserRole.Admin)]
     [InlineData(UserRole.Supervisor)]
-    public void GenerateImpersonationToken_ShouldRecordTheImpersonatorRole_WhenCalled(UserRole role)
+    public async Task GenerateImpersonationToken_ShouldRecordTheImpersonatorRole_WhenCalled(UserRole role)
     {
         // Every request that presents the token is held to this role (AccountStatusGate); the token's
         // own role claim stays Admin whatever the impersonator's role.
         var admin = MakeUser();
         admin.Role = role;
 
-        var (token, _, _) = _sut.GenerateImpersonationToken(admin, "t2", new HashSet<string> { "read:agents" });
+        var (token, _, _) = await _sut.GenerateImpersonationTokenAsync(admin, "t2", new HashSet<string> { "read:agents" });
 
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
         jwt.Claims.Single(c => c.Type == "impersonator_role").Value.Should().Be(role.ToString());
@@ -195,13 +195,13 @@ public sealed class JwtTokenServiceTests : IDisposable
     }
 
     [Fact]
-    public void GenerateAccessToken_ShouldIncludeUniqueJti_WhenCalledTwice()
+    public async Task GenerateAccessToken_ShouldIncludeUniqueJti_WhenCalledTwice()
     {
         var handler = new JwtSecurityTokenHandler();
         var user = MakeUser();
 
-        var (token1, _) = _sut.GenerateAccessToken(user);
-        var (token2, _) = _sut.GenerateAccessToken(user);
+        var (token1, _) = await _sut.GenerateAccessTokenAsync(user);
+        var (token2, _) = await _sut.GenerateAccessTokenAsync(user);
 
         var jti1 = handler.ReadJwtToken(token1).Claims.First(c => c.Type == JwtRegisteredClaimNames.Jti).Value;
         var jti2 = handler.ReadJwtToken(token2).Claims.First(c => c.Type == JwtRegisteredClaimNames.Jti).Value;

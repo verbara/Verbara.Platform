@@ -93,7 +93,7 @@ public sealed class PartnerCreditAttributionAuthorizationTests : IDisposable
             Status = UserStatus.Active,
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        var (token, _) = _factory.Services.GetRequiredService<JwtTokenService>().GenerateAccessToken(user);
+        var (token, _) = _factory.Services.GetRequiredService<JwtTokenService>().GenerateAccessTokenAsync(user).GetAwaiter().GetResult();
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return client;

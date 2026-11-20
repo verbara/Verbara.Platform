@@ -153,7 +153,12 @@ builder.Services
                     if (token is not null)
                         ctx.Token = token;
                 }
-                return Task.CompletedTask;
+
+                // The token check reads its keys from memory and never waits on the key store; a
+                // replica's first connects await the first load here, asynchronously.
+                return ctx.HttpContext.RequestServices
+                    .GetRequiredService<Verbara.Platform.Identity.Auth.Jwt.JwtValidationKeySnapshot>()
+                    .EnsureLoadedAsync(ctx.HttpContext.RequestAborted);
             },
             // A connection is closed when its token expires; a reconnect on that token is refused
             // here rather than admitted and closed again inside the clock-skew grace. So is an
@@ -162,6 +167,7 @@ builder.Services
         };
     });
 
+builder.Services.AddSingleton(sp => JwtValidationConfigurator.CreateKeySnapshot(sp));
 builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
     .Configure<IServiceProvider>((opts, sp) =>
     {

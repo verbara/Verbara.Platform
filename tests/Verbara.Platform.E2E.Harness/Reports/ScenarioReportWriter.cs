@@ -73,6 +73,20 @@ internal static class ScenarioReportWriter
         sb.AppendLine($"- **Leader pod(s):** {(r.LeaderPodInstanceIds.Count == 0 ? "(none)" : string.Join(", ", r.LeaderPodInstanceIds))}");
         sb.AppendLine();
 
+        if (r.OutcomesByEventType is { Count: > 0 } byType)
+        {
+            sb.AppendLine("## Audit outcomes by event type");
+            sb.AppendLine();
+            sb.AppendLine("| Event type | Outcome | Rows |");
+            sb.AppendLine("|---|---|---:|");
+            foreach (var (key, rows) in byType)
+            {
+                var parts = key.Split('|');
+                sb.AppendLine($"| {parts[0]} | {(parts.Length > 1 ? parts[1] : string.Empty)} | {rows} |");
+            }
+            sb.AppendLine();
+        }
+
         if (r.Warnings.Count > 0)
         {
             sb.AppendLine("## Warnings");

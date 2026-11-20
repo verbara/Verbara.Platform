@@ -31,7 +31,7 @@ namespace Verbara.Platform.Api.Tests.Multitenancy;
 ///   admin so the management-key bypass branch of the new tenant boundary
 ///   middleware can be probed.</description></item>
 /// </list>
-/// JWTs are minted via <see cref="JwtTokenService.GenerateAccessToken(User)"/>
+/// JWTs are minted via <see cref="JwtTokenService.GenerateAccessTokenAsync(User, System.Threading.CancellationToken)"/>
 /// so the principal carries the real <c>tid</c> claim and the JWT scheme
 /// (<c>eyJ</c>-prefixed) is selected by the dynamic auth selector. This is the
 /// codepath actually exploited by MT-001 — API keys overwrite
@@ -188,7 +188,7 @@ public sealed class CrossTenantHeaderAttackFixture : WebApplicationFactory<Progr
             Status = UserStatus.Active,
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        var (token, _) = jwt.GenerateAccessToken(user);
+        var (token, _) = jwt.GenerateAccessTokenAsync(user).GetAwaiter().GetResult();
         return token;
     }
 

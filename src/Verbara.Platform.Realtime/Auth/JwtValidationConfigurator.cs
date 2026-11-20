@@ -2,6 +2,7 @@ using Verbara.Platform.Core.Push;
 using Verbara.Platform.Identity.Auth;
 using Verbara.Platform.Identity.Auth.Jwt;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Verbara.Platform.Realtime.Auth;
@@ -13,13 +14,39 @@ namespace Verbara.Platform.Realtime.Auth;
 /// Redis-backed store (<c>Verbara.Platform.Identity.Redis</c>) is wired,
 /// both services share the rotation pool transparently (ADR-0012).
 /// </summary>
-internal static class JwtValidationConfigurator
+internal static partial class JwtValidationConfigurator
 {
     private const string Issuer = "verbara-platform";
     private const string Audience = "verbara-platform";
 
+    /// <summary>
+    /// The in-memory validation keys, loaded from <see cref="IJwtKeyStore"/> off the request path.
+    /// Registered as a singleton; the JwtBearer <c>OnMessageReceived</c> event awaits its first load
+    /// (<see cref="JwtValidationKeySnapshot.EnsureLoadedAsync"/>), never the host's start.
+    /// </summary>
+    public static JwtValidationKeySnapshot CreateKeySnapshot(IServiceProvider services, TimeProvider? timeProvider = null)
+    {
+        var logger = services.GetService<ILoggerFactory>()?.CreateLogger(typeof(JwtValidationKeySnapshot).FullName!)
+            ?? NullLogger.Instance;
+        return new JwtValidationKeySnapshot(
+            ct => LoadKeysAsync(services, ct),
+            BuildKey,
+            options: null,
+            timeProvider,
+            new JwtValidationKeySnapshotEvents
+            {
+                ReloadFailed = (ex, stillServing) => LogKeyReloadFailed(logger, stillServing, ex),
+            });
+    }
+
+    /// <summary>
+    /// Token validation parameters whose key resolver reads the registered
+    /// <see cref="JwtValidationKeySnapshot"/> (one is created when none is registered). The resolver
+    /// never waits on the key store.
+    /// </summary>
     public static TokenValidationParameters BuildValidationParameters(IServiceProvider services)
     {
+        var keys = services.GetService<JwtValidationKeySnapshot>() ?? CreateKeySnapshot(services);
         return new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -28,7 +55,7 @@ internal static class JwtValidationConfigurator
             ValidAudience = Audience,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKeyResolver = (_, _, _, _) => ResolveKeys(services),
+            IssuerSigningKeyResolver = (_, _, kid, _) => keys.Resolve(kid),
             ClockSkew = TimeSpan.FromSeconds(30),
             RoleClaimType = "role",
             NameClaimType = "sub",
@@ -76,21 +103,16 @@ internal static class JwtValidationConfigurator
         }
     }
 
-    private static List<SecurityKey> ResolveKeys(IServiceProvider services)
+    private static async Task<IReadOnlyList<JwtKeyEntry>> LoadKeysAsync(IServiceProvider services, CancellationToken ct)
     {
         using var scope = services.CreateScope();
         var store = scope.ServiceProvider.GetRequiredService<IJwtKeyStore>();
-        var entries = store.GetAllAsync().GetAwaiter().GetResult();
-        var now = DateTimeOffset.UtcNow;
-        var keys = new List<SecurityKey>(entries.Count);
-        foreach (var entry in entries)
-        {
-            if (entry.ExpiresAt <= now)
-                continue;
-            keys.Add(BuildKey(entry));
-        }
-        return keys;
+        return await store.GetAllAsync(ct).ConfigureAwait(false);
     }
+
+    [LoggerMessage(EventId = 6105, Level = LogLevel.Warning,
+        Message = "JWT validation-key reload failed; still serving the previous keys: {StillServing}. Investigate key-pool availability.")]
+    private static partial void LogKeyReloadFailed(ILogger logger, bool stillServing, Exception exception);
 
     private static SecurityKey BuildKey(JwtKeyEntry entry) => entry.Algorithm switch
     {
