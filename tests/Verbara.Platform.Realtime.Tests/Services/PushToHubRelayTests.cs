@@ -119,43 +119,11 @@ public sealed class PushToHubRelayTests
         return (relay, bus, mocks, leader, sink);
     }
 
-    private static PushEventMetadata MakeMetadata(string tenantId) =>
-        new(TenantId: tenantId, UserId: null, OccurredAt: DateTimeOffset.UtcNow, CorrelationId: null);
-
     // Deterministic replacement for wall-clock sync fences: awaits the relay's most
     // recently started fire-and-forget send (or a completed Task for synchronous skip
     // outcomes) under a bounded timeout, instead of Task.Delay.
     private static Task WaitForDispatch(PushToHubRelay relay) =>
         relay.WaitForDispatchAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
-
-    [Fact]
-    public async Task StartAsync_ShouldForwardToTenantGroup_WhenConversationStateChangedEventIsPublished()
-    {
-        var (relay, bus, mocks, _, _) = BuildSut("tenant:acme");
-        await relay.StartAsync(CancellationToken.None);
-
-        var evt = new ConversationStateChangedEvent
-        {
-            ConversationId = "conv-1",
-            PreviousState = "queued",
-            NewState = "active",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata("acme")
-        };
-
-        bus.Emit(evt);
-        await WaitForDispatch(relay);
-
-        mocks.HubClients.Received(1).Group("tenant:acme");
-        await mocks.GroupClient.Received(1).OnConversationStateChanged(
-            Arg.Is<ConversationStatePayload>(p => p != null &&
-                p.ConversationId == "conv-1" &&
-                p.TenantId == "acme" &&
-                p.PreviousState == "queued" &&
-                p.NewState == "active"));
-
-        await relay.StopAsync(CancellationToken.None);
-    }
 
     // -----------------------------------------------------------------------
     // Platform's own agent state (Verbara.Platform.Core.AgentStateChangedEvent, "agent.state_changed") is the only
@@ -368,29 +336,6 @@ public sealed class PushToHubRelayTests
                 p.Rating == 4 &&
                 p.QueueName == "support-tier1" &&
                 p.Comment == null));
-
-        await relay.StopAsync(CancellationToken.None);
-    }
-
-    [Fact]
-    public async Task StartAsync_ShouldSkipForward_WhenConversationEventTenantIdIsNullOrEmpty()
-    {
-        var (relay, bus, mocks, _, _) = BuildSut("tenant:");
-        await relay.StartAsync(CancellationToken.None);
-
-        var evt = new ConversationStateChangedEvent
-        {
-            ConversationId = "conv-2",
-            PreviousState = "queued",
-            NewState = "active",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata(string.Empty)
-        };
-
-        bus.Emit(evt);
-        await WaitForDispatch(relay);
-
-        await mocks.GroupClient.DidNotReceive().OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
 
         await relay.StopAsync(CancellationToken.None);
     }

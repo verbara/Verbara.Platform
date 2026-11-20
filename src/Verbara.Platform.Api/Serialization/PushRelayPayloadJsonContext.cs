@@ -50,7 +50,6 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(ProPush.ClusterNodeStateChangedEvent), TypeInfoPropertyName = "ProClusterNodeStateChangedEvent")]
 [JsonSerializable(typeof(ProPush.ConversationAssignedEvent), TypeInfoPropertyName = "ProConversationAssignedEvent")]
 [JsonSerializable(typeof(ProPush.ConversationMessageEvent), TypeInfoPropertyName = "ProConversationMessageEvent")]
-[JsonSerializable(typeof(ProPush.ConversationStateChangedEvent), TypeInfoPropertyName = "ProConversationStateChangedEvent")]
 [JsonSerializable(typeof(ProPush.ConversationTransferredEvent), TypeInfoPropertyName = "ProConversationTransferredEvent")]
 [JsonSerializable(typeof(ProPush.PresenceSnapshotEvent), TypeInfoPropertyName = "ProPresenceSnapshotEvent")]
 internal sealed partial class PushRelayPayloadJsonContext : JsonSerializerContext;

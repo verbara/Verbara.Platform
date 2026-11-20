@@ -39,9 +39,11 @@ internal static partial class PushToHubRelayLog
 }
 
 /// <summary>
-/// Bridges the in-process <see cref="IPushEventBus"/> T27 events to the
+/// Bridges the in-process <see cref="IPushEventBus"/> events to the
 /// SignalR <see cref="PlatformHub"/> so connected clients receive real-time
-/// conversation, agent, and cluster node state transitions.
+/// conversation, agent, and cluster node state transitions. Conversation and
+/// agent state come from Platform's own Core events (conversation.state_changed,
+/// agent.state_changed); no Pro-typed conversation or agent event is subscribed.
 ///
 /// <para>
 /// <b>Multi-pod (ADR-0022 Phase A.5):</b> the relay subscribes on every pod
@@ -73,17 +75,15 @@ internal sealed class PushToHubRelay : IHostedService
     private readonly IRelayOutcomeSink _outcomeSink;
     private readonly ILogger<PushToHubRelay> _logger;
 
-    private IDisposable? _conversationSubscription;
     private IDisposable? _clusterSubscription;
     private IDisposable? _csatSubscription;
     // v2.4.7 — Platform.Api PlatformEventBus publishes Verbara.Platform.Core
-    // event types directly (no Core→Pro translator exists), so the Pro-typed
-    // subscriptions above never matched anything from the Api side. The Core
-    // subscriptions below map field shapes to the same Pro Payloads and fan
-    // out through the same SendXxxAsync helpers. Cluster events stay
-    // single-source (Pro.Cluster publishes the Pro-typed event internally).
-    // Agent state has no Pro-typed subscription: the Core event is its only
-    // source (the Pro agent bridge is no longer wired, Pro/ADR-0026 point 4).
+    // event types directly (no Core→Pro translator exists). The Core
+    // subscriptions below map field shapes to the Pro Payloads the hub client
+    // contract uses and fan out through the SendXxxAsync helpers; they are the
+    // only source of conversation and agent frames (the Pro conversation and
+    // agent bridges are not wired: Pro/ADR-0026 point 4, owner Q8 = A). Cluster
+    // events stay single-source (Pro.Cluster publishes the Pro-typed event internally).
     private IDisposable? _coreConversationSubscription;
     private IDisposable? _coreAgentSubscription;
 
@@ -109,9 +109,6 @@ internal sealed class PushToHubRelay : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _conversationSubscription = _bus.OfType<ConversationStateChangedEvent>()
-            .Subscribe(evt => ForwardConversation(evt));
-
         _clusterSubscription = _bus.OfType<ClusterNodeStateChangedEvent>()
             .Subscribe(evt => ForwardClusterNode(evt));
 
@@ -130,46 +127,15 @@ internal sealed class PushToHubRelay : IHostedService
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _conversationSubscription?.Dispose();
         _clusterSubscription?.Dispose();
         _coreConversationSubscription?.Dispose();
         _coreAgentSubscription?.Dispose();
         _csatSubscription?.Dispose();
-        _conversationSubscription = null;
         _clusterSubscription = null;
         _coreConversationSubscription = null;
         _coreAgentSubscription = null;
         _csatSubscription = null;
         return Task.CompletedTask;
-    }
-
-    private void ForwardConversation(ConversationStateChangedEvent evt)
-    {
-        var leaderSnapshot = SnapshotLeader();
-        var tenantId = evt.Metadata?.TenantId;
-
-        if (!leaderSnapshot.IsLeader)
-        {
-            RealtimeLog.SkippedForwardNotLeader(_logger, evt.EventType, leaderSnapshot.Resource);
-            RecordOutcome(evt.EventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNotLeader);
-            return;
-        }
-
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            PushToHubRelayLog.SkippedNullTenant(_logger, evt.EventType);
-            RecordOutcome(evt.EventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNullTenant);
-            return;
-        }
-
-        var payload = new ConversationStatePayload(
-            ConversationId: evt.ConversationId,
-            PreviousState: evt.PreviousState,
-            NewState: evt.NewState,
-            ChangedAt: evt.ChangedAt,
-            TenantId: tenantId);
-
-        _lastSend = SendConversationAsync($"tenant:{tenantId}", payload, tenantId, evt.EventType, leaderSnapshot);
     }
 
     private void ForwardClusterNode(ClusterNodeStateChangedEvent evt)

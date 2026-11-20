@@ -36,13 +36,6 @@ public sealed class PushRelayPayloadSerializationTests
             QueueName: "sales",
             Abnormal: false,
             HangupAt: new DateTimeOffset(2026, 11, 19, 10, 0, 0, TimeSpan.Zero)),
-        new ProEvents.ConversationStateChangedEvent
-        {
-            ConversationId = "conv-1",
-            PreviousState = "Queued",
-            NewState = "Assigned",
-            ChangedAt = new DateTimeOffset(2026, 11, 19, 10, 0, 0, TimeSpan.Zero),
-        },
         new ProEvents.ClusterNodeStateChangedEvent
         {
             NodeId = "node-a",
@@ -118,7 +111,6 @@ public sealed class PushRelayPayloadSerializationTests
         types.Should().Contain(typeof(VoiceScreenPopEvent));
         types.Should().Contain(typeof(VoiceAgentHangupEvent));
         types.Should().Contain(typeof(AgentStateChangedEvent));
-        types.Should().Contain(typeof(ProEvents.ConversationStateChangedEvent));
         types.Should().Contain(typeof(ProEvents.ClusterNodeStateChangedEvent));
         types.Should().NotContain(typeof(RemotePushEvent));
     }
@@ -127,11 +119,14 @@ public sealed class PushRelayPayloadSerializationTests
     /// Pro event types that still ship in the pinned package but that nothing in Platform.Api publishes any more, so
     /// they never reach the bus. Named by string, not <c>typeof</c>, so this compiles after Pro deletes them.
     /// The Pro agent-state event's only publisher was <c>AgentStatePushBridge</c>, which Platform no longer wires;
-    /// Pro v2.31.0-pro removes both (Pro/ADR-0026 point 4), and the entry can go with that pin.
+    /// Pro v2.31.0-pro removes both (Pro/ADR-0026 point 4), and the entry can go with that pin. The Pro
+    /// conversation-state event's only publisher is <c>ConversationStatePushBridge</c>, which Platform no longer wires
+    /// either (owner Q8 = A, 2026-11-18); its entry can go when Pro removes that bridge.
     /// </summary>
     private static readonly HashSet<string> UnpublishedProEventTypes = new(StringComparer.Ordinal)
     {
         "Verbara.Sdk.Pro.Push.SignalR.Events.AgentStateChangedEvent",
+        "Verbara.Sdk.Pro.Push.SignalR.Events.ConversationStateChangedEvent",
     };
 
     /// <summary>
