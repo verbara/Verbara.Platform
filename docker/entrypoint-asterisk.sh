@@ -68,6 +68,19 @@ elif [ -f "$PJSIP_CONF" ]; then
     echo "[entrypoint] No EXTERNAL_IP set — removed external address lines (localhost-only mode)"
 fi
 
+# RTP port range from the environment (RTP_PORT_START / RTP_PORT_END, as in
+# .env.reference-smb). Unset keeps rtp.conf's own range. The range must match what
+# the host lets through: the compose port mapping, or the firewall with host networking.
+if [ -n "$RTP_PORT_START" ] || [ -n "$RTP_PORT_END" ]; then
+    if [ -f "$RTP_CONF" ] && [ -w "$RTP_CONF" ] && [ -w "$(dirname "$RTP_CONF")" ]; then
+        [ -n "$RTP_PORT_START" ] && sed -i "s/^rtpstart = .*/rtpstart = $RTP_PORT_START/" "$RTP_CONF"
+        [ -n "$RTP_PORT_END" ] && sed -i "s/^rtpend = .*/rtpend = $RTP_PORT_END/" "$RTP_CONF"
+        echo "[entrypoint] RTP range $(sed -n 's/^rtpstart = //p' "$RTP_CONF")-$(sed -n 's/^rtpend = //p' "$RTP_CONF")"
+    else
+        echo "[entrypoint] WARNING: RTP_PORT_START/RTP_PORT_END set but $RTP_CONF is not writable — the range stays as the file says"
+    fi
+fi
+
 if [ -n "$EXTERNAL_IP" ] && [ -f "$RTP_CONF" ]; then
     CONTAINER_IP=$(hostname -i | awk '{print $1}')
     cat >> "$RTP_CONF" <<EOF

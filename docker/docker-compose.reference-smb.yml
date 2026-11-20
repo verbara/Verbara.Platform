@@ -112,6 +112,9 @@ services:
     # binds to (configured in pjsip.conf, http.conf, manager.conf, rtp.conf).
     environment:
       EXTERNAL_IP: ${EXTERNAL_IP:-}
+      # The RTP range .env.reference-smb sizes (entrypoint-asterisk.sh writes it into rtp.conf).
+      RTP_PORT_START: ${RTP_PORT_START:-20000}
+      RTP_PORT_END: ${RTP_PORT_END:-20200}
       AMI_PASSWORD: ${AMI_PASSWORD:?AMI_PASSWORD required in .env.reference-smb}
       ARI_PASSWORD: ${ARI_PASSWORD:?ARI_PASSWORD required in .env.reference-smb}
       # Realtime DB on the loopback (Postgres binds 127.0.0.1:5432 below).
@@ -150,6 +153,14 @@ services:
     image: ghcr.io/verbara/platform/api:${PLATFORM_API_TAG:-v2.34.0}
     container_name: verbara-platform-api
     logging: *default-logging
+    # Open files. Docker's default soft limit is 1024, and the native-AOT Api does not raise it
+    # itself. Every call Agent Assist listens to holds about four descriptors (two AudioSocket
+    # streams from Asterisk, two speech-to-text connections), so near 250 such calls the Api
+    # runs out: new AudioSocket connections, database connections and DNS lookups all fail.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:

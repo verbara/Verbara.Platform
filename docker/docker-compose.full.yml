@@ -58,6 +58,14 @@ services:
       secrets:
         - nuget_auth_token
     logging: *default-logging
+    # Open files. Docker's default soft limit is 1024, and the native-AOT Api does not raise it
+    # itself. Every call Agent Assist listens to holds about four descriptors (two AudioSocket
+    # streams from Asterisk, two speech-to-text connections), so near 250 such calls the Api
+    # runs out: new AudioSocket connections, database connections and DNS lookups all fail.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     ports:
       - "5000:5000"
     environment:
