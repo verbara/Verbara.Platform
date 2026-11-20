@@ -134,10 +134,13 @@ public sealed class PasswordHashingGateTests
 
     private static void InterlockedMax(ref int target, int value)
     {
-        int current;
-        while ((current = Volatile.Read(ref target)) < value
-               && Interlocked.CompareExchange(ref target, value, current) != current)
+        var current = Volatile.Read(ref target);
+        while (current < value)
         {
+            var seen = Interlocked.CompareExchange(ref target, value, current);
+            if (seen == current)
+                return;
+            current = seen;
         }
     }
 

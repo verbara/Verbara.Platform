@@ -33,6 +33,7 @@ internal sealed class PasswordHashingGate : IDisposable
 
     private readonly SemaphoreSlim _slots;
 
+    /// <summary>A gate admitting <paramref name="maxConcurrency"/> hashes at once.</summary>
     /// <param name="maxConcurrency">Hashes allowed at once; zero or negative selects
     /// <see cref="DefaultMaxConcurrency"/>.</param>
     public PasswordHashingGate(int maxConcurrency)
