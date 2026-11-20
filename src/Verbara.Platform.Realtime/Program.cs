@@ -13,6 +13,7 @@ using Verbara.Sdk.Pro.Push.SignalR.Hubs;
 using Verbara.Sdk.Push.Authz;
 using Verbara.Sdk.Push.Hosting;
 using Verbara.Platform.Realtime.Authz;
+using Verbara.Platform.Core.Push;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.SignalR;
 using Npgsql;
@@ -39,8 +40,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 // Local in-process bus. The Pro.Push.Redis backplane (registered below) bridges
 // it to the same Redis pub/sub channels Platform.Api publishes on, so T27
 // state-change events emitted in Platform.Api land in Realtime's bus and the
-// PushToHubRelay (also below) fans them onto SignalR groups.
-builder.Services.AddVerbaraPush();
+// PushToHubRelay (also below) fans them onto SignalR groups. Sized as the Api's bus
+// (Push:Bus:BufferCapacity, PlatformPushBusExtensions).
+builder.Services.AddPlatformPushBus();
 
 // RBAC-aware subscription authorizer (replaces the SDK default Allow-All).
 // Used by the SDK Push delivery filter pipeline when clients subscribe to

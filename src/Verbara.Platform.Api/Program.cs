@@ -112,8 +112,9 @@ builder.Services.AddVerbaraSessionsMultiServer(o => o.WrapUpDuration = TimeSpan.
 // Verbara.Sdk.Push: in-process push event bus + delivery filter abstractions.
 // MUST precede AddPlatformCore() so the IPushEventBus dependency is available
 // for the PlatformEventBus DI ctor and the platform-specific delivery filter
-// can override the SDK default.
-builder.Services.AddVerbaraPush();
+// can override the SDK default. Its buffer is sized for the 250-call target and set by
+// Push:Bus:BufferCapacity (PlatformPushBusExtensions).
+builder.Services.AddPlatformPushBus();
 // Open SSE streams, cut on UserAccessRevokedEvent from this replica or another (via the backplane).
 builder.Services.AddLiveConnectionRevocation();
 
