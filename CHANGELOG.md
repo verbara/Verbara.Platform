@@ -102,6 +102,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A busy replica no longer loses live events at 250 calls.** The Api and Realtime push bus kept 256 events, about
+  one second of traffic at 250 concurrent calls; a replica that fell behind for longer, as one did in a lab run while
+  250 agents signed in again during the call ramp, evicted the oldest events for good (transcripts and sentiment never
+  reached the agents' streams; `asterisk_push_events_dropped_events_total{reason="buffer_full"}` counted them). The bus
+  now keeps 16384 events by default, about a minute at that rate, and the configuration key `Push:Bus:BufferCapacity`
+  (environment variable `Push__Bus__BufferCapacity`) sets it per host. A value that is not an integer stops the host at
+  startup naming the key; a value below 1 fails the existing validation. The buffer stays bounded: a longer stall
+  still evicts, and counts, the oldest events.
 - **Events relayed between Api replicas carry their payload.** The Redis push relay sends every event on an
   Api replica's push bus to the other replicas, but the Api only described the payloads of the five cross-replica
   events (agent state, pending agent state, conversation state, typification, account revocation). Every other event
