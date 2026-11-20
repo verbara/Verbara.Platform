@@ -1,13 +1,26 @@
+using System.Collections.Concurrent;
+using System.Text.Json;
 using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Verbara.Platform.E2E.Harness.Hub;
+
+/// <summary>
+/// One <c>OnConversationStateChanged</c> frame as a client received it: the conversation id, the previous and new
+/// state read from the JSON payload, and the client-side receive time.
+/// </summary>
+internal sealed record ConversationFrame(
+    string ConversationId,
+    string PreviousState,
+    string NewState,
+    DateTimeOffset ReceivedAt);
 
 /// <summary>
 /// Pool of <see cref="HubConnection"/>s connected to
 /// <c>/hubs/platform</c> via the cluster Gateway. Each client increments
 /// its own <c>OnAgentStateChanged</c> receive counter so the scenario can
 /// assert per-client receive parity (every connected client must observe
-/// the same fanout count — exactly once per emitted event).
+/// the same fanout count — exactly once per emitted event), and records every
+/// <c>OnConversationStateChanged</c> frame it receives, in arrival order.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -18,10 +31,10 @@ namespace Verbara.Platform.E2E.Harness.Hub;
 /// only on <c>/hubs/*</c>).
 /// </para>
 /// <para>
-/// We do NOT bind to typed <c>AgentStatePayload</c> records (defined in
-/// the SDK Pro.Push.SignalR package) — the harness avoids the Pro NuGet
-/// dependency by handling the message as an opaque <see cref="object"/>;
-/// only the receive count matters for the leader-gate assertion.
+/// We do NOT bind to typed <c>AgentStatePayload</c> / <c>ConversationStatePayload</c>
+/// records (defined in the SDK Pro.Push.SignalR package) — the harness avoids the Pro NuGet
+/// dependency: agent frames are only counted, and conversation frames are read from the
+/// JSON payload by property name, ignoring case.
 /// </para>
 /// </remarks>
 internal sealed class SignalRClientPool : IAsyncDisposable
@@ -30,6 +43,7 @@ internal sealed class SignalRClientPool : IAsyncDisposable
     private readonly string _hubUrl;
     private readonly string _accessToken;
     private int[] _receivedCounts = Array.Empty<int>();
+    private ConcurrentQueue<ConversationFrame>[] _conversationFrames = Array.Empty<ConcurrentQueue<ConversationFrame>>();
 
     public SignalRClientPool(string hubUrl, string accessToken)
     {
@@ -41,9 +55,26 @@ internal sealed class SignalRClientPool : IAsyncDisposable
 
     public IReadOnlyList<int> ReceivedCounts => _receivedCounts;
 
+    /// <summary>The conversation frames each client holds, in arrival order (a snapshot).</summary>
+    public IReadOnlyList<IReadOnlyList<ConversationFrame>> ConversationFrames =>
+        _conversationFrames.Select(q => (IReadOnlyList<ConversationFrame>)q.ToArray()).ToList();
+
+    /// <summary>
+    /// Drops every conversation frame recorded so far, so a window starts empty. The agent counters are left as
+    /// they are.
+    /// </summary>
+    public void ResetConversationFrames()
+    {
+        foreach (var q in _conversationFrames)
+        {
+            q.Clear();
+        }
+    }
+
     public async Task ConnectAsync(int count, CancellationToken ct)
     {
         _receivedCounts = new int[count];
+        _conversationFrames = Enumerable.Range(0, count).Select(_ => new ConcurrentQueue<ConversationFrame>()).ToArray();
         for (var i = 0; i < count; i++)
         {
             var clientIndex = i;
@@ -65,9 +96,40 @@ internal sealed class SignalRClientPool : IAsyncDisposable
                 return Task.CompletedTask;
             });
 
+            // IPlatformHubClient.OnConversationStateChanged: keep (conversation id, previous state, new state).
+            connection.On<JsonElement>("OnConversationStateChanged", payload =>
+            {
+                _conversationFrames[clientIndex].Enqueue(new ConversationFrame(
+                    ConversationId: ReadString(payload, "conversationId"),
+                    PreviousState: ReadString(payload, "previousState"),
+                    NewState: ReadString(payload, "newState"),
+                    ReceivedAt: DateTimeOffset.UtcNow));
+                return Task.CompletedTask;
+            });
+
             await connection.StartAsync(ct).ConfigureAwait(false);
             _connections.Add(connection);
         }
+    }
+
+    private static string ReadString(JsonElement payload, string name)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            return string.Empty;
+        }
+
+        foreach (var property in payload.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return property.Value.ValueKind == JsonValueKind.String
+                    ? property.Value.GetString() ?? string.Empty
+                    : property.Value.ValueKind == JsonValueKind.Null ? string.Empty : property.Value.GetRawText();
+            }
+        }
+
+        return string.Empty;
     }
 
     public async ValueTask DisposeAsync()

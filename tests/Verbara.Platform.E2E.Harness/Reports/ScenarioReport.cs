@@ -25,4 +25,5 @@ internal sealed record ScenarioReport(
     IReadOnlyList<string> LeaderPodInstanceIds,
     IReadOnlyDictionary<string, int> PerPodForwarded,
     IReadOnlyDictionary<string, int> PerPodSkippedNotLeader,
-    IReadOnlyList<string> AuditBaseUrls);
+    IReadOnlyList<string> AuditBaseUrls,
+    IReadOnlyDictionary<string, int>? OutcomesByEventType = null);

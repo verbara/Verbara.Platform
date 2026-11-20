@@ -20,7 +20,8 @@ internal sealed record MultiPodAuditAggregate(
     IReadOnlyList<string> LeaderPodInstanceIds,
     IReadOnlyDictionary<string, int> PerPodForwardedCount,
     IReadOnlyDictionary<string, int> PerPodSkippedNotLeaderCount,
-    IReadOnlyList<string> EvictionWarnings);
+    IReadOnlyList<string> EvictionWarnings,
+    IReadOnlyDictionary<string, int> OutcomesByEventType);
 
 internal static class MultiPodAuditAggregator
 {
@@ -35,6 +36,7 @@ internal static class MultiPodAuditAggregator
         var perPodForwarded = new Dictionary<string, int>(StringComparer.Ordinal);
         var perPodSkipNotLeader = new Dictionary<string, int>(StringComparer.Ordinal);
         var evictionWarnings = new List<string>();
+        var byEventType = new SortedDictionary<string, int>(StringComparer.Ordinal);
 
         foreach (var page in pages)
         {
@@ -49,6 +51,8 @@ internal static class MultiPodAuditAggregator
 
             foreach (var entry in page.Entries)
             {
+                var key = $"{entry.EventType}|{entry.Outcome}";
+                byEventType[key] = byEventType.TryGetValue(key, out var n) ? n + 1 : 1;
                 switch (entry.Outcome)
                 {
                     case RelayOutcomeKind.Forwarded:
@@ -86,6 +90,7 @@ internal static class MultiPodAuditAggregator
             LeaderPodInstanceIds: leaders.ToList(),
             PerPodForwardedCount: perPodForwarded,
             PerPodSkippedNotLeaderCount: perPodSkipNotLeader,
-            EvictionWarnings: evictionWarnings);
+            EvictionWarnings: evictionWarnings,
+            OutcomesByEventType: byEventType);
     }
 }

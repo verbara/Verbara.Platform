@@ -28,7 +28,16 @@ internal sealed record HarnessConfig(
     int ClientCount,
     int EventCount,
     TimeSpan SettleDelay,
-    string ReportDirectory)
+    string ReportDirectory,
+    string Scenario,
+    string? OtherTenant,
+    string? OtherEmail,
+    string? OtherPassword,
+    string? WorkloadCommand,
+    string? WorkloadOutput,
+    int WebChatConversations,
+    int VoiceCalls,
+    TimeSpan WorkloadTimeout)
 {
     public static HarnessConfig FromEnvironment()
     {
@@ -59,6 +68,14 @@ internal sealed record HarnessConfig(
         var settleSec = int.TryParse(Environment.GetEnvironmentVariable("HARNESS_SETTLE_SEC"), out var ss) && ss >= 0 ? ss : 5;
         var reportDir = Environment.GetEnvironmentVariable("HARNESS_REPORT_DIR") ?? "./harness-reports";
 
+        // Scenario "conversation-frames" (platform-drops-the-pro-agent-bridge, task 4.1): a second tenant's user for
+        // the negative-control client, and an external workload command (the lab's WebChat + voice drivers) that
+        // writes the ids of the conversations it drove to HARNESS_WORKLOAD_OUT.
+        var scenario = Environment.GetEnvironmentVariable("HARNESS_SCENARIO") ?? "exactly-once";
+        var webChatConversations = int.TryParse(Environment.GetEnvironmentVariable("HARNESS_WEBCHAT_CONVERSATIONS"), out var wc) && wc >= 0 ? wc : 3;
+        var voiceCalls = int.TryParse(Environment.GetEnvironmentVariable("HARNESS_VOICE_CALLS"), out var vc) && vc >= 0 ? vc : 1;
+        var workloadTimeoutSec = int.TryParse(Environment.GetEnvironmentVariable("HARNESS_WORKLOAD_TIMEOUT_SEC"), out var wt) && wt > 0 ? wt : 900;
+
         return new HarnessConfig(
             ApiBaseUrl: apiBaseUrl.TrimEnd('/'),
             RealtimeHubUrl: hubUrl,
@@ -72,7 +89,16 @@ internal sealed record HarnessConfig(
             ClientCount: clientCount,
             EventCount: eventCount,
             SettleDelay: TimeSpan.FromSeconds(settleSec),
-            ReportDirectory: reportDir);
+            ReportDirectory: reportDir,
+            Scenario: scenario,
+            OtherTenant: Environment.GetEnvironmentVariable("HARNESS_OTHER_TENANT"),
+            OtherEmail: Environment.GetEnvironmentVariable("HARNESS_OTHER_EMAIL"),
+            OtherPassword: Environment.GetEnvironmentVariable("HARNESS_OTHER_PASSWORD"),
+            WorkloadCommand: Environment.GetEnvironmentVariable("HARNESS_WORKLOAD_CMD"),
+            WorkloadOutput: Environment.GetEnvironmentVariable("HARNESS_WORKLOAD_OUT"),
+            WebChatConversations: webChatConversations,
+            VoiceCalls: voiceCalls,
+            WorkloadTimeout: TimeSpan.FromSeconds(workloadTimeoutSec));
     }
 
     private static string Required(string key) =>
