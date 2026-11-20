@@ -28,7 +28,7 @@ public sealed class LoginHashingBoundTests
         await WaitUntilAsync(() => gate.AvailableSlots == 0);
 
         var login = InvokeLoginAsync(fixture, gate);
-        await Task.Delay(Settle);
+        await Task.Delay(Settle); // fence-allow: SETTLE — a negative check: give an ungated sign-in time to finish before asserting it has not
 
         login.IsCompleted.Should().BeFalse("the password check needs a hashing slot and the only one is held");
 
@@ -93,6 +93,6 @@ public sealed class LoginHashingBoundTests
     {
         using var cts = new CancellationTokenSource(Deadline);
         while (!condition())
-            await Task.Delay(10, cts.Token);
+            await Task.Delay(10, cts.Token); // fence-allow: LOOP-DRIVER — bounded poll on the gate's slot count, which raises no signal of its own
     }
 }

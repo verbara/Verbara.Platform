@@ -25,7 +25,7 @@ public sealed class PasswordHashingGateTests
         {
             var now = Interlocked.Increment(ref inFlight);
             InterlockedMax(ref peak, now);
-            Thread.Sleep(40);
+            Thread.Sleep(40); // fence-allow: SIMULATED-WORK — a synchronous hash that holds its slot long enough for the callers to overlap
             Interlocked.Decrement(ref inFlight);
             return i;
         }, CancellationToken.None))).ToArray();
@@ -46,7 +46,7 @@ public sealed class PasswordHashingGateTests
         await WaitUntilAsync(() => gate.AvailableSlots == 0);
 
         var waiter = gate.RunAsync(() => 42, CancellationToken.None);
-        await Task.Delay(Settle);
+        await Task.Delay(Settle); // fence-allow: SETTLE — a negative check: give an unbounded run time to finish before asserting it has not
 
         waiter.IsCompleted.Should().BeFalse("the only slot is held, so the second caller waits");
 
@@ -145,6 +145,6 @@ public sealed class PasswordHashingGateTests
     {
         using var cts = new CancellationTokenSource(Deadline);
         while (!condition())
-            await Task.Delay(10, cts.Token);
+            await Task.Delay(10, cts.Token); // fence-allow: LOOP-DRIVER — bounded poll on the gate's slot count, which raises no signal of its own
     }
 }
