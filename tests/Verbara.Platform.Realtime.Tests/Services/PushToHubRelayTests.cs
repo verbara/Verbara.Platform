@@ -157,23 +157,25 @@ public sealed class PushToHubRelayTests
         await relay.StopAsync(CancellationToken.None);
     }
 
-    [Fact]
-    public async Task StartAsync_ShouldForwardToTenantGroup_WhenAgentStateChangedEventIsPublished()
-    {
-        var (relay, bus, mocks, _, _) = BuildSut("tenant:acme");
-        await relay.StartAsync(CancellationToken.None);
+    // -----------------------------------------------------------------------
+    // Platform's own agent state (Verbara.Platform.Core.AgentStateChangedEvent, "agent.state_changed") is the only
+    // source of OnAgentStateChanged frames (Pro/ADR-0026 point 4 removes the Pro agent bridge).
+    // -----------------------------------------------------------------------
 
-        var evt = new AgentStateChangedEvent
+    private static Verbara.Platform.Core.AgentStateChangedEvent CoreAgentEvent(string tenantId, DateTimeOffset at) =>
+        new Verbara.Platform.Core.AgentStateChangedEvent(tenantId, "agent-42", "Agent 42", "Available", "Break")
         {
-            AgentId = "agent-42",
-            PreviousState = "ready",
-            NewState = "paused",
-            ReasonCode = "break",
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata("acme")
+            Timestamp = at,
         };
 
-        bus.Emit(evt);
+    [Fact]
+    public async Task StartAsync_ShouldForwardCoreAgentStateToTenantGroup_WhenCoreAgentStateChangedEventIsPublished()
+    {
+        var (relay, bus, mocks, _, sink) = BuildSut("tenant:acme");
+        await relay.StartAsync(CancellationToken.None);
+        var at = new DateTimeOffset(2026, 11, 20, 9, 30, 0, TimeSpan.Zero);
+
+        bus.Emit(CoreAgentEvent("acme", at));
         await WaitForDispatch(relay);
 
         mocks.HubClients.Received(1).Group("tenant:acme");
@@ -181,9 +183,50 @@ public sealed class PushToHubRelayTests
             Arg.Is<AgentStatePayload>(p => p != null &&
                 p.AgentId == "agent-42" &&
                 p.TenantId == "acme" &&
-                p.ReasonCode == "break" &&
-                p.PreviousState == "ready" &&
-                p.NewState == "paused"));
+                p.PreviousState == "Available" &&
+                p.NewState == "Break" &&
+                p.ReasonCode == null &&
+                p.ChangedAt == at));
+        sink.Snapshot(since: null, limit: 100).Entries.Should().ContainSingle(e =>
+            e.EventType == "agent.state_changed" &&
+            e.TenantId == "acme" &&
+            e.Outcome == RelayOutcomeKind.Forwarded);
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldSkipForward_WhenCoreAgentEventTenantIdIsEmpty()
+    {
+        var (relay, bus, mocks, _, sink) = BuildSut("tenant:");
+        await relay.StartAsync(CancellationToken.None);
+
+        bus.Emit(CoreAgentEvent(string.Empty, DateTimeOffset.UtcNow));
+        await WaitForDispatch(relay);
+
+        await mocks.GroupClient.DidNotReceive().OnAgentStateChanged(Arg.Any<AgentStatePayload>());
+        sink.Snapshot(since: null, limit: 100).Entries.Should().ContainSingle(e =>
+            e.EventType == "agent.state_changed" &&
+            e.Outcome == RelayOutcomeKind.SkippedNullTenant);
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Forward_ShouldNotSendCoreAgentState_WhenNotLeader()
+    {
+        var (relay, bus, mocks, _, sink) = BuildSut("tenant:acme", isLeader: false);
+        await relay.StartAsync(CancellationToken.None);
+
+        bus.Emit(CoreAgentEvent("acme", DateTimeOffset.UtcNow));
+        await WaitForDispatch(relay);
+
+        mocks.HubClients.DidNotReceive().Group(Arg.Any<string>());
+        await mocks.GroupClient.DidNotReceive().OnAgentStateChanged(Arg.Any<AgentStatePayload>());
+        sink.Snapshot(since: null, limit: 100).Entries.Should().ContainSingle(e =>
+            e.EventType == "agent.state_changed" &&
+            e.TenantId == "acme" &&
+            e.Outcome == RelayOutcomeKind.SkippedNotLeader);
 
         await relay.StopAsync(CancellationToken.None);
     }
@@ -273,30 +316,6 @@ public sealed class PushToHubRelayTests
         await WaitForDispatch(relay);
 
         await mocks.GroupClient.DidNotReceive().OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
-
-        await relay.StopAsync(CancellationToken.None);
-    }
-
-    [Fact]
-    public async Task StartAsync_ShouldSkipForward_WhenAgentEventTenantIdIsNullOrEmpty()
-    {
-        var (relay, bus, mocks, _, _) = BuildSut("tenant:");
-        await relay.StartAsync(CancellationToken.None);
-
-        var evt = new AgentStateChangedEvent
-        {
-            AgentId = "agent-99",
-            PreviousState = "ready",
-            NewState = "offline",
-            ReasonCode = null,
-            ChangedAt = DateTimeOffset.UtcNow,
-            Metadata = MakeMetadata(string.Empty)
-        };
-
-        bus.Emit(evt);
-        await WaitForDispatch(relay);
-
-        await mocks.GroupClient.DidNotReceive().OnAgentStateChanged(Arg.Any<AgentStatePayload>());
 
         await relay.StopAsync(CancellationToken.None);
     }

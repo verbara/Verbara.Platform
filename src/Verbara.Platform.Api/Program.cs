@@ -120,8 +120,8 @@ builder.Services.AddLiveConnectionRevocation();
 
 // ADR-0022 Phase A — The SignalR Hub itself (MapHub, PresenceTracker,
 // PushToHubRelay) moved to Verbara.Platform.Realtime. Platform.Api KEEPS the
-// T27 event bridges (WithClusterEventBridge / WithConversationBridge /
-// WithAgentBridge) because they depend on SDK heavyweight types
+// T27 event bridges (WithClusterEventBridge / WithConversationBridge) because
+// they depend on SDK heavyweight types
 // (ICallSessionManager, VerbaraServerPool, ClusterTransportBase) that live
 // here. Bridges publish state-change events to IPushEventBus → Pro.Push
 // Redis backplane → Realtime's local bus → PushToHubRelay → SignalR clients.
@@ -151,8 +151,10 @@ if (!string.IsNullOrWhiteSpace(pushBackplaneRedis))
 
 builder.Services
     .WithClusterEventBridge()
-    .WithConversationBridge(opt => opt.DefaultTenantId = "default-tenant")
-    .WithAgentBridge();
+    .WithConversationBridge(opt => opt.DefaultTenantId = "default-tenant");
+// No Pro agent bridge (Pro/ADR-0026 point 4): the hub's agent-state frames come from
+// Platform's own AgentStateChangedEvent ("agent.state_changed"), which the state
+// endpoints and workers publish and Realtime's PushToHubRelay forwards.
 
 // Postgres-backed agent→tenant resolver consumed by /api/v1/internal/agent-tenant
 // (which Realtime calls over HTTP+JSON to honour cross-tenant Hub subscription

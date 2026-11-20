@@ -99,6 +99,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `405 Method Not Allowed`, and so does the console's DryRun checkbox until the console release that removes it; ship
   that console release with this one or first. `POST /api/v1/management/retention/run-now` is unchanged: it runs dry
   unless called with `dryRun=false`, whatever the configured mode.
+- **The Api no longer registers the Pro agent-state bridge, and the realtime relay no longer listens for its events.**
+  Agent-state updates on the realtime hub (`OnAgentStateChanged`) come from Platform's own agent state changes, as
+  they already did: the bridge only saw voice agent-pool logins, and none of its events reached a hub client. Nothing
+  changes for consoles, the API, the hub contract or configuration. This lets the next Pro release remove the bridge.
 
 ### Fixed
 

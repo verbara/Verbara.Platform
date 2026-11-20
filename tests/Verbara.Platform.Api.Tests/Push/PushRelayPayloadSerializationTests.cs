@@ -124,8 +124,20 @@ public sealed class PushRelayPayloadSerializationTests
     }
 
     /// <summary>
+    /// Pro event types that still ship in the pinned package but that nothing in Platform.Api publishes any more, so
+    /// they never reach the bus. Named by string, not <c>typeof</c>, so this compiles after Pro deletes them.
+    /// The Pro agent-state event's only publisher was <c>AgentStatePushBridge</c>, which Platform no longer wires;
+    /// Pro v2.31.0-pro removes both (Pro/ADR-0026 point 4), and the entry can go with that pin.
+    /// </summary>
+    private static readonly HashSet<string> UnpublishedProEventTypes = new(StringComparer.Ordinal)
+    {
+        "Verbara.Sdk.Pro.Push.SignalR.Events.AgentStateChangedEvent",
+    };
+
+    /// <summary>
     /// Every concrete, public <see cref="PushEvent"/> type in the Verbara assemblies Platform.Api loads, except
-    /// <see cref="RemotePushEvent"/>, which the relay never forwards. Test-only reflection; nothing here ships.
+    /// <see cref="RemotePushEvent"/>, which the relay never forwards, and <see cref="UnpublishedProEventTypes"/>.
+    /// Test-only reflection; nothing here ships.
     /// </summary>
     private static HashSet<Type> PushEventTypesReachableFromTheApi()
     {
@@ -146,7 +158,8 @@ public sealed class PushRelayPayloadSerializationTests
                 t is { IsAbstract: false, IsGenericTypeDefinition: false }
                 && (t.IsPublic || t.IsNestedPublic)
                 && t.IsAssignableTo(typeof(PushEvent))
-                && t != typeof(RemotePushEvent)));
+                && t != typeof(RemotePushEvent)
+                && !UnpublishedProEventTypes.Contains(t.FullName!)));
 
             var verbaraReferences = assembly.GetReferencedAssemblies().Where(r =>
                 r.Name is { } name

@@ -74,7 +74,6 @@ internal sealed class PushToHubRelay : IHostedService
     private readonly ILogger<PushToHubRelay> _logger;
 
     private IDisposable? _conversationSubscription;
-    private IDisposable? _agentSubscription;
     private IDisposable? _clusterSubscription;
     private IDisposable? _csatSubscription;
     // v2.4.7 — Platform.Api PlatformEventBus publishes Verbara.Platform.Core
@@ -83,6 +82,8 @@ internal sealed class PushToHubRelay : IHostedService
     // subscriptions below map field shapes to the same Pro Payloads and fan
     // out through the same SendXxxAsync helpers. Cluster events stay
     // single-source (Pro.Cluster publishes the Pro-typed event internally).
+    // Agent state has no Pro-typed subscription: the Core event is its only
+    // source (the Pro agent bridge is no longer wired, Pro/ADR-0026 point 4).
     private IDisposable? _coreConversationSubscription;
     private IDisposable? _coreAgentSubscription;
 
@@ -111,9 +112,6 @@ internal sealed class PushToHubRelay : IHostedService
         _conversationSubscription = _bus.OfType<ConversationStateChangedEvent>()
             .Subscribe(evt => ForwardConversation(evt));
 
-        _agentSubscription = _bus.OfType<AgentStateChangedEvent>()
-            .Subscribe(evt => ForwardAgent(evt));
-
         _clusterSubscription = _bus.OfType<ClusterNodeStateChangedEvent>()
             .Subscribe(evt => ForwardClusterNode(evt));
 
@@ -133,13 +131,11 @@ internal sealed class PushToHubRelay : IHostedService
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _conversationSubscription?.Dispose();
-        _agentSubscription?.Dispose();
         _clusterSubscription?.Dispose();
         _coreConversationSubscription?.Dispose();
         _coreAgentSubscription?.Dispose();
         _csatSubscription?.Dispose();
         _conversationSubscription = null;
-        _agentSubscription = null;
         _clusterSubscription = null;
         _coreConversationSubscription = null;
         _coreAgentSubscription = null;
@@ -174,36 +170,6 @@ internal sealed class PushToHubRelay : IHostedService
             TenantId: tenantId);
 
         _lastSend = SendConversationAsync($"tenant:{tenantId}", payload, tenantId, evt.EventType, leaderSnapshot);
-    }
-
-    private void ForwardAgent(AgentStateChangedEvent evt)
-    {
-        var leaderSnapshot = SnapshotLeader();
-        var tenantId = evt.Metadata?.TenantId;
-
-        if (!leaderSnapshot.IsLeader)
-        {
-            RealtimeLog.SkippedForwardNotLeader(_logger, evt.EventType, leaderSnapshot.Resource);
-            RecordOutcome(evt.EventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNotLeader);
-            return;
-        }
-
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            PushToHubRelayLog.SkippedNullTenant(_logger, evt.EventType);
-            RecordOutcome(evt.EventType, tenantId, leaderSnapshot, RelayOutcomeKind.SkippedNullTenant);
-            return;
-        }
-
-        var payload = new AgentStatePayload(
-            AgentId: evt.AgentId,
-            PreviousState: evt.PreviousState,
-            NewState: evt.NewState,
-            ReasonCode: evt.ReasonCode,
-            ChangedAt: evt.ChangedAt,
-            TenantId: tenantId);
-
-        _lastSend = SendAgentAsync($"tenant:{tenantId}", payload, tenantId, evt.EventType, leaderSnapshot);
     }
 
     private void ForwardClusterNode(ClusterNodeStateChangedEvent evt)
