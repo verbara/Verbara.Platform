@@ -841,13 +841,7 @@ builder.Services.TryAddSingleton<Verbara.Platform.Identity.Auth.Jwt.IJwtKeyStore
 builder.Services.AddSingleton<Verbara.Platform.Identity.Auth.Jwt.IJwtKeyRotationService,
     Verbara.Platform.Identity.Auth.Jwt.JwtKeyRotationService>();
 
-builder.Services.AddSingleton<RefreshTokenService>();
-builder.Services.AddSingleton<AuthEventService>();
-builder.Services.AddSingleton<AccountLockoutService>();
-// One bound on concurrent password hashing per process (Identity:PasswordHashing:MaxConcurrency, default half the
-// processors): a sign-in burst queues for a slot instead of occupying every thread-pool thread with Argon2id.
-builder.Services.AddSingleton(PasswordHashingGate.FromConfiguration(builder.Configuration));
-builder.Services.AddSingleton<SessionService>();
+builder.Services.AddPlatformSignInServices(builder.Configuration);
 // R5.2 PA.1 — MFA admin service backing /management/mfa endpoints.
 builder.Services.AddSingleton<
     Verbara.Platform.Api.Endpoints.Mfa.IMfaAdminService,
