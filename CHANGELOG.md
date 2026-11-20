@@ -17,7 +17,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a boolean stops the Api at startup with an error naming the key. The Api logs the mode once at startup, and
   `GET /api/v1/management/retention/config` reports in `dryRun` the mode of the replica that answers. The key does not
   govern the per-tenant conversation retention. Read
-  [Turning on the Pro retention purge](docs/operations/upgrade-retention-dry-run.md) before setting `false`.
+  [Turning on the Pro retention purge](docs/operations/upgrade-retention-dry-run.md) before setting `false`. (#623)
 - `GET /api/v1/analytics/qa-availability` says whether post-call QA results can exist for the caller's tenant, so a
   client can hide QA screens that would stay empty. The body always carries `available`, `analysisRunning`, `reason`,
   `transcriptSource`, `speakerMode`, `topicsConfigured`, `complianceConfigured`, `sentimentSupported` and `backlog`,
@@ -98,7 +98,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the mode is now a configuration change plus a restart (`Retention:DryRun`, above). A script that calls the PATCH gets
   `405 Method Not Allowed`, and so does the console's DryRun checkbox until the console release that removes it; ship
   that console release with this one or first. `POST /api/v1/management/retention/run-now` is unchanged: it runs dry
-  unless called with `dryRun=false`, whatever the configured mode.
+  unless called with `dryRun=false`, whatever the configured mode. (#623)
 
 ### Fixed
 
@@ -321,7 +321,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `POST /api/v1/management/retention/run-now` (no `dryRun`) and read `targets[].rowsPurged`, take a backup, then set
   the key on every replica and restart; confirm the startup log line and `dryRun: false` on each. Remove any script
   that calls `PATCH /api/v1/management/retention/config`. Steps:
-  [Turning on the Pro retention purge](docs/operations/upgrade-retention-dry-run.md).
+  [Turning on the Pro retention purge](docs/operations/upgrade-retention-dry-run.md). (#623)
 - **An Agent Assist session whose call carries no tenant is no longer listed.** A call that arrives on a trunk without
   the `TENANT_ID` channel variable has no tenant, so its Agent Assist session is missing from
   `GET /api/v1/supervisor/sessions/active` and answers 404 to whisper and transcript listen. Set `TENANT_ID` on every
