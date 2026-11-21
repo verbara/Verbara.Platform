@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +20,7 @@ using Verbara.Platform.Identity;
 using Verbara.Platform.Identity.Redis.Tests;
 using Verbara.Platform.Queues;
 using Verbara.Sdk.Enums;
+using Verbara.Sdk.Pro.Push.Diagnostics;
 using Verbara.Sdk.Push.Events;
 using Verbara.Sdk.Sessions;
 
@@ -71,7 +73,7 @@ public sealed class SupervisorWhisperTwoHostTests : IAsyncLifetime
     /// A host whose webhook stores record its deliveries, subscribed to <c>agentassist.suggestion</c> for the tenant, and
     /// whose dispatcher is built at once (it subscribes to the event bus in its constructor).
     /// </summary>
-    private RedisCrossPodHost NewHost(bool withReceiver)
+    private RedisCrossPodHost NewHost(bool withReceiver, Action<IServiceCollection>? configure = null)
     {
         var recorder = new WebhookRecorder();
         var host = new RedisCrossPodHost(_redis.ConnectionString, services =>
@@ -86,6 +88,8 @@ public sealed class SupervisorWhisperTwoHostTests : IAsyncLifetime
                              d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(CrossPodStreamReceiver)).ToList())
                     services.Remove(receiver);
             }
+
+            configure?.Invoke(services);
         });
         _ = host.Services;
         _ = host.Services.GetRequiredService<WebhookDispatcher>();
@@ -244,6 +248,99 @@ public sealed class SupervisorWhisperTwoHostTests : IAsyncLifetime
         _webhooks[L].DeliveriesFor(sessionId).Should().BeEmpty("a copy received over the backplane never reaches the event bus");
     }
 
+    /// <summary>
+    /// Task 2.5 (design D4, spec scenario "A failed forward to Redis still answers 204 and reaches no remote stream"): the
+    /// POST's host loses its backplane connection after the session lookup, so the relay's forward fails. The answer is
+    /// still 204, the POST's host delivers the whisper to its own read-all stream once, the agent's stream on L receives no
+    /// copy, and the POST's relay counts one event dropped with reason <c>deliver_error</c>. This pins the best-effort
+    /// contract: an acknowledged delivery across replicas must change this test on purpose.
+    /// </summary>
+    [Fact]
+    public async Task PostWhisper_ShouldAnswer204AndReachNoRemoteStream_WhenTheForwardToRedisFails()
+    {
+        await using var lookup = await ConnectionMultiplexer.ConnectAsync(_redis.ConnectionString);
+        var broken = NewHost(withReceiver: true, services =>
+        {
+            services.RemoveAll<IAgentAssistLiveSessionStore>();
+            services.AddSingleton<IAgentAssistLiveSessionStore>(sp => new BackplaneClosingStore(
+                new RedisAgentAssistLiveSessionStore(lookup, TimeProvider.System), sp.GetRequiredService<IConnectionMultiplexer>()));
+        });
+        var (agentUser, agent) = L.NewAgent("sw-xr-forward");
+        var sessionId = await FileSessionAsync(L, agent);
+        await TrackConversationAsync(broken, sessionId);
+        await using var agentStream = await L.OpenStreamAsync("agent on L", agentUser);
+        await using var readAll = await broken.OpenStreamAsync("read-all on the POST's host", broken.NewUser(UserRole.Supervisor, "sw-xr-forward-monitor"));
+        await LiveStreamProbe.SyncAsync(broken.Bus, Tenant, readAll);   // subscribed while the backplane is still up
+        using var received = new ReceivedCounter(L.ReceiverMetrics);
+        using var dropped = new DeliverErrors(broken.Services.GetRequiredService<PushProMetrics>());
+
+        await WhisperAsync(broken, sessionId);
+
+        await dropped.First.WaitAsync(TimeSpan.FromSeconds(60));
+        var drops = dropped.Count;
+        await LiveStreamProbe.SyncAsync(broken.Bus, Tenant, readAll);
+        await LiveStreamProbe.SyncAsync(L.Bus, Tenant, agentStream);
+
+        drops.Should().Be(1, "the POST's relay drops the whisper's forward once, with reason deliver_error");
+        WhispersOf(readAll, sessionId).Should().Be(1, "the POST's host delivers the whisper to its own streams once");
+        WhispersOf(agentStream, sessionId).Should().Be(0, "nothing reached the backplane, so no remote stream receives it");
+        received.Of(CrossPodStreamMetrics.Delivered).Should().Be(0, "L's receiver got no envelope");
+    }
+
+    /// <summary>The live-session store of the POST's host: it reads Redis on its own connection, then closes the host's backplane.</summary>
+    private sealed class BackplaneClosingStore(IAgentAssistLiveSessionStore inner, IConnectionMultiplexer backplane) : IAgentAssistLiveSessionStore
+    {
+        public bool IsShared => inner.IsShared;
+
+        public Task FileAsync(LiveSessionRecord record, DateTimeOffset expiresAt, CancellationToken ct) => inner.FileAsync(record, expiresAt, ct);
+
+        public Task RemoveAsync(string ownerTenant, string sessionId, CancellationToken ct) => inner.RemoveAsync(ownerTenant, sessionId, ct);
+
+        public Task<IReadOnlyList<LiveSessionRecord>> ListAsync(string tenant, CancellationToken ct) => inner.ListAsync(tenant, ct);
+
+        public async Task<LiveSessionRecord?> FindAsync(string callerTenant, string sessionId, CancellationToken ct)
+        {
+            var record = await inner.FindAsync(callerTenant, sessionId, ct);
+            await backplane.CloseAsync(allowCommandsToComplete: false);
+            return record;
+        }
+    }
+
+    /// <summary>Counts one host's relay drops with reason <c>deliver_error</c> (<c>push_relay_dropped_total</c>), from creation on.</summary>
+    private sealed class DeliverErrors : IDisposable
+    {
+        private readonly MeterListener _listener = new();
+        private readonly TaskCompletionSource _first = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private long _count;
+
+        public DeliverErrors(PushProMetrics metrics)
+        {
+            _listener.InstrumentPublished = (instrument, listener) =>
+            {
+                if (ReferenceEquals(instrument, metrics.EventsDropped))
+                    listener.EnableMeasurementEvents(instrument);
+            };
+            _listener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
+            {
+                foreach (var tag in tags)
+                {
+                    if (tag.Key == "reason" && tag.Value as string == "deliver_error")
+                    {
+                        Interlocked.Add(ref _count, value);
+                        _first.TrySetResult();
+                    }
+                }
+            });
+            _listener.Start();
+        }
+
+        public Task First => _first.Task;
+
+        public long Count => Interlocked.Read(ref _count);
+
+        public void Dispose() => _listener.Dispose();
+    }
+
     /// <summary>A host's webhook stores: one subscription to <c>agentassist.suggestion</c> for the tenant, deliveries recorded.</summary>
     private sealed class WebhookRecorder
     {
@@ -344,12 +441,13 @@ public sealed class SupervisorWhisperRedisRouteTests : IAsyncLifetime
             return [.. _published.Where(e => e.SessionId == sessionId)];
     }
 
-    private async Task<(string SessionId, CallSession Call, AgentAssistSessionFiling Filing)> StartAsync()
+    private async Task<(string SessionId, CallSession Call, AgentAssistSessionFiling Filing)> StartAsync(string? owner = null)
     {
+        owner ??= Tenant;
         var sessionId = $"as-sw-route-{Guid.NewGuid():N}";
         var call = new CallSession($"call-{sessionId}", $"{sessionId}.call", "server-1", CallDirection.Inbound)
         {
-            TenantId = Tenant, AgentId = "a-9e8d7c6b5a493827", QueueName = "support",
+            TenantId = owner, AgentId = "a-9e8d7c6b5a493827", QueueName = "support",
         };
         foreach (var tenant in new[] { Tenant, Other })
         {
@@ -365,7 +463,7 @@ public sealed class SupervisorWhisperRedisRouteTests : IAsyncLifetime
             }, CancellationToken.None);
         }
 
-        var filing = AgentAssistSessionFiling.Start(sessionId, Tenant, call, Store, _time, NullLogger.Instance);
+        var filing = AgentAssistSessionFiling.Start(sessionId, owner, call, Store, _time, NullLogger.Instance);
         _filings.Add(filing);
         await filing.WhenIdleAsync();
         return (sessionId, call, filing);
@@ -398,6 +496,20 @@ public sealed class SupervisorWhisperRedisRouteTests : IAsyncLifetime
         (await WhisperAsync(Tenant, sessionId)).Should().Be(HttpStatusCode.NotFound, "the heartbeat's re-evaluation removed it");
         (await WhisperAsync(Other, sessionId)).Should().Be(HttpStatusCode.NotFound);
         PublishedFor(sessionId).Should().ContainSingle("no refusal publishes anything");
+    }
+
+    /// <summary>
+    /// The positive control of the other tenant's 404s above: its supervisor passes every gate before the handler on this
+    /// host and gets 204 for a session filed under it, so those 404s are the lookup's.
+    /// </summary>
+    [Fact]
+    public async Task PostWhisper_ShouldAnswer204ToTheOtherTenant_WhenTheSessionIsFiledUnderIt()
+    {
+        var (sessionId, _, _) = await StartAsync(owner: Other);
+
+        (await WhisperAsync(Other, sessionId)).Should().Be(HttpStatusCode.NoContent, "the session is the other tenant's own");
+        (await WhisperAsync(Tenant, sessionId)).Should().Be(HttpStatusCode.NotFound, "and never the first tenant's");
+        PublishedFor(sessionId).Should().ContainSingle().Which.TenantId.Should().Be(Other);
     }
 
     [Fact]
