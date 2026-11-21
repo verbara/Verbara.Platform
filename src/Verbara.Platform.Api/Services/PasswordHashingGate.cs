@@ -94,5 +94,34 @@ internal sealed class PasswordHashingGate : IDisposable
         }
     }
 
+    /// <summary>
+    /// Waits for a slot (honouring <paramref name="ct"/> while waiting) and holds it until the returned
+    /// <see cref="Slot"/> is disposed. For a caller that must read or write state around its hash while no
+    /// other hash of the same queue overtakes it — the sign-in re-reads the account's lock once it holds a
+    /// slot and records a rejected password before it frees the slot. A cancelled wait never takes a slot.
+    /// </summary>
+    public async Task<Slot> EnterAsync(CancellationToken ct)
+    {
+        await _slots.WaitAsync(ct).ConfigureAwait(false);
+        return new Slot(_slots);
+    }
+
     public void Dispose() => _slots.Dispose();
+
+    /// <summary>A held hashing slot (<see cref="EnterAsync"/>); disposing it frees the slot, once.</summary>
+    public sealed class Slot : IDisposable
+    {
+        private SemaphoreSlim? _slots;
+
+        internal Slot(SemaphoreSlim slots) => _slots = slots;
+
+        /// <summary><see cref="PasswordService.VerifyPassword"/> in this slot.</summary>
+        public bool Verify(string password, string hash)
+        {
+            ObjectDisposedException.ThrowIf(_slots is null, this);
+            return PasswordService.VerifyPassword(password, hash);
+        }
+
+        public void Dispose() => Interlocked.Exchange(ref _slots, null)?.Release();
+    }
 }

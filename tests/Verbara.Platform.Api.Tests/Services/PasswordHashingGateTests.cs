@@ -132,6 +132,42 @@ public sealed class PasswordHashingGateTests
         hash.Should().StartWith(Argon2idHasher.Prefix);
     }
 
+    [Fact]
+    public async Task EnterAsync_ShouldHoldTheSlotUntilDisposed_WhenDisposedTwice()
+    {
+        using var gate = new PasswordHashingGate(1);
+        var hash = await gate.HashAsync("Correct-Horse-1", CancellationToken.None);
+
+        var slot = await gate.EnterAsync(CancellationToken.None);
+        gate.AvailableSlots.Should().Be(0);
+        slot.Verify("Correct-Horse-1", hash).Should().BeTrue();
+        slot.Verify("wrong", hash).Should().BeFalse();
+        var waiting = gate.EnterAsync(CancellationToken.None);
+        waiting.IsCompleted.Should().BeFalse("the only slot is held until the first one is disposed");
+
+        slot.Dispose();
+        slot.Dispose();
+        using (await waiting.WaitAsync(Deadline))
+            gate.AvailableSlots.Should().Be(0, "a second dispose of the same slot frees nothing more");
+
+        gate.AvailableSlots.Should().Be(1);
+        FluentActions.Invoking(() => slot.Verify("Correct-Horse-1", hash)).Should().Throw<ObjectDisposedException>();
+    }
+
+    [Fact]
+    public async Task EnterAsync_ShouldThrowAndTakeNoSlot_WhenTheWaitIsCancelled()
+    {
+        using var gate = new PasswordHashingGate(1);
+        using var held = await gate.EnterAsync(CancellationToken.None);
+        using var cts = new CancellationTokenSource();
+
+        var waiting = gate.EnterAsync(cts.Token);
+        await cts.CancelAsync();
+
+        await FluentActions.Awaiting(() => waiting).Should().ThrowAsync<OperationCanceledException>();
+        gate.AvailableSlots.Should().Be(0, "only the held slot is taken");
+    }
+
     private static void InterlockedMax(ref int target, int value)
     {
         var current = Volatile.Read(ref target);
