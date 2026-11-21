@@ -301,7 +301,8 @@ public sealed class SupervisorWhisperRedisRouteTests : IAsyncLifetime
 
     private static string Tenant => ConversationOwnershipApiFactory.Tenant.Value;
 
-    private static string Other => ConversationOwnershipApiFactory.PlatformTenantId;
+    /// <summary>A second operational Customer tenant, seeded on the host.</summary>
+    private const string Other = "globex-sw";
 
     private IAgentAssistLiveSessionStore Store => Host.Services.GetRequiredService<IAgentAssistLiveSessionStore>();
 
@@ -314,6 +315,8 @@ public sealed class SupervisorWhisperRedisRouteTests : IAsyncLifetime
             services.RemoveAll<IAgentAssistLiveSessionStore>();
             services.AddSingleton<IAgentAssistLiveSessionStore>(store);
         });
+        Verbara.Platform.Api.Tests.AuthenticatedPlatformApiFactory.SeedTestCustomerTenant(Host.Services, Other);
+        Verbara.Platform.Api.Tests.AuthenticatedPlatformApiFactory.SeedEnterpriseFeatureGate(Host.Services, Other);
         _recorder = Host.Bus.Events.Subscribe(evt =>
         {
             if (evt is AgentAssistSuggestionEvent suggestion)
