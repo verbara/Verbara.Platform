@@ -56,6 +56,19 @@ internal sealed class MemoryLiveSessionStore(TimeProvider time) : IAgentAssistLi
         }
     }
 
+    public Task<LiveSessionRecord?> FindAsync(string callerTenant, string sessionId, CancellationToken ct)
+    {
+        // The Redis store's semantics: the member's expiry must be strictly after now.
+        var now = time.GetUtcNow();
+        lock (_gate)
+        {
+            return Task.FromResult(
+                _tenants.TryGetValue(callerTenant, out var index) && index.TryGetValue(sessionId, out var entry) && entry.ExpiresAt > now
+                    ? entry.Record
+                    : null);
+        }
+    }
+
     /// <summary>The session ids in <paramref name="tenant"/>'s index, expired or not.</summary>
     public IReadOnlyList<string> IndexMembers(string tenant)
     {
