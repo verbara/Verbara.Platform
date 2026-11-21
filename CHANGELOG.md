@@ -9,6 +9,33 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed — BREAKING
+
+- **A supervisor's text whisper answers 204 No Content.** `POST /api/v1/supervisor/sessions/{sessionId}/whisper` now
+  answers 204 with no body when the whisper is delivered, where it answered an empty 200; a client that reads a body
+  from that answer must stop. It no longer depends on the spoken whisper: when the spoken whisper is off it answers 204
+  and delivers the text, where it answered 400 `Whisper delivery is not enabled for this session.` New refusals, each
+  delivering nothing: 400 `{"error":"whisper-text-invalid"}` for a missing, empty or blank text or one longer than
+  500 characters after trimming, and 409 `{"error":"whisper-session-not-bound"}` while the session's agent or
+  conversation is not resolved yet (retry shortly). Another tenant's, an ended or an unknown session still answers
+  404 with no body, before the text is read. Webhook subscribers to `agentassist.suggestion` now also receive one
+  delivery per whisper, with `source` `Supervisor` and `priority` `Critical`.
+
+### Fixed
+
+- **A supervisor's text whisper reaches the agent.** `POST /api/v1/supervisor/sessions/{sessionId}/whisper` with
+  `{"text": "..."}` now delivers the trimmed text to the session's agent as an `agentassist.suggestion` on
+  `GET /api/v1/events/stream`, with `source` `Supervisor` and `priority` `Critical`, a new `suggestionId` per whisper,
+  and the session's own agent and conversation (never values from the request). The agent's console shows it like any
+  suggestion; users who read every conversation of the tenant receive it too, and no other agent does. Any Api replica
+  accepts it, also one that does not run the session's Agent Assist engine: the session is found in the shared
+  live-session list (with `ConnectionStrings__Redis` set), and the event crosses replicas on the Redis backplane like
+  the other `agentassist.*` events. A 204 means the whisper was published; delivery to a stream on another replica is
+  best effort, at most once, so a supervisor who sees no effect can send it again. Until now the text reached the agent
+  only as the optional spoken whisper, on the engine's replica, and was refused everywhere else. The spoken whisper is
+  still attempted after the text is delivered, and still works only when the request reaches the engine's replica; a
+  spoken attempt that fails does not change the 204.
+
 ## [2.40.0] - 2026-11-21
 
 Agent Assist works end to end: a live call's transcript, suggestions, sentiment and compliance alerts reach the agent
@@ -52,16 +79,6 @@ the Pro retention purge can delete (#623). Verbara.Sdk `2.10.1` and Verbara.Sdk.
   `Escalating`). Both are always written, `null` when unknown or before the first reading. (#629)
 
 ### Changed — BREAKING
-
-- **A supervisor's text whisper answers 204 No Content.** `POST /api/v1/supervisor/sessions/{sessionId}/whisper` now
-  answers 204 with no body when the whisper is delivered, where it answered an empty 200; a client that reads a body
-  from that answer must stop. It no longer depends on the spoken whisper: when the spoken whisper is off it answers 204
-  and delivers the text, where it answered 400 `Whisper delivery is not enabled for this session.` New refusals, each
-  delivering nothing: 400 `{"error":"whisper-text-invalid"}` for a missing, empty or blank text or one longer than
-  500 characters after trimming, and 409 `{"error":"whisper-session-not-bound"}` while the session's agent or
-  conversation is not resolved yet (retry shortly). Another tenant's, an ended or an unknown session still answers
-  404 with no body, before the text is read. Webhook subscribers to `agentassist.suggestion` now also receive one
-  delivery per whisper, with `source` `Supervisor` and `priority` `Critical`.
 
 - **Only the Platform tenant configures Agent Assist.** The Agent Assist feature toggle
   (`GET/PUT /api/v1/admin/features/agent-assist`: on or off, speech provider, provider API key and endpoint) and the
@@ -165,18 +182,6 @@ the Pro retention purge can delete (#623). Verbara.Sdk `2.10.1` and Verbara.Sdk.
   hub contract or configuration. The cluster-event bridge stays. This lets Pro remove both bridges. (#637)
 
 ### Fixed
-
-- **A supervisor's text whisper reaches the agent.** `POST /api/v1/supervisor/sessions/{sessionId}/whisper` with
-  `{"text": "..."}` now delivers the trimmed text to the session's agent as an `agentassist.suggestion` on
-  `GET /api/v1/events/stream`, with `source` `Supervisor` and `priority` `Critical`, a new `suggestionId` per whisper,
-  and the session's own agent and conversation (never values from the request). The agent's console shows it like any
-  suggestion; users who read every conversation of the tenant receive it too, and no other agent does. Any Api replica
-  accepts it, also one that does not run the session's Agent Assist engine: the session is found in the shared
-  live-session list (with `ConnectionStrings__Redis` set), and the event crosses replicas on the Redis backplane like
-  the other `agentassist.*` events. A 204 means the whisper was published; delivery to a stream on another replica is
-  best effort, at most once, so a supervisor who sees no effect can send it again. Until now the text reached the agent
-  only as the optional spoken whisper, on the engine's replica, and was refused everywhere else. The spoken whisper is
-  still attempted after the text is delivered, and still works only when the request reaches the engine's replica.
 
 - **Agent Assist suggestions, sentiment, compliance alerts and transcripts reach the agent.** The service that forwards a
   live session's results to `GET /api/v1/events/stream` was not running, so nothing was delivered. It now starts before
