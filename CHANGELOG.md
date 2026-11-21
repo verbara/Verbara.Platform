@@ -133,6 +133,12 @@ the Pro retention purge can delete (#623). Verbara.Sdk `2.10.1` and Verbara.Sdk.
   section seeds that row until an administrator writes it. Without a database the toggle stays in memory, as before.
   (#629)
 
+### Deprecated
+
+- **`GET /api/v1/profile/security/sessions` and `POST /api/v1/profile/security/sessions/{tokenId}/revoke` are still
+  served.** Their removal, planned for v2.40.0, moves to a later release; use `GET /api/v1/auth/sessions` and
+  `DELETE /api/v1/auth/sessions/{tokenId}`. (#520)
+
 ### Removed
 
 - **BREAKING for scripts: `PATCH /api/v1/management/retention/config`, the runtime DryRun toggle.** It flipped a
