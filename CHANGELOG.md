@@ -9,6 +9,27 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Verbara.Sdk.Pro `2.30.2-pro` → `2.31.0-pro`**, the 22 `Verbara.Sdk.Pro.*` pins in one commit. Diffed by package
+  name over every `project.assets.json`, the restore moved only the 22 Pro packages: no other package (the
+  `Microsoft.Extensions.*`, OpenTelemetry and `StackExchange.Redis` floors included) moved, and none appears or drops.
+  What reaches a Platform deployment:
+  - **Pro timing options are checked at startup.** A Pro timing option set outside the range the engine can use now
+    stops the Api at startup with an error naming the option, instead of failing later on a background loop. The
+    Api's own values are all in range; a deployment is affected only if its environment sets one, for example
+    `Cluster__Leadership__RenewalInterval` (now at least 1 ms) or `Licensing__RevalidationInterval` (a positive
+    value below 1 ms now fails; zero, negative and unreadable values still fall back to 6 hours).
+  - **Post-call analyzers run for their configured timeouts.** The hidden 10-second cut on each call analyzer is gone,
+    so the summarizer and QA scorer get their 30-second defaults. This release configures no transcript source, so no
+    analysis runs yet. The Agent Assist suggestion timeout keeps its 3-second default, the same value as the cut it
+    loses.
+  - **A dialed contact list can be deleted.** `DELETE` of a contact list whose contacts already had calls no longer
+    fails; the list, its contacts and their phones go and the call history stays. On first start the dialer database
+    runs a migration that drops the two foreign keys from call attempts to contacts and phones; it rewrites no rows.
+  - **A campaign lists only contact lists of its own tenant.**
+  - The test doubles of the contact-list store follow the campaign-addressed contract; no Api route changes.
+
 ## [2.40.0] - 2026-11-21
 
 Agent Assist works end to end: a live call's transcript, suggestions, sentiment and compliance alerts reach the agent

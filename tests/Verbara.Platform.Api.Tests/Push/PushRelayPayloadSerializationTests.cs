@@ -118,14 +118,12 @@ public sealed class PushRelayPayloadSerializationTests
     /// <summary>
     /// Pro event types that still ship in the pinned package but that nothing in Platform.Api publishes any more, so
     /// they never reach the bus. Named by string, not <c>typeof</c>, so this compiles after Pro deletes them.
-    /// The Pro agent-state event's only publisher was <c>AgentStatePushBridge</c>, which Platform no longer wires;
-    /// Pro v2.31.0-pro removes both (Pro/ADR-0026 point 4), and the entry can go with that pin. The Pro
-    /// conversation-state event's only publisher is <c>ConversationStatePushBridge</c>, which Platform no longer wires
-    /// either (owner Q8 = A, 2026-11-18); its entry can go when Pro removes that bridge.
+    /// The Pro conversation-state event's only publisher is <c>ConversationStatePushBridge</c>, which Platform no
+    /// longer wires (owner Q8 = A, 2026-11-18); its entry can go when Pro removes that bridge. (The Pro agent-state
+    /// event left with its bridge in Pro <c>2.31.0-pro</c>, and its entry with it.)
     /// </summary>
     private static readonly HashSet<string> UnpublishedProEventTypes = new(StringComparer.Ordinal)
     {
-        "Verbara.Sdk.Pro.Push.SignalR.Events.AgentStateChangedEvent",
         "Verbara.Sdk.Pro.Push.SignalR.Events.ConversationStateChangedEvent",
     };
 

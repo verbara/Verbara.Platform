@@ -27,7 +27,7 @@ namespace Verbara.Platform.Api.Tests.Dialer;
 /// <see cref="ContactListStoreBase"/> and <see cref="DispositionCodeStoreBase"/> descriptors
 /// <c>UsePostgresDialerStorage</c> registered, re-adding them after
 /// <see cref="AuthenticatedPlatformApiFactory.RegisterInMemoryStores"/>, so the routes run against Pro's Postgres
-/// stores. Without one, the in-memory stores answer, which follow the Pro <c>2.30.1-pro</c> contract.
+/// stores. Without one, the in-memory stores answer, which follow the Pro <c>2.31.0-pro</c> campaign-addressed contract.
 /// </remarks>
 public sealed class DialerTenantScopeFactory : WebApplicationFactory<Program>
 {

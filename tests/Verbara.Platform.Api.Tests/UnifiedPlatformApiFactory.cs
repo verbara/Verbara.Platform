@@ -357,11 +357,11 @@ internal sealed class InMemoryCampaignStore : CampaignStoreBase
 }
 
 /// <summary>
-/// The in-memory contact-list store: a list belongs to the tenant it was created for, and delete, import and
-/// list-contacts act only on a list of the tenant they are given (a no-op, 0 imported, an empty page otherwise).
-/// The campaign-addressed members follow Pro's contract: they act only on a list of that tenant and that campaign,
-/// and answer "no such list" (<c>false</c> / <c>null</c>) otherwise. This store cannot see a campaign's own tenant,
-/// so the case of a list whose tenant differs from its campaign's is proven against Pro's Postgres store only.
+/// The in-memory contact-list store: a list belongs to the tenant and campaign it was created for. Every member is
+/// campaign-addressed, as Pro's contract is: delete, import and list-contacts act only on a list of that tenant and
+/// that campaign, and answer "no such list" (<c>false</c> / <c>null</c>) otherwise. This store cannot see a
+/// campaign's own tenant, so the case of a list whose tenant differs from its campaign's is proven against Pro's
+/// Postgres store only.
 /// </summary>
 internal sealed class InMemoryContactListStore : ContactListStoreBase
 {
@@ -370,10 +370,7 @@ internal sealed class InMemoryContactListStore : ContactListStoreBase
     private readonly ConcurrentDictionary<long, ContactList> _lists = new();
     private readonly ConcurrentDictionary<long, List<Contact>> _contacts = new();
 
-    public override async ValueTask<ContactList?> TryCreateContactListAsync(string tenantId, long campaignId, ContactList list, CancellationToken ct) =>
-        await CreateContactListAsync(tenantId, campaignId, list, ct);
-
-    public override ValueTask<ContactList> CreateContactListAsync(string tenantId, long campaignId, ContactList list, CancellationToken ct)
+    public override ValueTask<ContactList?> TryCreateContactListAsync(string tenantId, long campaignId, ContactList list, CancellationToken ct)
     {
         var id = Interlocked.Increment(ref _nextListId);
         list.Id = id;
@@ -381,7 +378,7 @@ internal sealed class InMemoryContactListStore : ContactListStoreBase
         list.CampaignId = campaignId;
         _lists[id] = list;
         _contacts[id] = [];
-        return new ValueTask<ContactList>(list);
+        return new ValueTask<ContactList?>(list);
     }
 
     public override ValueTask<IReadOnlyList<ContactList>> ListContactListsAsync(string tenantId, long campaignId, CancellationToken ct)
@@ -392,13 +389,6 @@ internal sealed class InMemoryContactListStore : ContactListStoreBase
         return new ValueTask<IReadOnlyList<ContactList>>(result);
     }
 
-    public override ValueTask DeleteContactListAsync(string tenantId, long listId, CancellationToken ct)
-    {
-        if (TenantList(tenantId, listId) is { } list)
-            Remove(list);
-        return ValueTask.CompletedTask;
-    }
-
     public override ValueTask<bool> DeleteContactListAsync(string tenantId, long campaignId, long listId, CancellationToken ct)
     {
         if (CampaignList(tenantId, campaignId, listId) is not { } list)
@@ -407,14 +397,8 @@ internal sealed class InMemoryContactListStore : ContactListStoreBase
         return new ValueTask<bool>(true);
     }
 
-    public override ValueTask<int> ImportContactsAsync(string tenantId, long listId, IReadOnlyList<ContactImportRow> rows, CancellationToken ct) =>
-        new(TenantList(tenantId, listId) is { } cl ? Import(cl, rows) : 0);
-
     public override ValueTask<int?> ImportContactsAsync(string tenantId, long campaignId, long listId, IReadOnlyList<ContactImportRow> rows, CancellationToken ct) =>
         new(CampaignList(tenantId, campaignId, listId) is { } cl ? Import(cl, rows) : null);
-
-    public override ValueTask<(IReadOnlyList<Contact> Items, int TotalCount)> ListContactsAsync(string tenantId, long listId, int page, int pageSize, CancellationToken ct) =>
-        new(TenantList(tenantId, listId) is { } cl ? Page(cl, page, pageSize) : ([], 0));
 
     public override ValueTask<(IReadOnlyList<Contact> Items, int TotalCount)?> ListContactsAsync(string tenantId, long campaignId, long listId, int page, int pageSize, CancellationToken ct) =>
         new(CampaignList(tenantId, campaignId, listId) is { } cl ? Page(cl, page, pageSize) : null);
