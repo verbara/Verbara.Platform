@@ -214,7 +214,7 @@ internal static partial class SupervisorEndpoints
             {
                 _ = liveSessions.TryWhisper(record.SessionId, text);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LogSpokenWhisperFailed(loggers.CreateLogger(typeof(SupervisorEndpoints).FullName!), ex, record.SessionId, callerTenant.Value);
             }
