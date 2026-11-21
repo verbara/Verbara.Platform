@@ -4,7 +4,8 @@ using Verbara.Platform.E2E.Harness.Scenarios;
 
 // Entrypoint. HARNESS_SCENARIO picks the scenario: "exactly-once" (default) or
 // "conversation-frames" (platform-drops-the-pro-agent-bridge, tasks 1.1 and 4.1), or
-// "conversation-frames-selfcheck" (that scenario's evaluator against synthetic records, offline).
+// "conversation-frames-selfcheck" (that scenario's evaluator against synthetic records, offline), or
+// "cluster-frames" (platform-drops-the-cluster-bridge, tasks 1.1 and 4.1) and "cluster-frames-selfcheck" (offline).
 // Wrapper script (scripts/run-harness-talos.sh) populates the HARNESS_* env
 // vars after preparing kubectl port-forwards for each Realtime pod.
 //
@@ -27,6 +28,19 @@ if (string.Equals(Environment.GetEnvironmentVariable("HARNESS_SCENARIO"), Conver
 
     Console.WriteLine(selfCheckFailures.Count == 0 ? "SELF-CHECK PASS" : $"SELF-CHECK FAIL ({selfCheckFailures.Count})");
     return selfCheckFailures.Count == 0 ? 0 : 1;
+}
+
+// Offline negative controls of the cluster-frames evaluator; needs no lab and no other HARNESS_* variable.
+if (string.Equals(Environment.GetEnvironmentVariable("HARNESS_SCENARIO"), ClusterFramesSelfCheck.Name, StringComparison.Ordinal))
+{
+    var clusterSelfCheckFailures = ClusterFramesSelfCheck.Run();
+    foreach (var failure in clusterSelfCheckFailures)
+    {
+        Console.Error.WriteLine($"SELF-CHECK FAIL: {failure}");
+    }
+
+    Console.WriteLine(clusterSelfCheckFailures.Count == 0 ? "SELF-CHECK PASS" : $"SELF-CHECK FAIL ({clusterSelfCheckFailures.Count})");
+    return clusterSelfCheckFailures.Count == 0 ? 0 : 1;
 }
 
 try
@@ -61,9 +75,29 @@ try
         return conversationReport.Passed ? 0 : 1;
     }
 
+    if (string.Equals(config.Scenario, ClusterFramesScenario.Name, StringComparison.Ordinal))
+    {
+        // platform-drops-the-cluster-bridge, tasks 1.1 and 4.1: the cluster cell. A fixture error exits 2 (rerun).
+        using var clusterCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var clusterReport = await ClusterFramesScenario.RunAsync(config, clusterCts.Token);
+        var (kJson, kMd) = ClusterFramesReportWriter.Write(clusterReport, config.ReportDirectory);
+        Console.WriteLine();
+        Console.WriteLine(ClusterFramesReportWriter.RenderMarkdown(clusterReport));
+        Console.WriteLine($"[{DateTimeOffset.UtcNow:HH:mm:ss}] Report written to:");
+        Console.WriteLine($"  - {kJson}");
+        Console.WriteLine($"  - {kMd}");
+        if (clusterReport.FixtureError is not null)
+        {
+            Console.Error.WriteLine($"FIXTURE ERROR: {clusterReport.FixtureError}");
+            return 2;
+        }
+
+        return clusterReport.Verdict.Passed ? 0 : 1;
+    }
+
     if (!string.Equals(config.Scenario, ExactlyOnceScenario.Name, StringComparison.Ordinal))
     {
-        throw new InvalidOperationException($"Unknown HARNESS_SCENARIO '{config.Scenario}' (exactly-once | conversation-frames | conversation-frames-selfcheck).");
+        throw new InvalidOperationException($"Unknown HARNESS_SCENARIO '{config.Scenario}' (exactly-once | conversation-frames | conversation-frames-selfcheck | cluster-frames | cluster-frames-selfcheck).");
     }
 
     using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));

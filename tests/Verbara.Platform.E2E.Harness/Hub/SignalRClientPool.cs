@@ -15,12 +15,18 @@ internal sealed record ConversationFrame(
     DateTimeOffset ReceivedAt);
 
 /// <summary>
+/// One <c>OnClusterNodeStateChanged</c> frame as a client received it: the payload kept as raw JSON (no Pro type is
+/// bound) and the client-side receive time (platform-drops-the-cluster-bridge, tasks 1.1 and 4.1).
+/// </summary>
+internal sealed record ClusterFrame(string PayloadJson, DateTimeOffset ReceivedAt);
+
+/// <summary>
 /// Pool of <see cref="HubConnection"/>s connected to
 /// <c>/hubs/platform</c> via the cluster Gateway. Each client increments
 /// its own <c>OnAgentStateChanged</c> receive counter so the scenario can
 /// assert per-client receive parity (every connected client must observe
 /// the same fanout count — exactly once per emitted event), and records every
-/// <c>OnConversationStateChanged</c> frame it receives, in arrival order.
+/// <c>OnConversationStateChanged</c> and <c>OnClusterNodeStateChanged</c> frame it receives, in arrival order.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -44,6 +50,7 @@ internal sealed class SignalRClientPool : IAsyncDisposable
     private readonly string _accessToken;
     private int[] _receivedCounts = Array.Empty<int>();
     private ConcurrentQueue<ConversationFrame>[] _conversationFrames = Array.Empty<ConcurrentQueue<ConversationFrame>>();
+    private ConcurrentQueue<ClusterFrame>[] _clusterFrames = Array.Empty<ConcurrentQueue<ClusterFrame>>();
 
     public SignalRClientPool(string hubUrl, string accessToken)
     {
@@ -59,6 +66,10 @@ internal sealed class SignalRClientPool : IAsyncDisposable
     public IReadOnlyList<IReadOnlyList<ConversationFrame>> ConversationFrames =>
         _conversationFrames.Select(q => (IReadOnlyList<ConversationFrame>)q.ToArray()).ToList();
 
+    /// <summary>The cluster node frames each client holds, in arrival order (a snapshot); never reset.</summary>
+    public IReadOnlyList<IReadOnlyList<ClusterFrame>> ClusterFrames =>
+        _clusterFrames.Select(q => (IReadOnlyList<ClusterFrame>)q.ToArray()).ToList();
+
     /// <summary>
     /// Drops every conversation frame recorded so far, so a window starts empty. The agent counters are left as
     /// they are.
@@ -71,10 +82,20 @@ internal sealed class SignalRClientPool : IAsyncDisposable
         }
     }
 
+    /// <summary>Sets every client's agent-frame counter back to 0, so a window counts only its own frames.</summary>
+    public void ResetAgentCounts()
+    {
+        for (var i = 0; i < _receivedCounts.Length; i++)
+        {
+            Interlocked.Exchange(ref _receivedCounts[i], 0);
+        }
+    }
+
     public async Task ConnectAsync(int count, CancellationToken ct)
     {
         _receivedCounts = new int[count];
         _conversationFrames = Enumerable.Range(0, count).Select(_ => new ConcurrentQueue<ConversationFrame>()).ToArray();
+        _clusterFrames = Enumerable.Range(0, count).Select(_ => new ConcurrentQueue<ClusterFrame>()).ToArray();
         for (var i = 0; i < count; i++)
         {
             var clientIndex = i;
@@ -104,6 +125,14 @@ internal sealed class SignalRClientPool : IAsyncDisposable
                     PreviousState: ReadString(payload, "previousState"),
                     NewState: ReadString(payload, "newState"),
                     ReceivedAt: DateTimeOffset.UtcNow));
+                return Task.CompletedTask;
+            });
+
+            // IPlatformHubClient.OnClusterNodeStateChanged (platform-drops-the-cluster-bridge): the method name as a
+            // string and the payload as raw JSON, so the harness observes the frame without a Pro type.
+            connection.On<JsonElement>("OnClusterNodeStateChanged", payload =>
+            {
+                _clusterFrames[clientIndex].Enqueue(new ClusterFrame(payload.GetRawText(), DateTimeOffset.UtcNow));
                 return Task.CompletedTask;
             });
 
