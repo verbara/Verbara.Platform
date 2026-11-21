@@ -179,11 +179,16 @@ public sealed class SupervisorWhisperDeliveryTests : IClassFixture<SupervisorWhi
         evt.ConversationId.Should().Be(conversationId, "the session's bound conversation, never the body's");
     }
 
+    /// <summary>Runs the session on this replica too, as its engine's replica does, with its owner rule computed live.</summary>
+    private void RunHere(string sessionId, string callTenant, string startTimeTenant, bool deliversWhispers = true, bool throwsOnWhisper = false) =>
+        _factory.Live.Add(
+            AgentAssistLiveSessions.ToLive(sessionId, Call(sessionId, callTenant), startTimeTenant), deliversWhispers, throwsOnWhisper);
+
     [Fact]
     public async Task PostWhisper_ShouldAnswer204AndPublish_WhenTheSpokenWhisperIsDisabled()
     {
         var (sessionId, _) = await FileSessionAsync(Acme, "spoken-off");
-        // The engine runs on another replica, or Pro's spoken whisper is off: TryWhisper answers false.
+        RunHere(sessionId, Acme, Acme, deliversWhispers: false);   // Pro's spoken whisper is off: TryWhisper answers false
 
         using var response = await WhisperAsync(Acme, sessionId, new { text = "offer the refund" });
 
@@ -191,6 +196,45 @@ public sealed class SupervisorWhisperDeliveryTests : IClassFixture<SupervisorWhi
         PublishedFor(sessionId).Should().ContainSingle("the text whisper does not depend on the spoken one");
         _factory.Live.Whispers.Should().ContainSingle(w => w.SessionId == sessionId, "the spoken whisper is still attempted, best effort")
             .Which.Text.Should().Be("offer the refund");
+    }
+
+    [Fact]
+    public async Task PostWhisper_ShouldAnswer204AndAttemptNoSpokenWhisper_WhenTheEngineRunsOnAnotherReplica()
+    {
+        var (sessionId, _) = await FileSessionAsync(Acme, "elsewhere");
+
+        using var response = await WhisperAsync(Acme, sessionId, new { text = "offer the refund" });
+
+        await ShouldBeNoContentAsync(response);
+        PublishedFor(sessionId).Should().ContainSingle();
+        _factory.Live.Whispers.Should().NotContain(w => w.SessionId == sessionId, "this replica runs no such session");
+    }
+
+    [Fact]
+    public async Task PostWhisper_ShouldAnswer204AndPublishOnce_WhenTheSpokenWhisperThrows()
+    {
+        var (sessionId, _) = await FileSessionAsync(Acme, "spoken-throws");
+        RunHere(sessionId, Acme, Acme, throwsOnWhisper: true);
+
+        using var response = await WhisperAsync(Acme, sessionId, new { text = "offer the refund" });
+
+        await ShouldBeNoContentAsync(response);
+        PublishedFor(sessionId).Should().ContainSingle("204 means published: a failed spoken attempt never turns it into a 500");
+        _factory.Live.Whispers.Should().ContainSingle(w => w.SessionId == sessionId, "precondition: the spoken whisper was attempted");
+    }
+
+    [Fact]
+    public async Task PostWhisper_ShouldQueueNoSpokenWhisper_WhenTheLiveOwnerConflictsAndTheRecordIsStillFiledUnderTheCaller()
+    {
+        var (sessionId, _) = await FileSessionAsync(Acme, "spoken-conflict");
+        RunHere(sessionId, callTenant: Globex, startTimeTenant: Acme);   // the owner rule now finds no owner
+
+        using var response = await WhisperAsync(Acme, sessionId, new { text = "offer the refund" });
+
+        await ShouldBeNoContentAsync(response);
+        PublishedFor(sessionId).Should().ContainSingle("the record still filed under the caller is found until the heartbeat");
+        _factory.Live.Whispers.Should().NotContain(w => w.SessionId == sessionId,
+            "the spoken whisper reaches only a session the caller's tenant owns as it is now");
     }
 
     [Fact]

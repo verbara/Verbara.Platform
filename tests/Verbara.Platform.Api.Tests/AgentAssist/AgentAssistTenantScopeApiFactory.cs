@@ -200,21 +200,31 @@ public class AgentAssistTenantScopeApiFactory : AccountStatusApiFactory
 /// <summary>A hand-written <see cref="IAgentAssistLiveSessions"/>: sessions a test adds, and every whisper asked of it.</summary>
 public sealed class FakeLiveSessions : IAgentAssistLiveSessions
 {
-    private readonly ConcurrentDictionary<string, (LiveAssistSession Session, bool DeliversWhispers)> _sessions = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, (LiveAssistSession Session, bool DeliversWhispers, bool ThrowsOnWhisper)> _sessions =
+        new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<(string SessionId, string Text)> _whispers = new();
 
     /// <summary>The whispers asked of this seam, in order.</summary>
     public IReadOnlyList<(string SessionId, string Text)> Whispers => [.. _whispers];
 
-    internal void Add(LiveAssistSession session, bool deliversWhispers = true) =>
-        _sessions[session.SessionId] = (session, deliversWhispers);
+    /// <summary>
+    /// Adds <paramref name="session"/>; a whisper asked for it answers <paramref name="deliversWhispers"/>, or throws
+    /// <see cref="InvalidOperationException"/> when <paramref name="throwsOnWhisper"/> (the queue's cancel of a callback
+    /// that throws).
+    /// </summary>
+    internal void Add(LiveAssistSession session, bool deliversWhispers = true, bool throwsOnWhisper = false) =>
+        _sessions[session.SessionId] = (session, deliversWhispers, throwsOnWhisper);
 
     IReadOnlyList<LiveAssistSession> IAgentAssistLiveSessions.Snapshot() => [.. _sessions.Values.Select(v => v.Session)];
 
     bool IAgentAssistLiveSessions.TryWhisper(string sessionId, string text)
     {
         _whispers.Enqueue((sessionId, text));
-        return _sessions.TryGetValue(sessionId, out var entry) && entry.DeliversWhispers;
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+        if (entry.ThrowsOnWhisper)
+            throw new InvalidOperationException("the spoken whisper's queue failed");
+        return entry.DeliversWhispers;
     }
 }
 

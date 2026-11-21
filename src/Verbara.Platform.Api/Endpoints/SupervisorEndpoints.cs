@@ -17,7 +17,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Verbara.Platform.Api.Endpoints;
 
-internal static class SupervisorEndpoints
+internal static partial class SupervisorEndpoints
 {
     public static void MapSupervisorEndpoints(this IEndpointRouteBuilder app)
     {
@@ -175,6 +175,9 @@ internal static class SupervisorEndpoints
     /// resolved (409 <c>whisper-session-not-bound</c>); then one <c>agentassist.suggestion</c> is published, the spoken
     /// whisper is attempted best effort, and the answer is 204 No Content. Every refusal publishes nothing. A publish that
     /// throws is not caught (500), and nothing is retried: a retry would hand a second copy to the subscribers that ran.
+    /// The spoken attempt runs only for a session this replica runs and the caller's tenant owns as it is now (the owner
+    /// rule of <see cref="IsLiveSessionOf"/>), so a record still filed under a former owner reaches no audio; a spoken
+    /// attempt that throws is logged and ignored, so 204 always means published.
     /// </summary>
     private static async Task<Results<NoContent, NotFound, BadRequest<ErrorResponse>, Conflict<ErrorResponse>>> PostWhisper(
         HttpContext context,
@@ -184,6 +187,7 @@ internal static class SupervisorEndpoints
         [FromServices] IConversationStore conversations,
         [FromServices] PlatformEventBus eventBus,
         [FromServices] IAgentAssistLiveSessions liveSessions,
+        [FromServices] ILoggerFactory loggers,
         CancellationToken ct)
     {
         var callerTenant = GetTenantId(context);
@@ -204,10 +208,24 @@ internal static class SupervisorEndpoints
             record, conversation.ConversationId.Value, text, SupervisorWhisper.NewSuggestionId()));
 
         // design D6: the spoken whisper succeeds only on the engine's replica with Pro's spoken whisper enabled.
-        _ = liveSessions.TryWhisper(record.SessionId, text);
+        if (IsLiveSessionOf(liveSessions, callerTenant, record.SessionId))
+        {
+            try
+            {
+                _ = liveSessions.TryWhisper(record.SessionId, text);
+            }
+            catch (Exception ex)
+            {
+                LogSpokenWhisperFailed(loggers.CreateLogger(typeof(SupervisorEndpoints).FullName!), ex, record.SessionId, callerTenant.Value);
+            }
+        }
 
         return TypedResults.NoContent();
     }
+
+    [LoggerMessage(EventId = 7610, Level = LogLevel.Warning,
+        Message = "The spoken whisper for session {SessionId} in tenant {TenantId} failed; the text whisper was published")]
+    private static partial void LogSpokenWhisperFailed(ILogger logger, Exception exception, string sessionId, string tenantId);
 
     private const string WhisperTextInvalid = "whisper-text-invalid";
     private const string WhisperSessionNotBound = "whisper-session-not-bound";
