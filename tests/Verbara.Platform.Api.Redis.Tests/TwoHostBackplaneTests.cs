@@ -18,8 +18,11 @@ using Verbara.Sdk.Sessions;
 
 namespace Verbara.Platform.Api.Redis.Tests;
 
-/// <summary>An Api host on a Redis backplane: its own relay, its receiver and the shared Monitor list.</summary>
-public sealed class RedisCrossPodHost(string redis) : CrossPodContentDeliveryApiFactory
+/// <summary>
+/// An Api host on a Redis backplane: its own relay, its receiver and the shared Monitor list. <paramref name="configure"/>
+/// runs last on the host's services, so a test can replace or remove one of them.
+/// </summary>
+public sealed class RedisCrossPodHost(string redis, Action<IServiceCollection>? configure = null) : CrossPodContentDeliveryApiFactory
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -32,6 +35,7 @@ public sealed class RedisCrossPodHost(string redis) : CrossPodContentDeliveryApi
         base.ConfigureTestServices(services);
         // The test host strips every Verbara hosted service; the relay is the one that joins the two hosts.
         services.AddHostedService<RedisEventRelay>();
+        configure?.Invoke(services);
     }
 }
 
