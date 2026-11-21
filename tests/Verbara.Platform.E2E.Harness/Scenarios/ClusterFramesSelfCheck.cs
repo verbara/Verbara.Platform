@@ -27,6 +27,9 @@ internal static class ClusterFramesSelfCheck
         [
             ("the declared record", declared, true),
             ("one cluster frame", declared with { ClusterFrames = [oneClusterFrame] }, false),
+            ("one cluster frame on the liveness client", declared with { LivenessClientClusterFrames = [oneClusterFrame] }, false),
+            ("host client Disconnected at the end", declared with { HostClientStateAtEnd = "Disconnected" }, false),
+            ("host client Reconnecting at the end", declared with { HostClientStateAtEnd = "Reconnecting" }, false),
             ("K - 1 agent frames", declared with { AgentFramesInLiveness = K - 1 }, false),
             ("K - 1 Forwarded agent.state_changed rows", declared with { AgentForwardedRowsInLiveness = K - 1 }, false),
             ("one cluster audit row", declared with { ClusterAuditRows = 1 }, false),
@@ -59,6 +62,7 @@ internal static class ClusterFramesSelfCheck
             AgentFramesInLiveness: K,
             AgentForwardedRowsInLiveness: K,
             ClusterFrames: [],
+            LivenessClientClusterFrames: [],
             ClusterAuditRows: 0,
             Steps:
             [
@@ -71,7 +75,8 @@ internal static class ClusterFramesSelfCheck
             FixtureRead: new NodeRead("fixture", DateTimeOffset.UnixEpoch, 200, bothHealthy, "[]"),
             PreDrainRead: new NodeRead("pre-drain", DateTimeOffset.UnixEpoch, 200, bothHealthy, "[]"),
             DrainPollSawDraining: true,
-            CancelPollLeftDraining: true);
+            CancelPollLeftDraining: true,
+            HostClientStateAtEnd: "Connected");
     }
 
     private static Dictionary<string, string> Nodes(params (string Id, string State)[] nodes) =>

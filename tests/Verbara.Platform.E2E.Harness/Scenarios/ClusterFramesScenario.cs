@@ -35,6 +35,7 @@ internal sealed record ClusterFramesRecord(
     int AgentFramesInLiveness,
     int AgentForwardedRowsInLiveness,
     IReadOnlyList<ClusterFrame> ClusterFrames,
+    IReadOnlyList<ClusterFrame> LivenessClientClusterFrames,
     int ClusterAuditRows,
     IReadOnlyList<RestStep> Steps,
     IReadOnlyList<string> RequiredNodes,
@@ -42,15 +43,17 @@ internal sealed record ClusterFramesRecord(
     NodeRead? FixtureRead,
     NodeRead? PreDrainRead,
     bool DrainPollSawDraining,
-    bool CancelPollLeftDraining);
+    bool CancelPollLeftDraining,
+    string HostClientStateAtEnd);
 
-/// <summary>The four rules of tasks.md 1.1 applied to one record.</summary>
+/// <summary>The five rules of tasks.md 1.1 (amended 2026-11-21) applied to one record.</summary>
 internal sealed record ClusterFramesVerdict(
     bool Passed,
     bool LivenessPassed,
     bool NoClusterFramesPassed,
     bool NoClusterAuditRowsPassed,
     bool RestStepsPassed,
+    bool HostClientConnectedPassed,
     IReadOnlyList<string> Failures);
 
 /// <summary>Result of the cluster-frames scenario (tasks 1.1 and 4.1 of platform-drops-the-cluster-bridge).</summary>
@@ -63,6 +66,7 @@ internal sealed record ClusterFramesReport(
     ClusterFramesRecord Record,
     string Tenant,
     string AdminTenant,
+    string LivenessAdminTenant,
     DateTimeOffset? LivenessWindowStart,
     DateTimeOffset? LivenessWindowEnd,
     DateTimeOffset? ClusterWindowStart,
@@ -77,24 +81,30 @@ internal sealed record ClusterFramesReport(
     IReadOnlyList<RelayOutcomePage> AuditPages);
 
 /// <summary>
-/// The lab cell of <c>platform-drops-the-cluster-bridge</c> (tasks.md 1.1 and 4.1; design D6). One hub client signed
-/// in as the host tenant's Admin connects first and stays to the end. Fixture: the second Asterisk node is registered
-/// through <c>POST /api/v1/management/cluster/nodes</c> and both nodes must read <c>"healthy"</c>. Liveness window:
-/// K agent state changes of a host-tenant agent. Cluster window: both nodes re-read <c>"healthy"</c>, the drained node
+/// The lab cell of <c>platform-drops-the-cluster-bridge</c> (tasks.md 1.1 and 4.1; design D6). Two hub clients
+/// connect first and stay to the end: the <b>host client</b>, signed in as the host tenant's Admin (the
+/// <c>/admin/cluster</c> listener, subject of rules 2-5), and the <b>liveness client</b>, signed in as the Admin of a
+/// Customer tenant (<c>acme</c>), because operational endpoints refuse a Platform tenant (409
+/// <c>tenant-type-mismatch</c>), so no host-tenant agent can exist (amendment approved by the owner 2026-11-21).
+/// Fixture: the second Asterisk node is registered through <c>POST /api/v1/management/cluster/nodes</c> and both
+/// nodes must read <c>"healthy"</c>. Liveness window: K agent state changes of the Customer tenant's agent. Cluster window: both nodes re-read <c>"healthy"</c>, the drained node
 /// is drained (<c>{"gracePeriodSeconds":120}</c>, 202), seen <c>"draining"</c>, the drain cancelled (2xx), seen to
 /// leave <c>"draining"</c>, and the window closes 10 s later.
 /// </summary>
 /// <remarks>
-/// Pass (each build): (1) the client holds exactly K <c>OnAgentStateChanged</c> frames and the audit holds K Forwarded
-/// <c>agent.state_changed</c> rows of the tenant in the liveness window; (2) the client holds 0
+/// Pass (each build): (1) the liveness client holds exactly K <c>OnAgentStateChanged</c> frames and the audit holds K
+/// Forwarded <c>agent.state_changed</c> rows of the agent's tenant in the liveness window; (2) both clients hold 0
 /// <c>OnClusterNodeStateChanged</c> frames in the whole run; (3) the audit holds 0 rows of any outcome for
 /// <c>cluster.node.state.changed</c> (the whole ring of every pod); (4) every REST step answered as declared, both
 /// nodes read <c>"healthy"</c> in the fixture read and in the pre-drain read, and the drain poll saw
-/// <c>"draining"</c>. A refused step or a node that never reaches <c>"healthy"</c> is a fixture error (exit 2): fix
+/// <c>"draining"</c>; (5) the host client reads <c>Connected</c> at the end of the run. A refused step or a node that never reaches <c>"healthy"</c> is a fixture error (exit 2): fix
 /// and rerun, never count it. Environment beyond <see cref="HarnessConfig"/>: <c>HARNESS_CLUSTER_NODE_ID</c>
 /// (lab-node-2), <c>HARNESS_CLUSTER_NODE_AMI_HOST</c> (dut2), <c>HARNESS_CLUSTER_NODE_AMI_PORT</c> (5038),
 /// <c>HARNESS_CLUSTER_NODE_AMI_USER</c> (platform), <c>HARNESS_CLUSTER_NODE_AMI_PASSWORD</c> (required),
-/// <c>HARNESS_CLUSTER_DRAIN_NODE</c> (primary), <c>HARNESS_CLUSTER_GRACE_SEC</c> (120).
+/// <c>HARNESS_CLUSTER_DRAIN_NODE</c> (primary), <c>HARNESS_CLUSTER_GRACE_SEC</c> (120),
+/// <c>HARNESS_LIVENESS_ADMIN_EMAIL</c> and <c>HARNESS_LIVENESS_ADMIN_PASSWORD</c> (required: the liveness client),
+/// <c>HARNESS_LIVENESS_ADMIN_TENANT</c> (default <c>HARNESS_TENANT</c>). The agent (<c>HARNESS_AGENT_EMAIL</c>) belongs
+/// to <c>HARNESS_TENANT</c>; the host Admin is <c>HARNESS_PLATFORMADMIN_*</c> in <c>HARNESS_ADMIN_TENANT</c>.
 /// </remarks>
 internal static class ClusterFramesScenario
 {
@@ -116,6 +126,11 @@ internal static class ClusterFramesScenario
         var drainNode = Env("HARNESS_CLUSTER_DRAIN_NODE", "primary");
         var graceSec = int.Parse(Env("HARNESS_CLUSTER_GRACE_SEC", "120"), System.Globalization.CultureInfo.InvariantCulture);
         string[] required = [drainNode, nodeId];
+        var livenessEmail = Environment.GetEnvironmentVariable("HARNESS_LIVENESS_ADMIN_EMAIL")
+            ?? throw new InvalidOperationException("HARNESS_LIVENESS_ADMIN_EMAIL is required for scenario 'cluster-frames'.");
+        var livenessPassword = Environment.GetEnvironmentVariable("HARNESS_LIVENESS_ADMIN_PASSWORD")
+            ?? throw new InvalidOperationException("HARNESS_LIVENESS_ADMIN_PASSWORD is required for scenario 'cluster-frames'.");
+        var livenessTenant = Env("HARNESS_LIVENESS_ADMIN_TENANT", config.Tenant);
 
         var steps = new List<RestStep>();
         var reads = new List<NodeRead>();
@@ -132,15 +147,20 @@ internal static class ClusterFramesScenario
         var adminToken = await auth.LoginAsync(config.PlatformAdminEmail, config.PlatformAdminPassword, config.AdminTenant, ct).ConfigureAwait(false);
         Log($"Logging in as the agent '{config.Email}' (tenant '{config.Tenant}')...");
         var agentToken = await auth.LoginAsync(config.Email, config.Password, config.Tenant, ct).ConfigureAwait(false);
+        Log($"Logging in as the liveness Admin '{livenessEmail}' (tenant '{livenessTenant}')...");
+        var livenessToken = await auth.LoginAsync(livenessEmail, livenessPassword, livenessTenant, ct).ConfigureAwait(false);
 
         using var api = new HttpClient { BaseAddress = new Uri(config.ApiBaseUrl + "/"), Timeout = TimeSpan.FromSeconds(30) };
         api.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
         api.DefaultRequestHeaders.Add("X-Tenant-Id", config.AdminTenant);
 
-        // The one hub client, signed in as the host Admin, connected before the fixture and kept to the end.
-        Log($"Connecting 1 hub client as the host Admin to {config.RealtimeHubUrl}...");
+        // Two hub clients, connected before the fixture and kept to the end: the host Admin (rules 2-5) and the
+        // Customer tenant's Admin (rule 1, and rule 2).
+        Log($"Connecting the host client (host Admin) and the liveness client ('{livenessEmail}') to {config.RealtimeHubUrl}...");
         await using var pool = new SignalRClientPool(config.RealtimeHubUrl, adminToken);
         await pool.ConnectAsync(1, ct).ConfigureAwait(false);
+        await using var livenessPool = new SignalRClientPool(config.RealtimeHubUrl, livenessToken);
+        await livenessPool.ConnectAsync(1, ct).ConfigureAwait(false);
         await Task.Delay(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false); // fence-allow: SETTLE — let the SignalR tenant-group join settle against the live hub
 
         // Fixture: register the second node, then both nodes "healthy" (at most 60 s).
@@ -169,6 +189,7 @@ internal static class ClusterFramesScenario
         {
             // (a) Liveness window: K agent state changes of the host-tenant agent.
             pool.ResetAgentCounts();
+            livenessPool.ResetAgentCounts();
             livenessStart = DateTimeOffset.UtcNow.AddMilliseconds(-500);
             Log($"Liveness window opens at {livenessStart:O}: {config.EventCount} agent state change(s).");
             using (var trigger = new AgentStateTrigger(config.ApiBaseUrl, agentToken, config.Tenant))
@@ -178,7 +199,7 @@ internal static class ClusterFramesScenario
 
             await Task.Delay(config.SettleDelay, ct).ConfigureAwait(false); // fence-allow: SETTLE — settle before closing the liveness window
             livenessEnd = DateTimeOffset.UtcNow;
-            agentFramesInLiveness = pool.ReceivedCounts[0];
+            agentFramesInLiveness = livenessPool.ReceivedCounts[0];
 
             // (b) Cluster window.
             clusterStart = DateTimeOffset.UtcNow;
@@ -235,8 +256,13 @@ internal static class ClusterFramesScenario
             metricsAfter = await BridgeMetricsAsync(config.ApiBaseUrl, ct).ConfigureAwait(false);
         }
 
-        // Audit: the whole ring of every pod (since = none), so a cluster row of any outcome at any time counts.
-        var auditClients = config.AuditBaseUrls.Select(url => new AuditClient(url, adminToken)).ToList();
+        // The host client's connection state at the end of the run (rule 5): the only liveness that client can show.
+        var hostState = pool.ConnectionStates.Count == 1 ? pool.ConnectionStates[0].ToString() : "absent";
+        Log($"Host client state at the end of the run: {hostState}.");
+
+        // Audit: the whole ring of every pod (since = none), so a cluster row of any outcome at any time counts. Read
+        // with the Customer Admin's token, as C10's scenarios read it (the ring is per pod and not tenant-filtered).
+        var auditClients = config.AuditBaseUrls.Select(url => new AuditClient(url, livenessToken)).ToList();
         RelayOutcomePage[] pages;
         try
         {
@@ -266,6 +292,7 @@ internal static class ClusterFramesScenario
             AgentFramesInLiveness: agentFramesInLiveness,
             AgentForwardedRowsInLiveness: agentRows.Count(e => string.Equals(e.TenantId, config.Tenant, StringComparison.Ordinal)),
             ClusterFrames: pool.ClusterFrames[0],
+            LivenessClientClusterFrames: livenessPool.ClusterFrames[0],
             ClusterAuditRows: clusterRows.Count,
             Steps: steps,
             RequiredNodes: required,
@@ -273,7 +300,8 @@ internal static class ClusterFramesScenario
             FixtureRead: fixtureRead,
             PreDrainRead: preDrainRead,
             DrainPollSawDraining: sawDraining,
-            CancelPollLeftDraining: leftDraining);
+            CancelPollLeftDraining: leftDraining,
+            HostClientStateAtEnd: hostState);
         var verdict = Evaluate(record);
 
         return new ClusterFramesReport(
@@ -285,11 +313,12 @@ internal static class ClusterFramesScenario
             Record: record,
             Tenant: config.Tenant,
             AdminTenant: config.AdminTenant,
+            LivenessAdminTenant: livenessTenant,
             LivenessWindowStart: livenessStart,
             LivenessWindowEnd: livenessEnd,
             ClusterWindowStart: clusterStart,
             ClusterWindowEnd: clusterEnd,
-            AgentFramesWholeRun: pool.ReceivedCounts[0],
+            AgentFramesWholeRun: livenessPool.ReceivedCounts[0],
             AgentForwardedRowsInLivenessAllTenants: agentRows.Count,
             ClusterAuditRowsByEventTypeAndOutcome: clusterByKind,
             NodeReads: reads,
@@ -299,7 +328,7 @@ internal static class ClusterFramesScenario
             AuditPages: pages);
     }
 
-    /// <summary>The four rules of tasks.md 1.1 on one record.</summary>
+    /// <summary>The five rules of tasks.md 1.1 (amended 2026-11-21) on one record.</summary>
     internal static ClusterFramesVerdict Evaluate(ClusterFramesRecord record)
     {
         var failures = new List<string>();
@@ -313,11 +342,12 @@ internal static class ClusterFramesScenario
                          $"OnAgentStateChanged frame(s) and the audit {record.AgentForwardedRowsInLiveness} Forwarded {CoreAgentEventType} row(s) in the window.");
         }
 
-        // (2) No cluster frame in the whole run.
-        var noFrames = record.ClusterFrames.Count == 0;
+        // (2) No cluster frame in the whole run, on either client.
+        var noFrames = record.ClusterFrames.Count == 0 && record.LivenessClientClusterFrames.Count == 0;
         if (!noFrames)
         {
-            failures.Add($"The client holds {record.ClusterFrames.Count} OnClusterNodeStateChanged frame(s) — expected 0.");
+            failures.Add($"The host client holds {record.ClusterFrames.Count} and the liveness client " +
+                         $"{record.LivenessClientClusterFrames.Count} OnClusterNodeStateChanged frame(s) — expected 0 on each.");
         }
 
         // (3) No audit row of any outcome for the cluster event type.
@@ -346,7 +376,15 @@ internal static class ClusterFramesScenario
                          $"left draining after the cancel {record.CancelPollLeftDraining}.");
         }
 
-        return new ClusterFramesVerdict(liveness && noFrames && noRows && rest, liveness, noFrames, noRows, rest, failures);
+        // (5) The host client is still connected at the end of the run.
+        var hostConnected = string.Equals(record.HostClientStateAtEnd, "Connected", StringComparison.Ordinal);
+        if (!hostConnected)
+        {
+            failures.Add($"The host client reads '{record.HostClientStateAtEnd}' at the end of the run — expected Connected.");
+        }
+
+        return new ClusterFramesVerdict(liveness && noFrames && noRows && rest && hostConnected,
+            liveness, noFrames, noRows, rest, hostConnected, failures);
     }
 
     private static async Task<RestStep> SendAsync(

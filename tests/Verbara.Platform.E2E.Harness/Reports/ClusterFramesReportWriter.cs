@@ -39,12 +39,13 @@ internal static class ClusterFramesReportWriter
         {
             sb.AppendLine($"- **Fixture error (rerun, never count):** {r.FixtureError}");
         }
-        sb.AppendLine($"- **Tenant:** {r.Tenant} (agent); hub client and REST as the Admin of {r.AdminTenant}");
+        sb.AppendLine($"- **Tenant:** {r.Tenant} (agent); host client and REST as the Admin of {r.AdminTenant}; liveness client as the Admin of {r.LivenessAdminTenant}");
         sb.AppendLine($"- **Liveness window:** {r.LivenessWindowStart:O} → {r.LivenessWindowEnd:O}; cluster window {r.ClusterWindowStart:O} → {r.ClusterWindowEnd:O}");
-        sb.AppendLine($"- **1. Liveness:** {V(v.LivenessPassed)} (K = {k.ExpectedAgentFrames}; client frames {k.AgentFramesInLiveness}; Forwarded {ClusterFramesScenario.CoreAgentEventType} rows of the tenant {k.AgentForwardedRowsInLiveness}, all tenants {r.AgentForwardedRowsInLivenessAllTenants}; client frames whole run {r.AgentFramesWholeRun})");
-        sb.AppendLine($"- **2. No cluster frame:** {V(v.NoClusterFramesPassed)} ({k.ClusterFrames.Count} OnClusterNodeStateChanged frame(s))");
+        sb.AppendLine($"- **1. Liveness:** {V(v.LivenessPassed)} (K = {k.ExpectedAgentFrames}; liveness client frames {k.AgentFramesInLiveness}; Forwarded {ClusterFramesScenario.CoreAgentEventType} rows of the tenant {k.AgentForwardedRowsInLiveness}, all tenants {r.AgentForwardedRowsInLivenessAllTenants}; client frames whole run {r.AgentFramesWholeRun})");
+        sb.AppendLine($"- **2. No cluster frame:** {V(v.NoClusterFramesPassed)} (host client {k.ClusterFrames.Count}, liveness client {k.LivenessClientClusterFrames.Count} OnClusterNodeStateChanged frame(s))");
         sb.AppendLine($"- **3. No cluster audit row:** {V(v.NoClusterAuditRowsPassed)} ({k.ClusterAuditRows} row(s) of {ClusterFramesScenario.ClusterEventType}, any outcome)");
         sb.AppendLine($"- **4. REST steps:** {V(v.RestStepsPassed)} (fixture read {Nodes(k.FixtureRead)}; pre-drain read {Nodes(k.PreDrainRead)}; drain poll saw draining {k.DrainPollSawDraining}; left draining after cancel {k.CancelPollLeftDraining})");
+        sb.AppendLine($"- **5. Host client connected at the end:** {V(v.HostClientConnectedPassed)} ({k.HostClientStateAtEnd})");
         sb.AppendLine();
         sb.AppendLine("## REST steps");
         sb.AppendLine();
@@ -78,7 +79,11 @@ internal static class ClusterFramesReportWriter
         }
         foreach (var f in k.ClusterFrames)
         {
-            sb.AppendLine($"- cluster frame at {f.ReceivedAt:O}: `{f.PayloadJson}`");
+            sb.AppendLine($"- host client cluster frame at {f.ReceivedAt:O}: `{f.PayloadJson}`");
+        }
+        foreach (var f in k.LivenessClientClusterFrames)
+        {
+            sb.AppendLine($"- liveness client cluster frame at {f.ReceivedAt:O}: `{f.PayloadJson}`");
         }
         if (r.Warnings.Count > 0)
         {

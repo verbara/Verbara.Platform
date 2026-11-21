@@ -62,6 +62,9 @@ internal sealed class SignalRClientPool : IAsyncDisposable
 
     public IReadOnlyList<int> ReceivedCounts => _receivedCounts;
 
+    /// <summary>Each client's <see cref="HubConnectionState"/> as read now (a snapshot), in connection order.</summary>
+    public IReadOnlyList<HubConnectionState> ConnectionStates => _connections.Select(c => c.State).ToList();
+
     /// <summary>The conversation frames each client holds, in arrival order (a snapshot).</summary>
     public IReadOnlyList<IReadOnlyList<ConversationFrame>> ConversationFrames =>
         _conversationFrames.Select(q => (IReadOnlyList<ConversationFrame>)q.ToArray()).ToList();
