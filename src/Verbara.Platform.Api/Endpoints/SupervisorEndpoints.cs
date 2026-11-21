@@ -26,7 +26,20 @@ internal static class SupervisorEndpoints
         // Voice sessions
         group.MapGet("/sessions/active", GetActiveSessions)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
-        group.MapPost("/sessions/{sessionId}/whisper", PostWhisper);
+        group.MapPost("/sessions/{sessionId}/whisper", PostWhisper)
+            .WithSummary("Sends a supervisor's text whisper to the session's agent")
+            .WithDescription(
+                "The text whisper: delivers the text to the Agent Assist session's bound agent as an agentassist.suggestion " +
+                "with source Supervisor and priority Critical, from any Api replica, and answers 204 No Content. The " +
+                "session is looked up in the caller's tenant only: another tenant's, an ended or an unknown session " +
+                "answers 404. 400 whisper-text-invalid: the text is empty or longer than 500 characters after trimming. " +
+                "409 whisper-session-not-bound: the session's agent or conversation is not resolved yet; nothing was " +
+                "published. The Realtime hub's WhisperToAgentAsync, StartSupervisionAsync and StopSupervisingAsync stay " +
+                "refused; this route is the only whisper.")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces<ErrorResponse>(StatusCodes.Status409Conflict);
         group.MapPost("/sessions/{sessionId}/listen", PostListen)
             .Produces(StatusCodes.Status403Forbidden);
 
@@ -155,21 +168,49 @@ internal static class SupervisorEndpoints
         return names;
     }
 
-    private static IResult PostWhisper(
+    /// <summary>
+    /// supervisor-whisper-reaches-the-agent (design D2-D7): the text whisper. In this order: the session is looked up in
+    /// the shared live-session store under the caller's tenant (404, no body, when not found, before the text is read);
+    /// the text is validated (400 <c>whisper-text-invalid</c>); the session's agent, linked id and conversation must be
+    /// resolved (409 <c>whisper-session-not-bound</c>); then one <c>agentassist.suggestion</c> is published, the spoken
+    /// whisper is attempted best effort, and the answer is 204 No Content. Every refusal publishes nothing. A publish that
+    /// throws is not caught (500), and nothing is retried: a retry would hand a second copy to the subscribers that ran.
+    /// </summary>
+    private static async Task<Results<NoContent, NotFound, BadRequest<ErrorResponse>, Conflict<ErrorResponse>>> PostWhisper(
         HttpContext context,
         string sessionId,
         [FromBody] WhisperRequest body,
-        [FromServices] IAgentAssistLiveSessions liveSessions)
+        [FromServices] IAgentAssistLiveSessionStore liveSessionStore,
+        [FromServices] IConversationStore conversations,
+        [FromServices] PlatformEventBus eventBus,
+        [FromServices] IAgentAssistLiveSessions liveSessions,
+        CancellationToken ct)
     {
-        if (!IsLiveSessionOf(liveSessions, GetTenantId(context), sessionId))
-            return Results.NotFound();
+        var callerTenant = GetTenantId(context);
+        if (await liveSessionStore.FindAsync(callerTenant.Value, sessionId, ct) is not { } record)
+            return TypedResults.NotFound();
 
-        var enqueued = liveSessions.TryWhisper(sessionId, body.Text);
-        if (!enqueued)
-            return Results.BadRequest(new ErrorResponse("Whisper delivery is not enabled for this session."));
+        var text = body.Text?.Trim();
+        if (string.IsNullOrEmpty(text) || text.Length > SupervisorWhisper.MaxTextLength)
+            return TypedResults.BadRequest(new ErrorResponse(WhisperTextInvalid));
 
-        return Results.Ok();
+        if (string.IsNullOrEmpty(record.AgentId) || string.IsNullOrEmpty(record.LinkedId))
+            return TypedResults.Conflict(new ErrorResponse(WhisperSessionNotBound));
+        var conversation = await conversations.FindByVoiceLinkedIdAsync(callerTenant, record.LinkedId, ct);
+        if (conversation is null || string.IsNullOrEmpty(conversation.ConversationId.Value))
+            return TypedResults.Conflict(new ErrorResponse(WhisperSessionNotBound));
+
+        eventBus.Publish(SupervisorWhisper.BuildEvent(
+            record, conversation.ConversationId.Value, text, SupervisorWhisper.NewSuggestionId()));
+
+        // design D6: the spoken whisper succeeds only on the engine's replica with Pro's spoken whisper enabled.
+        _ = liveSessions.TryWhisper(record.SessionId, text);
+
+        return TypedResults.NoContent();
     }
+
+    private const string WhisperTextInvalid = "whisper-text-invalid";
+    private const string WhisperSessionNotBound = "whisper-session-not-bound";
 
     /// <summary>
     /// design D5: records the signed-in caller as the listening supervisor. The body is optional and its

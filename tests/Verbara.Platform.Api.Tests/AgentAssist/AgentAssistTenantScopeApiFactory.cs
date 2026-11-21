@@ -32,7 +32,7 @@ namespace Verbara.Platform.Api.Tests.AgentAssist;
 /// <see cref="Acme"/> with no <c>sub</c>, <c>user_id</c> or <c>NameIdentifier</c> claim: neither the host's JWTs nor
 /// its API keys can carry such a principal.
 /// </remarks>
-public sealed class AgentAssistTenantScopeApiFactory : AccountStatusApiFactory
+public class AgentAssistTenantScopeApiFactory : AccountStatusApiFactory
 {
     public const string Acme = "acme";
     public const string Globex = "globex";
@@ -53,6 +53,12 @@ public sealed class AgentAssistTenantScopeApiFactory : AccountStatusApiFactory
     /// <summary>When set, the Agent Assist feature store and toggle the host resolves (both are this instance).</summary>
     internal IAgentAssistFeatureStore? FeatureStore { get; init; }
 
+    /// <summary>
+    /// When set, the Monitor's live-session store the host resolves instead of the in-process view over <see cref="Live"/>
+    /// (supervisor-whisper-reaches-the-agent: a shared store, as with Redis).
+    /// </summary>
+    internal virtual IAgentAssistLiveSessionStore? LiveSessionStore => null;
+
     /// <inheritdoc />
     protected override void ConfigureTestServices(IServiceCollection services)
     {
@@ -62,6 +68,12 @@ public sealed class AgentAssistTenantScopeApiFactory : AccountStatusApiFactory
         services.AddSingleton<IAgentAssistLiveSessions>(Live);
         services.RemoveAll<IAgentAssistRecordReader>();
         services.AddSingleton<IAgentAssistRecordReader>(Records);
+
+        if (LiveSessionStore is { } liveSessionStore)
+        {
+            services.RemoveAll<IAgentAssistLiveSessionStore>();
+            services.AddSingleton(liveSessionStore);
+        }
 
         if (FeatureStore is not null)
         {

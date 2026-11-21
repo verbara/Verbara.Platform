@@ -62,6 +62,47 @@ public sealed class AgentAssistTenantScopeTests : IClassFixture<AgentAssistTenan
         return id;
     }
 
+    private async Task<string> TrackConversationAsync(string tenant, string linkedId)
+    {
+        var conversation = new Conversation
+        {
+            ConversationId = EntityId.From($"conv-{Guid.NewGuid():N}"),
+            TenantId = new TenantId(tenant),
+            ContactId = EntityId.From($"contact-{Guid.NewGuid():N}"),
+            Channel = ChannelType.Voice,
+            State = ConversationState.Active,
+            CreatedAt = DateTimeOffset.UtcNow,
+            VoiceLinkedId = linkedId,
+        };
+        using var scope = _factory.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<IConversationStore>().SaveAsync(conversation, CancellationToken.None);
+        return conversation.ConversationId.Value;
+    }
+
+    /// <summary>Records the <c>agentassist.suggestion</c>s the host publishes while it lives.</summary>
+    private sealed class SuggestionRecorder : IDisposable
+    {
+        private readonly List<AgentAssistSuggestionEvent> _events = [];
+        private readonly IDisposable _subscription;
+
+        public SuggestionRecorder(PlatformEventBus bus) => _subscription = bus.Events.Subscribe(evt =>
+        {
+            if (evt is AgentAssistSuggestionEvent suggestion)
+            {
+                lock (_events)
+                    _events.Add(suggestion);
+            }
+        });
+
+        public IReadOnlyList<AgentAssistSuggestionEvent> For(string sessionId)
+        {
+            lock (_events)
+                return [.. _events.Where(e => e.SessionId == sessionId)];
+        }
+
+        public void Dispose() => _subscription.Dispose();
+    }
+
     private static async Task<JsonArray> ListAsync(HttpClient client)
     {
         using var response = await client.GetAsync(ActiveRoute);
@@ -170,6 +211,8 @@ public sealed class AgentAssistTenantScopeTests : IClassFixture<AgentAssistTenan
     public async Task PostWhisper_ShouldAnswer404AndQueueNothing_WhenTheSessionBelongsToAnotherTenant()
     {
         var globexSession = AddSession(Globex, "whisper-foreign");
+        await TrackConversationAsync(Globex, $"{globexSession}.call");
+        using var recorder = new SuggestionRecorder(_factory.Services.GetRequiredService<PlatformEventBus>());
         using var acme = _factory.SupervisorClient(Acme);
 
         using var response = await acme.PostAsJsonAsync(WhisperRoute(globexSession), new { text = "offer the refund" });
@@ -177,6 +220,7 @@ public sealed class AgentAssistTenantScopeTests : IClassFixture<AgentAssistTenan
         response.StatusCode.Should().Be(HttpStatusCode.NotFound, because: "another tenant's session answers as an unknown one");
         (await response.Content.ReadAsStringAsync()).Should().BeEmpty();
         _factory.Live.Whispers.Should().NotContain(w => w.SessionId == globexSession, "no whisper is queued for it");
+        recorder.For(globexSession).Should().BeEmpty("nothing is published for it");
     }
 
     [Fact]
@@ -360,30 +404,47 @@ public sealed class AgentAssistTenantScopeTests : IClassFixture<AgentAssistTenan
             $"the item keeps its shape field for field, its conversation resolved in the caller's tenant; it was {item.ToJsonString()}");
     }
 
+    /// <summary>
+    /// supervisor-whisper-reaches-the-agent (task 2.1) re-asserts the former <c>PostWhisper_ShouldAnswer200_…</c>: on the
+    /// in-process store a bound session of the caller's tenant answers 204 No Content and publishes one
+    /// <c>agentassist.suggestion</c>; the spoken whisper is still attempted.
+    /// </summary>
     [Fact]
-    public async Task PostWhisper_ShouldAnswer200_WhenTheSessionBelongsToTheCallersTenant()
+    public async Task PostWhisper_ShouldAnswer204AndPublishOneSuggestion_WhenTheSessionBelongsToTheCallersTenant()
     {
         var acmeSession = AddSession(Acme, "whisper-own");
+        var conversationId = await TrackConversationAsync(Acme, $"{acmeSession}.call");
+        using var recorder = new SuggestionRecorder(_factory.Services.GetRequiredService<PlatformEventBus>());
         using var acme = _factory.SupervisorClient(Acme);
 
         using var response = await acme.PostAsJsonAsync(WhisperRoute(acmeSession), new { text = "offer the refund" });
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK, because: await response.Content.ReadAsStringAsync());
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, because: await response.Content.ReadAsStringAsync());
+        (await response.Content.ReadAsStringAsync()).Should().BeEmpty();
+        var evt = recorder.For(acmeSession).Should().ContainSingle().Subject;
+        evt.AgentId.Should().Be("0651f84b6f284a1c9b8d658330fa8310");
+        evt.ConversationId.Should().Be(conversationId);
+        evt.Source.Should().Be("Supervisor");
         _factory.Live.Whispers.Should().ContainSingle(w => w.SessionId == acmeSession)
             .Which.Text.Should().Be("offer the refund");
     }
 
+    /// <summary>
+    /// supervisor-whisper-reaches-the-agent (task 2.1) re-asserts the former <c>PostWhisper_ShouldAnswer400_WhenWhisperDeliveryIsDisabled</c>:
+    /// the text whisper no longer depends on Pro's spoken whisper, so a disabled one answers 204, not 400.
+    /// </summary>
     [Fact]
-    public async Task PostWhisper_ShouldAnswer400_WhenWhisperDeliveryIsDisabled()
+    public async Task PostWhisper_ShouldAnswer204NotTheFormer400_WhenSpokenWhisperDeliveryIsDisabled()
     {
         var acmeSession = AddSession(Acme, "whisper-disabled", deliversWhispers: false);
+        await TrackConversationAsync(Acme, $"{acmeSession}.call");
+        using var recorder = new SuggestionRecorder(_factory.Services.GetRequiredService<PlatformEventBus>());
         using var acme = _factory.SupervisorClient(Acme);
 
         using var response = await acme.PostAsJsonAsync(WhisperRoute(acmeSession), new { text = "offer the refund" });
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, because: await response.Content.ReadAsStringAsync());
-        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["error"]!.GetValue<string>()
-            .Should().Be("Whisper delivery is not enabled for this session.");
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, because: await response.Content.ReadAsStringAsync());
+        recorder.For(acmeSession).Should().ContainSingle("the suggestion is published whatever the spoken whisper does");
     }
 
     [Fact]
