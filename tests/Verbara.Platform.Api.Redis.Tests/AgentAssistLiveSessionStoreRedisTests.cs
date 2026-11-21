@@ -239,6 +239,88 @@ public sealed class AgentAssistLiveSessionStoreRedisTests : IAsyncLifetime
         }
     }
 
+    // ═══ supervisor-whisper-reaches-the-agent (design D2, task 1.2): FindAsync on replica B ═══
+
+    [Fact]
+    public async Task Find_ShouldReturnTheRecordTheOtherReplicaFiled_UnderItsOwnerTenantOnly()
+    {
+        await StartOnAAsync("as-find-shown", _demo, Call(_demo));
+
+        var found = await StoreB.FindAsync(_demo, "as-find-shown", CancellationToken.None);
+
+        found.Should().Be(LiveSessionRecord.Of("as-find-shown", _demo, Call(_demo)),
+            "replica B reads what replica A filed");
+        (await StoreB.FindAsync(_acme, "as-find-shown", CancellationToken.None)).Should().BeNull("another tenant never finds it");
+        (await StoreB.FindAsync(_demo, "as-find-unknown", CancellationToken.None)).Should().BeNull("an unknown id is not found");
+    }
+
+    [Fact]
+    public async Task Find_ShouldReturnNull_WhenTheIndexMemberHasExpired()
+    {
+        var filing = await StartOnAAsync("as-find-expired", _demo, Call(_demo));
+        filing.Dispose();   // replica A is gone: no more heartbeats
+        _time.Advance(AgentAssistSessionFiling.RecordTtl - TimeSpan.FromMilliseconds(1));
+        (await StoreB.FindAsync(_demo, "as-find-expired", CancellationToken.None)).Should().NotBeNull("precondition: not expired yet");
+
+        _time.Advance(TimeSpan.FromMilliseconds(1));
+
+        (await StoreB.FindAsync(_demo, "as-find-expired", CancellationToken.None)).Should().BeNull(
+            "a member whose score is not strictly after now is not found, whatever Redis's own expiry does");
+    }
+
+    [Fact]
+    public async Task Find_ShouldReturnNull_WhenTheHashExpiredAfterTheIndexRead()
+    {
+        await StartOnAAsync("as-find-nohash", _demo, Call(_demo));
+        // The index member is live and the hash is gone, as when the hash's own TTL fires between the two reads.
+        await _replicaB!.GetDatabase().KeyDeleteAsync(RedisAgentAssistLiveSessionStore.RecordKey(_demo, "as-find-nohash"));
+        (await IndexLengthAsync(_demo)).Should().Be(1, "precondition: the index member is still there");
+
+        (await StoreB.FindAsync(_demo, "as-find-nohash", CancellationToken.None)).Should().BeNull("an empty hash is not found");
+    }
+
+    /// <summary>
+    /// The equivalence property of task 1.2: for every seeded state, FindAsync on replica B returns exactly the record
+    /// ListAsync returns for that id, or null when ListAsync omits it, for both tenants.
+    /// </summary>
+    [Theory]
+    [InlineData(State.Bound)]
+    [InlineData(State.LateStamp)]
+    [InlineData(State.ConflictAfterHeartbeat)]
+    [InlineData(State.Ownerless)]
+    [InlineData(State.OwnerChangeAfterHeartbeat)]
+    [InlineData(State.Ended)]
+    public async Task Find_ShouldReturnWhatListReturnsForThatId_ForEverySeededState(State state)
+    {
+        var sessionId = $"as-find-parity-{state}";
+        var startTimeTenant = state is State.Bound or State.ConflictAfterHeartbeat or State.Ended ? _demo : string.Empty;
+        var call = Call(state is State.LateStamp or State.Ownerless ? null : _demo);
+        var filing = await StartOnAAsync(sessionId, startTimeTenant, call);
+
+        switch (state)
+        {
+            case State.LateStamp:
+                call.TenantId = _demo;
+                await AdvanceAsync(AgentAssistSessionFiling.BindCheckInterval);
+                break;
+            case State.ConflictAfterHeartbeat:
+            case State.OwnerChangeAfterHeartbeat:
+                call.TenantId = _acme;
+                await AdvanceAsync(AgentAssistSessionFiling.HeartbeatInterval);
+                break;
+            case State.Ended:
+                await filing.EndAsync();
+                break;
+        }
+
+        foreach (var tenant in new[] { _demo, _acme })
+        {
+            var listed = (await StoreB.ListAsync(tenant, CancellationToken.None)).SingleOrDefault(r => r.SessionId == sessionId);
+            var found = await StoreB.FindAsync(tenant, sessionId, CancellationToken.None);
+            found.Should().Be(listed, $"state {state}, tenant {(tenant == _demo ? "demo" : "acme")}: FindAsync is ListAsync for one id");
+        }
+    }
+
     /// <summary>The engine's registry on replica A, holding one session.</summary>
     private sealed class OneSession(string sessionId, string startTimeTenant, CallSession call) : IAgentAssistLiveSessions
     {

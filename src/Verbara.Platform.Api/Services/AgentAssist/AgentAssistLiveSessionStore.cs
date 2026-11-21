@@ -59,6 +59,14 @@ internal interface IAgentAssistLiveSessionStore
 
     /// <summary>The unexpired records filed under <paramref name="tenant"/>.</summary>
     Task<IReadOnlyList<LiveSessionRecord>> ListAsync(string tenant, CancellationToken ct);
+
+    /// <summary>
+    /// The unexpired record of <paramref name="sessionId"/> filed under <paramref name="callerTenant"/>, or
+    /// <see langword="null"/> (supervisor-whisper-reaches-the-agent, design D2): exactly the record
+    /// <see cref="ListAsync"/> returns for that id, or <see langword="null"/> when <see cref="ListAsync"/> omits it. Another
+    /// tenant's session, an ownerless or conflicted one, an ended one and an unknown id are all not found.
+    /// </summary>
+    Task<LiveSessionRecord?> FindAsync(string callerTenant, string sessionId, CancellationToken ct);
 }
 
 /// <summary>
@@ -84,6 +92,22 @@ internal sealed class InProcessAgentAssistLiveSessionStore(IAgentAssistLiveSessi
                 .Where(s => string.Equals(s.OwnerTenant, tenant, StringComparison.Ordinal))
                 .Select(s => LiveSessionRecord.Of(s.SessionId, tenant, s.Call, s.Sentiment)),
         ]);
+
+    /// <inheritdoc />
+    public Task<LiveSessionRecord?> FindAsync(string callerTenant, string sessionId, CancellationToken ct)
+    {
+        foreach (var session in liveSessions.Snapshot())
+        {
+            if (string.Equals(session.SessionId, sessionId, StringComparison.Ordinal)
+                && string.Equals(session.OwnerTenant, callerTenant, StringComparison.Ordinal))
+            {
+                return Task.FromResult<LiveSessionRecord?>(
+                    LiveSessionRecord.Of(session.SessionId, callerTenant, session.Call, session.Sentiment));
+            }
+        }
+
+        return Task.FromResult<LiveSessionRecord?>(null);
+    }
 }
 
 /// <summary>
@@ -154,24 +178,44 @@ internal sealed class RedisAgentAssistLiveSessionStore(IConnectionMultiplexer re
         foreach (var sessionId in ids.Select(id => id.ToString()))
         {
             var fields = await db.HashGetAllAsync(RecordKey(tenant, sessionId)).WaitAsync(ct).ConfigureAwait(false);
-            if (fields.Length == 0)
-                continue;   // the hash expired between the index read and this one
-
-            var values = fields.ToDictionary(f => f.Name, f => f.Value);
-            records.Add(new LiveSessionRecord(
-                sessionId,
-                tenant,
-                StringOf(values, AgentIdField),
-                StringOf(values, QueueNameField),
-                StringOf(values, CallerIdNumField),
-                values.TryGetValue(ConnectedAtField, out var at) && long.TryParse(at.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ms)
-                    ? DateTimeOffset.FromUnixTimeMilliseconds(ms)
-                    : null,
-                StringOf(values, LinkedIdField),
-                StringOf(values, SentimentField)));
+            if (RecordOf(tenant, sessionId, fields) is { } record)
+                records.Add(record);   // an empty hash expired between the index read and this one
         }
 
         return records;
+    }
+
+    /// <inheritdoc />
+    public async Task<LiveSessionRecord?> FindAsync(string callerTenant, string sessionId, CancellationToken ct)
+    {
+        // ListAsync's semantics for one member: the index score must be strictly after now, then the hash must exist.
+        var db = redis.GetDatabase();
+        var now = time.GetUtcNow().ToUnixTimeMilliseconds();
+        var expiresAt = await db.SortedSetScoreAsync(IndexKey(callerTenant), sessionId).WaitAsync(ct).ConfigureAwait(false);
+        if (expiresAt is not { } score || score <= now)
+            return null;
+
+        var fields = await db.HashGetAllAsync(RecordKey(callerTenant, sessionId)).WaitAsync(ct).ConfigureAwait(false);
+        return RecordOf(callerTenant, sessionId, fields);
+    }
+
+    private static LiveSessionRecord? RecordOf(string tenant, string sessionId, HashEntry[] fields)
+    {
+        if (fields.Length == 0)
+            return null;
+
+        var values = fields.ToDictionary(f => f.Name, f => f.Value);
+        return new LiveSessionRecord(
+            sessionId,
+            tenant,
+            StringOf(values, AgentIdField),
+            StringOf(values, QueueNameField),
+            StringOf(values, CallerIdNumField),
+            values.TryGetValue(ConnectedAtField, out var at) && long.TryParse(at.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var ms)
+                ? DateTimeOffset.FromUnixTimeMilliseconds(ms)
+                : null,
+            StringOf(values, LinkedIdField),
+            StringOf(values, SentimentField));
     }
 
     private static IEnumerable<HashEntry> FieldsOf(LiveSessionRecord record)
