@@ -124,12 +124,18 @@ internal static class AuthEndpoints
         // The hash runs inside the replica's hashing bound: a sign-in burst waits for a slot without holding
         // a thread, so the rest of the replica keeps serving (PasswordHashingGate).
         var hashingGate = PasswordHashingGate.For(context);
-        if (!await hashingGate.VerifyAsync(body.Password, user.PasswordHash, ct))
+        switch (await CheckPasswordInSlotAsync(user, body.Password, hashingGate, userStore, lockoutService, ip, ua, ct))
         {
-            await lockoutService.RecordFailedAttemptAsync(user, ip, ua, ct);
-            await authEvents.LogAsync(rawTenantId!, user.UserId.Value, AuthEventTypes.LoginFailure, ip, ua,
-                new Dictionary<string, string> { ["reason"] = "invalid_password" }, ct);
-            return Results.Unauthorized();
+            case PasswordCheck.Locked:
+                return AccountLocked();
+            case PasswordCheck.AccountGone:
+                await authEvents.LogAsync(rawTenantId!, null, AuthEventTypes.LoginFailure, ip, ua,
+                    new Dictionary<string, string> { ["email"] = body.Email, ["reason"] = "invalid_credentials" }, ct);
+                return Results.Unauthorized();
+            case PasswordCheck.Rejected:
+                await authEvents.LogAsync(rawTenantId!, user.UserId.Value, AuthEventTypes.LoginFailure, ip, ua,
+                    new Dictionary<string, string> { ["reason"] = "invalid_password" }, ct);
+                return Results.Unauthorized();
         }
 
         // Account status is checked only once the password is proven: a caller who does not know
@@ -192,6 +198,55 @@ internal static class AuthEndpoints
 
         // Issue tokens
         return await IssueTokensAsync(user, context, jwtService, refreshService, lockoutService, authEvents, configStore, tenantStore, ct);
+    }
+
+    private enum PasswordCheck
+    {
+        Verified,
+        Rejected,
+        Locked,
+        AccountGone,
+    }
+
+    /// <summary>
+    /// Checks a sign-in's password inside a hashing slot, with the account's lock read again once the slot is
+    /// held and a rejected password recorded before the slot is freed.
+    /// </summary>
+    /// <remarks>
+    /// The copy of the account the caller checked was read before the wait for a slot. During a burst for one
+    /// account every queued sign-in reads it before the first failure is counted, so a lock checked only on that
+    /// copy is passed by all of them, and each gets its password checked. Reading the lock in the slot, and
+    /// counting the failure before the next queued sign-in takes the slot, keeps the passwords checked for one
+    /// account at the lockout threshold (plus at most one per further slot hashing alongside, which read the
+    /// lock before the failures beside them are counted). The count itself is atomic in the store.
+    /// Only the lock state is taken from the fresh read: the password is verified against the hash the caller
+    /// read, as before.
+    /// </remarks>
+    private static async Task<PasswordCheck> CheckPasswordInSlotAsync(
+        User user,
+        string password,
+        PasswordHashingGate hashingGate,
+        IUserStore userStore,
+        AccountLockoutService lockoutService,
+        string? ip,
+        string? ua,
+        CancellationToken ct)
+    {
+        using var slot = await hashingGate.EnterAsync(ct);
+
+        var current = await userStore.GetByIdAsync(user.TenantId, user.UserId, ct);
+        if (current is null)
+            return PasswordCheck.AccountGone;
+        if (current.IsLockedOut(DateTimeOffset.UtcNow))
+            return PasswordCheck.Locked;
+        user.FailedLoginAttempts = current.FailedLoginAttempts;
+        user.LockedUntil = current.LockedUntil;
+
+        if (slot.Verify(password, user.PasswordHash!))
+            return PasswordCheck.Verified;
+
+        await lockoutService.RecordFailedAttemptAsync(user, ip, ua, ct);
+        return PasswordCheck.Rejected;
     }
 
     // ─── MFA Verify ──────────────────────────────────────────────────────────────

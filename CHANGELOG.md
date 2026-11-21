@@ -44,6 +44,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A burst of wrong passwords for one account stops at the lockout threshold again.** Since password checks wait
+  for a hashing slot (v2.40.0), every sign-in of a burst for the same account read the account before the first
+  failure was counted, so each one had its password checked and none answered 423. A sign-in now reads the account's
+  lock again once it holds its slot, and a wrong password is counted before the slot goes to the next sign-in: of
+  50 wrong-password sign-ins queued for one account behind one slot, the threshold's worth answer 401 and the rest
+  423 `Account is locked`. With more slots, at most one more password per further slot is checked. Successful
+  sign-ins, MFA and the 401/423 bodies are unchanged.
+
 - **A supervisor's text whisper reaches the agent.** `POST /api/v1/supervisor/sessions/{sessionId}/whisper` with
   `{"text": "..."}` now delivers the trimmed text to the session's agent as an `agentassist.suggestion` on
   `GET /api/v1/events/stream`, with `source` `Supervisor` and `priority` `Critical`, a new `suggestionId` per whisper,
