@@ -9,6 +9,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.40.0] - 2026-11-21
+
+Agent Assist works end to end: a live call's transcript, suggestions, sentiment and compliance alerts reach the agent
+and the supervisor on any Api replica, and only the Platform tenant configures it (#629, #597). Sign-in and token checks
+no longer stall a replica under a burst: password hashing is bounded and tokens are checked against keys held in
+memory (#636, #638). The shipped Docker stacks hold 250 calls (open-file limits, RTP range, push-bus size; #633, #634),
+campaign routes stay in the caller's tenant (#621, #628, #631, #632), QA results are produced or not shown (#585), and
+the Pro retention purge can delete (#623). Verbara.Sdk `2.10.1` and Verbara.Sdk.Pro `2.30.2-pro`. Read
+**Changed — BREAKING**, **Removed** and **Upgrading** first.
+
 ### Added
 
 - **The nightly Pro retention purge can delete.** The configuration key `Retention:DryRun` (environment variable
@@ -27,19 +37,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (no analytics or dialer database is configured), `not_licensed` (the licence does not include call analytics; read
   again on each request, so a renewed licence shows without a restart) or `no_transcript_source`. This release
   configures no transcript source, so the read never answers `available` true yet. The route sits with the other
-  analytics reads: supervisors and admins of an operational tenant, with the analytics licence module.
+  analytics reads: supervisors and admins of an operational tenant, with the analytics licence module. (#585)
 - Agent Assist configuration keys: `AgentAssist:AudioSocket:Port` (default `9093`) and
   `AgentAssist:AudioSocket:AdvertisedHost` (a literal host, or `auto` for the replica's own address, resolved at first
   use) say where Asterisk sends a snoop's audio; `AgentAssist:Deepgram:Model` (optional) and
   `AgentAssist:Deepgram:Language` (required for a session to be transcribed) configure Deepgram transcription. As
   environment variables, `AgentAssist__AudioSocket__Port` and so on. The existing `AgentAssist:Deepgram:ApiKey` and
-  `:Endpoint` seed keys are unchanged.
+  `:Endpoint` seed keys are unchanged. (#629)
 - `GET /api/v1/supervisor/sessions/active` items name the agent and the caller's mood. `agentId` is now the agent the
   session's live events name (parsed from the call's queue-member interface in the caller's tenant, falling back to
   the call's own agent id), so the Monitor list and the agent's console agree on who takes the call; it is `null` when
   neither is known. New `agentName` is that agent's display name in the caller's tenant, and new `sentiment` is the
   label of the session's latest caller sentiment reading (`Positive`, `Neutral`, `Negative`, `Frustrated` or
-  `Escalating`). Both are always written, `null` when unknown or before the first reading.
+  `Escalating`). Both are always written, `null` when unknown or before the first reading. (#629)
 
 ### Changed — BREAKING
 
@@ -66,26 +76,28 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the Platform tenant, so the console hides Features > Agent Assist there. Both states are held in memory, so the
   restart of this upgrade discards whatever was set through these routes: the toggle and the engine settings start again
   from the `AgentAssist` configuration section, and the keyword and compliance rules start empty. The Agent Assist
-  session reads under `/api/v1/agent-assist/sessions` are unchanged.
+  session reads under `/api/v1/agent-assist/sessions` are unchanged. (#597)
 - **Agent Assist can be switched on only with a live speech provider.** `PUT /api/v1/admin/features/agent-assist`
   with `enabled` true now accepts `provider` `deepgram` only. `whisper`, `azure-whisper` and `google` answer 400 with
   an error on `provider` explaining that their recognizer returns text only after the audio ends, so it cannot
   transcribe a call while it is in progress. `credentials.endpoint`, when present, must be an absolute `ws://` or
   `wss://` URI, else 400 with an error on `credentials`. A refused request leaves the stored state unchanged. Member
   names are unchanged, and a state stored earlier with one of those providers is still returned by `GET` as stored.
+  (#611, #629)
 - **A call analysed with an empty scorecard has no QA score.** An analysis whose scorecard had no item (a maximum
   score of 0) used to report `hasQaScore` true with `qaScore` 0. Now `GET /api/v1/analytics/cdr` and
   `GET /api/v1/analytics/cdr/{sessionId}` answer `hasQaScore` false with `qaScore` null (the detail answers
   `qaSummary` null), `GET /api/v1/analytics/qa` leaves the analysis out, and `GET /api/v1/analytics/qa/{sessionId}`
-  answers 404. Its sentiment, topics and compliance stay readable on their own routes.
+  answers 404. Its sentiment, topics and compliance stay readable on their own routes. (#585)
 - **`GET /api/v1/analytics/qa` refuses a `minScore` outside 0-100** with 400 and an `error` naming the parameter,
-  before reading any data.
+  before reading any data. (#585)
 - **The QA data routes require the call analytics licence module.** `GET /api/v1/analytics/qa`,
   `GET /api/v1/analytics/qa/{sessionId}` and `GET /api/v1/call-analytics/{topics/trends,sentiment/trends,compliance/summary}`
   now need both the analytics and the call analytics modules, and answer 402 like any other licence-gated route when
   either is missing. `GET /api/v1/analytics/qa-availability` and the CDR routes still need only the analytics module.
   Without call analytics, `GET /api/v1/analytics/cdr` and `GET /api/v1/analytics/cdr/{sessionId}` answer
   `hasQaScore` false, `qaScore` null and `sentimentLabel` null on every row, and the detail answers `qaSummary` null.
+  (#585)
 
 ### Changed
 
@@ -95,39 +107,47 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `GET /api/v1/analytics/cdr?agent=` finds the call. An interface of another tenant, a supervisor's listen slot or any
   other member keeps the agent the Sdk recorded. A call taken in two queue visits names its first agent. The Api no
   longer logs Pro's warning that no `ICallAgentResolver` is registered. Records written before this release are not
-  repaired (read **Upgrading**).
+  repaired (read **Upgrading**). (#624)
 - **The `services` readiness entry stays Degraded while a dependency circuit is half-open.** From Verbara.Sdk `2.10`
   a tripped circuit reads half-open once its open window ends, with or without a call, so the entry read Healthy
   while the dependency was still down. A watched circuit that is not closed now keeps `services` Degraded until a call
   succeeds and the circuit closes; the message reads `Circuit not closed: <key> (<state>)`. Only a circuit read open
   past a check's threshold escalates (the `postgres` check's rule), so a dependency circuit still never fails
-  `/health/ready`. The `postgres` probe has no circuit of its own: it runs on every evaluation.
+  `/health/ready`. The `postgres` probe has no circuit of its own: it runs on every evaluation. (#615)
 - **The WhatsApp, Instagram, Messenger, Twitter and Telegram connectors return a failed send on a circuit
   rejection.** From Verbara.Sdk `2.10` a half-open circuit lets one probe through and rejects every other call until
   the probe's result is recorded. These connectors let that rejection escape; they now return the result of a
   transport failure (`HTTP_ERROR`) and log a warning naming the circuit. The Telegram and Twitter warning and error
   lines no longer include the request URL: Telegram logs the API method and the status, Twitter the status. The other outbound clients (mail, PDF
   rendering, the OIDC token exchange, SMTP, Microsoft Graph, Twilio SMS, video, RCS, S3 and the flow HTTP request node)
-  already pass a failure to their callers, and pass the rejection the same way.
+  already pass a failure to their callers, and pass the rejection the same way. (#615)
 - **A linked id that two attached servers hold resolves no tenant and no listen leg.** From Verbara.Sdk `2.10` the
   unscoped linked-id lookup answers nothing when more than one server holds the id. The event store's tenant lookup and
   the supervisor listen keep that lookup, so such a call gets no tenant and no listen leg instead of the first match.
-- **Cross-node push events reach each node's event bus in publish order** (Verbara.Sdk.Pro `2.28.0-pro`, below).
+  (#615)
+- **Cross-node push events reach each node's event bus in publish order** (Verbara.Sdk.Pro `2.28.0-pro`, below). (#615)
 - **Calls already up when a server attaches are admitted** at boot, on add-node and on a takeover after a refused
-  reconstruction (Verbara.Sdk.Pro `2.29.0-pro`, below, as measured on each path).
+  reconstruction (Verbara.Sdk.Pro `2.29.0-pro`, below, as measured on each path). (#615)
 - **`GET /api/v1/call-analytics/sentiment/trends` and `/compliance/summary` with a queue return the analyses stored
   after the upgrade for that queue.** They returned none; analyses stored earlier carry no queue and still do not match
-  (Verbara.Sdk.Pro `2.27.0-pro`, below).
+  (Verbara.Sdk.Pro `2.27.0-pro`, below). (#615)
 - **Each replica's node ARI client registers an app of its own.** The app named by `Asterisk:Ari:NodeApplication`
   (default `<Asterisk:Ari:Application>-node`, for example `verbara-node`) is now followed by `-` and the replica's
   machine name, for example `verbara-node-api-7f9c`, so two replicas never register the same app. Agent Assist creates
   its snoop channels in that app. Anything outside the Platform that looks for the node app by its exact name must match
   it by prefix. The Api still refuses to start when `Asterisk:Ari:NodeApplication` equals `Asterisk:Ari:Application`,
-  and now also when the name it would register does (the error names both settings and the machine name).
+  and now also when the name it would register does (the error names both settings and the machine name). (#629)
 - **The Agent Assist feature toggle is kept in the database.** With a `Postgres` connection string, the on/off switch,
   provider and encrypted credentials set through `PUT /api/v1/admin/features/agent-assist` are stored in
   `agent_assist_feature_state` and shared by every replica, so they survive a restart; the `AgentAssist` configuration
   section seeds that row until an administrator writes it. Without a database the toggle stays in memory, as before.
+  (#629)
+
+### Deprecated
+
+- **`GET /api/v1/profile/security/sessions` and `POST /api/v1/profile/security/sessions/{tokenId}/revoke` are still
+  served.** Their removal, planned for v2.40.0, moves to a later release; use `GET /api/v1/auth/sessions` and
+  `DELETE /api/v1/auth/sessions/{tokenId}`. (#520)
 
 ### Removed
 
@@ -142,7 +162,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `OnConversationStateChanged`) come from Platform's own agent and conversation state changes, as they already did:
   none of the bridges' events reached a hub client (the agent bridge only saw voice agent-pool logins; the
   conversation bridge published every call under a fixed default tenant). Nothing changes for consoles, the API, the
-  hub contract or configuration. The cluster-event bridge stays. This lets Pro remove both bridges.
+  hub contract or configuration. The cluster-event bridge stays. This lets Pro remove both bridges. (#637)
 
 ### Fixed
 
@@ -163,7 +183,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the Agent Assist engine, so a session that begins while the Api is still starting is not missed. With several
   replicas, only the replica that holds the voice AMI connection assists calls, at most one session runs per call (a
   claim per call in the `Postgres` database), and each session transcribes with the provider and credentials stored at
-  the moment it starts.
+  the moment it starts. (#629)
 - **Agent Assist results reach an agent and a supervisor on any Api replica.** The engine runs on one replica, while
   an agent's `GET /api/v1/events/stream` and a supervisor's `GET /api/v1/supervisor/sessions/active` may be served by
   another. With `ConnectionStrings__Redis` set, the four `agentassist.*` events now cross replicas on the Redis
@@ -174,7 +194,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   given a different tenant the former tenant stops seeing it within 5 seconds. A session's `conversationId` is still
   looked up in the caller's tenant on each read, so a row never shows another tenant's conversation. Without Redis both stay on the one replica, as before; run a single Api replica then.
   New counter on `/metrics`: `platform_agentassist_crosspod_received_total{outcome}` (`delivered`, `empty_payload`,
-  `tenant_mismatch`, `decode_error`).
+  `tenant_mismatch`, `decode_error`). (#629)
 - **Agent Assist events carry the call's tenant, agent and conversation even when they are known late.** The four
   `agentassist.*` events of a session used to take the call's tenant, the agent and the conversation once, when the
   session started; a call given its tenant a moment later (a slow lookup or a replica handover) then sent every event
@@ -186,12 +206,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   own conversation, never the former tenant's. A session whose call and session disagree on the tenant publishes
   nothing. Each event is published once: a failed publish is logged, no longer retried later out of order. New counter
   on `/metrics`: `platform_agentassist_events_held_dropped_total{reason}` (`tenant_unresolved`, `conflict`,
-  `overflow`) counts held events that were never published.
+  `overflow`) counts held events that were never published. (#629)
 - **Agent Assist sends each snoop's audio to the replica that created it.** The listener uses
   `AgentAssist:AudioSocket:Port`, and each snoop carries `AgentAssist:AudioSocket:AdvertisedHost` and that port as its
   audio address, resolved when the first call needs it (`auto`: the replica's own address on its route to Asterisk).
   When no address is set or `auto` finds no route, the Api still starts; each call is then skipped and counted, and a
-  Warning is logged once.
+  Warning is logged once. (#629)
 - **The shipped deployment files carry the Agent Assist audio path.** The `[agentassist]` context of
   `docker/asterisk-config/extensions.conf` (and of the demo override) appended `:9092` to `AUDIOSOCKET_HOST`, which
   now already holds `host:port`, so Asterisk dialled an address that does not exist; it now reads
@@ -206,9 +226,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Realtime uses), so its replicas join the push backplane and Agent Assist results reach an agent on any replica.
   Two new CI checks keep these in place: `scripts/check-scale-backplane.py` and `scripts/check-agentassist-k8s.py`.
   Deepgram transcription is verified against a protocol fake only, not against Deepgram's live service; setup in
-  `docs/operations/agentassist-setup.md`.
+  `docs/operations/agentassist-setup.md`. (#629)
 - New counters on `/metrics`: `platform_agentassist_call_claim_total{outcome}`,
   `platform_agentassist_toggle_stale_total{path}` and `platform_agentassist_recognizer_unavailable_total{reason}`.
+  (#629)
 - **A burst of sign-ins no longer stalls the rest of an Api replica.** Each password check (Argon2id, or BCrypt for a
   hash not yet migrated) is deliberate CPU work, and every sign-in ran its own at once on the shared thread pool: when a
   shift's agents all signed in within the same second, every pool thread was busy hashing and every other request on
@@ -218,8 +239,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   none is refused. Sign-in, password change, MFA disable and recovery-code regeneration go through the bound. On a
   4-processor replica, a burst of 250 sign-ins kept `/health` at 6 ms (95th percentile) instead of 531 ms, with every
   sign-in succeeding. Total time for the burst can grow when the bound leaves processors unused for hashing: read
-  [Password hashing concurrency](docs/operations/auth-horizontal-scaling.md#password-hashing-concurrency).
-
+  [Password hashing concurrency](docs/operations/auth-horizontal-scaling.md#password-hashing-concurrency). (#636)
 - **A token check no longer waits on the key pool inside a request.** With the JWT key-rotation pool on
   (`Identity:JwtKeyRotation:UseRotationPool`), every five minutes one request per replica read the pool's keys from
   Redis while holding a lock, blocking a thread-pool thread; the requests behind it blocked on the lock. Under a
@@ -234,7 +254,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   retried. A token signed with a key the replica has not read yet starts a read (at most one every 10 seconds) and is
   refused at once rather than waiting. A sign-in refreshes the signing key in the background and adds it to the
   validation keys. The counters `jwt.key.cache_misses`, `jwt.key.stale_cache_fallbacks` and `jwt.key.fail_closed` stay
-  on `/metrics`; they now count background reads.
+  on `/metrics`; they now count background reads. (#638)
 - **The shipped Docker stacks no longer run the Api and Asterisk out of open files under load.** Docker starts a
   container with a soft limit of 1024 open files, and neither the native-AOT Api nor Asterisk raised it. With Agent
   Assist listening, each call holds about four descriptors in the Api (two AudioSocket streams, two speech-to-text
@@ -245,11 +265,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `docker-compose.production.yml`, `docker-compose.reference-smb.yml` and the `docker-compose.verified.yml` template;
   `docker/asterisk-config/asterisk.conf` sets `maxfiles = 65536`, which Asterisk applies itself at start-up, in every
   stack that mounts that file. On Kubernetes the limit comes from the node's container runtime: check it there.
+  (#634)
 - **`RTP_PORT_START` / `RTP_PORT_END` in `.env.reference-smb` now set Asterisk's RTP range.** The SMB manuals size the
   tiers by raising `RTP_PORT_END`, but nothing passed it to Asterisk, which kept `rtp.conf`'s 20000-20200 (about 100
   channels, so about 50 calls bridged to an agent). The reference stack passes both variables to Asterisk, and
   `entrypoint-asterisk.sh` writes them into `rtp.conf` at start-up when they are set (and says so in the log when the
-  file is not writable). Unset, `rtp.conf` keeps its own range, as before.
+  file is not writable). Unset, `rtp.conf` keeps its own range, as before. (#634)
 - **A busy replica no longer loses live events at 250 calls.** The Api and Realtime push bus kept 256 events, about
   one second of traffic at 250 concurrent calls; a replica that fell behind for longer, as one did in a lab run while
   250 agents signed in again during the call ramp, evicted the oldest events for good (transcripts and sentiment never
@@ -257,32 +278,32 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   now keeps 16384 events by default, about a minute at that rate, and the configuration key `Push:Bus:BufferCapacity`
   (environment variable `Push__Bus__BufferCapacity`) sets it per host. A value that is not an integer stops the host at
   startup naming the key; a value below 1 fails the existing validation. The buffer stays bounded: a longer stall
-  still evicts, and counts, the oldest events.
+  still evicts, and counts, the oldest events. (#633)
 - **Events relayed between Api replicas carry their payload.** The Redis push relay sends every event on an
   Api replica's push bus to the other replicas, but the Api only described the payloads of the five cross-replica
   events (agent state, pending agent state, conversation state, typification, account revocation). Every other event
   (screen pops, agent hangups, the Pro conversation, agent and cluster-node state events, Agent Assist, campaign and
   notification events, among others) failed to serialize: it was counted in `push_relay_dropped_total` with
   `reason="serialization_error"`, logged a warning, and reached the other replicas with an empty payload. The Api
-  now describes every event type that can reach its push bus, and a test fails when a new one is missing.
+  now describes every event type that can reach its push bus, and a test fails when a new one is missing. (#630)
 - `PUT /api/v1/admin/campaigns/{id}/dispositions/{codeId}` checks that the campaign belongs to the caller before it
   updates the disposition code, as creating and deleting a code already do. A campaign of another tenant answers 404
-  and nothing is written.
+  and nothing is written. (#628)
 - Listing a campaign's disposition codes (`GET /api/v1/admin/campaigns/{id}/dispositions`) checks that the campaign
   belongs to the caller, like the other disposition routes, and answers 404 otherwise, as listing a campaign's contact
-  lists does. Before, it answered 200 for any campaign id.
+  lists does. Before, it answered 200 for any campaign id. (#631)
 - A campaign's scheduled-callback routes (`GET` and `POST /api/v1/admin/campaigns/{id}/callbacks`) check that the
   campaign belongs to the caller, like the disposition and contact-list routes, and answer 404 otherwise; the `POST`
   then schedules nothing. Before, listing answered 200 for any campaign id, and scheduling relied only on the contact.
-  The OpenAPI document now declares the 404 on both, and the `POST`'s 201 and 400 in place of a bare 200.
+  The OpenAPI document now declares the 404 on both, and the `POST`'s 201 and 400 in place of a bare 200. (#632)
 - `GET /api/v1/analytics/cdr/{sessionId}` always answers `hasTranscript` false. It used to answer true for any call
-  with an analysis summary, although no transcript route is served, so a client that followed it got 404.
+  with an analysis summary, although no transcript route is served, so a client that followed it got 404. (#585)
 - The analytics endpoints read a date-only `to` (`2026-11-10`) as the whole of that UTC day. Before, it was that day's
   00:00, so the console's default range and its "Today" preset left out every call made that day, and
   `GET /api/v1/analytics/cdr` did not list today's calls. A date-only `from` starts at 00:00 UTC on every host (it
   used to start at the host's local midnight), and a `from` or `to` that carries a time keeps its meaning. This applies
   to `GET /api/v1/analytics/{dashboard,cdr,qa,intervals,intervals/agents,bot}` and
-  `GET /api/v1/call-analytics/{topics/trends,sentiment/trends,compliance/summary}`.
+  `GET /api/v1/call-analytics/{topics/trends,sentiment/trends,compliance/summary}`. (#561)
 - The other endpoints that take a date range in the query string also read a date-only upper bound as the whole of
   that UTC day, and a date-only lower bound as 00:00 UTC. Before, `to=2026-11-10` stopped at 00:00 of that day, so the
   console's audit log and GDPR purge log filters left out the last day they showed. This applies to `to` on
@@ -294,7 +315,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `POST /api/v1/partner/customers/{customerId}/invoices/generate`, whose invoice period then ends at that midnight. A
   bound that carries a time keeps its meaning: `endDate=2026-11-10T00:00:00Z` on auth events no longer stretches to the
   end of the day. A malformed bound is still refused with 400. In the OpenAPI document these parameters are plain
-  strings instead of `date-time` strings.
+  strings instead of `date-time` strings. (#562)
 - **Agent Assist sessions stay in their tenant.** Agent Assist live sessions, whisper, transcript listen and stored
   suggestions and compliance alerts are now limited to the caller's tenant; the transcript listen records the signed-in
   supervisor. `GET /api/v1/supervisor/sessions/active` lists only the sessions whose call belongs to the caller's
@@ -309,11 +330,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   memory than a hosted CI runner has. The stage is now owned by the host and stops with it, and the unit-test run
   stays within a hosted runner's memory. Rate limiting behaves the same: the same three policies, partition keys,
   windows and limits, the same position after tenant resolution and before authentication, and the same 429
-  response with `Retry-After`. The `aspnetcore.rate_limiting.*` metrics are no longer emitted. (#586)
+  response with `Retry-After`. The `aspnetcore.rate_limiting.*` metrics are no longer emitted. (#586, #595)
 - **The realtime reconciliation loop runs on the host's clock.** Its 10 s start-up stagger and its tick timer now
   wait on the `TimeProvider` the host registers, which is the system clock, so its tests can drive them with a fake
   clock instead of waiting on a loaded CI runner. The loop behaves the same: the same stagger, the same 60 s
-  interval, the same order of work.
+  interval, the same order of work. (#598)
 - **Campaign contact lists and disposition codes stay in their tenant.** The campaign contact-list routes and the
   disposition-code create and delete routes answer 404 for a campaign, list or code outside the caller's tenant or
   campaign, and change nothing: `GET` and `POST /api/v1/admin/campaigns/{id}/contact-lists` for a campaign of another
@@ -333,13 +354,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Verbara.Sdk `2.9.0` → `2.10.1` (`2.10.0` skipped) and Verbara.Sdk.Pro `2.26.0-pro` → `2.29.0-pro`**, the 8
   `Verbara.Sdk.*` and 22 `Verbara.Sdk.Pro.*` pins in one commit: Pro `2.29.0-pro` is built on Sdk `2.10.1`, so moving
   one side alone downgrades a transitive Sdk package (`NU1605`). The triple is **Sdk `2.10.1` × Pro `2.29.0-pro` ×
-  Platform (next cut from `main`)**. The hop crosses Pro `2.27.0-pro` and `2.28.0-pro`, and both reach Platform
+  Platform `2.40.0`**. The hop crosses Pro `2.27.0-pro` and `2.28.0-pro`, and both reach Platform
   (below). Floors the restore moved, diffed by package name over the 70 `project.assets.json`: `OpenTelemetry`,
   `.Api`, `.Api.ProviderBuilderExtensions`, `.Exporter.Console`, `.Exporter.OpenTelemetryProtocol` and
   `.Extensions.Hosting` `1.19.1` → `1.20.1` and `.Exporter.Prometheus.AspNetCore` `1.19.1-beta.1` → `1.20.1-beta.1`
   (Sdk floors); `Microsoft.Extensions.Diagnostics.HealthChecks` and `.Abstractions` and `System.IO.Hashing` `10.0.14` →
   `10.0.15` (Pro floors). None of them is pinned centrally, no package resolves lower, and none appears or drops. Twelve
-  test projects now reference `Microsoft.Extensions.TimeProvider.Testing`, already pinned centrally.
+  test projects now reference `Microsoft.Extensions.TimeProvider.Testing`, already pinned centrally. (#615)
 - **Pro `2.27.0-pro` reaches Platform** through the call-analytics store and engine the Api registers when an
   `Analytics` (or `Dialer`) connection string is set, through the recording resolver and through the call-analytics
   retention targets:
@@ -360,7 +381,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `/health/voice` and does not gate `/health/ready`.
   - The call-analytics store writes and reads each analysis's queue and agent, so the queue filter of
     `GET /api/v1/call-analytics/sentiment/trends` and `/compliance/summary` matches the analyses stored after the
-    upgrade; nothing back-fills older rows (`CallAnalyticsQueueFilterLiveDbTests`).
+    upgrade; nothing back-fills older rows (`CallAnalyticsQueueFilterLiveDbTests`). (#615)
 - **Pro `2.28.0-pro` reaches Platform** through the Agent Assist engine and the Redis push backplane the Api and
   Realtime register:
   - The Agent Assist engine creates a snoop only with an advertised AudioSocket address, which the Api now sets from
@@ -370,7 +391,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     it created snoops that never produced a session.
   - Cross-node push events (agent, conversation and cluster state) reach the receiving node's event bus in publish
     order; before, two events from one node could reach it swapped (`PlatformPushRelayOrderLiveTests`). The order from
-    that bus to SignalR clients is not asserted.
+    that bus to SignalR clients is not asserted. (#615, #629)
 - **Pro `2.29.0-pro` itself reaches Platform** through the cluster manager and failover the Api registers when
   `Asterisk:Ami:Hostname` is set, through the originate executor of click-to-dial and callbacks, and through the
   dialer:
@@ -404,12 +425,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `Snoop/` channel is no longer rebuilt as a call leg, and a linked id whose live channels are all snoops gets no
     session; a takeover on an Agent Assist host rebuilds only the real calls.
   - Inert on Platform: the RTP quality conversion (no caller), a call's direction after a rebuild (unchanged), and the
-    release's test-only and pin-only items.
+    release's test-only and pin-only items. (#615, #629)
 - **A paused `app_agent_pool` agent is a known limitation of Pro `2.29.0-pro`** (its "Known limitations" entry, Sdk
   #541), and the limitation stays: no Pro release fixes it. A later Pro release removes both the agent-state push
   bridge and the skill-based agent selector, after a separate Platform change stops registering the bridge. Platform
   registers the bridge today, but its agent members are PJSIP only, it registers no skill-based agent selector, and
-  the Web console only re-fetches on that event, so the limitation does not change what Platform shows.
+  the Web console only re-fetches on that event, so the limitation does not change what Platform shows. (#615)
 - **Verbara.Sdk.Pro `2.29.0-pro` → `2.30.1-pro`**, the 22 `Verbara.Sdk.Pro.*` pins in one commit, for the scoped
   contact-list operations the campaign routes above use. Diffed by package name over the 70 `project.assets.json`, the
   restore moved only the 22 Pro packages: no floor moved, and none appears or drops. What else of `2.30.x` reaches
@@ -428,25 +449,42 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - The Sdk logs each absorbed 409 at Warning (`[ARI_HTTP] Error response`). It is not a fault when it comes with an
     `agentassist.snoop.stasis_wait` sample.
   - A snoop that never enters its app ends the pair, counted in `agentassist.snoop.errors` with
-    `error.type=SnoopNeverEnteredStasisException`.
+    `error.type=SnoopNeverEnteredStasisException`. (#629)
 - **The ASP.NET Core packages move together to `10.0.15`**: `Microsoft.AspNetCore.Authentication.JwtBearer` and
   `.OpenIdConnect` (`10.0.14`), `Microsoft.AspNetCore.DataProtection` and `.Extensions`, `Microsoft.AspNetCore.SignalR.Client`
   and `.Common`, `Microsoft.AspNetCore.Mvc.Testing`, `System.Security.Cryptography.Xml` and `.Pkcs` (`10.0.13`), and
   `Microsoft.AspNetCore.OpenApi` (`10.0.11`). `Microsoft.AspNetCore.OpenApi 10.0.15` needs `Microsoft.OpenApi` `2.13.0` or
   later in the 2.x line, so that pin moves from `2.9.0` to `2.13.0`. Moved one at a time, several failed restore with `NU1109`,
-  so they ship as one change and replace #568, #576, #577, #578 and #579.
+  so they ship as one change and replace #568, #576, #577, #578 and #579. (#596)
 - **The Mail service moves to Microsoft Graph `6.9.0`** (from `5.105.0`), and the `Microsoft.Kiota.Abstractions` pin moves
   from `1.22.2` to `2.0.0` with it. Graph 6 depends on `Microsoft.Graph.Core` `4.0.1`, which needs Kiota `2.0.0` or later, so
   the Graph bump alone failed restore with `NU1109`; the rest of the Kiota packages follow at `2.0.0`. Mailbox behaviour
   (list, send, reply, forward, delete, mark as read, attachments) is unchanged, and only the `mail` image carries Graph.
-  Replaces #571.
+  Replaces #571. (#606)
 - **The Mail service no longer references `Azure.Identity`**, which no Mail code used (it authenticates against Azure AD
-  with its own token request), and its central `1.21.0` pin goes with it, since no other project referenced it.
+  with its own token request), and its central `1.21.0` pin goes with it, since no other project referenced it. (#608)
 - **A snoop channel no longer opens a call session** (Verbara.Sdk `2.10.1`, above). The Sdk session manager opens no
   call for a snoop channel (`Snoop/…`), the tap Agent Assist puts on each call it serves: such a channel used to count
   as a call of its own in the session metrics, the active-session counts and the call events that Pro's push, event
   store and cluster consumers read. Conversations, agent presence and voice load were never affected
-  (`SnoopChannelSessionTests`, and the snoop cases of `VoiceConversationBridgeTests`).
+  (`SnoopChannelSessionTests`, and the snoop cases of `VoiceConversationBridgeTests`). (#615, #629)
+- **`Microsoft.AspNetCore.SignalR.StackExchangeRedis` `10.0.5` → `10.0.15`** (Realtime's Redis backplane), the first
+  release NuGet audit (`NU1903`) no longer flags. It needs `MessagePack` `2.5.303` or later, so that pin moves from
+  `2.5.301`, and the `Microsoft.Extensions.Logging.Abstractions`, `.DependencyInjection`,
+  `.DependencyInjection.Abstractions`, `.Hosting`, `.Hosting.Abstractions`, `.Options` and `.Http` pins move from
+  `10.0.14` to `10.0.15` with it. (#563)
+- `Verbara.Sdk.VoiceAi.Stt` is pinned with the other `Verbara.Sdk.*` packages, for the Api's speech-recognizer
+  factory that Agent Assist builds its recognizer with. The Api already resolved it through Pro's Agent Assist
+  package, and the restored package graph did not change. (#611)
+- `MailKit` and `MimeKit` `4.16.0` → `4.18.2` (Mail). (#605)
+- `StackExchange.Redis` `3.4.29` → `3.4.35`. (#604)
+- `AWSSDK.S3` `4.0.104.7` → `4.0.104.12`. (#602)
+- `QuestPDF` `2026.9.1` → `2026.9.2`. (#603)
+- `Scalar.AspNetCore` `2.18.6` → `2.19.0`. (#574)
+- Build and CI only: `Microsoft.NET.Test.Sdk` `17.14.1` → `17.14.2` in the test projects (#601); `global.json` pins
+  the .NET SDK to the 10 line (`10.0.100`, `rollForward: latestFeature`) (#581); Dependabot no longer proposes a new
+  major of the `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*` and `System.Security.Cryptography.*` packages,
+  which move with a planned .NET major (#583); four action versions in the `github-actions` group (#575).
 
 ### Upgrading
 
@@ -510,7 +548,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Migration `031` runs at start-up**: it adds two empty tables for Agent Assist, `agent_assist_feature_state` (the
   deployment's one feature state, shared by every replica) and `agent_assist_call_claims` (one row per call with a live
   Agent Assist session). Only new tables are created, so no existing table is locked or read. It is additive; a rollback
-  to the previous image leaves both tables unused.
+  to the previous image leaves both tables unused. (#629)
+
+### Tests
+
+- Tests that waited on wall-clock time or a shared token now wait on the event they need, so they hold on a loaded
+  CI runner; no product code changes: WebChat socket attaches wait for registration (#592, #594, #599, #609, #610),
+  the live-stream probe waits for its subscription (#588), the MFA recovery-code throttle and the trunk reload loop
+  run on a fake clock (#587, #589), the option-validation hosts start through the entry point (#590), the wrap-up rig
+  gets a bound past a late Sdk timer (#591), the inactivity double-close controls take the shared row one worker at
+  a time (#593), and the event-store standby tests wait for the lock table to replay (#564). The test projects
+  satisfy the CA2026 and CA2027 rules of the .NET 11 SDK analyzers (#580).
+- CHANGELOG citations only: #582, #622, #635.
 
 ## [2.39.1] - 2026-11-10
 
