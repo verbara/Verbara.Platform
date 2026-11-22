@@ -20,21 +20,21 @@ via the Web UI. Shipped in Platform v1.10.0 + Web v1.9.0 (R5.1 Phase 2).
 ## Drain flow
 
 Draining a node gracefully removes it from routing without interrupting
-active sessions:
+active sessions. The node's row menu offers no item today (see Known
+limitations), so start the drain through the API:
 
-1. From the node's row menu, **Drain** opens a dialog asking for the
-   grace period in seconds (default 300).
-2. On submit, the Web sends
-   `POST /api/v1/management/cluster/nodes/{nodeId}/drain` with
-   `{"gracePeriodSeconds": <n>}`; the API answers 202 Accepted. The
-   drain is refused while it would leave no other healthy node.
-3. The **Active drains** section and the drawer's **Drain Status** tab
-   show the drain's progress (remaining and completed calls, calls
-   force-disconnected, deadline).
-4. **Cancel** (in the Active drains section) sends
+1. Send `POST /api/v1/management/cluster/nodes/{nodeId}/drain` with
+   `{"gracePeriodSeconds": <n>}` (the Web dialog's default is 300); the
+   API answers 202 Accepted. The drain is refused while it would leave
+   no other healthy node.
+2. The **Active drains** section shows the drain's progress (remaining
+   and completed calls, calls force-disconnected) and its state. The
+   drawer's **Drain Status** tab does not (see Known limitations).
+3. **Cancel** (in the Active drains section) sends
    `DELETE /api/v1/management/cluster/nodes/{nodeId}/drain` and returns
    the node to routing.
-5. **Force** ends the remaining calls of a running drain
+4. **Force** (in the Active drains section) ends the remaining calls of
+   a running drain
    (`POST /api/v1/management/cluster/nodes/{nodeId}/force-drain`). Its
    confirm dialog (the `ConfirmDeleteDialog.confirmationWord` primitive)
    asks the operator to type **`FORCE`**, because forced calls are cut.
@@ -81,9 +81,13 @@ drains section, drawer).
 - **Cluster node removal** (`DELETE /api/v1/management/cluster/nodes/{nodeId}`)
   is meant for an `offline` or `unhealthy` node; drain a healthy node
   first.
-- **Row menu and Drain Status tab casing.** The page compares node
-  states in title case (`Healthy`, `Draining`) while the API returns
-  them in lower case, so the row menu's state-dependent actions, the
-  healthy count and the drawer's Drain Status tab may not reflect the
-  node's state. Until the Web fixes the comparison, drive a drain with
-  the endpoints above; the Active drains section is not affected.
+- **Row menu, healthy count and Drain Status tab.** The page compares
+  node states in title case (`Healthy`, `Draining`) while the API
+  returns them in lower case, so these never follow the node's state:
+  the row menu shows no Edit, Drain, Cancel, Force or Remove item for
+  any node, the summary card counts 0 healthy nodes, and the drawer's
+  Drain Status tab always reads "not draining". Until the Web fixes the
+  comparison, start a drain, edit a node or remove one through the
+  endpoints above, and follow, cancel or force a drain in the Active
+  drains section, which reads the drain's own state and is not
+  affected.

@@ -274,14 +274,19 @@ is refused when it would leave no other healthy node.
 > credentials). See [cluster-management.md](cluster-management.md).
 
 Signed in as the host tenant's admin, open Web UI → **Platform Admin →
-Cluster**: both nodes should read `healthy`. Drain `primary` (row menu →
-**Drain**, or `POST /api/v1/management/cluster/nodes/primary/drain` with
-`{"gracePeriodSeconds":120}`). The drain coordinator (`Pro.Cluster`) will:
+Cluster**: both nodes should read `healthy`. Drain `primary` with
+`POST /api/v1/management/cluster/nodes/primary/drain` and
+`{"gracePeriodSeconds":120}`. The page's row menu offers no Drain item today:
+it compares node states in title case while the API returns them in lower
+case, so the menu stays empty and the drawer's **Drain Status** tab always
+reads "not draining" (see the Known limitations of
+[cluster-management.md](cluster-management.md)). The drain coordinator
+(`Pro.Cluster`) will:
 
 1. Mark the node `draining` in the registry.
 2. Reject new traffic; existing calls keep running.
-3. Show the drain's progress (completed / initial calls) in **Active drains**
-   and the node drawer's **Drain Status** tab.
+3. Show the drain's progress (remaining / completed calls) in **Active
+   drains**, with its **Cancel** and **Force** buttons.
 4. Take the node out of routing when the last call ends or the grace period
    runs out.
 
