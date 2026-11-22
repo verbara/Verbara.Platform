@@ -74,7 +74,6 @@ using Verbara.Sdk.Pro.MultiTenant;
 using Verbara.Sdk.Pro.MultiTenant.DependencyInjection;
 using Verbara.Sdk.Push.Hosting;
 using Verbara.Sdk.Pro.Push;
-using Verbara.Sdk.Pro.Push.SignalR.Bridges;
 using Verbara.Sdk.Pro.Storage.Common.Retention;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Verbara.Platform.Api.Endpoints.Internal;
@@ -119,12 +118,8 @@ builder.Services.AddPlatformPushBus();
 builder.Services.AddLiveConnectionRevocation();
 
 // ADR-0022 Phase A — The SignalR Hub itself (MapHub, PresenceTracker,
-// PushToHubRelay) moved to Verbara.Platform.Realtime. Platform.Api keeps the
-// one remaining Pro event bridge, WithClusterEventBridge, because it depends on
-// ClusterTransportBase, which lives here. It publishes cluster node events to
-// IPushEventBus and the Pro.Push Redis backplane; Realtime's relay subscribes to them but its
-// RemoteEventDispatcher cannot decode them yet (follow-up of platform-drops-the-pro-agent-bridge).
-// Hub agent and conversation frames come from Platform's own Core events
+// PushToHubRelay) moved to Verbara.Platform.Realtime. Platform.Api wires no Pro
+// push bridge (Pro/ADR-0026): hub agent and conversation frames come from Platform's own Core events
 // (agent.state_changed, conversation.state_changed): the Api's bus → Pro.Push
 // Redis backplane → Realtime's RemoteEventDispatcher → PushToHubRelay → SignalR clients.
 var pushBackplaneRedis = builder.Configuration.GetConnectionString("Redis");
@@ -150,16 +145,6 @@ if (!string.IsNullOrWhiteSpace(pushBackplaneRedis))
         o.PayloadSerializerOptions = Verbara.Platform.Api.Serialization.PushRelayPayloadSerialization.CreateOptions();
     });
 }
-
-// The cluster bridge resolves a tenant for every event and its loop ends on the
-// first one without it, so the shared BridgeOptions carries the default tenant.
-// No Pro agent or conversation bridge (Pro/ADR-0026 point 4; owner Q8 = A,
-// 2026-11-18): the hub's agent and conversation frames come from Platform's own
-// AgentStateChangedEvent and ConversationStateChangedEvent, which the endpoints,
-// the switchboard and the workers publish and Realtime's PushToHubRelay forwards.
-builder.Services
-    .WithClusterEventBridge()
-    .WithDefaultTenantId("default-tenant");
 
 // Postgres-backed agent→tenant resolver consumed by /api/v1/internal/agent-tenant
 // (which Realtime calls over HTTP+JSON to honour cross-tenant Hub subscription

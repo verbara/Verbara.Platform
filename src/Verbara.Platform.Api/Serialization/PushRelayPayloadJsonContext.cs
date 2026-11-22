@@ -1,7 +1,6 @@
 using System.Text.Json.Serialization;
 using Verbara.Platform.Core;
 using ProAnalytics = Verbara.Sdk.Pro.Analytics.Events;
-using ProPush = Verbara.Sdk.Pro.Push.SignalR.Events;
 
 namespace Verbara.Platform.Api.Serialization;
 
@@ -34,18 +33,8 @@ namespace Verbara.Platform.Api.Serialization;
 [JsonSerializable(typeof(NotificationEvent))]
 [JsonSerializable(typeof(VoiceAgentHangupEvent))]
 [JsonSerializable(typeof(VoiceScreenPopEvent))]
-// Pro push events (the T27 bridges and the Pro packages Platform.Api hosts).
+// Pro push events (the Pro packages Platform.Api hosts).
 [JsonSerializable(typeof(ProAnalytics.AnalyticsIntervalCompletedEvent), TypeInfoPropertyName = "ProAnalyticsIntervalCompletedEvent")]
 [JsonSerializable(typeof(ProAnalytics.LiveQueueStateEvent), TypeInfoPropertyName = "ProLiveQueueStateEvent")]
 [JsonSerializable(typeof(ProAnalytics.QueueMetricsUpdatedEvent), TypeInfoPropertyName = "ProQueueMetricsUpdatedEvent")]
-[JsonSerializable(typeof(ProPush.AgentCapacityChangedEvent), TypeInfoPropertyName = "ProAgentCapacityChangedEvent")]
-[JsonSerializable(typeof(ProPush.AgentPresenceOfflineEvent), TypeInfoPropertyName = "ProAgentPresenceOfflineEvent")]
-[JsonSerializable(typeof(ProPush.AgentPresenceOnlineEvent), TypeInfoPropertyName = "ProAgentPresenceOnlineEvent")]
-[JsonSerializable(typeof(ProPush.AgentTenantMembershipChangedEvent), TypeInfoPropertyName = "ProAgentTenantMembershipChangedEvent")]
-[JsonSerializable(typeof(ProPush.ClusterNodeDrainProgressEvent), TypeInfoPropertyName = "ProClusterNodeDrainProgressEvent")]
-[JsonSerializable(typeof(ProPush.ClusterNodeStateChangedEvent), TypeInfoPropertyName = "ProClusterNodeStateChangedEvent")]
-[JsonSerializable(typeof(ProPush.ConversationAssignedEvent), TypeInfoPropertyName = "ProConversationAssignedEvent")]
-[JsonSerializable(typeof(ProPush.ConversationMessageEvent), TypeInfoPropertyName = "ProConversationMessageEvent")]
-[JsonSerializable(typeof(ProPush.ConversationTransferredEvent), TypeInfoPropertyName = "ProConversationTransferredEvent")]
-[JsonSerializable(typeof(ProPush.PresenceSnapshotEvent), TypeInfoPropertyName = "ProPresenceSnapshotEvent")]
 internal sealed partial class PushRelayPayloadJsonContext : JsonSerializerContext;

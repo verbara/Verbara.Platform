@@ -21,17 +21,9 @@ internal static partial class PushToHubRelayLog
         Message = "[RELAY] Skipping event {EventType}: TenantId is null or empty.")]
     public static partial void SkippedNullTenant(ILogger logger, string eventType);
 
-    [LoggerMessage(Level = LogLevel.Warning,
-        Message = "[RELAY] Skipping cluster event {EventType}: NodeId is null or empty.")]
-    public static partial void SkippedNullNodeId(ILogger logger, string eventType);
-
     [LoggerMessage(Level = LogLevel.Debug,
         Message = "[RELAY] Forwarded {EventType} for tenant={TenantId} to SignalR group.")]
     public static partial void Forwarded(ILogger logger, string eventType, string tenantId);
-
-    [LoggerMessage(Level = LogLevel.Debug,
-        Message = "[RELAY] Forwarded {EventType} for node={NodeId} to admins:platform group.")]
-    public static partial void ForwardedCluster(ILogger logger, string eventType, string nodeId);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "[RELAY] Error forwarding {EventType}: {Reason}")]
@@ -41,9 +33,10 @@ internal static partial class PushToHubRelayLog
 /// <summary>
 /// Bridges the in-process <see cref="IPushEventBus"/> events to the
 /// SignalR <see cref="PlatformHub"/> so connected clients receive real-time
-/// conversation, agent, and cluster node state transitions. Conversation and
+/// conversation and agent state transitions and CSAT results. Conversation and
 /// agent state come from Platform's own Core events (conversation.state_changed,
-/// agent.state_changed); no Pro-typed conversation or agent event is subscribed.
+/// agent.state_changed); no Pro-typed event is subscribed (no conversation, agent
+/// or cluster one; platform-drops-the-cluster-bridge).
 ///
 /// <para>
 /// <b>Multi-pod (ADR-0022 Phase A.5):</b> the relay subscribes on every pod
@@ -56,8 +49,8 @@ internal static partial class PushToHubRelayLog
 /// </para>
 /// <para>
 /// <b>Observability (2026-05-24 audit endpoint):</b> every outcome
-/// (Forwarded / SkippedNotLeader / SkippedNullTenant / SkippedNullNodeId /
-/// ForwardError) is also pushed to <see cref="IRelayOutcomeSink"/>, which
+/// (Forwarded / SkippedNotLeader / SkippedNullTenant / ForwardError) is also
+/// pushed to <see cref="IRelayOutcomeSink"/>, which
 /// powers (a) the in-memory ring buffer exposed by
 /// <c>GET /admin/realtime/audit</c> for E2E harness assertions and (b) the
 /// <c>verbara_realtime_relay_outcomes_total</c> counter consumed by
@@ -75,15 +68,13 @@ internal sealed class PushToHubRelay : IHostedService
     private readonly IRelayOutcomeSink _outcomeSink;
     private readonly ILogger<PushToHubRelay> _logger;
 
-    private IDisposable? _clusterSubscription;
     private IDisposable? _csatSubscription;
     // v2.4.7 — Platform.Api PlatformEventBus publishes Verbara.Platform.Core
     // event types directly (no Core→Pro translator exists). The Core
     // subscriptions below map field shapes to the Pro Payloads the hub client
     // contract uses and fan out through the SendXxxAsync helpers; they are the
     // only source of conversation and agent frames (the Pro conversation and
-    // agent bridges are not wired: Pro/ADR-0026 point 4, owner Q8 = A). Cluster
-    // events stay single-source (Pro.Cluster publishes the Pro-typed event internally).
+    // agent bridges are not wired: Pro/ADR-0026 point 4, owner Q8 = A).
     private IDisposable? _coreConversationSubscription;
     private IDisposable? _coreAgentSubscription;
 
@@ -109,9 +100,6 @@ internal sealed class PushToHubRelay : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _clusterSubscription = _bus.OfType<ClusterNodeStateChangedEvent>()
-            .Subscribe(evt => ForwardClusterNode(evt));
-
         _coreConversationSubscription = _bus.OfType<CoreEvents.ConversationStateChangedEvent>()
             .Subscribe(evt => ForwardCoreConversation(evt));
 
@@ -127,42 +115,13 @@ internal sealed class PushToHubRelay : IHostedService
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _clusterSubscription?.Dispose();
         _coreConversationSubscription?.Dispose();
         _coreAgentSubscription?.Dispose();
         _csatSubscription?.Dispose();
-        _clusterSubscription = null;
         _coreConversationSubscription = null;
         _coreAgentSubscription = null;
         _csatSubscription = null;
         return Task.CompletedTask;
-    }
-
-    private void ForwardClusterNode(ClusterNodeStateChangedEvent evt)
-    {
-        var leaderSnapshot = SnapshotLeader();
-
-        if (!leaderSnapshot.IsLeader)
-        {
-            RealtimeLog.SkippedForwardNotLeader(_logger, evt.EventType, leaderSnapshot.Resource);
-            RecordOutcome(evt.EventType, tenantId: null, leaderSnapshot, RelayOutcomeKind.SkippedNotLeader);
-            return;
-        }
-
-        if (string.IsNullOrEmpty(evt.NodeId))
-        {
-            PushToHubRelayLog.SkippedNullNodeId(_logger, evt.EventType);
-            RecordOutcome(evt.EventType, tenantId: null, leaderSnapshot, RelayOutcomeKind.SkippedNullNodeId);
-            return;
-        }
-
-        var payload = new ClusterNodeStatePayload(
-            NodeId: evt.NodeId,
-            PreviousState: evt.PreviousState,
-            NewState: evt.NewState,
-            ChangedAt: evt.ChangedAt);
-
-        _lastSend = SendClusterAsync(payload, evt.NodeId, evt.EventType, leaderSnapshot);
     }
 
     private async Task SendConversationAsync(
@@ -208,28 +167,6 @@ internal sealed class PushToHubRelay : IHostedService
         {
             PushToHubRelayLog.ForwardError(_logger, eventType, ex.Message);
             RecordOutcome(eventType, tenantId, leaderSnapshot, RelayOutcomeKind.ForwardError, ex.Message);
-        }
-    }
-
-    private async Task SendClusterAsync(
-        ClusterNodeStatePayload payload,
-        string nodeId,
-        string eventType,
-        LeaderSnapshot leaderSnapshot)
-    {
-        try
-        {
-            await _hubContext.Clients.Group("admins:platform")
-                .OnClusterNodeStateChanged(payload)
-                .ConfigureAwait(false);
-
-            PushToHubRelayLog.ForwardedCluster(_logger, eventType, nodeId);
-            RecordOutcome(eventType, tenantId: null, leaderSnapshot, RelayOutcomeKind.Forwarded);
-        }
-        catch (Exception ex)
-        {
-            PushToHubRelayLog.ForwardError(_logger, eventType, ex.Message);
-            RecordOutcome(eventType, tenantId: null, leaderSnapshot, RelayOutcomeKind.ForwardError, ex.Message);
         }
     }
 

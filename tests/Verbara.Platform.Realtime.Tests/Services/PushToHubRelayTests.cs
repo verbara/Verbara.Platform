@@ -86,7 +86,6 @@ public sealed class PushToHubRelayTests
         var groupClient = Substitute.For<IPlatformHubClient>();
         groupClient.OnConversationStateChanged(Arg.Any<ConversationStatePayload>()).Returns(Task.CompletedTask);
         groupClient.OnAgentStateChanged(Arg.Any<AgentStatePayload>()).Returns(Task.CompletedTask);
-        groupClient.OnClusterNodeStateChanged(Arg.Any<ClusterNodeStatePayload>()).Returns(Task.CompletedTask);
         // csat-completion — the CSAT recorded branch now uses the typed hub client method.
         groupClient.OnCsatResponseRecorded(Arg.Any<CsatResponseRecordedPayload>()).Returns(Task.CompletedTask);
 
@@ -355,55 +354,6 @@ public sealed class PushToHubRelayTests
         await mocks.GroupClient.DidNotReceive().OnConversationStateChanged(Arg.Any<ConversationStatePayload>());
     }
 
-    [Fact]
-    public async Task StartAsync_ShouldForwardToAdminsPlatformGroup_WhenClusterNodeStateChangedEventIsPublished()
-    {
-        var (relay, bus, mocks, _, _) = BuildSut("admins:platform");
-        await relay.StartAsync(CancellationToken.None);
-
-        var evt = new ClusterNodeStateChangedEvent
-        {
-            NodeId = "node-1",
-            PreviousState = "Healthy",
-            NewState = "Degraded",
-            ChangedAt = DateTimeOffset.UtcNow
-        };
-
-        bus.Emit(evt);
-        await WaitForDispatch(relay);
-
-        mocks.HubClients.Received(1).Group("admins:platform");
-        await mocks.GroupClient.Received(1).OnClusterNodeStateChanged(
-            Arg.Is<ClusterNodeStatePayload>(p => p != null &&
-                p.NodeId == "node-1" &&
-                p.PreviousState == "Healthy" &&
-                p.NewState == "Degraded"));
-
-        await relay.StopAsync(CancellationToken.None);
-    }
-
-    [Fact]
-    public async Task StartAsync_ShouldSkipForward_WhenClusterEventNodeIdIsNullOrEmpty()
-    {
-        var (relay, bus, mocks, _, _) = BuildSut("admins:platform");
-        await relay.StartAsync(CancellationToken.None);
-
-        var evt = new ClusterNodeStateChangedEvent
-        {
-            NodeId = string.Empty,
-            PreviousState = "Healthy",
-            NewState = "Degraded",
-            ChangedAt = DateTimeOffset.UtcNow
-        };
-
-        bus.Emit(evt);
-        await WaitForDispatch(relay);
-
-        await mocks.GroupClient.DidNotReceive().OnClusterNodeStateChanged(Arg.Any<ClusterNodeStatePayload>());
-
-        await relay.StopAsync(CancellationToken.None);
-    }
-
     // -----------------------------------------------------------------------
     // ADR-0022 Phase A.5 — leader-gating tests
     // -----------------------------------------------------------------------
@@ -563,60 +513,6 @@ public sealed class PushToHubRelayTests
             e.EventType == "conversation.state_changed" &&
             string.IsNullOrEmpty(e.TenantId) &&
             e.Outcome == RelayOutcomeKind.SkippedNullTenant &&
-            e.IsLeaderAtTime);
-
-        await relay.StopAsync(CancellationToken.None);
-    }
-
-    [Fact]
-    public async Task Forward_ShouldRecordSkippedNullNodeIdOutcomeInSink_WhenClusterNodeIdMissing()
-    {
-        var (relay, bus, _, _, sink) = BuildSut("admins:platform", isLeader: true);
-        await relay.StartAsync(CancellationToken.None);
-
-        var evt = new ClusterNodeStateChangedEvent
-        {
-            NodeId = string.Empty,
-            PreviousState = "Healthy",
-            NewState = "Degraded",
-            ChangedAt = DateTimeOffset.UtcNow,
-        };
-
-        bus.Emit(evt);
-        await WaitForDispatch(relay);
-
-        var page = sink.Snapshot(since: null, limit: 100);
-        page.Entries.Should().ContainSingle(e =>
-            e.EventType == evt.EventType &&
-            e.TenantId == null &&
-            e.Outcome == RelayOutcomeKind.SkippedNullNodeId &&
-            e.IsLeaderAtTime);
-
-        await relay.StopAsync(CancellationToken.None);
-    }
-
-    [Fact]
-    public async Task Forward_ShouldRecordClusterForwardedOutcomeWithNullTenantId_WhenLeader()
-    {
-        var (relay, bus, _, _, sink) = BuildSut("admins:platform", isLeader: true);
-        await relay.StartAsync(CancellationToken.None);
-
-        var evt = new ClusterNodeStateChangedEvent
-        {
-            NodeId = "node-1",
-            PreviousState = "Healthy",
-            NewState = "Degraded",
-            ChangedAt = DateTimeOffset.UtcNow,
-        };
-
-        bus.Emit(evt);
-        await WaitForDispatch(relay);
-
-        var page = sink.Snapshot(since: null, limit: 100);
-        page.Entries.Should().ContainSingle(e =>
-            e.EventType == evt.EventType &&
-            e.TenantId == null &&
-            e.Outcome == RelayOutcomeKind.Forwarded &&
             e.IsLeaderAtTime);
 
         await relay.StopAsync(CancellationToken.None);

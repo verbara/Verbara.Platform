@@ -26,7 +26,11 @@ public enum RelayOutcomeKind
     /// <summary>The event metadata carried a null/empty TenantId — cannot route to a tenant group.</summary>
     SkippedNullTenant = 2,
 
-    /// <summary>A cluster-node event arrived with a null/empty NodeId — cannot publish a coherent payload.</summary>
+    /// <summary>
+    /// A cluster-node event arrived with a null/empty NodeId — cannot publish a coherent payload. No relay path
+    /// produces it since platform-drops-the-cluster-bridge (the relay has no cluster path); the value stays so the
+    /// audit contract keeps its names and 3 is never reused.
+    /// </summary>
     SkippedNullNodeId = 3,
 
     /// <summary>The hub broadcast threw — Redis backplane down, group serialisation error, etc.</summary>

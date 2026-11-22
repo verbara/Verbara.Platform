@@ -1,9 +1,4 @@
-using Verbara.Sdk.Pro.Push.SignalR.Bridges;
-using Verbara.Sdk.Pro.Push.SignalR.Bridges.Diagnostics;
 using FluentAssertions;
-using FluentAssertions.Execution;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 
 namespace Verbara.Platform.Api.Tests.Bridges;
 
@@ -16,30 +11,6 @@ namespace Verbara.Platform.Api.Tests.Bridges;
 /// </summary>
 public sealed class T27BridgesWiringTests
 {
-    [Fact]
-    public async Task Platform_ShouldConfigureBridgeOptions_WithPlatformDefaultTenant()
-    {
-        await using var factory = new PlatformApiFactory();
-        _ = factory.CreateClient();
-
-        var options = factory.Services.GetRequiredService<IOptions<BridgeOptions>>();
-
-        options.Value.DefaultTenantId.Should().Be(
-            "default-tenant",
-            "Program.cs wires WithDefaultTenantId(\"default-tenant\"), which the cluster bridge's loop needs for every event");
-    }
-
-    [Fact]
-    public async Task Platform_ShouldRegisterBridgeMetrics_AsSingleton()
-    {
-        await using var factory = new PlatformApiFactory();
-        _ = factory.CreateClient();
-
-        var metrics = factory.Services.GetRequiredService<BridgeMetrics>();
-
-        metrics.Should().NotBeNull("shared BridgeMetrics is registered by every bridge opt-in");
-    }
-
     [Fact]
     public async Task Platform_ShouldNotRegisterAnyProPushBridge_WhenHostIsBuilt()
     {
