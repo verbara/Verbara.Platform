@@ -31,6 +31,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requests reuse pooled connections too. Recreate the gateway to pick it up:
   `docker compose -f <compose file> up -d --force-recreate nginx-gateway`.
 
+### Dependencies
+
+- **Five dependency updates that the `v2.40.0` release undid are back.** The release commit reset these pins to
+  their earlier versions; they now match the updates merged before it: `AWSSDK.S3` `4.1.0` (#626), `Microsoft.Graph`
+  `6.10.0` (#612), `Scalar.AspNetCore` `2.21.0` (#627), `coverlet.collector` `10.1.1` (#625) and the
+  `dotnet-reportgenerator-globaltool` tool `5.6.0` (#618). `v2.40.0` and `v2.41.0` shipped the earlier versions.
+
 ## [2.41.0] - 2026-11-21
 
 A supervisor's text whisper reaches the agent from any Api replica, as an `agentassist.suggestion` on the agent's
