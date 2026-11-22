@@ -10,6 +10,8 @@ using Verbara.Sdk.Pro.Dialer.Campaign;
 using Verbara.Sdk.Pro.Dialer.Compliance;
 using Verbara.Sdk.Pro.Dialer.Contacts;
 using Verbara.Sdk.Pro.Dialer.Dispositions;
+using Verbara.Sdk.Pro.Dialer.Routing;
+using Verbara.Sdk.Pro.Dialer.Scheduling;
 using Verbara.Sdk.Pro.Licensing;
 using Verbara.Sdk.Pro.MultiTenant;
 
@@ -24,8 +26,8 @@ namespace Verbara.Platform.Api.Tests.Dialer;
 /// <remarks>
 /// With a dialer connection string (a Testcontainers Postgres) <c>Program.cs</c> registers the dialer over it, and
 /// this host keeps the <see cref="DncListStoreBase"/>, <see cref="CampaignStoreBase"/>,
-/// <see cref="ContactListStoreBase"/> and <see cref="DispositionCodeStoreBase"/> descriptors
-/// <c>UsePostgresDialerStorage</c> registered, re-adding them after
+/// <see cref="ContactListStoreBase"/>, <see cref="DispositionCodeStoreBase"/>, <see cref="HolidayCalendarStoreBase"/>
+/// and <see cref="CallerIdPoolStoreBase"/> descriptors <c>UsePostgresDialerStorage</c> registered, re-adding them after
 /// <see cref="AuthenticatedPlatformApiFactory.RegisterInMemoryStores"/>, so the routes run against Pro's Postgres
 /// stores. Without one, the in-memory stores answer, which follow the Pro <c>2.31.0-pro</c> campaign-addressed contract.
 /// </remarks>
@@ -62,10 +64,16 @@ public sealed class DialerTenantScopeFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>
-    /// The contact-list and disposition-code store descriptors, kept only in live-DB mode: the in-memory suite reads
-    /// the <see cref="InMemoryContactListStore"/> and <see cref="InMemoryDispositionCodeStore"/> directly.
+    /// The contact-list, disposition-code, holiday-calendar and caller-ID-pool store descriptors, kept only in live-DB
+    /// mode: the in-memory suite reads the <see cref="InMemoryContactListStore"/>,
+    /// <see cref="InMemoryDispositionCodeStore"/>, <see cref="InMemoryHolidayCalendarStore"/> and
+    /// <see cref="InMemoryCallerIdPoolStore"/> directly.
     /// </summary>
-    private static readonly HashSet<Type> LiveDbOnlyStores = [typeof(ContactListStoreBase), typeof(DispositionCodeStoreBase)];
+    private static readonly HashSet<Type> LiveDbOnlyStores =
+    [
+        typeof(ContactListStoreBase), typeof(DispositionCodeStoreBase),
+        typeof(HolidayCalendarStoreBase), typeof(CallerIdPoolStoreBase),
+    ];
 
     /// <inheritdoc />
     protected override IHost CreateHost(IHostBuilder builder)

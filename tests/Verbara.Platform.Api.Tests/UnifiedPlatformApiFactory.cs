@@ -856,57 +856,81 @@ internal sealed class InMemoryDncListStore : DncListStoreBase
     }
 }
 
+/// <summary>
+/// The caller-ID pools of every tenant, with Pro's Postgres semantics (Pro <c>2.31.0-pro</c>): a pool belongs to the
+/// tenant that created it, and the pool operations act only on a pool of the given tenant. The entry operations take
+/// a tenant and ignore it, as Pro's do, so a route that does not check the pool's tenant first reaches any pool.
+/// </summary>
 internal sealed class InMemoryCallerIdPoolStore : CallerIdPoolStoreBase
 {
     private long _nextId = 1;
-    private readonly ConcurrentDictionary<long, CallerIdPool> _pools = new();
+    private long _nextEntryId;
+    private readonly ConcurrentDictionary<long, (string TenantId, CallerIdPool Pool)> _pools = new();
     private readonly ConcurrentDictionary<long, List<CallerIdEntry>> _entries = new();
+
+    private bool Owns(long id, string tenantId) =>
+        _pools.TryGetValue(id, out var owned) && string.Equals(owned.TenantId, tenantId, StringComparison.Ordinal);
 
     public override ValueTask<IReadOnlyList<CallerIdPool>> ListAsync(string tenantId, CancellationToken ct = default)
     {
-        IReadOnlyList<CallerIdPool> result = [.. _pools.Values];
+        IReadOnlyList<CallerIdPool> result =
+        [
+            .. _pools.Values
+                .Where(p => string.Equals(p.TenantId, tenantId, StringComparison.Ordinal))
+                .Select(p => p.Pool)
+                .OrderBy(p => p.Id),
+        ];
         return new ValueTask<IReadOnlyList<CallerIdPool>>(result);
     }
 
-    public override ValueTask<CallerIdPool?> GetAsync(long id, string tenantId, CancellationToken ct = default)
-    {
-        _pools.TryGetValue(id, out var pool);
-        return new ValueTask<CallerIdPool?>(pool);
-    }
+    public override ValueTask<CallerIdPool?> GetAsync(long id, string tenantId, CancellationToken ct = default) =>
+        new(Owns(id, tenantId) ? _pools[id].Pool : null);
 
     public override ValueTask<long> CreateAsync(CallerIdPool pool, string tenantId, CancellationToken ct = default)
     {
         var id = Interlocked.Increment(ref _nextId);
         pool.Id = id;
-        _pools[id] = pool;
+        _pools[id] = (tenantId, pool);
         _entries[id] = [];
         return new ValueTask<long>(id);
     }
 
     public override ValueTask UpdateAsync(CallerIdPool pool, string tenantId, CancellationToken ct = default)
     {
-        _pools[pool.Id] = pool;
+        if (Owns(pool.Id, tenantId))
+            _pools[pool.Id] = (tenantId, pool);
         return ValueTask.CompletedTask;
     }
 
     public override ValueTask DeleteAsync(long id, string tenantId, CancellationToken ct = default)
     {
-        _pools.TryRemove(id, out _);
-        _entries.TryRemove(id, out _);
+        if (Owns(id, tenantId))
+        {
+            _pools.TryRemove(id, out _);
+            _entries.TryRemove(id, out _);
+        }
         return ValueTask.CompletedTask;
     }
 
     public override ValueTask AddEntryAsync(long poolId, string tenantId, CallerIdEntry entry, CancellationToken ct = default)
     {
         var entries = _entries.GetOrAdd(poolId, _ => []);
-        entries.Add(entry);
+        lock (entries)
+        {
+            entry.Id = Interlocked.Increment(ref _nextEntryId);
+            entry.PoolId = poolId;
+            entries.Add(entry);
+        }
         return ValueTask.CompletedTask;
     }
 
     public override ValueTask RemoveEntryAsync(long poolId, long entryId, string tenantId, CancellationToken ct = default)
     {
         if (_entries.TryGetValue(poolId, out var entries))
-            entries.RemoveAll(e => e.Id == entryId);
+        {
+            lock (entries)
+                entries.RemoveAll(e => e.Id == entryId);
+        }
         return ValueTask.CompletedTask;
     }
 
@@ -914,62 +938,99 @@ internal sealed class InMemoryCallerIdPoolStore : CallerIdPoolStoreBase
     {
         if (!_entries.TryGetValue(poolId, out var entries))
             return new ValueTask<IReadOnlyList<CallerIdEntry>>(Array.Empty<CallerIdEntry>());
-        IReadOnlyList<CallerIdEntry> result = [.. entries];
+        IReadOnlyList<CallerIdEntry> result;
+        lock (entries)
+            result = [.. entries];
         return new ValueTask<IReadOnlyList<CallerIdEntry>>(result);
     }
 }
 
+/// <summary>
+/// The holiday calendars of every tenant, with Pro's Postgres semantics (Pro <c>2.31.0-pro</c>): a calendar belongs to
+/// the tenant that created it, and the calendar operations act only on a calendar of the given tenant. The holiday
+/// operations take a tenant and ignore it, as Pro's do, so a route that does not check the calendar's tenant first
+/// reaches any calendar; adding a holiday on a date the calendar already holds renames that holiday, as Pro's upsert
+/// on (calendar, date) does.
+/// </summary>
 internal sealed class InMemoryHolidayCalendarStore : HolidayCalendarStoreBase
 {
     private long _nextId = 1;
-    private readonly ConcurrentDictionary<long, HolidayCalendar> _calendars = new();
+    private long _nextHolidayId;
+    private readonly ConcurrentDictionary<long, (string TenantId, HolidayCalendar Calendar)> _calendars = new();
     private readonly ConcurrentDictionary<long, List<Holiday>> _holidays = new();
+
+    private bool Owns(long id, string tenantId) =>
+        _calendars.TryGetValue(id, out var owned) && string.Equals(owned.TenantId, tenantId, StringComparison.Ordinal);
 
     public override ValueTask<IReadOnlyList<HolidayCalendar>> ListAsync(string tenantId, CancellationToken ct = default)
     {
-        IReadOnlyList<HolidayCalendar> result = [.. _calendars.Values];
+        IReadOnlyList<HolidayCalendar> result =
+        [
+            .. _calendars.Values
+                .Where(c => string.Equals(c.TenantId, tenantId, StringComparison.Ordinal))
+                .Select(c => c.Calendar)
+                .OrderBy(c => c.Id),
+        ];
         return new ValueTask<IReadOnlyList<HolidayCalendar>>(result);
     }
 
-    public override ValueTask<HolidayCalendar?> GetAsync(long id, string tenantId, CancellationToken ct = default)
-    {
-        _calendars.TryGetValue(id, out var cal);
-        return new ValueTask<HolidayCalendar?>(cal);
-    }
+    public override ValueTask<HolidayCalendar?> GetAsync(long id, string tenantId, CancellationToken ct = default) =>
+        new(Owns(id, tenantId) ? _calendars[id].Calendar : null);
 
     public override ValueTask<long> CreateAsync(HolidayCalendar calendar, string tenantId, CancellationToken ct = default)
     {
         var id = Interlocked.Increment(ref _nextId);
         calendar.Id = id;
-        _calendars[id] = calendar;
+        _calendars[id] = (tenantId, calendar);
         _holidays[id] = [];
         return new ValueTask<long>(id);
     }
 
     public override ValueTask UpdateAsync(HolidayCalendar calendar, string tenantId, CancellationToken ct = default)
     {
-        _calendars[calendar.Id] = calendar;
+        if (Owns(calendar.Id, tenantId))
+            _calendars[calendar.Id] = (tenantId, calendar);
         return ValueTask.CompletedTask;
     }
 
     public override ValueTask DeleteAsync(long id, string tenantId, CancellationToken ct = default)
     {
-        _calendars.TryRemove(id, out _);
-        _holidays.TryRemove(id, out _);
+        if (Owns(id, tenantId))
+        {
+            _calendars.TryRemove(id, out _);
+            _holidays.TryRemove(id, out _);
+        }
         return ValueTask.CompletedTask;
     }
 
     public override ValueTask AddHolidayAsync(long calendarId, string tenantId, Holiday holiday, CancellationToken ct = default)
     {
         var holidays = _holidays.GetOrAdd(calendarId, _ => []);
-        holidays.Add(holiday);
+        lock (holidays)
+        {
+            var existing = holidays.Find(h => h.Date == holiday.Date);
+            if (existing is not null)
+            {
+                existing.Name = holiday.Name;
+                holiday.Id = existing.Id;
+            }
+            else
+            {
+                holiday.Id = Interlocked.Increment(ref _nextHolidayId);
+                holiday.CalendarId = calendarId;
+                holidays.Add(holiday);
+            }
+        }
         return ValueTask.CompletedTask;
     }
 
     public override ValueTask RemoveHolidayAsync(long calendarId, long holidayId, string tenantId, CancellationToken ct = default)
     {
         if (_holidays.TryGetValue(calendarId, out var holidays))
-            holidays.RemoveAll(h => h.Id == holidayId);
+        {
+            lock (holidays)
+                holidays.RemoveAll(h => h.Id == holidayId);
+        }
         return ValueTask.CompletedTask;
     }
 
@@ -977,7 +1038,9 @@ internal sealed class InMemoryHolidayCalendarStore : HolidayCalendarStoreBase
     {
         if (!_holidays.TryGetValue(calendarId, out var holidays))
             return new ValueTask<IReadOnlyList<Holiday>>(Array.Empty<Holiday>());
-        IReadOnlyList<Holiday> result = [.. holidays];
+        IReadOnlyList<Holiday> result;
+        lock (holidays)
+            result = [.. holidays.OrderBy(h => h.Date)];
         return new ValueTask<IReadOnlyList<Holiday>>(result);
     }
 }
