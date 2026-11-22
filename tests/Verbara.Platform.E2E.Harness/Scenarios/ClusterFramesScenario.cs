@@ -440,7 +440,7 @@ internal static class ClusterFramesScenario
                 return read;
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false); // fence-allow: POLL — the declared bounded poll of the cluster REST surface
+            await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false); // fence-allow: LOOP-DRIVER — the declared bounded poll of the cluster REST surface
         }
     }
 
