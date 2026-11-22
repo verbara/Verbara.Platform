@@ -17,7 +17,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no longer subscribes to the Pro cluster-node event nor sends `OnClusterNodeStateChanged`. No hub client ever
   received those frames, and `/admin/cluster` reads cluster state over REST, refreshed every 10 s, as before. The
   `bridge_events_*{bridge="cluster"}` metric series are gone. `RelayOutcomeKind.SkippedNullNodeId` stays in
-  `GET /admin/realtime/audit` with no producer. (#N)
+  `GET /admin/realtime/audit` with no producer. (#644)
 
 ## [2.41.0] - 2026-11-21
 
