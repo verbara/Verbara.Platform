@@ -9,6 +9,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Live updates and API calls accept a new signing key on its first request.** On a fresh install, Realtime (and an
+  Api replica that did not sign the token) refused the admin's first live-update connects for up to 30 s after setup
+  finished: the requests that reached it before the first signing key existed were counted as failed key reads, and
+  the retry wait had grown to 30 s. After a key rotation, the first request signed with the new key could be refused
+  too, and requests naming made-up key ids could stretch that to 10 s. Now an empty key pool is a successful load
+  (read again after 1 s, without the growing wait), and a request whose token names a key the service does not hold
+  waits for one key reload (at most 5 s) instead of being refused. Those reloads stay rate-limited — at most one
+  every 2 s, shared by every request waiting — so made-up key ids cannot flood the key store, and a real new key is
+  accepted within that interval. A partial read that leaves out keys still held keeps them, as before.
+
 ### Removed
 
 - **The Api no longer wires the Pro cluster-event bridge, and Realtime no longer has a cluster relay path.** The Api

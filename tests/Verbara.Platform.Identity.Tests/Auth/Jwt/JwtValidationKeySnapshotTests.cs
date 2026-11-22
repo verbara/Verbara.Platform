@@ -87,21 +87,32 @@ public sealed class JwtValidationKeySnapshotTests
     }
 
     [Fact]
-    public async Task EnsureLoadedAsync_ShouldRetryAfterTheBackoff_WhenTheFirstLoadReturnsNoKey()
+    public async Task EnsureLoadedAsync_ShouldReadAgainAfterTheInitialBackoffWithoutGrowing_WhenThePoolHasNoKey()
     {
-        // A pool read that silently skips a disconnected server answers with no key. Cached as a
-        // loaded set, it would refuse every token until the next refresh, 5 minutes later.
+        // A pool with no key yet (a fresh install before setup), or a read that silently skipped a
+        // disconnected server, serves no key either way. It is a successful empty load, read again
+        // after 1 s, not a failure whose wait grows to 30 s: kept for 5 minutes, it would refuse
+        // tokens that long; counted as failed, it would refuse them up to 30 s.
+        Answer();
         Answer();
         Answer(NewKey("k1"));
         var snapshot = NewSnapshot();
 
         await snapshot.EnsureLoadedAsync(CancellationToken.None);
-        snapshot.IsLoaded.Should().BeFalse();
+        snapshot.IsLoaded.Should().BeTrue();
+        Kids(snapshot).Should().BeEmpty();
+        await snapshot.EnsureLoadedAsync(CancellationToken.None);
+        _loads.Should().Be(1);
 
         _clock.Advance(TimeSpan.FromSeconds(1));
         await snapshot.EnsureLoadedAsync(CancellationToken.None);
+        await snapshot.ReloadInFlight;
+        _loads.Should().Be(2);
 
-        snapshot.IsLoaded.Should().BeTrue();
+        _clock.Advance(TimeSpan.FromSeconds(1));      // not 2 s: an empty read does not double the wait
+        await snapshot.EnsureLoadedAsync(CancellationToken.None);
+        await snapshot.ReloadInFlight;
+        _loads.Should().Be(3);
         Kids(snapshot).Should().Equal("k1");
     }
 
@@ -172,13 +183,15 @@ public sealed class JwtValidationKeySnapshotTests
         await snapshot.ReloadInFlight;
         _loads.Should().Be(2);
 
+        // Inside the interval: no reload now, one scheduled for when the interval ends.
         _clock.Advance(TimeSpan.FromSeconds(9));
         _ = snapshot.Resolve("unknown");
+        _ = snapshot.Resolve("unknown");
+        var scheduled = snapshot.PendingUnknownKeyIdReload;
         _loads.Should().Be(2);
 
         _clock.Advance(TimeSpan.FromSeconds(1));
-        _ = snapshot.Resolve("unknown");
-        await snapshot.ReloadInFlight;
+        await scheduled.WaitAsync(TimeSpan.FromSeconds(10));
         _loads.Should().Be(3);
     }
 
@@ -223,5 +236,108 @@ public sealed class JwtValidationKeySnapshotTests
         var second = snapshot.EnsureLoadedAsync(CancellationToken.None);
         second.IsCompletedSuccessfully.Should().BeTrue();
         _loads.Should().Be(1);
+    }
+
+    // ─── A key the snapshot has never seen (first key after setup, rotation, forged kids) ────────
+
+    [Fact]
+    public async Task EnsureLoadedAsync_ShouldAcceptTheFirstKey_WhenItAppearsAfterTheProbesFoundAnEmptyPool()
+    {
+        // A fresh install: health probes and the setup screen reach the host for minutes before the
+        // first signing key exists. Then setup creates it and the admin's first request carries it.
+        for (var i = 0; i < 8; i++)
+            Answer();
+        var k1 = NewKey("k1");
+        Answer(k1);
+        var snapshot = NewSnapshot();
+        for (var i = 0; i < 8; i++)
+        {
+            if (i > 0)
+                _clock.Advance(TimeSpan.FromSeconds(30));
+            await snapshot.EnsureLoadedAsync(null, CancellationToken.None);
+            await snapshot.ReloadInFlight;
+        }
+        var probesLoads = _loads;
+
+        await snapshot.EnsureLoadedAsync("k1", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+        snapshot.Resolve("k1").Select(k => k.KeyId).Should().Contain(
+            "k1", because: "the first request after setup must be accepted at once, not after a 30 s backoff");
+        _loads.Should().Be(probesLoads + 1);
+    }
+
+    [Fact]
+    public async Task EnsureLoadedAsync_ShouldAcceptANewKeyId_WhenTheFirstTokenSignedWithItArrives()
+    {
+        var k1 = NewKey("k1");
+        var k2 = NewKey("k2");
+        Answer(k1);
+        Answer(k1, k2);       // the pool after a rotation
+        var snapshot = NewSnapshot();
+        await snapshot.EnsureLoadedAsync(null, CancellationToken.None);
+
+        await snapshot.EnsureLoadedAsync("k2", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+        snapshot.Resolve("k2").Select(k => k.KeyId).Should().Contain(
+            "k2", because: "the first token signed with a rotated key must not be refused");
+    }
+
+    [Fact]
+    public async Task EnsureLoadedAsync_ShouldAcceptANewKeyIdWithinTheInterval_WhenForgedKeyIdsSpentTheReload()
+    {
+        var k1 = NewKey("k1");
+        var k2 = NewKey("k2");
+        Answer(k1);
+        Answer(k1);           // the reload a forged kid triggers, read before the rotation
+        Answer(k1, k2);
+        var interval = TimeSpan.FromSeconds(2);
+        var snapshot = NewSnapshot(new JwtValidationKeySnapshotOptions { UnknownKeyIdReloadInterval = interval });
+        await snapshot.EnsureLoadedAsync(null, CancellationToken.None);
+
+        var forged = snapshot.EnsureLoadedAsync("forged-1", CancellationToken.None);
+        await snapshot.ReloadInFlight;
+        _ = snapshot.EnsureLoadedAsync("forged-2", CancellationToken.None);
+        _loads.Should().Be(2);
+
+        // The rotated key exists now; the first token signed with it arrives inside the interval.
+        var legit = snapshot.EnsureLoadedAsync("k2", CancellationToken.None);
+        legit.IsCompleted.Should().BeFalse(because: "the request waits for the next reload instead of being refused");
+        _clock.Advance(interval);
+        await legit.WaitAsync(TimeSpan.FromSeconds(10));
+
+        snapshot.Resolve("k2").Select(k => k.KeyId).Should().Contain(
+            "k2", because: "forged key ids must not keep a real new key out beyond one interval");
+        _loads.Should().Be(3);
+        await forged.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public async Task EnsureLoadedAsync_ShouldReloadAtMostOncePerInterval_WhenAFloodOfForgedKeyIdsArrives()
+    {
+        Answer(NewKey("k1"));
+        var interval = TimeSpan.FromSeconds(2);
+        var wait = TimeSpan.FromSeconds(5);
+        var snapshot = NewSnapshot(new JwtValidationKeySnapshotOptions
+        {
+            UnknownKeyIdReloadInterval = interval,
+            UnknownKeyIdWait = wait,
+        });
+        await snapshot.EnsureLoadedAsync(null, CancellationToken.None);
+        var warm = _loads;
+
+        var requests = new List<Task>();
+        var step = TimeSpan.FromMilliseconds(250);
+        for (var t = TimeSpan.Zero; t < TimeSpan.FromSeconds(20); t += step)
+        {
+            for (var i = 0; i < 25; i++)
+                requests.Add(snapshot.EnsureLoadedAsync($"forged-{t.Ticks}-{i}", CancellationToken.None));
+            await snapshot.ReloadInFlight;
+            _clock.Advance(step);
+        }
+        _clock.Advance(wait);
+        await Task.WhenAll(requests).WaitAsync(TimeSpan.FromSeconds(10));
+
+        (_loads - warm).Should().BeInRange(1, 11, because: "20 s of forged key ids cost one reload per 2 s interval at most");
+        snapshot.Resolve(null).Select(k => k.KeyId).Should().Equal("k1");
     }
 }

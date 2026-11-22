@@ -199,6 +199,27 @@ public sealed class JwtKeySnapshotRegressionTests
     }
 
     [Fact]
+    public async Task ValidateToken_ShouldAcceptAnotherReplicasRotatedKey_WhenTheFirstTokenSignedWithItArrives()
+    {
+        var store = new InMemoryJwtKeyStore();
+        using var real = NewRotationService(store);
+        _ = await real.RotateAsync();
+        var scripted = new ScriptedRotationService(real);
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var sut = new JwtTokenService(scripted, timeProvider: clock);
+        var (token, _) = await sut.GenerateAccessTokenAsync(MakeUser());
+        (await TokenValidation.ValidateWithKeyIdAsync(sut, token)).Should().NotBeNull();
+        var callsWhenWarm = scripted.ValidationCalls;
+
+        // Another replica rotates the pool and signs with the new key; this replica has not loaded it.
+        var foreign = MintWith(await real.RotateAsync());
+
+        (await TokenValidation.ValidateWithKeyIdAsync(sut, foreign).WaitAsync(TimeSpan.FromSeconds(10)))
+            .Should().NotBeNull(because: "the first request carrying a rotated key must not be refused");
+        (scripted.ValidationCalls - callsWhenWarm).Should().Be(1);
+    }
+
+    [Fact]
     public async Task ValidateToken_ShouldNotStarveTheThreadPool_WhenManyRequestsCrossAKeyExpiryAndTheReloadIsSlow()
     {
         using var real = NewRotationService(new InMemoryJwtKeyStore());

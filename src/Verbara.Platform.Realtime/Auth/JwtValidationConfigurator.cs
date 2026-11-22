@@ -22,7 +22,7 @@ internal static partial class JwtValidationConfigurator
     /// <summary>
     /// The in-memory validation keys, loaded from <see cref="IJwtKeyStore"/> off the request path.
     /// Registered as a singleton; the JwtBearer <c>OnMessageReceived</c> event awaits its first load
-    /// (<see cref="JwtValidationKeySnapshot.EnsureLoadedAsync"/>), never the host's start.
+    /// (<see cref="JwtValidationKeySnapshot.EnsureLoadedAsync(string?, CancellationToken)"/>), never the host's start.
     /// </summary>
     public static JwtValidationKeySnapshot CreateKeySnapshot(IServiceProvider services, TimeProvider? timeProvider = null)
     {

@@ -22,4 +22,17 @@ internal static class TokenValidation
         var result = await new JsonWebTokenHandler().ValidateTokenAsync(token, service.ValidationParameters);
         return result.IsValid ? new ClaimsPrincipal(result.ClaimsIdentity) : null;
     }
+
+    /// <summary>
+    /// <see cref="ValidateAsync"/>, passing the key id the token names, as the scheme's
+    /// <c>OnMessageReceived</c> event does: a token signed with a key this replica does not hold yet
+    /// waits for one reload.
+    /// </summary>
+    public static async Task<ClaimsPrincipal?> ValidateWithKeyIdAsync(JwtTokenService service, string token)
+    {
+        await service.EnsureValidationKeysAsync(
+            Verbara.Platform.Identity.Auth.Jwt.JwtKeyId.FromRequest(null, "Bearer " + token), CancellationToken.None);
+        var result = await new JsonWebTokenHandler().ValidateTokenAsync(token, service.ValidationParameters);
+        return result.IsValid ? new ClaimsPrincipal(result.ClaimsIdentity) : null;
+    }
 }

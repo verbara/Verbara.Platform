@@ -94,9 +94,13 @@ internal static class AuthSchemeConfiguration
                         // The token check that follows reads the validation keys from memory and
                         // never waits on the key pool. Here, before it, a replica's first requests
                         // await the first load asynchronously (no thread held); afterwards this only
-                        // starts a background refresh when one is due.
+                        // starts a background refresh when one is due. A token signed with a key
+                        // this replica does not hold yet (another replica's first or rotated key)
+                        // awaits one rate-limited reload instead of being refused.
+                        var keyId = Verbara.Platform.Identity.Auth.Jwt.JwtKeyId.FromRequest(
+                            context.Token, context.Request.Headers.Authorization.ToString());
                         return context.HttpContext.RequestServices.GetRequiredService<JwtTokenService>()
-                            .EnsureValidationKeysAsync(context.HttpContext.RequestAborted);
+                            .EnsureValidationKeysAsync(keyId, context.HttpContext.RequestAborted);
                     },
                     OnTokenValidated = async context =>
                     {

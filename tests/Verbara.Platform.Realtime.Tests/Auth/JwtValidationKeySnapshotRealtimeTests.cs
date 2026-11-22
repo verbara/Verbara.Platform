@@ -92,4 +92,43 @@ public sealed class JwtValidationKeySnapshotRealtimeTests
         parameters.IssuerSigningKeyResolver("token", null, "k1", parameters).Select(k => k.KeyId)
             .Should().Contain("k1", because: "an empty key set is a failed read, not a pool with no keys");
     }
+
+    [Fact]
+    public async Task IssuerSigningKeyResolver_ShouldAcceptTheFirstKey_WhenSetupCreatesItAfterTheStoreWasEmpty()
+    {
+        // A fresh install: the store holds no key until setup finishes; requests (health probes, the
+        // setup screen's live updates) reach Realtime meanwhile.
+        var store = new ScriptedKeyStore();
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        await using var services = Services(store, clock);
+        var parameters = JwtValidationConfigurator.BuildValidationParameters(services);
+        var keys = services.GetRequiredService<JwtValidationKeySnapshot>();
+        for (var i = 0; i < 6; i++)
+        {
+            if (i > 0)
+                clock.Advance(TimeSpan.FromSeconds(20));
+            await keys.EnsureLoadedAsync(null, CancellationToken.None);
+            await keys.ReloadInFlight;
+        }
+
+        var first = NewKey("first-key");
+        await store.UpsertAsync(first);
+        var token = new Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+        {
+            Issuer = "verbara-platform",
+            Audience = "verbara-platform",
+            Expires = DateTime.UtcNow.AddMinutes(15),
+            SigningCredentials = new SigningCredentials(
+                new SymmetricSecurityKey(Convert.FromBase64String(first.Key)) { KeyId = first.KeyId },
+                SecurityAlgorithms.HmacSha256),
+        });
+
+        // What the JwtBearer OnMessageReceived event does, then the token check.
+        await keys.EnsureLoadedAsync(JwtKeyId.FromRequest(null, "Bearer " + token), CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await new Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler()
+            .ValidateTokenAsync(token, parameters);
+
+        result.IsValid.Should().BeTrue(because: "the admin's first live-update connect after setup must not be refused");
+    }
 }
