@@ -24,7 +24,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The compose gateway no longer answers 502 under sustained load.** `docker/nginx-gateway.conf` (mounted by the
   full, production, reference-SMB and demo compose files) opened a new connection to platform-api, realtime or web
   for every request, and each closed one held one of the gateway's ephemeral ports for about 60 s; under sustained
-  load (around 1,800 requests per second from one client) the ports ran out and the gateway answered 502 for tens
+  load (more than about 470 new connections per second) the ports ran out and the gateway answered 502 for tens
   of seconds at a time, visible only in its access log. Each upstream now keeps a pool of idle connections
   (`keepalive 64`), every location speaks HTTP/1.1 with an empty `Connection` header, and `/hubs/` and `/ws/` send
   `Connection: upgrade` only on a WebSocket upgrade, so the hub's negotiate, long-polling and server-sent-events
