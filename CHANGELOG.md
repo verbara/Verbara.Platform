@@ -9,6 +9,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **The Api no longer wires the Pro cluster-event bridge, and Realtime no longer has a cluster relay path.** The Api
+  stops registering `ClusterEventPushBridge` (and the `default-tenant` bridge option it alone read) and no longer
+  references `Verbara.Sdk.Pro.Push.SignalR`, so the Native AOT image carries one Pro package fewer; Realtime's relay
+  no longer subscribes to the Pro cluster-node event nor sends `OnClusterNodeStateChanged`. No hub client ever
+  received those frames, and `/admin/cluster` reads cluster state over REST, refreshed every 10 s, as before. The
+  `bridge_events_*{bridge="cluster"}` metric series are gone. `RelayOutcomeKind.SkippedNullNodeId` stays in
+  `GET /admin/realtime/audit` with no producer. (#N)
+
 ## [2.41.0] - 2026-11-21
 
 A supervisor's text whisper reaches the agent from any Api replica, as an `agentassist.suggestion` on the agent's

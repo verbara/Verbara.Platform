@@ -6,85 +6,84 @@ via the Web UI. Shipped in Platform v1.10.0 + Web v1.9.0 (R5.1 Phase 2).
 ## Pages
 
 - **Overview** — `/admin/cluster` lists all registered nodes with
-  health state, last heartbeat, version, and routing weight.
+  health state, capacity, routing weight and Asterisk version, plus
+  summary cards (nodes, channels, agents, instances) and an
+  **Active drains** section while any drain runs.
 - **Node Detail drawer** — click any node row; opens a side drawer
   (uses the `DrawerDetail` primitive shipped in R5.1 Phase 0) with
-  three tabs: **Overview**, **Drain**, **History**. Drawer state
-  (selected node, selected tab) is reflected in the URL so links can
-  be shared.
-- **Grafana deeplink** — each drawer carries a "View in Grafana"
-  shortcut that opens the Pro.Cluster dashboard filtered to the selected
-  node. The deeplink URL template is driven by the
-  `GRAFANA_BASE_URL` + `GRAFANA_CLUSTER_DASHBOARD_UID` env vars; leave
-  them blank to hide the link.
+  three tabs: **Overview**, **Drain Status**, **History**.
+- **Grafana deeplink** — the drawer's Overview tab carries an
+  "Open in Grafana" link to the Pro.Cluster dashboard filtered to the
+  selected node (`var-node=<nodeId>`). It is driven by the Web build's
+  `VITE_GRAFANA_URL`; leave it blank to hide the link.
 
 ## Drain flow
 
 Draining a node gracefully removes it from routing without interrupting
-active sessions. The Web UI exposes this on the **Drain** tab of the
-node detail drawer:
+active sessions:
 
-1. The tab shows the node's current drain state (Active / Draining /
-   Drained).
-2. Clicking **Start Drain** opens a confirm dialog (uses the
-   `ConfirmDeleteDialog.confirmationWord` primitive with the word
-   **`FORCE`**) — the operator must type `FORCE` to confirm. This
-   guards against accidental drains on production nodes.
-3. On confirm, the Web sends `POST /api/v1/admin/cluster/nodes/{id}/drain`.
-4. The tab refreshes every 5 s showing drain progress (inflight
-   session count, expected completion ETA).
-
-The `FORCE` word is intentional — drains cannot be undone gracefully
-(canceling mid-drain may strand calls). Operators who genuinely want a
-fast drain for an unhealthy node must type the word; there is no
-keyboard shortcut.
+1. From the node's row menu, **Drain** opens a dialog asking for the
+   grace period in seconds (default 300).
+2. On submit, the Web sends
+   `POST /api/v1/management/cluster/nodes/{nodeId}/drain` with
+   `{"gracePeriodSeconds": <n>}`; the API answers 202 Accepted. The
+   drain is refused while it would leave no other healthy node.
+3. The **Active drains** section and the drawer's **Drain Status** tab
+   show the drain's progress (remaining and completed calls, calls
+   force-disconnected, deadline).
+4. **Cancel** (in the Active drains section) sends
+   `DELETE /api/v1/management/cluster/nodes/{nodeId}/drain` and returns
+   the node to routing.
+5. **Force** ends the remaining calls of a running drain
+   (`POST /api/v1/management/cluster/nodes/{nodeId}/force-drain`). Its
+   confirm dialog (the `ConfirmDeleteDialog.confirmationWord` primitive)
+   asks the operator to type **`FORCE`**, because forced calls are cut.
 
 ## History tab
 
-Shows the last N `cluster-node` audit entries for the selected node —
-node joined, state transitions, drain start / complete, manual evict.
-Backed by the `AuditTrailMini` primitive (shipped R5.1 Phase 2) with
-paging. Uses the same `/api/v1/audit/events?subsystem=cluster` endpoint
-as other audit views.
+Shows the last 10 audit events whose resource type is `cluster_node`
+and whose resource id is the selected node, through the
+`AuditTrailMini` primitive (shipped R5.1 Phase 2). Platform writes no
+audit entry of that type today, so the tab is empty: no audit trail of
+cluster node transitions or drains exists.
 
-## RBAC
+## Access
 
-Viewing the cluster page + drawer requires `cluster:view`. Starting a
-drain requires `cluster:drain:manage`. Both are seeded into
-`platform_admin`; operators may also receive them via a custom role.
+The page requires the `platform:cluster:manage` permission. Every
+`/api/v1/management/cluster/*` endpoint is gated by `PlatformAdminOnly`:
+only an administrator of the host (Platform) tenant reaches them;
+Customer and Partner tenant callers never do.
 
-## Real-time updates
+## Updates
 
-The cluster overview + drawer subscribe to the `admins:platform`
-SignalR group (joined automatically for connections carrying the
-`PlatformAdmin` role — wired in Pro v1.11.0-pro, Platform v1.9.0).
-The typed hub method `OnClusterNodeStateChanged` streams state
-transitions; nodes re-render without refresh.
+The page refreshes cluster status, nodes and instances over REST every
+10 s. There is no live push of node state.
 
 ## Status colors (StatusBadge variants)
 
-The Web `StatusBadge` primitive (R5.1 Phase 0) renders node states
-with 6 variants:
+The Web `StatusBadge` primitive (R5.1 Phase 0, variant `cluster-node`)
+renders the node states the API returns (lower case):
 
-| State | Variant | When |
-|-------|---------|------|
-| `Healthy`   | `success`  | heartbeat within threshold, no circuit open |
-| `Degraded`  | `warning`  | intermittent failures, still routable |
-| `Unhealthy` | `destructive` | circuit open or heartbeat stale > 30s |
-| `Draining`  | `info`     | drain in progress, excluded from new routing |
-| `Drained`   | `muted`    | drain complete, awaiting removal |
-| `Unknown`   | `outline`  | no heartbeat ever observed |
+| State | Color | When |
+|-------|-------|------|
+| `healthy`   | green | heartbeat within threshold, no circuit open |
+| `degraded`  | amber | intermittent failures, still routable |
+| `unhealthy` | red   | circuit open or heartbeat stale |
+| `draining`  | blue  | drain in progress, excluded from new routing |
+| `offline`   | gray  | out of routing (for example after a drain) |
+| `unknown`   | gray  | no heartbeat ever observed |
 
-Colors apply everywhere the state is shown (overview table, drawer
-header, Grafana link, SignalR notifications).
+Colors apply everywhere the state is shown (overview table, Active
+drains section, drawer).
 
 ## Known limitations
 
-- **Drain cancellation is not exposed in the UI** by design — safely
-  canceling a drain requires state machine work that hasn't been
-  prioritized. Operators needing to un-drain a node can hit
-  `POST /api/v1/admin/cluster/nodes/{id}/drain/cancel` via API, but the
-  Web does not surface a button. Tracked in **R5.2+** if demand arises.
-- **Cluster node force-evict** (remove without drain) is backend-only
-  and intentionally has no UI path. Use the API with an audited
-  support ticket trail.
+- **Cluster node removal** (`DELETE /api/v1/management/cluster/nodes/{nodeId}`)
+  is meant for an `offline` or `unhealthy` node; drain a healthy node
+  first.
+- **Row menu and Drain Status tab casing.** The page compares node
+  states in title case (`Healthy`, `Draining`) while the API returns
+  them in lower case, so the row menu's state-dependent actions, the
+  healthy count and the drawer's Drain Status tab may not reflect the
+  node's state. Until the Web fixes the comparison, drive a drain with
+  the endpoints above; the Active drains section is not affected.

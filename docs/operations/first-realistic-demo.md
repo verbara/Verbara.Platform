@@ -261,28 +261,31 @@ https://verbara.io/developer-license.
 
 ## Step 6 — Cluster drain demo (~5 min, OPTIONAL — multi-node only)
 
-Skip if running single-node. To enable cluster:
+Skip if running single-node. The bundled compose
+(`docker/docker-compose.full.yml`) runs one Asterisk, which the API registers
+as the cluster node `primary`. A drain needs a second healthy node: the drain
+is refused when it would leave no other healthy node.
 
-```bash
-docker compose -f docker/docker-compose.full.yml --profile cluster up -d
-```
+> **Cluster nodes are Asterisk servers, not API replicas.** Scaling
+> `platform-api` adds no cluster node (and the bundled compose pins it to host
+> port `5000:5000`, so `--scale platform-api=N` fails with a port collision).
+> Register each further Asterisk you run with **Add node** on the Cluster page
+> (`POST /api/v1/management/cluster/nodes`, with its AMI host, port and
+> credentials). See [cluster-management.md](cluster-management.md).
 
-> **Scaling caveat.** The bundled compose pins `platform-api` to host port
-> `5000:5000`, so `--scale platform-api=N` will fail with a port collision.
-> For a real multi-node demo, edit the compose file to remove the host port
-> mapping and put a load-balancer in front. Full multi-node walkthrough lives
-> in [cluster-management.md](cluster-management.md).
+Signed in as the host tenant's admin, open Web UI → **Platform Admin →
+Cluster**: both nodes should read `healthy`. Drain `primary` (row menu →
+**Drain**, or `POST /api/v1/management/cluster/nodes/primary/drain` with
+`{"gracePeriodSeconds":120}`). The drain coordinator (`Pro.Cluster`) will:
 
-In Web UI → **Platform Admin → Cluster**, you should see 3 healthy nodes.
-Click a node → **Drain**. The drain coordinator (`Pro.Cluster`) will:
-
-1. Mark the node `Draining` in the registry.
+1. Mark the node `draining` in the registry.
 2. Reject new traffic; existing calls keep running.
-3. Show a progress bar (`drainedCalls / totalCalls`).
-4. Move to `Offline` when the last call ends.
+3. Show the drain's progress (completed / initial calls) in **Active drains**
+   and the node drawer's **Drain Status** tab.
+4. Take the node out of routing when the last call ends or the grace period
+   runs out.
 
-Watch the audit log: each transition emits `cluster.node.state.changed`
-events.
+Watch the node's state on the Cluster page (it refreshes every 10 s).
 
 ---
 
