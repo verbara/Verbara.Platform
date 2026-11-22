@@ -116,8 +116,10 @@ public sealed partial class NginxGatewayAccessLogTests
             d => d.Name == "proxy_set_header" && d.Args.Count == 2 && d.Args[0] == "Upgrade" && d.Args[1] == "$http_upgrade",
             "Upgrade is a hop-by-hop header: nginx passes it on only when the location sets it again");
         location.Children.Should().Contain(
-            d => d.Name == "proxy_set_header" && d.Args.Count == 2 && d.Args[0] == "Connection" && d.Args[1] == "upgrade",
-            "Connection is a hop-by-hop header: nginx passes it on only when the location sets it again");
+            d => d.Name == "proxy_set_header" && d.Args.Count == 2 && d.Args[0] == "Connection"
+                && d.Args[1] == "$connection_upgrade",
+            "Connection is a hop-by-hop header: nginx passes it on only when the location sets it again, and " +
+            "the map sets it to 'upgrade' whenever the client asks for one (NginxUpstreamKeepaliveTests)");
         Seconds(location.Children!.Single(d => d.Name == "proxy_read_timeout").Args.Single()).Should().BeGreaterThan(120,
             "the API pings an idle socket every 2 minutes (UseWebSockets' default keep-alive), so a shorter " +
             "read timeout closes a quiet conversation");

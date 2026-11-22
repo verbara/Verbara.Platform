@@ -142,6 +142,17 @@ same. The shipped services therefore keep query strings out of their logs:
   recreate the gateway when only that file changed: run
   `docker compose -f <compose file> up -d --force-recreate nginx-gateway`.
 
+## Gateway connections to the services
+
+`nginx-gateway.conf` reuses its connections to platform-api, realtime and web: each
+`upstream` block keeps a pool (`keepalive 64;`), and every location speaks HTTP/1.1 and
+sends an empty `Connection` header, or `upgrade` only when the client asks for a WebSocket
+(the `$connection_upgrade` map). Without that, every proxied request opens a new connection,
+each closed one holds one of the gateway's ephemeral ports (about 28,000) for about 60 s, and
+under sustained load the ports run out: the gateway answers 502 for tens of seconds at a
+time, and only the access log shows it (the error log is discarded, see above). A location
+you add, or a proxy of your own in front of the services, needs the same three settings.
+
 ## Public address of the console (`Platform__PublicBaseUrl`)
 
 Platform.Api builds the links that bring a user back to the console from configuration, never
