@@ -9,6 +9,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.41.0] - 2026-11-21
+
+A supervisor's text whisper reaches the agent from any Api replica, as an `agentassist.suggestion` on the agent's
+event stream, and the whisper route answers 204 No Content (#640). A burst of wrong passwords for one account stops at
+the lockout threshold again (#642). Verbara.Sdk.Pro `2.31.0-pro`: Pro timing options are checked at startup, post-call
+analyzers run for their configured timeouts, and a dialed contact list can be deleted (#641). Verbara.Sdk stays at
+`2.10.1`. Read **Changed — BREAKING** first.
+
 ### Changed — BREAKING
 
 - **A supervisor's text whisper answers 204 No Content.** `POST /api/v1/supervisor/sessions/{sessionId}/whisper` now
@@ -19,9 +27,31 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   500 characters after trimming, and 409 `{"error":"whisper-session-not-bound"}` while the session's agent or
   conversation is not resolved yet (retry shortly). Another tenant's, an ended or an unknown session still answers
   404 with no body, before the text is read. Webhook subscribers to `agentassist.suggestion` now also receive one
-  delivery per whisper, with `source` `Supervisor` and `priority` `Critical`.
+  delivery per whisper, with `source` `Supervisor` and `priority` `Critical`. (#640)
 
-### Changed
+### Fixed
+
+- **A burst of wrong passwords for one account stops at the lockout threshold again.** Since password checks wait
+  for a hashing slot (v2.40.0), every sign-in of a burst for the same account read the account before the first
+  failure was counted, so each one had its password checked and none answered 423. A sign-in now reads the account's
+  lock again once it holds its slot, and a wrong password is counted before the slot goes to the next sign-in: of
+  50 wrong-password sign-ins queued for one account behind one slot, the threshold's worth answer 401 and the rest
+  423 `Account is locked`. With more slots, at most one more password per further slot is checked. Successful
+  sign-ins, MFA and the 401/423 bodies are unchanged. (#642)
+- **A supervisor's text whisper reaches the agent.** `POST /api/v1/supervisor/sessions/{sessionId}/whisper` with
+  `{"text": "..."}` now delivers the trimmed text to the session's agent as an `agentassist.suggestion` on
+  `GET /api/v1/events/stream`, with `source` `Supervisor` and `priority` `Critical`, a new `suggestionId` per whisper,
+  and the session's own agent and conversation (never values from the request). The agent's console shows it like any
+  suggestion; users who read every conversation of the tenant receive it too, and no other agent does. Any Api replica
+  accepts it, also one that does not run the session's Agent Assist engine: the session is found in the shared
+  live-session list (with `ConnectionStrings__Redis` set), and the event crosses replicas on the Redis backplane like
+  the other `agentassist.*` events. A 204 means the whisper was published; delivery to a stream on another replica is
+  best effort, at most once, so a supervisor who sees no effect can send it again. Until now the text reached the agent
+  only as the optional spoken whisper, on the engine's replica, and was refused everywhere else. The spoken whisper is
+  still attempted after the text is delivered, and still works only when the request reaches the engine's replica; a
+  spoken attempt that fails does not change the 204. (#640)
+
+### Dependencies
 
 - **Verbara.Sdk.Pro `2.30.2-pro` → `2.31.0-pro`**, the 22 `Verbara.Sdk.Pro.*` pins in one commit. Diffed by package
   name over every `project.assets.json`, the restore moved only the 22 Pro packages: no other package (the
@@ -40,30 +70,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     fails; the list, its contacts and their phones go and the call history stays. On first start the dialer database
     runs a migration that drops the two foreign keys from call attempts to contacts and phones; it rewrites no rows.
   - **A campaign lists only contact lists of its own tenant.**
-  - The test doubles of the contact-list store follow the campaign-addressed contract; no Api route changes.
-
-### Fixed
-
-- **A burst of wrong passwords for one account stops at the lockout threshold again.** Since password checks wait
-  for a hashing slot (v2.40.0), every sign-in of a burst for the same account read the account before the first
-  failure was counted, so each one had its password checked and none answered 423. A sign-in now reads the account's
-  lock again once it holds its slot, and a wrong password is counted before the slot goes to the next sign-in: of
-  50 wrong-password sign-ins queued for one account behind one slot, the threshold's worth answer 401 and the rest
-  423 `Account is locked`. With more slots, at most one more password per further slot is checked. Successful
-  sign-ins, MFA and the 401/423 bodies are unchanged.
-
-- **A supervisor's text whisper reaches the agent.** `POST /api/v1/supervisor/sessions/{sessionId}/whisper` with
-  `{"text": "..."}` now delivers the trimmed text to the session's agent as an `agentassist.suggestion` on
-  `GET /api/v1/events/stream`, with `source` `Supervisor` and `priority` `Critical`, a new `suggestionId` per whisper,
-  and the session's own agent and conversation (never values from the request). The agent's console shows it like any
-  suggestion; users who read every conversation of the tenant receive it too, and no other agent does. Any Api replica
-  accepts it, also one that does not run the session's Agent Assist engine: the session is found in the shared
-  live-session list (with `ConnectionStrings__Redis` set), and the event crosses replicas on the Redis backplane like
-  the other `agentassist.*` events. A 204 means the whisper was published; delivery to a stream on another replica is
-  best effort, at most once, so a supervisor who sees no effect can send it again. Until now the text reached the agent
-  only as the optional spoken whisper, on the engine's replica, and was refused everywhere else. The spoken whisper is
-  still attempted after the text is delivered, and still works only when the request reaches the engine's replica; a
-  spoken attempt that fails does not change the 204.
+  - The test doubles of the contact-list store follow the campaign-addressed contract; no Api route changes. (#641)
 
 ## [2.40.0] - 2026-11-21
 
