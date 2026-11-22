@@ -403,7 +403,9 @@ public sealed record JwtValidationKeySnapshotOptions
 
     /// <summary>
     /// Longest a request whose token names an unknown key id waits for the reload it asked for.
-    /// Default 5 seconds.
+    /// Default 5 seconds. Before the first load, the same request first waits up to
+    /// <see cref="FirstLoadWait"/> for that load, so it can wait both: up to 10 seconds with the
+    /// defaults.
     /// </summary>
     public TimeSpan UnknownKeyIdWait { get; init; } = TimeSpan.FromSeconds(5);
 

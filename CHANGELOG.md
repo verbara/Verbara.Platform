@@ -17,9 +17,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the retry wait had grown to 30 s. After a key rotation, the first request signed with the new key could be refused
   too, and requests naming made-up key ids could stretch that to 10 s. Now an empty key pool is a successful load
   (read again after 1 s, without the growing wait), and a request whose token names a key the service does not hold
-  waits for one key reload (at most 5 s) instead of being refused. Those reloads stay rate-limited — at most one
-  every 2 s, shared by every request waiting — so made-up key ids cannot flood the key store, and a real new key is
-  accepted within that interval. A partial read that leaves out keys still held keeps them, as before.
+  waits for one key reload (at most 5 s, plus up to 5 s more for the first key load on a service that has not loaded
+  its keys yet) instead of being refused. Those reloads stay rate-limited — at most one every 2 s, shared by every
+  request waiting — so made-up key ids cannot flood the key store, and a real new key is accepted within that interval. A partial read that leaves out keys still held keeps them, as before.
 
 ### Removed
 

@@ -49,6 +49,19 @@ public sealed class JwtKeyIdTests
     public void FromToken_ShouldReturnNull_WhenTheHeaderIsImplausiblyLong() =>
         JwtKeyId.FromToken(new string('e', 4096) + ".p.s").Should().BeNull();
 
+    [Theory]
+    [InlineData(1536, "edge")]      // 2048 encoded characters: the longest header read
+    [InlineData(1537, null)]        // 2050 encoded characters
+    public void FromToken_ShouldReadTheHeaderUpToTwoKilobytes_WhenItIsPadded(int headerBytes, string? expected)
+    {
+        const string prefix = "{\"kid\":\"edge\",\"pad\":\"";
+        var header = prefix + new string('a', headerBytes - prefix.Length - 2) + "\"}";
+        var encoded = Base64UrlEncoder.Encode(header);
+        encoded.Length.Should().Be(headerBytes == 1536 ? 2048 : 2050);
+
+        JwtKeyId.FromToken(encoded + ".p.s").Should().Be(expected);
+    }
+
     [Fact]
     public void FromRequest_ShouldPreferTheQueryToken_WhenBothAreGiven() =>
         JwtKeyId.FromRequest(Token("query"), "Bearer " + Token("header")).Should().Be("query");

@@ -340,4 +340,150 @@ public sealed class JwtValidationKeySnapshotTests
         (_loads - warm).Should().BeInRange(1, 11, because: "20 s of forged key ids cost one reload per 2 s interval at most");
         snapshot.Resolve(null).Select(k => k.KeyId).Should().Equal("k1");
     }
+
+    // ─── A reload that has (or has not) read the pool when a new key id arrives ──────────────────
+
+    [Fact]
+    public async Task EnsureLoadedAsync_ShouldAcceptANewKeyId_WhenTheKeyLandsWhileAReloadThatAlreadyReadThePoolRuns()
+    {
+        // A refresh reads the pool, then its answer is slow to come back (a slow Redis round trip).
+        // The rotation lands after that read, and the first token signed with the new key arrives
+        // while the refresh still runs: that refresh can never return the new key, so the request
+        // must wait for the next reload, started once the running one is done, not join it.
+        var pool = new GatedPool();
+        pool.Put(NewKey("k1"));
+        var unknownKeyIdReloadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var snapshot = new JwtValidationKeySnapshot(
+            pool.LoadAsync,
+            Build,
+            timeProvider: _clock,
+            events: new JwtValidationKeySnapshotEvents { UnknownKeyIdReload = () => unknownKeyIdReloadStarted.TrySetResult() });
+        await snapshot.EnsureLoadedAsync(null, CancellationToken.None);
+
+        pool.HoldAnswers();
+        _clock.Advance(TimeSpan.FromMinutes(6));
+        _ = snapshot.Resolve(null);                                  // the refresh starts and reads k1 only
+        await pool.HasRead.WaitAsync(TimeSpan.FromSeconds(10));
+        pool.Put(NewKey("k2"));
+
+        var legit = snapshot.EnsureLoadedAsync("k2", CancellationToken.None);
+        // A reload asked for now that does not wait for the running one joins it, and announces
+        // itself at once; give it that chance before the running reload answers. On the correct
+        // path nothing starts here, so this wait simply runs out.
+        await Task.WhenAny(unknownKeyIdReloadStarted.Task, Task.Delay(TimeSpan.FromMilliseconds(500))); // fence-allow: GUARD-TIMEOUT — bounds the wait for a reload that must NOT start while the running one holds; its absence is the correct path
+        legit.IsCompleted.Should().BeFalse(because: "the request waits for a reload that reads the pool after the new key landed");
+        pool.ReleaseAnswers();
+        await legit.WaitAsync(TimeSpan.FromSeconds(10));
+
+        snapshot.Resolve("k2").Select(k => k.KeyId).Should().Contain(
+            "k2", because: "a request must never settle for a reload that read the pool before its key existed");
+        pool.Loads.Should().Be(3, because: "the first load, the slow refresh, and one reload for the new key id");
+    }
+
+    [Fact]
+    public async Task EnsureLoadedAsync_ShouldJoinTheReload_WhenItHasNotReadThePoolYet()
+    {
+        // A reload that has started but not read the pool yet will read it after this request
+        // arrived: sharing it costs nothing and answers the request, so no second load runs.
+        var pool = new GatedPool();
+        pool.Put(NewKey("k1"));
+        using var hold = new ManualResetEventSlim(initialState: true);
+        TaskCompletionSource? reloadStarted = null;
+        var snapshot = new JwtValidationKeySnapshot(
+            pool.LoadAsync,
+            Build,
+            timeProvider: _clock,
+            events: new JwtValidationKeySnapshotEvents
+            {
+                // Runs on the reload's thread before it reads the pool: holding it here keeps the
+                // reload started but unread.
+                ReloadStarted = () =>
+                {
+                    Volatile.Read(ref reloadStarted)?.TrySetResult();
+                    hold.Wait(TimeSpan.FromSeconds(10));
+                },
+            });
+        await snapshot.EnsureLoadedAsync(null, CancellationToken.None);
+
+        hold.Reset();
+        Volatile.Write(ref reloadStarted, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+        _clock.Advance(TimeSpan.FromMinutes(6));
+        _ = snapshot.Resolve(null);
+        await reloadStarted!.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        pool.Put(NewKey("k2"));
+
+        var legit = snapshot.EnsureLoadedAsync("k2", CancellationToken.None);
+        hold.Set();
+        await legit.WaitAsync(TimeSpan.FromSeconds(10));
+
+        snapshot.Resolve("k2").Select(k => k.KeyId).Should().Contain("k2");
+        pool.Loads.Should().Be(2, because: "the request shares the reload that had not read the pool yet instead of starting another");
+    }
+
+    [Fact]
+    public async Task Resolve_ShouldNotReload_WhenTheTokenNamesAHeldKeyOrNone()
+    {
+        Answer(NewKey("k1"));
+        var snapshot = NewSnapshot();
+        await snapshot.EnsureLoadedAsync(CancellationToken.None);
+
+        for (var i = 0; i < 5; i++)
+        {
+            snapshot.Resolve("k1").Select(k => k.KeyId).Should().Equal("k1");
+            snapshot.Resolve(null).Select(k => k.KeyId).Should().Equal("k1");
+            snapshot.Resolve("").Select(k => k.KeyId).Should().Equal("k1");
+        }
+        await snapshot.ReloadInFlight.WaitAsync(TimeSpan.FromSeconds(10));
+
+        _loads.Should().Be(1, because: "only a key id the snapshot does not hold asks for a reload");
+        snapshot.PendingUnknownKeyIdReload.IsCompleted.Should().BeTrue(because: "nor schedules one");
+    }
+
+    private static SymmetricSecurityKey Build(JwtKeyEntry entry) =>
+        new SymmetricSecurityKey(Convert.FromBase64String(entry.Key)) { KeyId = entry.KeyId };
+
+    /// <summary>
+    /// A key pool each load reads when it is called; while <see cref="HoldAnswers"/> is in force the
+    /// load then waits before answering what it read, as a slow store round trip does.
+    /// </summary>
+    private sealed class GatedPool
+    {
+        private readonly Lock _lock = new();
+        private readonly List<JwtKeyEntry> _entries = [];
+        private TaskCompletionSource? _answers;
+        private TaskCompletionSource _hasRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _loads;
+
+        public int Loads => Volatile.Read(ref _loads);
+
+        /// <summary>Completes when a load has read the pool since the last <see cref="HoldAnswers"/>.</summary>
+        public Task HasRead => Volatile.Read(ref _hasRead).Task;
+
+        public void Put(JwtKeyEntry entry)
+        {
+            lock (_lock)
+                _entries.Add(entry);
+        }
+
+        public void HoldAnswers()
+        {
+            Volatile.Write(ref _hasRead, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+            Volatile.Write(ref _answers, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+        }
+
+        public void ReleaseAnswers() => Volatile.Read(ref _answers)?.TrySetResult();
+
+        public async Task<IReadOnlyList<JwtKeyEntry>> LoadAsync(CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _loads);
+            JwtKeyEntry[] read;
+            lock (_lock)
+                read = [.. _entries];
+            var answers = Volatile.Read(ref _answers);
+            Volatile.Read(ref _hasRead).TrySetResult();
+            if (answers is not null)
+                await answers.Task.ConfigureAwait(false);
+            return read;
+        }
+    }
 }
