@@ -355,6 +355,45 @@ public sealed class PushToHubRelayTests
     }
 
     // -----------------------------------------------------------------------
+    // platform-drops-the-cluster-bridge — the relay has no cluster path. The Pro event type still ships in the
+    // pinned Pro package, so a cluster event on the bus must reach no hub group and leave no relay outcome.
+    // A Core agent event after it is the positive control: the relay is started and does forward.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task StartAsync_ShouldSendNoClusterFrameAndRecordNoOutcome_WhenClusterNodeStateChangedEventIsPublished()
+    {
+        var (relay, bus, mocks, _, sink) = BuildSut("admins:platform", isLeader: true);
+        await relay.StartAsync(CancellationToken.None);
+
+        var clusterEvent = new ClusterNodeStateChangedEvent
+        {
+            NodeId = "node-1",
+            PreviousState = "Healthy",
+            NewState = "Draining",
+            ChangedAt = DateTimeOffset.UtcNow,
+        };
+        bus.Emit(clusterEvent);
+        await WaitForDispatch(relay);
+
+        bus.Emit(CoreAgentEvent("acme", DateTimeOffset.UtcNow));
+        await WaitForDispatch(relay);
+
+        mocks.HubClients.DidNotReceive().Group("admins:platform");
+        await mocks.GroupClient.DidNotReceive().OnClusterNodeStateChanged(Arg.Any<ClusterNodeStatePayload>());
+        mocks.HubClients.Received(1).Group("tenant:acme");
+        mocks.HubClients.ReceivedCalls().Should().ContainSingle();
+        var entries = sink.Snapshot(since: null, limit: 100).Entries;
+        entries.Should().NotContain(e => e.EventType == clusterEvent.EventType);
+        entries.Should().ContainSingle(e =>
+            e.EventType == "agent.state_changed" &&
+            e.TenantId == "acme" &&
+            e.Outcome == RelayOutcomeKind.Forwarded);
+
+        await relay.StopAsync(CancellationToken.None);
+    }
+
+    // -----------------------------------------------------------------------
     // ADR-0022 Phase A.5 — leader-gating tests
     // -----------------------------------------------------------------------
 
