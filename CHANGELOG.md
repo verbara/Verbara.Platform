@@ -29,7 +29,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`keepalive 64`), every location speaks HTTP/1.1 with an empty `Connection` header, and `/hubs/` and `/ws/` send
   `Connection: upgrade` only on a WebSocket upgrade, so the hub's negotiate, long-polling and server-sent-events
   requests reuse pooled connections too. Recreate the gateway to pick it up:
-  `docker compose -f <compose file> up -d --force-recreate nginx-gateway`.
+  `docker compose -f <compose file> up -d --force-recreate nginx-gateway`. (#646)
 
 ## [2.41.0] - 2026-11-21
 
