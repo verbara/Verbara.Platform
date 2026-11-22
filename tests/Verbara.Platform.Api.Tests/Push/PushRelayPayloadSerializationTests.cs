@@ -115,6 +115,18 @@ public sealed class PushRelayPayloadSerializationTests
         types.Should().NotContain(typeof(RemotePushEvent));
     }
 
+    [Fact]
+    public void PushEventTypesReachableFromTheApi_ShouldIncludeNoProPushSignalRType()
+    {
+        var proPushSignalRTypes = PushEventTypesReachableFromTheApi()
+            .Where(t => t.Assembly.GetName().Name == "Verbara.Sdk.Pro.Push.SignalR")
+            .Select(t => t.FullName!)
+            .Order(StringComparer.Ordinal);
+
+        string.Join(", ", proPushSignalRTypes).Should().BeEmpty(
+            "Platform.Api no longer references Verbara.Sdk.Pro.Push.SignalR, so none of its event types can reach the push bus");
+    }
+
     /// <summary>
     /// Pro event types that still ship in the pinned package but that nothing in Platform.Api publishes any more, so
     /// they never reach the bus. Named by string, not <c>typeof</c>, so this compiles after Pro deletes them.
