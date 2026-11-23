@@ -19,8 +19,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   anything. Management create no longer overwrites an existing tenant: it answers 409. A deleted tenant's id cannot be
   used again.
 - **Existing tenants whose ids break that rule are reported and kept apart.** A new readiness health check,
-  `tenant-ids`, reports them as Degraded (readiness still answers 200), naming both tenants of each pair, and also
-  reports every `Realtime:TenantIds` entry with no stored tenant. Such tenants are not reconciled, and their
+  `tenant-ids`, reports them as Degraded (readiness still answers 200), and also reports every `Realtime:TenantIds`
+  entry with no stored tenant. Readiness shows counts only; the Api log names the tenants, both tenants of each pair,
+  and the unstored entries at Warning each time that set changes. Such tenants are not reconciled, and their
   suspension or deletion removes their credentials, queue memberships and trunks by exact id but never their queues;
   deleting one of their queues does not remove it from the telephony engine either. They stay in that state, even
   after one tenant of a pair is deleted, until a tenant rename tool is available.

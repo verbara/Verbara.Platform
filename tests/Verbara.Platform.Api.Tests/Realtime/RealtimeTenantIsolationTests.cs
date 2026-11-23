@@ -30,6 +30,14 @@ internal sealed class FixedTenantIdRegistry(params StoredTenantId[] ids) : ITena
     public ValueTask<IReadOnlyList<StoredTenantId>> ListAllIdsAsync(CancellationToken ct) => new(ids);
 }
 
+/// <summary>A registry that reads the test's list on each call.</summary>
+internal sealed class ListTenantIdRegistry(List<StoredTenantId> ids) : ITenantIdRegistry
+{
+    public ValueTask<TenantCreateResult> TryCreateAsync(Tenant tenant, CancellationToken ct) => throw new NotSupportedException();
+
+    public ValueTask<IReadOnlyList<StoredTenantId>> ListAllIdsAsync(CancellationToken ct) => new(ids.ToList());
+}
+
 /// <summary>A registry that cannot be read.</summary>
 internal sealed class UnreadableTenantIdRegistry : ITenantIdRegistry
 {
@@ -172,32 +180,83 @@ public sealed class TenantIdAuditTests
     }
 }
 
+/// <summary>A logger that records the Warning messages it receives.</summary>
+internal sealed class RecordingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+{
+    public List<string> Warnings { get; } = [];
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+    public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+        TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning)
+            lock (Warnings) Warnings.Add(formatter(state, exception));
+    }
+}
+
 public sealed class TenantIdHealthCheckTests
 {
     private static IConfiguration Config(params string[] realtimeTenants) => new ConfigurationBuilder()
         .AddInMemoryCollection(realtimeTenants.Select((t, i) => new KeyValuePair<string, string?>($"Realtime:TenantIds:{i}", t)))
         .Build();
 
+    private static TenantIdHealthCheck NewCheck(IConfiguration config, RecordingLogger<TenantIdHealthCheck>? logger,
+        params StoredTenantId[] ids) =>
+        new(new TenantIdAudit(new FixedTenantIdRegistry(ids)), config,
+            (Microsoft.Extensions.Logging.ILogger<TenantIdHealthCheck>?)logger ?? NullLogger<TenantIdHealthCheck>.Instance);
+
     private static Task<HealthCheckResult> Check(IConfiguration config, params StoredTenantId[] ids) =>
-        new TenantIdHealthCheck(new TenantIdAudit(new FixedTenantIdRegistry(ids)), config)
-            .CheckHealthAsync(new HealthCheckContext());
+        NewCheck(config, null, ids).CheckHealthAsync(new HealthCheckContext());
+
+    private static IEnumerable<string> Text(HealthCheckResult result) =>
+        result.Data.Keys.Concat(result.Data.Values.Select(v => v.ToString() ?? "")).Append(result.Description ?? "");
 
     [Fact]
-    public async Task CheckHealthAsync_ShouldBeDegradedNamingThePair_WhenAPairIsStored()
+    public async Task CheckHealthAsync_ShouldBeDegradedWithCountsAndNoTenantId_WhenAPairIsStored()
     {
-        var result = await Check(Config("acme-corp"), IsolationKit.Id("platform"), IsolationKit.Id("acme"), IsolationKit.Id("acme-corp"));
+        var result = await Check(Config("acme-corp"), IsolationKit.Id("platform"), IsolationKit.Id("acme"),
+            IsolationKit.Id("acme-corp", TenantStatus.Suspended));
 
         result.Status.Should().Be(HealthStatus.Degraded);
-        result.Data.Values.Select(v => v.ToString()).Should().Contain(v => v!.Contains("acme / acme-corp") && v.Contains(TenantIdFlagReason.PrefixPair));
+        result.Description.Should().Be("2 stored tenant ids break the tenant-id rule; see the Api log.");
+        result.Data["flaggedTenantIds"].Should().Be(2);
+        result.Data["pairs"].Should().Be(1);
+        result.Data["unstoredRealtimeTenantIds"].Should().Be(0);
+        Text(result).Should().NotContain(t => t.Contains("acme", StringComparison.OrdinalIgnoreCase)
+            || t.Contains(nameof(TenantStatus.Suspended), StringComparison.Ordinal)
+            || t.Contains(TenantIdFlagReason.PrefixPair, StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task CheckHealthAsync_ShouldBeDegraded_WhenTheDefaultRealtimeTenantIsNotStored()
+    public async Task CheckHealthAsync_ShouldBeDegradedWithACountAndNoTenantId_WhenTheDefaultRealtimeTenantIsNotStored()
     {
         var result = await Check(new ConfigurationBuilder().Build(), IsolationKit.Id("platform"), IsolationKit.Id("demo-corp"));
 
         result.Status.Should().Be(HealthStatus.Degraded);
-        result.Data.Values.Select(v => v.ToString()).Should().Contain("configured realtime tenant 'demo' does not exist");
+        result.Description.Should().Be("1 configured realtime tenant id is not stored; see the Api log.");
+        result.Data["unstoredRealtimeTenantIds"].Should().Be(1);
+        Text(result).Should().NotContain(t => t.Contains("demo", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ShouldLogTheIdsOncePerChangeOfTheFlaggedSet_WhenProbedRepeatedly()
+    {
+        var logger = new RecordingLogger<TenantIdHealthCheck>();
+        var ids = new List<StoredTenantId> { IsolationKit.Id("platform"), IsolationKit.Id("acme"), IsolationKit.Id("acme-corp") };
+        var check = new TenantIdHealthCheck(new TenantIdAudit(new ListTenantIdRegistry(ids)), Config("acme"), logger);
+
+        await check.CheckHealthAsync(new HealthCheckContext());
+        await check.CheckHealthAsync(new HealthCheckContext());
+        logger.Warnings.Should().ContainSingle().Which.Should().Contain("acme / acme-corp").And.Contain(TenantIdFlagReason.PrefixPair);
+
+        ids.Add(IsolationKit.Id("t"));
+        await check.CheckHealthAsync(new HealthCheckContext());
+        await check.CheckHealthAsync(new HealthCheckContext());
+        logger.Warnings.Should().HaveCount(2);
+        logger.Warnings[1].Should().Contain("t: " + TenantIdFlagReason.Reserved);
     }
 
     [Fact]
@@ -222,7 +281,23 @@ public sealed class TenantIdHealthCheckTests
         var body = await response.Content.ReadAsStringAsync();
         response.StatusCode.Should().Be(HttpStatusCode.OK, body);
         JsonNode.Parse(body)!["checks"]!["tenant-ids"]?["status"]?.GetValue<string>().Should().Be("Degraded", body);
-        JsonNode.Parse(body)!["checks"]!["tenant-ids"].Should().NotBeNull(body);
+        JsonNode.Parse(body)!["checks"]!["tenant-ids"]!["data"]!["pairs"]!.GetValue<int>().Should().Be(1, body);
+    }
+
+    [Fact]
+    public async Task Readiness_ShouldCarryNoTenantId_WhenTheTenantIdCheckIsDegraded()
+    {
+        using var factory = new AuthenticatedPlatformApiFactory();
+        _ = factory.Server;
+        await IsolationKit.SeedTenantAsync(factory.Services, "acme");
+        await IsolationKit.SeedTenantAsync(factory.Services, "acme-corp", TenantStatus.Suspended);
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync(new Uri("/health/ready", UriKind.Relative));
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain("acme", "readiness is anonymous and served on the public gateway");
+        body.Should().NotContain(TenantIdFlagReason.PrefixPair);
     }
 }
 

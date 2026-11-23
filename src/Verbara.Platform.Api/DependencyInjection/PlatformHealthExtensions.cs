@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
 using Verbara.Platform.Api.Health;
@@ -114,6 +115,8 @@ public static class PlatformHealthExtensions
 
         // `asterisk` is the voice plane (design D2): this pod's primary AMI connection and the voice heartbeats,
         // tagged `voice` only, so it is reported on /health/voice and never gates /health/ready.
+        // Singleton: the check logs the flagged ids once per change of the flagged set, so it keeps the last one logged.
+        services.TryAddSingleton<TenantIdHealthCheck>();
         var healthBuilder = services.AddHealthChecks()
             .AddCheck<BackgroundServiceHealthCheck>("services", tags: [ReadyTag])
             .AddCheck<AsteriskAmiHealthCheck>("asterisk", tags: [VoiceTag])

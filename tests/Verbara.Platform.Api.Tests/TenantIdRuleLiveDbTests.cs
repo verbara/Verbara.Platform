@@ -146,7 +146,7 @@ public sealed class TenantIdRuleLiveDbTests : IClassFixture<ConversationClockRec
         ready.StatusCode.Should().Be(HttpStatusCode.OK, body);
         System.Text.Json.Nodes.JsonNode.Parse(body)!["checks"]!["tenant-ids"]?["status"]?.GetValue<string>()
             .Should().Be("Degraded", body);
-        body.Should().Contain("acme / acme-corp");
+        body.Should().NotContain("acme", "readiness carries counts only; the ids are in the Api log");
         (await factory.Services.GetRequiredService<Verbara.Sdk.Pro.Realtime.Engine.IDesiredStateProvider>()
             .GetActiveTenantIdsAsync()).Should().BeEmpty("deleting one member of a pair unflags nothing");
     }
