@@ -423,12 +423,19 @@ public sealed class FlaggedTenantLifecycleTests
             NullLogger<Verbara.Platform.Billing.DunningService>.Instance,
             Microsoft.Extensions.Options.Options.Create(new Verbara.Platform.Billing.DunningConfig()));
 
+        var dispatched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+#pragma warning disable CA2012 // NSubstitute setup chains .Returns() on the ValueTask
+        rig.Sync.RemoveAgentAsync(Acme, "a1", Arg.Any<CancellationToken>()).Returns(_ =>
+        {
+            dispatched.TrySetResult();
+            return ValueTask.CompletedTask;
+        });
+#pragma warning restore CA2012
+
         await dunning.StartAsync(default);
-        var tenants = rig.Factory.Services.GetRequiredService<ITenantStore>();
-        for (var i = 0; i < 100 && (await tenants.GetAsync(Acme))!.Status != TenantStatus.Suspended; i++)
-            await Task.Delay(50);
-        await Task.Delay(200);
+        await dispatched.Task.WaitAsync(TimeSpan.FromSeconds(30));
         await dunning.StopAsync(default);
+        var tenants = rig.Factory.Services.GetRequiredService<ITenantStore>();
 
         (await tenants.GetAsync(Acme))!.Status.Should().Be(TenantStatus.Suspended);
         await rig.Sync.Received(1).RemoveAgentAsync(Acme, "a1", Arg.Any<CancellationToken>());
