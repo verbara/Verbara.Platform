@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Verbara.Platform.Api.Services;
 
-internal sealed partial class TenantProvisioningService : ITenantLifecycleHandler
+internal sealed partial class TenantProvisioningService : IPlatformTenantLifecycleHandler
 {
     private readonly ITenantRoleStore _roleStore;
     private readonly IRoleTemplateStore _templateStore;
