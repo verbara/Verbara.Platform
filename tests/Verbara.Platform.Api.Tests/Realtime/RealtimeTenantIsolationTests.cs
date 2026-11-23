@@ -170,6 +170,60 @@ public sealed class TenantIdAuditTests
         report.IsFlagged("acme-corp").Should().BeTrue("deleting one member of a pair unflags nothing");
     }
 
+    /// <summary>The quadratic definition: every unordered pair for which <see cref="TenantIdRule.Overlaps"/> holds.</summary>
+    private static HashSet<(string, string)> OraclePairs(StoredTenantId[] ids)
+    {
+        var pairs = new HashSet<(string, string)>();
+        for (var i = 0; i < ids.Length; i++)
+            for (var j = i + 1; j < ids.Length; j++)
+                if (TenantIdRule.Overlaps(ids[i].TenantId, ids[j].TenantId))
+                    pairs.Add(Ordered(ids[i].TenantId, ids[j].TenantId));
+        return pairs;
+    }
+
+    private static (string, string) Ordered(string a, string b) => string.CompareOrdinal(a, b) < 0 ? (a, b) : (b, a);
+
+    [Fact]
+    public void OverlappingPairs_ShouldFindTheNonAdjacentPair_WhenAnUnrelatedExtensionSortsBetween()
+    {
+        // Sorted: x, x-a, x-a1, x-b, x0, x0-x: neighbour comparison alone misses x / x-b, x / x-a1 and x-a / x-a1 is no pair.
+        StoredTenantId[] ids = [IsolationKit.Id("x-b"), IsolationKit.Id("x0"), IsolationKit.Id("x"), IsolationKit.Id("x-a1"),
+            IsolationKit.Id("x-a"), IsolationKit.Id("x0-x")];
+
+        TenantIdAudit.OverlappingPairs(ids).Select(p => Ordered(p.A.TenantId, p.B.TenantId)).Should().BeEquivalentTo(new[]
+        {
+            ("x", "x-a"), ("x", "x-a1"), ("x", "x-b"), ("x0", "x0-x"),
+        });
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldMatchTheQuadraticDefinition_WhenStoredIdsAreRandom()
+    {
+        // Property test: a small alphabet makes prefixes, case variants and hyphen boundaries frequent; the non-ASCII
+        // letters check that the sort key folds case as OrdinalIgnoreCase does.
+        const string alphabet = "ab-A_.\u0131\u0130k\u212A";
+        var random = new Random(20261123);
+        for (var round = 0; round < 1500; round++)
+        {
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            var size = random.Next(0, 40);
+            while (set.Count < size)
+                set.Add(new string([.. Enumerable.Range(0, random.Next(1, 6)).Select(_ => alphabet[random.Next(alphabet.Length)])]));
+            var ids = set.Select(i => IsolationKit.Id(i)).ToArray();
+
+            var expected = OraclePairs(ids);
+            var found = TenantIdAudit.OverlappingPairs(ids).Select(p => Ordered(p.A.TenantId, p.B.TenantId)).ToList();
+            found.Should().OnlyHaveUniqueItems($"round {round}: [{string.Join(' ', set)}]");
+            found.Should().BeEquivalentTo(expected, $"round {round}: [{string.Join(' ', set)}]");
+
+            var report = await Run(ids);
+            report.Pairs.Should().HaveCount(expected.Count);
+            var paired = expected.SelectMany(p => new[] { p.Item1, p.Item2 }).ToHashSet(StringComparer.Ordinal);
+            report.Flags.Where(f => f.Reason is TenantIdFlagReason.PrefixPair or TenantIdFlagReason.CaseVariant)
+                .Select(f => f.TenantId).ToHashSet(StringComparer.Ordinal).Should().BeEquivalentTo(paired, $"round {round}");
+        }
+    }
+
     [Fact]
     public async Task RunAsync_ShouldFlagTheHostTenant_WhenAStoredIdExtendsIt()
     {
