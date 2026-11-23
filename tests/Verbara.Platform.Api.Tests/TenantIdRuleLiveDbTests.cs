@@ -65,31 +65,34 @@ public sealed class TenantIdRuleLiveDbTests : IClassFixture<ConversationClockRec
         }
     }
 
+    /// <summary>
+    /// First-run setup adopts a stored tenant whose id is exactly the customer id by writing it under the host with the
+    /// tenant store's upsert (design D1, "First-run setup"). On Postgres that write must land the parent and the type,
+    /// as the in-memory store does. Driven at the store: setup's own route signs a token, which this host cannot do over
+    /// a fresh database, and the route is covered by <c>SetupEndpointTests</c>.
+    /// </summary>
     [Fact]
-    public async Task Setup_ShouldAdoptTheStoredTenant_WhenItsIdIsExactlyTheCustomerIdOnPostgres()
+    public async Task UpsertAsync_ShouldAdoptAStoredOrphan_WhenSetupWritesItsExactIdUnderTheHostOnPostgres()
     {
         var connectionString = await NewDatabaseAsync();
-        using var factory = new PlatformApiFactory().WithWebHostBuilder(
+        using var factory = new PlatformAdminApiFactory().WithWebHostBuilder(
             b => b.UseSetting("ConnectionStrings:Postgres", connectionString));
         var store = factory.Services.GetRequiredService<ITenantStore>();
-        foreach (var (id, type) in new[] { ("platform", TenantType.Platform), ("acme", TenantType.Customer) })
+        await store.UpsertAsync(new Tenant
         {
-            await store.UpsertAsync(new Tenant
-            {
-                TenantId = id, Name = id, Status = TenantStatus.Active, Type = type, ParentTenantId = null,
-                CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
-            });
-        }
-        using var client = factory.CreateClient();
-
-        using var response = await client.PostAsJsonAsync("/api/setup", new
-        {
-            email = "admin@setup-test.com", password = "PlatformPass2026!", customerTenantId = "acme",
-            customerName = "Acme", customerAdminEmail = "ops@acme.test", customerAdminPassword = "CustomerPass2026!",
+            TenantId = "acme", Name = "acme", Status = TenantStatus.Active, Type = TenantType.Partner, ParentTenantId = null,
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
         });
 
-        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
-        (await store.GetAsync("acme"))!.ParentTenantId.Should().Be("platform", "the stored tenant is adopted by the host");
+        await store.UpsertAsync(new Tenant
+        {
+            TenantId = "acme", Name = "Acme", Status = TenantStatus.Active, Type = TenantType.Customer,
+            ParentTenantId = PlatformAdminApiFactory.HostTenantId, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+        });
+
+        var adopted = await store.GetAsync("acme");
+        adopted!.ParentTenantId.Should().Be(PlatformAdminApiFactory.HostTenantId, "the stored tenant is adopted by the host");
+        adopted.Type.Should().Be(TenantType.Customer);
     }
 
     [Fact]
