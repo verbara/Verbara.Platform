@@ -137,18 +137,20 @@ internal static class CallerIdPoolEndpoints
 
     // ─── Entry Handlers ───────────────────────────────────────────────────────
 
-    private static async Task<Ok<List<CallerIdEntryDto>>> ListEntries(
+    private static async Task<Results<Ok<List<CallerIdEntryDto>>, NotFound>> ListEntries(
         long id,
         HttpContext context,
         [FromServices] CallerIdPoolStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        if (await store.GetAsync(id, tenantId, ct) is null) return TypedResults.NotFound();
+
         var entries = await store.ListEntriesAsync(id, tenantId, ct);
         return TypedResults.Ok(entries.Select(MapEntryToDto).ToList());
     }
 
-    private static async Task<IResult> AddEntry(
+    private static async Task<Results<Created<CallerIdEntryDto>, NotFound>> AddEntry(
         long id,
         HttpContext context,
         [FromBody] AddCallerIdEntryRequest body,
@@ -156,6 +158,8 @@ internal static class CallerIdPoolEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        if (await store.GetAsync(id, tenantId, ct) is null) return TypedResults.NotFound();
+
         var entry = new CallerIdEntry
         {
             PoolId = id,
@@ -164,10 +168,10 @@ internal static class CallerIdPoolEndpoints
             IsActive = body.IsActive ?? true,
         };
         await store.AddEntryAsync(id, tenantId, entry, ct);
-        return Results.Created($"/admin/caller-id-pools/{id}/entries/{entry.Id}", MapEntryToDto(entry));
+        return TypedResults.Created($"/admin/caller-id-pools/{id}/entries/{entry.Id}", MapEntryToDto(entry));
     }
 
-    private static async Task<IResult> RemoveEntry(
+    private static async Task<Results<NoContent, NotFound>> RemoveEntry(
         long id,
         long entryId,
         HttpContext context,
@@ -175,8 +179,10 @@ internal static class CallerIdPoolEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        if (await store.GetAsync(id, tenantId, ct) is null) return TypedResults.NotFound();
+
         await store.RemoveEntryAsync(id, entryId, tenantId, ct);
-        return Results.NoContent();
+        return TypedResults.NoContent();
     }
 
     // ─── Mapping Helpers ─────────────────────────────────────────────────────
