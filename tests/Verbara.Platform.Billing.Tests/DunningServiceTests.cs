@@ -29,6 +29,7 @@ public class DunningServiceTests
 
         foreach (var handler in handlers ?? [])
             services.AddSingleton<ITenantLifecycleHandler>(handler);
+        services.AddSingleton<ITenantLifecycleDispatcher, EveryHandlerDispatcher>();
 
         var sp = services.BuildServiceProvider();
         var svc = new DunningService(
@@ -362,5 +363,42 @@ public class DunningServiceTests
 
         await tenantStore.Received(1).UpdateStatusAsync("dc1", TenantStatus.Suspended, Arg.Any<CancellationToken>());
         await handler.Received(1).OnTenantSuspendedAsync("dc1", Arg.Any<CancellationToken>());
+    }
+}
+
+/// <summary>
+/// The dispatch DunningService calls (realtime-objects-stay-in-their-tenant, design D3), reduced to what these tests
+/// observe: every registered handler, each failure swallowed. The Api's dispatcher and its flagged path are tested in
+/// Verbara.Platform.Api.Tests.
+/// </summary>
+internal sealed class EveryHandlerDispatcher(IEnumerable<ITenantLifecycleHandler> handlers) : ITenantLifecycleDispatcher
+{
+    public async ValueTask CreatedAsync(Tenant tenant, CancellationToken ct)
+    {
+        foreach (var h in handlers)
+            await Run(() => h.OnTenantCreatedAsync(tenant, ct));
+    }
+
+    public async ValueTask SuspendedAsync(string tenantId, CancellationToken ct)
+    {
+        foreach (var h in handlers)
+            await Run(() => h.OnTenantSuspendedAsync(tenantId, ct));
+    }
+
+    public async ValueTask DeletedAsync(string tenantId, CancellationToken ct)
+    {
+        foreach (var h in handlers)
+            await Run(() => h.OnTenantDeletedAsync(tenantId, ct));
+    }
+
+    private static async ValueTask Run(Func<ValueTask> call)
+    {
+        try
+        {
+            await call();
+        }
+        catch (InvalidOperationException)
+        {
+        }
     }
 }

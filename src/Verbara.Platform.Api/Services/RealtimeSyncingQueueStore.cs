@@ -22,13 +22,19 @@ internal sealed class RealtimeSyncingQueueStore : IQueueStore
     private readonly IRealtimeSyncService _sync;
     private readonly QueueWrapUpDurationProvider _wrapUps;
     private readonly ILogger<RealtimeSyncingQueueStore> _logger;
+    private readonly TenantIdAudit? _tenantIdAudit;
 
+    // tenantIdAudit (realtime-objects-stay-in-their-tenant, design D2): read on each delete; a flagged tenant, or an
+    // unreadable audit, keeps the realtime queue row. The composition always passes it; only a test that builds the
+    // decorator by hand leaves it out.
     public RealtimeSyncingQueueStore(
         IQueueStore inner,
         IRealtimeSyncService sync,
         QueueWrapUpDurationProvider wrapUps,
-        ILogger<RealtimeSyncingQueueStore> logger)
+        ILogger<RealtimeSyncingQueueStore> logger,
+        TenantIdAudit? tenantIdAudit = null)
     {
+        _tenantIdAudit = tenantIdAudit;
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentNullException.ThrowIfNull(sync);
         ArgumentNullException.ThrowIfNull(wrapUps);
@@ -90,6 +96,28 @@ internal sealed class RealtimeSyncingQueueStore : IQueueStore
 
         if (queue is null)
             return;
+
+        // A queue row of a flagged tenant may be another tenant's row too (acme's `corp-x` is acme-corp's `x`), so it
+        // is never removed for one; nor when the audit cannot be read (fail-closed). The flagged set never changes on
+        // its own, so this read is current when the removal would run.
+        if (_tenantIdAudit is not null)
+        {
+            string? flag;
+            try
+            {
+                flag = (await _tenantIdAudit.RunAsync(ct).ConfigureAwait(false)).ReasonOf(tenantId.Value);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                RealtimeSyncDeferralLog.Deferred(_logger, "ReadTenantIdAudit", queue.Name, tenantId.Value, ex);
+                flag = "the tenant-id audit could not be read";
+            }
+            if (flag is not null)
+            {
+                FlaggedTenantRealtimeRemoval.LogKeptQueue(_logger, $"{tenantId.Value}-{queue.Name}", tenantId.Value, flag);
+                return;
+            }
+        }
 
         try
         {

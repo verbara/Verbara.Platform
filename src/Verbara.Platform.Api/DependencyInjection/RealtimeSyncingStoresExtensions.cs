@@ -57,6 +57,10 @@ public static class RealtimeSyncingStoresExtensions
         // membership decorator (queue-members-stay-unpaused-across-reconcile). No external seam.
         services.TryAddSingleton<AgentPauseCoordinator>();
 
+        // realtime-objects-stay-in-their-tenant (design D2): the tenant-id audit, read by the queue decorator's delete,
+        // the lifecycle dispatcher, the reconciler's tenant list and the health check.
+        services.TryAddSingleton<TenantIdAudit>();
+
         // The in-memory wrap-up answers, written by the queue decorator and the reconciliation worker.
         services.TryAddSingleton<QueueWrapUpDurationProvider>();
         services.TryAddSingleton<QueueWrapUpDurationRefresher>();
@@ -76,7 +80,8 @@ public static class RealtimeSyncingStoresExtensions
                 ? inner
                 : new RealtimeSyncingQueueStore(
                     inner, sync, sp.GetRequiredService<QueueWrapUpDurationProvider>(),
-                    sp.GetRequiredService<ILogger<RealtimeSyncingQueueStore>>());
+                    sp.GetRequiredService<ILogger<RealtimeSyncingQueueStore>>(),
+                    sp.GetRequiredService<TenantIdAudit>());
         });
 
         RekeyInnerFromUnkeyed<IAgentStore>(services, AgentStoreInner);

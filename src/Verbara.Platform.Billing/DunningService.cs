@@ -85,7 +85,7 @@ public sealed partial class DunningService : BackgroundService
         var invoiceStore = sp.GetRequiredService<IInvoiceStore>();
         var dunningStore = sp.GetRequiredService<IDunningStore>();
         var tenantStore = sp.GetRequiredService<ITenantStore>();
-        var lifecycleHandlers = sp.GetServices<ITenantLifecycleHandler>();
+        var lifecycle = sp.GetRequiredService<ITenantLifecycleDispatcher>();
         var clock = sp.GetRequiredService<IClock>();
 
         var now = clock.UtcNow;
@@ -196,18 +196,10 @@ public sealed partial class DunningService : BackgroundService
                     }
                 }
 
-                // Dispatch lifecycle handler for Suspended (cleans up Realtime rows)
+                // Dispatch the suspension (cleans up realtime rows) through the one lifecycle dispatcher, which logs
+                // each handler's failure and keeps a tenant whose id breaks the tenant-id rule out of prefix sweeps.
                 if (newStage == TenantStatus.Suspended)
-                {
-                    foreach (var handler in lifecycleHandlers)
-                    {
-                        try { await handler.OnTenantSuspendedAsync(record.TenantId, ct); }
-                        catch (Exception hex)
-                        {
-                            LogLifecycleHandlerFailed(_logger, record.TenantId, hex);
-                        }
-                    }
-                }
+                    await lifecycle.SuspendedAsync(record.TenantId, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -227,9 +219,6 @@ public sealed partial class DunningService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Dunning escalation failed for tenant {TenantId}")]
     private static partial void LogEscalationFailed(ILogger logger, string tenantId, Exception ex);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Lifecycle handler failed during dunning suspension for {TenantId}")]
-    private static partial void LogLifecycleHandlerFailed(ILogger logger, string tenantId, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Debug,
         Message = "Circuit open for worker.dunning — skipping cycle")]

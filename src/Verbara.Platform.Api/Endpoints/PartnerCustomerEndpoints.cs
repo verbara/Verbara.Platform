@@ -80,7 +80,7 @@ internal static class PartnerCustomerEndpoints
         [FromServices] ITenantStore tenantStore,
         [FromServices] ITenantIdRegistry tenantIds,
         [FromServices] IAuditService audit,
-        [FromServices] IEnumerable<ITenantLifecycleHandler> lifecycleHandlers,
+        [FromServices] ITenantLifecycleDispatcher lifecycle,
         [FromServices] TenantTierCache tierCache,
         CancellationToken ct)
     {
@@ -147,7 +147,7 @@ internal static class PartnerCustomerEndpoints
         if (await tenantIds.TryCreateAsync(tenant, ct) == TenantCreateResult.Conflict)
             return Results.Conflict(new ErrorResponse(TenantIdRefusal.Unavailable(tenant.TenantId)));
         tierCache.SetTier(tenant.TenantId, derivedTier);
-        await DispatchLifecycleAsync(lifecycleHandlers, h => h.OnTenantCreatedAsync(tenant, ct));
+        await lifecycle.CreatedAsync(tenant, ct);
         await audit.RecordAsync(
             new TenantId(callerTenantId), category: "admin", action: "partner.customer.created", severity: "warning",
             actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
@@ -248,10 +248,9 @@ internal static class PartnerCustomerEndpoints
         [FromBody] SuspendCustomerRequest body,
         [FromServices] ITenantStore tenantStore,
         [FromServices] IAuditService audit,
-        [FromServices] IEnumerable<ITenantLifecycleHandler> lifecycleHandlers,
+        [FromServices] ITenantLifecycleDispatcher lifecycle,
         [FromServices] TenantTierCache tierCache,
         [FromServices] FeatureGateCache featureGateCache,
-        [FromServices] ILogger<Program> logger,
         CancellationToken ct)
     {
         var callerTenantId = context.User.FindFirst("tid")?.Value
@@ -269,7 +268,7 @@ internal static class PartnerCustomerEndpoints
         await tenantStore.UpdateStatusAsync(customerId, TenantStatus.Suspended, ct);
         tierCache.Remove(customerId);
         featureGateCache.Remove(customerId);
-        await DispatchLifecycleAsync(lifecycleHandlers, h => h.OnTenantSuspendedAsync(customerId, ct), logger);
+        await lifecycle.SuspendedAsync(customerId, ct);
         await audit.RecordAsync(
             new TenantId(callerTenantId), category: "admin", action: "partner.customer.suspended", severity: "warning",
             actorId: context.User.FindFirst("sub")?.Value ?? "system", actorType: "user",
@@ -404,26 +403,6 @@ internal static class PartnerCustomerEndpoints
 
     private static PartnerCustomerDto MapToDto(Tenant t) =>
         new(t.TenantId, t.Name, t.Status.ToString(), t.GetPlan().ToString(), t.CreatedAt);
-
-    private static async Task DispatchLifecycleAsync(
-        IEnumerable<ITenantLifecycleHandler> handlers,
-        Func<ITenantLifecycleHandler, ValueTask> action,
-        ILogger? logger = null)
-    {
-        foreach (var handler in handlers)
-        {
-            try
-            {
-                await action(handler);
-            }
-            catch (Exception ex)
-            {
-#pragma warning disable CA1848
-                logger?.LogWarning(ex, "Lifecycle handler {Handler} failed", handler.GetType().Name);
-#pragma warning restore CA1848
-            }
-        }
-    }
 }
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────

@@ -843,6 +843,10 @@ if (!builder.Services.Any(d => d.ServiceType == typeof(TimeProvider)))
     builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<TenantProvisioningService>();
 builder.Services.AddSingleton<ITenantLifecycleHandler>(sp => sp.GetRequiredService<TenantProvisioningService>());
+// realtime-objects-stay-in-their-tenant (design D3): the one lifecycle dispatch site (routes and dunning). The
+// tenant-id audit it reads is registered by AddRealtimeSyncingStores, whose queue decorator reads it too.
+builder.Services.AddSingleton<FlaggedTenantRealtimeRemoval>();
+builder.Services.AddSingleton<ITenantLifecycleDispatcher, TenantLifecycleDispatcher>();
 
 // ─── MFA Policy Evaluator ────────────────────────────────────────────────────
 builder.Services.AddSingleton<Verbara.Platform.Identity.Mfa.IMfaPolicyEvaluator,
@@ -1187,7 +1191,6 @@ builder.Services.AddHostedService<Verbara.Platform.Api.Services.RealtimeReconcil
 
 // Queue membership service + desired state provider for reconciler
 builder.Services.AddSingleton<QueueMembershipService>();
-builder.Services.AddSingleton<TenantIdAudit>();
 builder.Services.AddSingleton<IDesiredStateProvider, PlatformDesiredStateProvider>();
 
 // Queue-member pause tracker (ephemeral, per-instance) — backs the IsPaused
