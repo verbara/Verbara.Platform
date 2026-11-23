@@ -295,4 +295,108 @@ public sealed class SetupEndpointTests : IClassFixture<PlatformApiFactory>
         customer!.Metadata.Should().NotBeNull().And.ContainKey("Plan", "the setup Customer is born on the host's plan, not on the Starter fallback");
         customer.GetPlan().Should().Be(TenantPlan.Enterprise);
     }
+
+    // ─── The tenant-id rule at first-run setup (realtime-objects-stay-in-their-tenant, design D1) ───────────
+
+    private static object BodyWithCustomer(string customerTenantId) => new
+    {
+        email = "admin@setup-test.com",
+        password = "PlatformPass2026!",
+        displayName = "Platform Admin",
+        platformName = "Test Platform",
+        customerTenantId,
+        customerName = "Customer",
+        customerAdminEmail = "ops@customer.test",
+        customerAdminPassword = "CustomerPass2026!",
+    };
+
+    private static async Task SeedOrphanAsync(IServiceProvider services, string tenantId, TenantType type = TenantType.Customer)
+    {
+        await services.GetRequiredService<ITenantStore>().UpsertAsync(new Tenant
+        {
+            TenantId = tenantId,
+            Name = tenantId,
+            Status = TenantStatus.Active,
+            Type = type,
+            ParentTenantId = null,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        }, default);
+    }
+
+    private static async Task AssertNoUserAndNoKeyAsync(IServiceProvider services, params string[] tenantIds)
+    {
+        var users = services.GetRequiredService<IUserStore>();
+        var keys = services.GetRequiredService<IApiKeyStore>();
+        foreach (var t in tenantIds)
+        {
+            (await users.ListAsync(new TenantId(t), new PagedQuery(1, 10), default)).Items.Should().BeEmpty($"no user of {t} is written");
+            (await keys.ListAsync(new TenantId(t), new PagedQuery(1, 10), default)).Items.Should().BeEmpty($"no key of {t} is written");
+        }
+    }
+
+    [Fact]
+    public async Task Setup_ShouldReturn400AndCreateNoTenant_WhenTheCustomerIdIsReserved()
+    {
+        using var factory = new PlatformApiFactory();
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/setup", BodyWithCustomer("t"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        var store = factory.Services.GetRequiredService<ITenantStore>();
+        (await store.GetAsync("t", default)).Should().BeNull();
+        (await store.GetAsync("platform", default)).Should().BeNull("a refused setup writes no tenant");
+    }
+
+    [Fact]
+    public async Task Setup_ShouldReturn409AndWriteNothing_WhenTheHostIdExtendsTheCustomerId()
+    {
+        using var factory = new PlatformApiFactory();
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/setup", BodyWithCustomer("platform-one"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        var store = factory.Services.GetRequiredService<ITenantStore>();
+        (await store.GetAsync("platform", default)).Should().BeNull();
+        (await store.GetAsync("platform-one", default)).Should().BeNull();
+        await AssertNoUserAndNoKeyAsync(factory.Services, "platform", "platform-one");
+    }
+
+    [Fact]
+    public async Task Setup_ShouldReturn409AndWriteNothing_WhenTheCustomerIdOverlapsAStoredTenant()
+    {
+        using var factory = new PlatformApiFactory();
+        _ = factory.Server;
+        await SeedOrphanAsync(factory.Services, "acme");
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/setup", BodyWithCustomer("acme-corp"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        var store = factory.Services.GetRequiredService<ITenantStore>();
+        (await store.GetAsync("platform", default)).Should().BeNull();
+        (await store.GetAsync("acme-corp", default)).Should().BeNull();
+        (await store.GetAsync("acme", default))!.ParentTenantId.Should().BeNull("nothing is adopted before the refusal");
+        await AssertNoUserAndNoKeyAsync(factory.Services, "platform", "acme-corp");
+    }
+
+    [Fact]
+    public async Task Setup_ShouldAdoptTheStoredTenant_WhenItsIdIsExactlyTheCustomerId()
+    {
+        using var factory = new PlatformApiFactory();
+        _ = factory.Server;
+        await SeedOrphanAsync(factory.Services, "platform", TenantType.Platform);
+        await SeedOrphanAsync(factory.Services, "acme");
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/setup", BodyWithCustomer("acme"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var store = factory.Services.GetRequiredService<ITenantStore>();
+        (await store.GetAsync("acme", default))!.ParentTenantId.Should().Be("platform");
+        (await factory.Services.GetRequiredService<IUserStore>().ListAsync(new TenantId("platform"), new PagedQuery(1, 1), default))
+            .Items.Should().ContainSingle("the platform administrator exists");
+    }
 }

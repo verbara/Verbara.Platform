@@ -287,4 +287,77 @@ public sealed class PartnerCustomerEndpointsTests : IClassFixture<PartnerApiFact
         stored!.Options.NodeAffinity.Should().BeNullOrEmpty("a Partner cannot place its Customer on nodes");
         stored.Options.MaxActiveCampaigns.Should().Be(7, "every other field of the request is still applied");
     }
+
+    // ─── The tenant-id rule (realtime-objects-stay-in-their-tenant, design D1) ───────────────────────────────
+
+    private static string Unique(string stem) => stem + Guid.NewGuid().ToString("N")[..8];
+
+    private static async Task SeedTenantWithStatusAsync(IServiceProvider services, string tenantId, string parent,
+        TenantStatus status)
+    {
+        await PartnerChannelTestKit.SeedTenantAsync(services, tenantId, TenantType.Customer, parent, TenantPlan.Pro);
+        using var scope = services.CreateScope();
+        if (status != TenantStatus.Active)
+            await scope.ServiceProvider.GetRequiredService<ITenantStore>().UpdateStatusAsync(tenantId, status);
+    }
+
+    public static TheoryData<string> MalformedOrReservedIds() =>
+        ["Acme", "a_c", "a%", "-acme", "acme-", "t", "platform", new string('a', 64)];
+
+    [Theory]
+    [MemberData(nameof(MalformedOrReservedIds))]
+    public async Task CreateCustomer_ShouldReturn400AndCreateNothing_WhenTheIdIsNotASlugOrIsReserved(string tenantId)
+    {
+        var response = await _client.PostAsJsonAsync("/api/v1/partner/customers", new { tenantId, name = "Refused" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["error"]!.GetValue<string>().Should().NotBeNullOrEmpty();
+        var stored = await PartnerChannelTestKit.GetTenantAsync(_factory.Services, tenantId);
+        (stored is not null && stored.TenantId == tenantId).Should().BeFalse("a refused id creates no tenant");
+    }
+
+    [Fact]
+    public async Task CreateCustomer_ShouldReturn409NamingOnlyTheNewId_WhenItExtendsASuspendedTenantOfAnotherPartner()
+    {
+        var otherPartner = Unique("otherpartner");
+        await PartnerChannelTestKit.SeedTenantAsync(_factory.Services, otherPartner, TenantType.Partner,
+            PartnerApiFactory.HostTenantId, TenantPlan.Enterprise);
+        var stored = Unique("acme");
+        await SeedTenantWithStatusAsync(_factory.Services, stored, otherPartner, TenantStatus.Suspended);
+        var requested = stored + "-corp";
+
+        var response = await _client.PostAsJsonAsync("/api/v1/partner/customers", new { tenantId = requested, name = "Corp" });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        JsonNode.Parse(body)!["error"]!.GetValue<string>().Should().Be(
+            $"Tenant id '{requested}' is unavailable: it equals an existing tenant id, or one of them is the other followed by '-'.");
+        (await PartnerChannelTestKit.GetTenantAsync(_factory.Services, requested)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateCustomer_ShouldReturn409_WhenItExtendsADeletedTenant()
+    {
+        var stored = Unique("gone");
+        await SeedTenantWithStatusAsync(_factory.Services, stored, PartnerApiFactory.PartnerTenantId, TenantStatus.Deleted);
+        var requested = stored + "-corp";
+
+        var response = await _client.PostAsJsonAsync("/api/v1/partner/customers", new { tenantId = requested, name = "Corp" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        (await PartnerChannelTestKit.GetTenantAsync(_factory.Services, requested)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateCustomer_ShouldCreateTheTenant_WhenTheIdOnlySharesLettersWithAStoredOne()
+    {
+        var stored = Unique("acme");
+        await SeedTenantWithStatusAsync(_factory.Services, stored, PartnerApiFactory.PartnerTenantId, TenantStatus.Active);
+        var requested = stored + "corp";
+
+        var response = await _client.PostAsJsonAsync("/api/v1/partner/customers", new { tenantId = requested, name = "Corp" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        (await PartnerChannelTestKit.GetTenantAsync(_factory.Services, requested)).Should().NotBeNull();
+    }
 }

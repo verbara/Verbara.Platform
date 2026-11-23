@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using FluentAssertions;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Verbara.Platform.Api.Tests.PartnerChannel;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.MultiTenant;
@@ -368,5 +370,97 @@ public sealed class ManagementTenantEndpointTests : IClassFixture<PlatformAdminA
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await PartnerChannelTestKit.GetTenantAsync(_factory.Services, "pchild-" + suffix)).Should().BeNull();
+    }
+
+    // ─── The tenant-id rule (realtime-objects-stay-in-their-tenant, design D1) ───────────────────────────────
+
+    private static string Unique(string stem) => stem + Guid.NewGuid().ToString("N")[..8];
+
+    private async Task SeedCustomerAsync(string tenantId, string name = "Seeded", TenantStatus status = TenantStatus.Active)
+    {
+        _ = _factory.Server;
+        using var scope = _factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<ITenantStore>();
+        await store.UpsertAsync(Named(tenantId, name));
+        if (status != TenantStatus.Active)
+            await store.UpdateStatusAsync(tenantId, status);
+    }
+
+    [Fact]
+    public async Task CreateTenant_ShouldReturn400AndCreateNothing_WhenTheIdIsNotASlug()
+    {
+        var response = await _client.PostAsJsonAsync("/api/management/tenants", new { tenantId = "a c", name = "Spaced", type = 2 });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        (await PartnerChannelTestKit.GetTenantAsync(_factory.Services, "a c")).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateTenant_ShouldReturn409_WhenAStoredTenantExtendsTheId()
+    {
+        var requested = Unique("acme");
+        await SeedCustomerAsync(requested + "-corp");
+
+        var response = await _client.PostAsJsonAsync("/api/management/tenants", new { tenantId = requested, name = "Acme", type = 2 });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        (await PartnerChannelTestKit.GetTenantAsync(_factory.Services, requested)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateTenant_ShouldReturn409_WhenTheIdOfADeletedTenantIsRequestedAgain()
+    {
+        var stored = Unique("gone");
+        await SeedCustomerAsync(stored, status: TenantStatus.Deleted);
+
+        var response = await _client.PostAsJsonAsync("/api/management/tenants", new { tenantId = stored, name = "Again", type = 2 });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        (await PartnerChannelTestKit.GetTenantAsync(_factory.Services, stored))!.Status.Should().Be(TenantStatus.Deleted);
+    }
+
+    [Fact]
+    public async Task CreateTenant_ShouldReturn409AndRunNoLifecycleHandler_WhenTheTenantAlreadyExists()
+    {
+        var recorder = new RecordingLifecycleHandler();
+        using var factory = _factory.WithWebHostBuilder(b => b.ConfigureTestServices(
+            s => s.AddSingleton<ITenantLifecycleHandler>(recorder)));
+        using var client = PlatformAdminApiFactory.CreatePlatformAdminClient(factory);
+        var id = Unique("globex");
+        using (var scope = factory.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<ITenantStore>().UpsertAsync(Named(id, "Globex"));
+
+        var response = await client.PostAsJsonAsync("/api/management/tenants", new { tenantId = id, name = "Other", type = 2 });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        (await PartnerChannelTestKit.GetTenantAsync(factory.Services, id))!.Name.Should().Be("Globex");
+        recorder.Created.Should().BeEmpty("a refused create runs no lifecycle handler");
+    }
+
+    private static Tenant Named(string tenantId, string name) => new()
+    {
+        TenantId = tenantId,
+        Name = name,
+        Status = TenantStatus.Active,
+        Type = TenantType.Customer,
+        ParentTenantId = PlatformAdminApiFactory.HostTenantId,
+        Metadata = new Dictionary<string, string> { ["Plan"] = TenantPlan.Pro.ToString() },
+        CreatedAt = DateTimeOffset.UtcNow,
+        UpdatedAt = DateTimeOffset.UtcNow,
+    };
+
+    private sealed class RecordingLifecycleHandler : ITenantLifecycleHandler
+    {
+        public List<string> Created { get; } = [];
+
+        public ValueTask OnTenantCreatedAsync(Tenant tenant, CancellationToken cancellationToken = default)
+        {
+            lock (Created) Created.Add(tenant.TenantId);
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask OnTenantSuspendedAsync(string tenantId, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+
+        public ValueTask OnTenantDeletedAsync(string tenantId, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
     }
 }
