@@ -21,6 +21,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Holiday-calendar and caller-ID-pool contents stay in their tenant.** The holiday routes of a holiday calendar and
+  the entry routes of a caller-ID pool answer 404 and change nothing when the calendar or pool belongs to another
+  tenant; on the tenant's own calendar or pool they answer as before. The OpenAPI document declares the 404 on the
+  six operations.
 - **The compose gateway no longer answers 502 under sustained load.** `docker/nginx-gateway.conf` (mounted by the
   full, production, reference-SMB and demo compose files) opened a new connection to platform-api, realtime or web
   for every request, and each closed one held one of the gateway's ephemeral ports for about 60 s; under sustained
