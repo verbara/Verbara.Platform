@@ -25,6 +25,7 @@ internal static class PartnerCustomerEndpoints
         group.MapPost("/customers", CreateCustomer)
             .RequireAuthorization("partner:customer:create")
             .Produces<PartnerCustomerDto>(StatusCodes.Status201Created)
+            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
             .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
         group.MapGet("/customers/{customerId}", GetCustomer)
             .RequireAuthorization("partner:customer:view");
@@ -77,6 +78,7 @@ internal static class PartnerCustomerEndpoints
         HttpContext context,
         [FromBody] CreatePartnerCustomerRequest body,
         [FromServices] ITenantStore tenantStore,
+        [FromServices] ITenantIdRegistry tenantIds,
         [FromServices] IAuditService audit,
         [FromServices] IEnumerable<ITenantLifecycleHandler> lifecycleHandlers,
         [FromServices] TenantTierCache tierCache,
@@ -92,10 +94,11 @@ internal static class PartnerCustomerEndpoints
         if (partner is null || partner.Status != TenantStatus.Active)
             return Results.BadRequest(new ErrorResponse("Partner tenant must be Active to create customers."));
 
-        // Check for duplicate TenantId
-        var existing = await tenantStore.GetAsync(body.TenantId, ct);
-        if (existing is not null)
-            return Results.Conflict(new ErrorResponse($"Tenant '{body.TenantId}' already exists."));
+        // The tenant-id rule (design D1), on the id as sent: a lowercase slug that is not reserved. The overlap with a
+        // stored id (equal, or one the other followed by '-', any status, any parent) is checked atomically with the
+        // insert by the registry below.
+        if (!TenantIdRule.IsWellFormed(body.TenantId) || TenantIdRule.IsReserved(body.TenantId))
+            return Results.BadRequest(new ErrorResponse(TenantIdRefusal.Malformed));
 
         // Resolve plan (design D6/D15): no plan inherits the Partner's plan; an unknown name is a 400; a plan above
         // the Partner's is a 409 plan-exceeds-parent — all before anything is written.
@@ -141,7 +144,8 @@ internal static class PartnerCustomerEndpoints
             UpdatedAt = DateTimeOffset.UtcNow,
         };
 
-        await tenantStore.UpsertAsync(tenant, ct);
+        if (await tenantIds.TryCreateAsync(tenant, ct) == TenantCreateResult.Conflict)
+            return Results.Conflict(new ErrorResponse(TenantIdRefusal.Unavailable(tenant.TenantId)));
         tierCache.SetTier(tenant.TenantId, derivedTier);
         await DispatchLifecycleAsync(lifecycleHandlers, h => h.OnTenantCreatedAsync(tenant, ct));
         await audit.RecordAsync(

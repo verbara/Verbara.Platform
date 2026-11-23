@@ -74,7 +74,8 @@ internal sealed class PostgresTenantStore : ITenantStore
             "VALUES (@TenantId, @Name, @Status, @Type, @ParentTenantId, @Options::jsonb, @Metadata::jsonb, @CreatedAt, @UpdatedAt) " +
             "ON CONFLICT (tenant_id) DO UPDATE SET " +
             "  name = EXCLUDED.name, status = EXCLUDED.status, options = EXCLUDED.options, " +
-            "  metadata = EXCLUDED.metadata, updated_at = EXCLUDED.updated_at",
+            "  metadata = EXCLUDED.metadata, updated_at = EXCLUDED.updated_at, " +
+            "  type = EXCLUDED.type, parent_tenant_id = EXCLUDED.parent_tenant_id",
             p =>
             {
                 p.Add(new NpgsqlParameter("TenantId", tenant.TenantId));

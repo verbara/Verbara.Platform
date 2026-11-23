@@ -177,6 +177,8 @@ public static class ServiceCollectionExtensions
         // MultiTenant
         if (!services.Any(d => d.ServiceType == typeof(ITenantStore)))
             services.AddSingleton<ITenantStore, InMemoryTenantStore>();
+        if (!services.Any(d => d.ServiceType == typeof(ITenantIdRegistry)))
+            services.AddSingleton<ITenantIdRegistry>(sp => new InMemoryTenantIdRegistry(sp.GetRequiredService<ITenantStore>()));
 
         // Pro Analytics (fallback when no Postgres analytics configured)
         if (!services.Any(d => d.ServiceType == typeof(ICompletedSessionStore)))

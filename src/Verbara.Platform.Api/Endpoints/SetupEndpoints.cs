@@ -22,6 +22,7 @@ internal static class SetupEndpoints
     private static async Task<IResult> Setup(
         [FromBody] SetupRequest body,
         [FromServices] ITenantStore tenantStore,
+        [FromServices] ITenantIdRegistry tenantIds,
         [FromServices] IUserStore userStore,
         [FromServices] IApiKeyStore apiKeyStore,
         [FromServices] ITenantRoleStore tenantRoleStore,
@@ -63,11 +64,12 @@ internal static class SetupEndpoints
             return Results.BadRequest(new ErrorResponse(
                 "Customer tenant id, name, admin email and admin password are required."));
 
-        // Customer tenant id must be a valid slug and must not collide with the host tenant
+        // Customer tenant id must be a valid slug and must not be reserved (the host id `platform`, the trunk
+        // namespace `t`): the tenant-id rule of every create path (realtime-objects-stay-in-their-tenant, design D1).
         var customerTenantIdNormalized = body.CustomerTenantId.Trim().ToLowerInvariant();
-        if (!IsValidSlug(customerTenantIdNormalized) || customerTenantIdNormalized == HostTenantId)
+        if (!TenantIdRule.IsWellFormed(customerTenantIdNormalized) || TenantIdRule.IsReserved(customerTenantIdNormalized))
             return Results.BadRequest(new ErrorResponse(
-                "Customer tenant id must be a lowercase slug (letters, digits, hyphens) and cannot be 'platform'."));
+                "Customer tenant id must be a lowercase slug (letters, digits, hyphens) and cannot be 'platform' or 't'."));
 
         // Normalize each email once and reuse the normalized value for BOTH the
         // distinct-check below AND persistence (User.Email assignments). The email
@@ -94,6 +96,19 @@ internal static class SetupEndpoints
         if (!customerPwdCheck.IsValid)
             return Results.BadRequest(new ErrorDetailResponse(
                 "Customer admin password does not meet policy", customerPwdCheck.Errors));
+
+        // Pre-write overlap check (design D1, "First-run setup"): before the first write, refuse a customer id that
+        // overlaps the host id (a pure check, so `platform-one` is refused on an empty database) or a stored id other
+        // than an exact match, whatever its status. An exactly equal stored id is adopted below, as before.
+        if (TenantIdRule.Overlaps(customerTenantIdNormalized, HostTenantId))
+            return Results.Conflict(new ErrorResponse(TenantIdRefusal.Unavailable(customerTenantIdNormalized)));
+        foreach (var stored in await tenantIds.ListAllIdsAsync(ct))
+        {
+            if (stored.TenantId == HostTenantId || stored.TenantId == customerTenantIdNormalized)
+                continue;
+            if (TenantIdRule.Overlaps(stored.TenantId, customerTenantIdNormalized))
+                return Results.Conflict(new ErrorResponse(TenantIdRefusal.Unavailable(customerTenantIdNormalized)));
+        }
 
         // NON-ATOMIC BUT RE-ENTRANT FIRST-RUN WINDOW: the writes below (host tenant →
         // orphan adoption → platform admin → mgmt key → customer tenant → customer
@@ -240,7 +255,15 @@ internal static class SetupEndpoints
             CreatedAt = clock.UtcNow,
             UpdatedAt = clock.UtcNow,
         };
-        await tenantStore.UpsertAsync(customerTenant, ct);
+        // A stored tenant whose id is exactly the customer id (an orphan adopted in step 2, or a row left by a failed
+        // run) is adopted by the upsert, as before; any other customer id is created through the registry. Setup runs
+        // before any credential exists, so no create route races the pre-write check; a Conflict here would land in
+        // the documented window after the platform admin exists, recoverable through the normal API.
+        var storedCustomer = await tenantStore.GetAsync(customerTenantIdNormalized, ct);
+        if (storedCustomer is not null && storedCustomer.TenantId == customerTenantIdNormalized)
+            await tenantStore.UpsertAsync(customerTenant, ct);
+        else if (await tenantIds.TryCreateAsync(customerTenant, ct) == TenantCreateResult.Conflict)
+            return Results.Conflict(new ErrorResponse(TenantIdRefusal.Unavailable(customerTenantIdNormalized)));
 
         // 7. Create the Customer admin user (lives inside the Customer tenant)
         var customerTenantId = new TenantId(customerTenantIdNormalized);
@@ -286,18 +309,6 @@ internal static class SetupEndpoints
             rawApiKey,
             customerTenantIdNormalized,
             customerUserId.Value));
-    }
-
-    private static bool IsValidSlug(string value)
-    {
-        if (string.IsNullOrEmpty(value) || value.Length > 63)
-            return false;
-        foreach (var c in value)
-        {
-            if (!(c is >= 'a' and <= 'z' or >= '0' and <= '9' || c == '-'))
-                return false;
-        }
-        return value[0] != '-' && value[^1] != '-';
     }
 }
 

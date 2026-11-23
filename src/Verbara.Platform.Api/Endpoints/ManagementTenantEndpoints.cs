@@ -20,6 +20,7 @@ internal static class ManagementTenantEndpoints
         group.MapGet("/{id}", GetTenant);
         group.MapPost("/", CreateTenant)
             .Produces<MgmtTenantDto>(StatusCodes.Status201Created)
+            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
             .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
         group.MapPut("/{id}", UpdateTenant)
             .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
@@ -81,6 +82,7 @@ internal static class ManagementTenantEndpoints
         HttpContext context,
         [FromBody] CreateMgmtTenantRequest body,
         [FromServices] ITenantStore store,
+        [FromServices] ITenantIdRegistry tenantIds,
         [FromServices] IAuditService audit,
         [FromServices] IEnumerable<ITenantLifecycleHandler> lifecycleHandlers,
         CancellationToken ct)
@@ -88,6 +90,11 @@ internal static class ManagementTenantEndpoints
         // Validate type
         if (body.Type is not (TenantType.Customer or TenantType.Partner))
             return Results.BadRequest(new ErrorResponse("Type must be Customer or Partner."));
+
+        // The tenant-id rule (design D1), on the id as sent; the overlap is checked atomically by the registry below,
+        // which also refuses an existing id instead of overwriting it.
+        if (!TenantIdRule.IsWellFormed(body.TenantId) || TenantIdRule.IsReserved(body.TenantId))
+            return Results.BadRequest(new ErrorResponse(TenantIdRefusal.Malformed));
 
         // Resolve parent
         var parentId = body.ParentTenantId;
@@ -170,7 +177,8 @@ internal static class ManagementTenantEndpoints
             UpdatedAt = DateTimeOffset.UtcNow,
         };
 
-        await store.UpsertAsync(tenant, ct);
+        if (await tenantIds.TryCreateAsync(tenant, ct) == TenantCreateResult.Conflict)
+            return Results.Conflict(new ErrorResponse(TenantIdRefusal.Unavailable(tenant.TenantId)));
         await DispatchLifecycleAsync(lifecycleHandlers, h => h.OnTenantCreatedAsync(tenant, ct));
         await audit.RecordAsync(
             new TenantId(tenant.TenantId), category: "admin", action: "tenant.created", severity: "warning",

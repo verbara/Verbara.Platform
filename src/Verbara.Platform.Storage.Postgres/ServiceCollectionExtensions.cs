@@ -257,6 +257,7 @@ public static class ServiceCollectionExtensions
 
         // MultiTenant
         services.AddSingleton<ITenantStore, PostgresTenantStore>();
+        services.AddSingleton<ITenantIdRegistry, PostgresTenantIdRegistry>();
 
         // Branding
         services.AddSingleton<ITenantBrandingStore, PostgresTenantBrandingStore>();

@@ -69,6 +69,9 @@ public sealed class InMemoryTenantStore : ITenantStore
         return default;
     }
 
+    /// <summary>Every stored tenant, of any status.</summary>
+    internal IReadOnlyList<Tenant> Snapshot() => [.. _tenants.Values];
+
     public ValueTask<Tenant?> GetHostTenantAsync(CancellationToken cancellationToken = default)
     {
         var host = _tenants.Values.FirstOrDefault(t => t.Type == TenantType.Platform);
