@@ -19,17 +19,31 @@ public sealed class PasswordHashingGateTests
         using var gate = new PasswordHashingGate(2);
         var inFlight = 0;
         var peak = 0;
-        using var start = new ManualResetEventSlim(false);
+        using var entered = new SemaphoreSlim(0);
+        using var release = new ManualResetEventSlim(false);
 
-        var callers = Enumerable.Range(0, 12).Select(i => Task.Run(() => gate.RunAsync(() =>
-        {
-            var now = Interlocked.Increment(ref inFlight);
-            InterlockedMax(ref peak, now);
-            Thread.Sleep(40); // fence-allow: SIMULATED-WORK — a synchronous hash that holds its slot long enough for the callers to overlap
-            Interlocked.Decrement(ref inFlight);
-            return i;
-        }, CancellationToken.None))).ToArray();
+        // Each caller on a thread of its own, so the hashes that hold a slot block their own thread
+        // while the test holds them, never a pool thread the waiting callers' continuations need.
+        var callers = Enumerable.Range(0, 12).Select(i => Task.Factory.StartNew(
+            () => gate.RunAsync(() =>
+            {
+                InterlockedMax(ref peak, Interlocked.Increment(ref inFlight));
+                entered.Release();
+                release.Wait(Deadline);
+                Interlocked.Decrement(ref inFlight);
+                return i;
+            }, CancellationToken.None),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default).Unwrap()).ToArray();
 
+        (await entered.WaitAsync(Deadline)).Should().BeTrue("the first caller takes a free slot");
+        (await entered.WaitAsync(Deadline)).Should().BeTrue("the bound of two admits a second caller");
+        (await entered.WaitAsync(Settle)).Should().BeFalse("both slots are held, so a third caller waits instead of hashing");
+        Volatile.Read(ref inFlight).Should().Be(2);
+        gate.AvailableSlots.Should().Be(0);
+
+        release.Set();
         var results = await Task.WhenAll(callers).WaitAsync(Deadline);
 
         results.Should().BeEquivalentTo(Enumerable.Range(0, 12), "every caller over the bound waits and then runs");
