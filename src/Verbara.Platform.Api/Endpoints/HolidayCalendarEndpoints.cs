@@ -138,18 +138,20 @@ internal static class HolidayCalendarEndpoints
 
     // ─── Holiday Handlers ─────────────────────────────────────────────────────
 
-    private static async Task<Ok<List<HolidayDto>>> ListHolidays(
+    private static async Task<Results<Ok<List<HolidayDto>>, NotFound>> ListHolidays(
         long id,
         HttpContext context,
         [FromServices] HolidayCalendarStoreBase store,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        if (await store.GetAsync(id, tenantId, ct) is null) return TypedResults.NotFound();
+
         var holidays = await store.ListHolidaysAsync(id, tenantId, ct);
         return TypedResults.Ok(holidays.Select(MapHolidayToDto).ToList());
     }
 
-    private static async Task<IResult> AddHoliday(
+    private static async Task<Results<Created<HolidayDto>, NotFound>> AddHoliday(
         long id,
         HttpContext context,
         [FromBody] AddHolidayRequest body,
@@ -157,6 +159,8 @@ internal static class HolidayCalendarEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        if (await store.GetAsync(id, tenantId, ct) is null) return TypedResults.NotFound();
+
         var holiday = new Holiday
         {
             CalendarId = id,
@@ -166,10 +170,10 @@ internal static class HolidayCalendarEndpoints
             AllowedEndTime = body.AllowedEnd is not null ? TimeOnly.Parse(body.AllowedEnd, CultureInfo.InvariantCulture) : null,
         };
         await store.AddHolidayAsync(id, tenantId, holiday, ct);
-        return Results.Created($"/admin/holiday-calendars/{id}/holidays/{holiday.Id}", MapHolidayToDto(holiday));
+        return TypedResults.Created($"/admin/holiday-calendars/{id}/holidays/{holiday.Id}", MapHolidayToDto(holiday));
     }
 
-    private static async Task<IResult> RemoveHoliday(
+    private static async Task<Results<NoContent, NotFound>> RemoveHoliday(
         long id,
         long holidayId,
         HttpContext context,
@@ -177,8 +181,10 @@ internal static class HolidayCalendarEndpoints
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        if (await store.GetAsync(id, tenantId, ct) is null) return TypedResults.NotFound();
+
         await store.RemoveHolidayAsync(id, holidayId, tenantId, ct);
-        return Results.NoContent();
+        return TypedResults.NoContent();
     }
 
     // ─── Mapping Helpers ─────────────────────────────────────────────────────
