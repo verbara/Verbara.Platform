@@ -1,4 +1,5 @@
 using Verbara.Platform.Api.Endpoints.Shared;
+using Verbara.Platform.Api.OpenApi;
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
@@ -21,7 +22,12 @@ internal static class ManagementTenantEndpoints
         group.MapPost("/", CreateTenant)
             .Produces<MgmtTenantDto>(StatusCodes.Status201Created)
             .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
-            .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
+            // 409: an unavailable tenant id (ErrorResponse, realtime-objects-stay-in-their-tenant design D1) or a plan
+            // above the parent's (PlanAboveParentRefusal). ApiExplorer keeps one type per status, so the document's
+            // oneOf comes from the marker below.
+            .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict)
+            .WithMetadata(new AlternativeResponseBodies(StatusCodes.Status409Conflict,
+                typeof(ErrorResponse), typeof(PlanAboveParentRefusal)));
         group.MapPut("/{id}", UpdateTenant)
             .Produces<PlanAboveParentRefusal>(StatusCodes.Status409Conflict);
         group.MapPost("/{id}/suspend", SuspendTenant);
