@@ -858,8 +858,8 @@ internal sealed class InMemoryDncListStore : DncListStoreBase
 
 /// <summary>
 /// The caller-ID pools of every tenant, with Pro's Postgres semantics (Pro <c>2.31.0-pro</c>): a pool belongs to the
-/// tenant that created it, and the pool operations act only on a pool of the given tenant. The entry operations take
-/// a tenant and ignore it, as Pro's do, so a route that does not check the pool's tenant first reaches any pool.
+/// tenant that created it, and the pool operations act only on a pool of the given tenant. The entry operations are
+/// keyed by the pool id only; the endpoint's pool lookup is what scopes them to the tenant (design D1).
 /// </summary>
 internal sealed class InMemoryCallerIdPoolStore : CallerIdPoolStoreBase
 {
@@ -948,9 +948,9 @@ internal sealed class InMemoryCallerIdPoolStore : CallerIdPoolStoreBase
 /// <summary>
 /// The holiday calendars of every tenant, with Pro's Postgres semantics (Pro <c>2.31.0-pro</c>): a calendar belongs to
 /// the tenant that created it, and the calendar operations act only on a calendar of the given tenant. The holiday
-/// operations take a tenant and ignore it, as Pro's do, so a route that does not check the calendar's tenant first
-/// reaches any calendar; adding a holiday on a date the calendar already holds renames that holiday, as Pro's upsert
-/// on (calendar, date) does.
+/// operations are keyed by the calendar id only; the endpoint's calendar lookup is what scopes them to the tenant
+/// (design D1). Adding a holiday on a date the calendar already holds renames that holiday, as Pro's upsert on
+/// (calendar, date) does.
 /// </summary>
 internal sealed class InMemoryHolidayCalendarStore : HolidayCalendarStoreBase
 {

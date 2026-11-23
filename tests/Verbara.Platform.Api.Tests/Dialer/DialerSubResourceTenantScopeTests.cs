@@ -211,7 +211,7 @@ public sealed class DialerSubResourceTenantScopeTests : IClassFixture<DialerTena
 
     // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-    /// <summary>The calendar's holidays as (date, name), read from the in-memory store (its holiday reads ignore the tenant).</summary>
+    /// <summary>The calendar's holidays as (date, name), read from the in-memory store (its holiday reads are keyed by the calendar id only).</summary>
     private async Task<IReadOnlyList<(string Date, string Name)>> StoredHolidaysAsync(long calendarId)
     {
         var store = _factory.Services.GetRequiredService<HolidayCalendarStoreBase>();
@@ -219,7 +219,7 @@ public sealed class DialerSubResourceTenantScopeTests : IClassFixture<DialerTena
         return [.. holidays.Select(h => (h.Date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), h.Name))];
     }
 
-    /// <summary>The pool's entry numbers, read from the in-memory store (its entry reads ignore the tenant).</summary>
+    /// <summary>The pool's entry numbers, read from the in-memory store (its entry reads are keyed by the pool id only).</summary>
     private async Task<IReadOnlyList<string>> StoredEntriesAsync(long poolId)
     {
         var store = _factory.Services.GetRequiredService<CallerIdPoolStoreBase>();
