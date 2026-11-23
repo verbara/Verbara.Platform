@@ -382,6 +382,43 @@ public sealed class SetupEndpointTests : IClassFixture<PlatformApiFactory>
         await AssertNoUserAndNoKeyAsync(factory.Services, "platform", "acme-corp");
     }
 
+    [Theory]
+    [InlineData("platform-x")]
+    [InlineData("PLATFORM")]
+    public async Task Setup_ShouldReturn409AndWriteNothing_WhenTheHostIsNotStoredAndAStoredIdOverlapsIt(string stored)
+    {
+        using var factory = new PlatformApiFactory();
+        _ = factory.Server;
+        await SeedOrphanAsync(factory.Services, stored);
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/setup", BodyWithCustomer("acme"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        var store = factory.Services.GetRequiredService<ITenantStore>();
+        // The in-memory store looks ids up ignoring case, so `PLATFORM` answers a lookup of `platform`.
+        (await store.GetAsync("platform", default))?.TenantId.Should().NotBe("platform", "writing the host would create a new pair");
+        (await store.GetAsync("acme", default)).Should().BeNull();
+        (await store.GetAsync(stored, default))!.ParentTenantId.Should().BeNull("nothing is adopted before the refusal");
+        await AssertNoUserAndNoKeyAsync(factory.Services, "platform", "acme");
+    }
+
+    [Fact]
+    public async Task Setup_ShouldNotRefuse_WhenTheHostIsAlreadyStoredWithAnOverlappingId()
+    {
+        // A pair that already includes the stored host is not created by setup; the audit reports it, and a repair
+        // re-POST over a half-written install stays possible.
+        using var factory = new PlatformApiFactory();
+        _ = factory.Server;
+        await SeedOrphanAsync(factory.Services, "platform", TenantType.Platform);
+        await SeedOrphanAsync(factory.Services, "platform-x");
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/setup", BodyWithCustomer("acme"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+    }
+
     [Fact]
     public async Task Setup_ShouldAdoptTheStoredTenant_WhenItsIdIsExactlyTheCustomerId()
     {

@@ -102,9 +102,19 @@ internal static class SetupEndpoints
         // than an exact match, whatever its status. An exactly equal stored id is adopted below, as before.
         if (TenantIdRule.Overlaps(customerTenantIdNormalized, HostTenantId))
             return Results.Conflict(new ErrorResponse(TenantIdRefusal.Unavailable(customerTenantIdNormalized)));
-        foreach (var stored in await tenantIds.ListAllIdsAsync(ct))
+        // The host write below is an upsert, so when `platform` is not stored yet it is a create too: a stored id that
+        // overlaps `platform` (`platform-x`, `PLATFORM`, seeded or left over) would become a new pair with it. When
+        // `platform` is already stored, any such pair predates this request; the audit reports it, and a repair
+        // re-POST stays possible.
+        var storedIds = await tenantIds.ListAllIdsAsync(ct);
+        var hostStored = storedIds.Any(s => s.TenantId == HostTenantId);
+        foreach (var stored in storedIds)
         {
-            if (stored.TenantId == HostTenantId || stored.TenantId == customerTenantIdNormalized)
+            if (stored.TenantId == HostTenantId)
+                continue;
+            if (!hostStored && TenantIdRule.Overlaps(stored.TenantId, HostTenantId))
+                return Results.Conflict(new ErrorResponse(TenantIdRefusal.Unavailable(HostTenantId)));
+            if (stored.TenantId == customerTenantIdNormalized)
                 continue;
             if (TenantIdRule.Overlaps(stored.TenantId, customerTenantIdNormalized))
                 return Results.Conflict(new ErrorResponse(TenantIdRefusal.Unavailable(customerTenantIdNormalized)));
