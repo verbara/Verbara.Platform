@@ -28,7 +28,7 @@ namespace Verbara.Platform.Api.Services;
 /// profile no slot is listed: the endpoint would otherwise inherit the default, dialable context.
 /// </para>
 /// </remarks>
-internal sealed class PlatformDesiredStateProvider : IDesiredStateProvider
+internal sealed partial class PlatformDesiredStateProvider : IDesiredStateProvider
 {
     private readonly IConfiguration _configuration;
     private readonly IAgentStore _agentStore;
@@ -39,6 +39,9 @@ internal sealed class PlatformDesiredStateProvider : IDesiredStateProvider
     private readonly ISupervisorListenProfileStore? _listenProfiles;
     private readonly EndpointProfileStoreBase? _endpointProfiles;
     private readonly IUserStore? _users;
+    private readonly TenantIdAudit? _tenantIdAudit;
+    private readonly ILogger<PlatformDesiredStateProvider> _logger;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _droppedLogged = new(StringComparer.Ordinal);
 
     public PlatformDesiredStateProvider(
         IConfiguration configuration,
@@ -49,8 +52,12 @@ internal sealed class PlatformDesiredStateProvider : IDesiredStateProvider
         IAgentAccountStatusLookup accountStatus,
         ISupervisorListenProfileStore? listenProfiles = null,
         EndpointProfileStoreBase? endpointProfiles = null,
-        IUserStore? users = null)
+        IUserStore? users = null,
+        TenantIdAudit? tenantIdAudit = null,
+        ILogger<PlatformDesiredStateProvider>? logger = null)
     {
+        _tenantIdAudit = tenantIdAudit;
+        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PlatformDesiredStateProvider>.Instance;
         _listenProfiles = listenProfiles;
         _endpointProfiles = endpointProfiles;
         _users = users;
@@ -62,14 +69,59 @@ internal sealed class PlatformDesiredStateProvider : IDesiredStateProvider
         _accountStatus = accountStatus;
     }
 
-    public ValueTask<IReadOnlyList<string>> GetActiveTenantIdsAsync(CancellationToken ct = default)
+    /// <summary>The ids <c>Realtime:TenantIds</c> lists, or the default <c>["demo"]</c> when it is unset.</summary>
+    internal static IReadOnlyList<string> ReadConfiguredTenantIds(IConfiguration configuration)
     {
-        var section = _configuration.GetSection("Realtime:TenantIds");
-        var tenantIds = section.Exists()
+        var section = configuration.GetSection("Realtime:TenantIds");
+        return section.Exists()
             ? section.GetChildren().Select(c => c.Value!).Where(v => v is not null).ToArray()
             : (string[])["demo"];
-        return new ValueTask<IReadOnlyList<string>>(tenantIds);
     }
+
+    /// <summary>
+    /// realtime-objects-stay-in-their-tenant (design D2): the configured ids that are stored, not <c>Deleted</c> and not
+    /// flagged by <see cref="TenantIdAudit"/>, read after the configuration, so listing one member of a pair alone or
+    /// both changes nothing. Every id Pro's reconciler receives is then a stored, unflagged id that no other stored id
+    /// extends with <c>-</c>. Each dropped id is logged once per process at Warning; an audit that cannot be read
+    /// returns an empty list (fail-closed: the reconciler then does nothing) and logs at Error.
+    /// </summary>
+    public async ValueTask<IReadOnlyList<string>> GetActiveTenantIdsAsync(CancellationToken ct = default)
+    {
+        var configured = ReadConfiguredTenantIds(_configuration);
+        TenantIdAuditReport report;
+        try
+        {
+            report = _tenantIdAudit is null
+                ? throw new InvalidOperationException("No tenant-id audit is registered.")
+                : await _tenantIdAudit.RunAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogTenantIdAuditFailed(_logger, ex);
+            return [];
+        }
+
+        var kept = new List<string>(configured.Count);
+        foreach (var id in configured)
+        {
+            var stored = report.Find(id);
+            var reason = stored is null ? "no stored tenant has this id"
+                : stored.Status == Verbara.Sdk.Pro.MultiTenant.TenantStatus.Deleted ? "the tenant is deleted"
+                : report.ReasonOf(id) is { } flag ? $"the tenant id is flagged ({flag})"
+                : null;
+            if (reason is null)
+                kept.Add(id);
+            else if (_droppedLogged.TryAdd(id, 0))
+                LogConfiguredTenantDropped(_logger, id, reason);
+        }
+        return kept;
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Realtime tenant {TenantId} is not reconciled: {Reason}")]
+    private static partial void LogConfiguredTenantDropped(ILogger logger, string tenantId, string reason);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "The stored tenant ids could not be read; no realtime tenant is reconciled this cycle")]
+    private static partial void LogTenantIdAuditFailed(ILogger logger, Exception ex);
 
     public async ValueTask<IReadOnlyList<AgentSyncRequest>> GetExpectedAgentsAsync(
         string tenantId, CancellationToken ct = default)

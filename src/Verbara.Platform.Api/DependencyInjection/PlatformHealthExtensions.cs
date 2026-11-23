@@ -117,7 +117,9 @@ public static class PlatformHealthExtensions
         var healthBuilder = services.AddHealthChecks()
             .AddCheck<BackgroundServiceHealthCheck>("services", tags: [ReadyTag])
             .AddCheck<AsteriskAmiHealthCheck>("asterisk", tags: [VoiceTag])
-            .AddCheck<RetentionService>("retention", tags: [ReadyTag]);
+            .AddCheck<RetentionService>("retention", tags: [ReadyTag])
+            // realtime-objects-stay-in-their-tenant (design D2): Degraded, never Unhealthy, so readiness keeps 200.
+            .AddCheck<TenantIdHealthCheck>(TenantIdHealthCheck.Name, tags: [ReadyTag]);
 
         // Only add Postgres health check if NpgsqlDataSource is registered
         if (services.Any(d => d.ServiceType == typeof(NpgsqlDataSource)))

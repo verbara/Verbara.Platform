@@ -45,6 +45,8 @@ public sealed class HealthPlaneClassificationTests
         ["services"] = new(Plane.Readiness, Ready),
         ["retention"] = new(Plane.Readiness, Ready),
         ["postgres"] = new(Plane.Readiness, Ready),
+        // realtime-objects-stay-in-their-tenant (design D2): Degraded, never Unhealthy, so readiness keeps answering 200.
+        ["tenant-ids"] = new(Plane.Readiness, Ready),
         // `asterisk` is registered with the tag `voice` only (design D2): this pod's primary AMI connection and the
         // voice heartbeats, reported on /health/voice and never on /health/ready.
         ["asterisk"] = new(Plane.Voice, VoiceOnly),

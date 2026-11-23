@@ -47,7 +47,8 @@ public sealed class PlatformDesiredStateProviderTests
             .AddInMemoryCollection(_configData!)
             .Build();
         var sut = new PlatformDesiredStateProvider(
-            config, _agentStore, _queueStore, _trunkStore, _membershipService, _accountStatus);
+            config, _agentStore, _queueStore, _trunkStore, _membershipService, _accountStatus,
+            tenantIdAudit: StoredAudit("acme", "globex"));
 
         var result = await sut.GetActiveTenantIdsAsync();
 
@@ -59,7 +60,8 @@ public sealed class PlatformDesiredStateProviderTests
     {
         var config = new ConfigurationBuilder().Build();
         var sut = new PlatformDesiredStateProvider(
-            config, _agentStore, _queueStore, _trunkStore, _membershipService, _accountStatus);
+            config, _agentStore, _queueStore, _trunkStore, _membershipService, _accountStatus,
+            tenantIdAudit: StoredAudit("demo"));
 
         var result = await sut.GetActiveTenantIdsAsync();
 
@@ -218,6 +220,10 @@ public sealed class PlatformDesiredStateProviderTests
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────
+
+    /// <summary>An audit over these stored, Active, unflagged tenant ids (realtime-objects-stay-in-their-tenant, design D2).</summary>
+    private static TenantIdAudit StoredAudit(params string[] ids) => new(new Realtime.FixedTenantIdRegistry(
+        [.. ids.Select(id => new StoredTenantId(id, Verbara.Sdk.Pro.MultiTenant.TenantStatus.Active))]));
 
     private static Agent MakeAgent(string id, string name, string? ext, string? pw) => new()
     {

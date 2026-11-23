@@ -1187,6 +1187,7 @@ builder.Services.AddHostedService<Verbara.Platform.Api.Services.RealtimeReconcil
 
 // Queue membership service + desired state provider for reconciler
 builder.Services.AddSingleton<QueueMembershipService>();
+builder.Services.AddSingleton<TenantIdAudit>();
 builder.Services.AddSingleton<IDesiredStateProvider, PlatformDesiredStateProvider>();
 
 // Queue-member pause tracker (ephemeral, per-instance) — backs the IsPaused

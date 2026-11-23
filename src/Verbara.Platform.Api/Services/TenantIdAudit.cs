@@ -25,20 +25,26 @@ internal sealed record TenantIdAuditReport(
     IReadOnlyList<TenantIdPair> Pairs)
 {
     /// <summary>True when <paramref name="tenantId"/> carries any flag.</summary>
-    public bool IsFlagged(string tenantId) => throw new NotImplementedException();
+    public bool IsFlagged(string tenantId) => Flags.Any(f => string.Equals(f.TenantId, tenantId, StringComparison.Ordinal));
 
     /// <summary>The reasons of <paramref name="tenantId"/>, comma-separated, or null when it carries none.</summary>
-    public string? ReasonOf(string tenantId) => throw new NotImplementedException();
+    public string? ReasonOf(string tenantId)
+    {
+        var reasons = Flags.Where(f => string.Equals(f.TenantId, tenantId, StringComparison.Ordinal))
+            .Select(f => f.Reason).Distinct(StringComparer.Ordinal).ToList();
+        return reasons.Count == 0 ? null : string.Join(',', reasons);
+    }
 
     /// <summary>The stored tenant whose id equals <paramref name="tenantId"/> exactly, or null.</summary>
-    public StoredTenantId? Find(string tenantId) => throw new NotImplementedException();
+    public StoredTenantId? Find(string tenantId) =>
+        Stored.FirstOrDefault(s => string.Equals(s.TenantId, tenantId, StringComparison.Ordinal));
 }
 
 /// <summary>
 /// Flags every stored tenant id, of any status, that breaks the tenant-id rule (realtime-objects-stay-in-their-tenant,
 /// design D2): not a slug, reserved (the host tenant itself excepted), equal to another ignoring case, or forming a
 /// hyphen-prefix pair with another. Both members of a pair are flagged. Evaluated on each call, never cached: the
-/// flagged set is a function of the stored ids alone.
+/// flagged set is a function of the stored ids alone, and no path of this release renames or removes a stored id.
 /// </summary>
 internal sealed class TenantIdAudit
 {
@@ -49,5 +55,45 @@ internal sealed class TenantIdAudit
 
     public TenantIdAudit(ITenantIdRegistry registry) => _registry = registry;
 
-    public ValueTask<TenantIdAuditReport> RunAsync(CancellationToken ct) => throw new NotImplementedException();
+    public async ValueTask<TenantIdAuditReport> RunAsync(CancellationToken ct)
+    {
+        var stored = await _registry.ListAllIdsAsync(ct).ConfigureAwait(false);
+        var flags = new List<TenantIdFlag>();
+        var seen = new HashSet<(string, string)>();
+        void Flag(StoredTenantId s, string reason)
+        {
+            if (seen.Add((s.TenantId, reason)))
+                flags.Add(new TenantIdFlag(s.TenantId, s.Status, reason));
+        }
+
+        foreach (var s in stored)
+        {
+            if (!TenantIdRule.IsWellFormed(s.TenantId))
+                Flag(s, TenantIdFlagReason.NotASlug);
+            if (TenantIdRule.IsReserved(s.TenantId) && !string.Equals(s.TenantId, HostTenantId, StringComparison.Ordinal))
+                Flag(s, TenantIdFlagReason.Reserved);
+        }
+
+        var pairs = new List<TenantIdPair>();
+        for (var i = 0; i < stored.Count; i++)
+        {
+            for (var j = i + 1; j < stored.Count; j++)
+            {
+                var (a, b) = (stored[i], stored[j]);
+                if (!TenantIdRule.Overlaps(a.TenantId, b.TenantId))
+                    continue;
+                var reason = string.Equals(a.TenantId, b.TenantId, StringComparison.OrdinalIgnoreCase)
+                    ? TenantIdFlagReason.CaseVariant
+                    : TenantIdFlagReason.PrefixPair;
+                Flag(a, reason);
+                Flag(b, reason);
+                var aFirst = a.TenantId.Length != b.TenantId.Length
+                    ? a.TenantId.Length < b.TenantId.Length
+                    : string.CompareOrdinal(a.TenantId, b.TenantId) < 0;
+                pairs.Add(aFirst ? new TenantIdPair(a, b, reason) : new TenantIdPair(b, a, reason));
+            }
+        }
+
+        return new TenantIdAuditReport(stored, flags, pairs);
+    }
 }
