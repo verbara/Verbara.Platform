@@ -223,7 +223,15 @@ internal sealed partial class JwtTokenService
     /// on the file-key path.
     /// </summary>
     public Task EnsureValidationKeysAsync(CancellationToken cancellationToken) =>
-        _validationKeys?.EnsureLoadedAsync(cancellationToken) ?? Task.CompletedTask;
+        EnsureValidationKeysAsync(null, cancellationToken);
+
+    /// <summary>
+    /// <see cref="EnsureValidationKeysAsync(CancellationToken)"/> for a token naming
+    /// <paramref name="keyId"/>: when the validation keys do not hold it, also awaits one rate-limited
+    /// reload (<see cref="JwtValidationKeySnapshot.EnsureLoadedAsync(string?, CancellationToken)"/>).
+    /// </summary>
+    public Task EnsureValidationKeysAsync(string? keyId, CancellationToken cancellationToken) =>
+        _validationKeys?.EnsureLoadedAsync(keyId, cancellationToken) ?? Task.CompletedTask;
 
     /// <summary>The validation-key reload running now, or a completed task. For tests.</summary>
     internal Task ValidationKeyReloadInFlight => _validationKeys?.ReloadInFlight ?? Task.CompletedTask;

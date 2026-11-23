@@ -14,17 +14,24 @@ namespace Verbara.Platform.Identity.Auth.Jwt;
 /// it starts a reload in the background and answers from what it has.
 /// </para>
 /// <para>
-/// <see cref="EnsureLoadedAsync"/> awaits the first load asynchronously; the JwtBearer
-/// <c>OnMessageReceived</c> event calls it, so a replica's first requests wait for the keys without
-/// holding a thread. It is never called at host start, so a host boots without the pool.
+/// <see cref="EnsureLoadedAsync(string?, CancellationToken)"/> awaits the first load asynchronously;
+/// the JwtBearer <c>OnMessageReceived</c> event calls it with the key id the token names, so a
+/// replica's first requests wait for the keys without holding a thread, and a token signed with a key
+/// the snapshot does not hold yet (the first key setup creates, a rotated key) waits for one reload
+/// instead of being refused. It is never called at host start, so a host boots without the pool.
 /// </para>
 /// <para>
 /// Reload rules: one at a time; after a failure the next attempt waits (1 s, doubling, at most
 /// <see cref="JwtValidationKeySnapshotOptions.MaxFailureBackoff"/>) and the previous snapshot keeps
-/// serving; a reload for an unknown key id runs at most once per
-/// <see cref="JwtValidationKeySnapshotOptions.UnknownKeyIdReloadInterval"/>. A reload that returns no
-/// live key is a failed reload. A reload that leaves out keys the previous snapshot held and that have
-/// not expired keeps them, and counts as failed so it is retried after the backoff.
+/// serving. A reload for an unknown key id starts at most once per
+/// <see cref="JwtValidationKeySnapshotOptions.UnknownKeyIdReloadInterval"/>, also inside a failure
+/// backoff; requests that arrive meanwhile share the next one, which reads the whole pool, so forged
+/// key ids cannot keep a real one out for longer than that interval. A pool with no live key, read
+/// while the snapshot holds none, is a successful empty load (a fresh install before setup), not a
+/// failure: it is read again after <see cref="JwtValidationKeySnapshotOptions.InitialFailureBackoff"/>
+/// without doubling. A reload that leaves out keys the previous snapshot held and that have not
+/// expired (an empty read included) keeps them, and counts as failed so it is retried after the
+/// backoff.
 /// </para>
 /// </remarks>
 public sealed class JwtValidationKeySnapshot
@@ -37,9 +44,13 @@ public sealed class JwtValidationKeySnapshot
 
     private Snapshot? _current;
     private Task? _inFlight;
+    private Task? _unreadReload;               // the in-flight reload until it starts reading the pool
     private long _nextReloadAtTicks;          // refresh due (after a success) or backoff end (after a failure)
-    private long _lastUnknownKeyIdReloadTicks = long.MinValue;
     private int _consecutiveFailures;          // written only by the single in-flight reload
+
+    private readonly Lock _unknownKeyIdGate = new();
+    private Task? _pendingUnknownKeyIdReload;  // scheduled, has not read the pool yet; under the gate
+    private long _lastUnknownKeyIdReloadTicks = long.MinValue; // under the gate
 
     /// <summary>Creates a snapshot that loads its keys with <paramref name="load"/>.</summary>
     /// <param name="load">Reads every key of the pool. Called off the request path, one call at a time.</param>
@@ -70,6 +81,16 @@ public sealed class JwtValidationKeySnapshot
     /// <summary>The reload running now, or a completed task. For tests and diagnostics.</summary>
     public Task ReloadInFlight => Volatile.Read(ref _inFlight) ?? Task.CompletedTask;
 
+    /// <summary>The unknown-key-id reload scheduled for later, or a completed task. For tests.</summary>
+    internal Task PendingUnknownKeyIdReload
+    {
+        get
+        {
+            lock (_unknownKeyIdGate)
+                return _pendingUnknownKeyIdReload ?? Task.CompletedTask;
+        }
+    }
+
     /// <summary>
     /// The keys to check a token against. Never waits: starts a background reload when one is due or
     /// <paramref name="keyId"/> is unknown, and answers from the current snapshot (empty before the
@@ -84,23 +105,31 @@ public sealed class JwtValidationKeySnapshot
         {
             _ = StartReload();
         }
-        else if (!string.IsNullOrEmpty(keyId)
-                 && snapshot is not null
-                 && !snapshot.ById.ContainsKey(keyId)
-                 && Volatile.Read(ref _consecutiveFailures) == 0)
+        else if (!string.IsNullOrEmpty(keyId) && !Holds(snapshot, keyId))
         {
-            TryStartUnknownKeyIdReload(nowTicks);
+            _ = RequestUnknownKeyIdReload();
         }
 
         return snapshot?.Keys ?? [];
     }
 
     /// <summary>
+    /// <see cref="EnsureLoadedAsync(string?, CancellationToken)"/> for a token whose key id is not
+    /// known.
+    /// </summary>
+    public Task EnsureLoadedAsync(CancellationToken cancellationToken) => EnsureLoadedAsync(null, cancellationToken);
+
+    /// <summary>
     /// Awaits the first full load, at most <see cref="JwtValidationKeySnapshotOptions.FirstLoadWait"/>;
-    /// once loaded, only starts a background refresh when one is due. Never throws for a pool failure:
+    /// once loaded, only starts a background refresh when one is due. When <paramref name="keyId"/>
+    /// names a key the snapshot does not hold, then awaits one reload that reads the pool after this
+    /// call, rate-limited and shared with every other request waiting for one, at most
+    /// <see cref="JwtValidationKeySnapshotOptions.UnknownKeyIdWait"/>. Never throws for a pool failure:
     /// the token check that follows fails on its own when no key is held.
     /// </summary>
-    public async Task EnsureLoadedAsync(CancellationToken cancellationToken)
+    /// <param name="keyId">The <c>kid</c> the request's token names (<see cref="JwtKeyId"/>), or <see langword="null"/>.</param>
+    /// <param name="cancellationToken">The request's abort token.</param>
+    public async Task EnsureLoadedAsync(string? keyId, CancellationToken cancellationToken)
     {
         var nowTicks = _time.GetUtcNow().UtcTicks;
         var due = nowTicks >= Volatile.Read(ref _nextReloadAtTicks);
@@ -109,20 +138,32 @@ public sealed class JwtValidationKeySnapshot
         {
             if (due)
                 _ = StartReload();
-            return;
+        }
+        else if (due || Volatile.Read(ref _inFlight) is not null)
+        {
+            // Not loaded yet. Inside a failure backoff this is skipped rather than queue requests.
+            try
+            {
+                await StartReload().WaitAsync(_options.FirstLoadWait, _time, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // The load keeps running in the background; this request goes on without keys.
+            }
         }
 
-        // Not loaded yet. Inside a failure backoff, answer at once rather than queue requests.
-        if (!due && Volatile.Read(ref _inFlight) is null)
+        if (string.IsNullOrEmpty(keyId) || Holds(Volatile.Read(ref _current), keyId))
             return;
 
         try
         {
-            await StartReload().WaitAsync(_options.FirstLoadWait, _time, cancellationToken).ConfigureAwait(false);
+            await RequestUnknownKeyIdReload()
+                .WaitAsync(_options.UnknownKeyIdWait, _time, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
-            // The load keeps running in the background; this request goes on without keys.
+            // The reload goes on in the background; the token check that follows refuses this token.
         }
     }
 
@@ -165,20 +206,77 @@ public sealed class JwtValidationKeySnapshot
         if (running is not null)
             return running;
 
+        Volatile.Write(ref _unreadReload, done.Task);
         // Off the caller's thread: a loader that blocks before its first await must not block a request.
         _ = Task.Run(() => RunReloadAsync(done));
         return done.Task;
     }
 
-    private void TryStartUnknownKeyIdReload(long nowTicks)
+    private static bool Holds(Snapshot? snapshot, string keyId) =>
+        snapshot is not null && snapshot.ById.ContainsKey(keyId);
+
+    /// <summary>
+    /// A reload that reads the pool after this call, for a token whose key id the snapshot does not
+    /// hold. Joins a reload that has not read the pool yet; starts one now when the rate limit allows
+    /// and no reload is running; otherwise returns the one already scheduled, or schedules one for
+    /// when the interval ends and any running reload (which may have read the pool before this call)
+    /// has finished. Completes when it has run.
+    /// </summary>
+    private Task RequestUnknownKeyIdReload()
     {
-        var last = Interlocked.Read(ref _lastUnknownKeyIdReloadTicks);
-        if (last != long.MinValue && nowTicks - last < _options.UnknownKeyIdReloadInterval.Ticks)
-            return;
-        if (Interlocked.CompareExchange(ref _lastUnknownKeyIdReloadTicks, nowTicks, last) != last)
-            return;
+        TaskCompletionSource scheduled;
+        Task delay;
+        lock (_unknownKeyIdGate)
+        {
+            if (_pendingUnknownKeyIdReload is { } pending)
+                return pending;
+            // A reload that has not read the pool yet reads it after this call: share it, at no cost.
+            if (Volatile.Read(ref _unreadReload) is { } unread)
+                return unread;
+
+            var nowTicks = _time.GetUtcNow().UtcTicks;
+            var last = _lastUnknownKeyIdReloadTicks;
+            var earliest = last == long.MinValue ? nowTicks : last + _options.UnknownKeyIdReloadInterval.Ticks;
+            if (earliest <= nowTicks && Volatile.Read(ref _inFlight) is null)
+                return StartUnknownKeyIdReload(nowTicks);
+
+            scheduled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingUnknownKeyIdReload = scheduled.Task;
+            // The timer is taken here, on the caller's clock reading, not later on a pool thread.
+            delay = earliest > nowTicks ? Task.Delay(TimeSpan.FromTicks(earliest - nowTicks), _time) : Task.CompletedTask;
+        }
+
+        _ = Task.Run(() => RunScheduledUnknownKeyIdReloadAsync(scheduled, delay));
+        return scheduled.Task;
+    }
+
+    private async Task RunScheduledUnknownKeyIdReloadAsync(TaskCompletionSource scheduled, Task delay)
+    {
+        try
+        {
+            await delay.ConfigureAwait(false);
+            // A reload running now may have read the pool before the request that asked arrived.
+            await ReloadInFlight.ConfigureAwait(false);
+            Task reload;
+            lock (_unknownKeyIdGate)
+            {
+                _pendingUnknownKeyIdReload = null;
+                reload = StartUnknownKeyIdReload(_time.GetUtcNow().UtcTicks);
+            }
+            await reload.ConfigureAwait(false);
+        }
+        finally
+        {
+            scheduled.TrySetResult();
+        }
+    }
+
+    /// <summary>Starts (or joins, when one started since the caller looked) a reload; under the gate.</summary>
+    private Task StartUnknownKeyIdReload(long nowTicks)
+    {
+        _lastUnknownKeyIdReloadTicks = nowTicks;
         _events.UnknownKeyIdReload?.Invoke();
-        _ = StartReload();
+        return StartReload();
     }
 
     private async Task RunReloadAsync(TaskCompletionSource done)
@@ -187,6 +285,7 @@ public sealed class JwtValidationKeySnapshot
         try
         {
             _events.ReloadStarted?.Invoke();
+            _ = Interlocked.CompareExchange(ref _unreadReload, null, done.Task);
             var entries = await _load(CancellationToken.None)
                 .WaitAsync(_options.LoadTimeout, _time)
                 .ConfigureAwait(false);
@@ -201,8 +300,11 @@ public sealed class JwtValidationKeySnapshot
                     : new Item(entry.ExpiresAt, _build(entry));
             }
 
-            if (loaded.Count == 0)
-                throw new JwtKeySetRejectedException("The key pool returned no live key; keeping the keys already held.");
+            // No live key, while none is held either: the pool is empty (a fresh install before setup
+            // creates the first key) or a read skipped it; both serve no key. Not a failure, so no
+            // growing backoff: read again soon, and at once (rate-limited) for a token naming a key.
+            // While keys are held, an empty read is a partial read: the left-out rule below keeps them.
+            var emptyLoad = loaded.Count == 0;
 
             var kept = 0;
             if (baseline is not null)
@@ -224,7 +326,8 @@ public sealed class JwtValidationKeySnapshot
             }
 
             Volatile.Write(ref _consecutiveFailures, 0);
-            Volatile.Write(ref _nextReloadAtTicks, now.Add(_options.RefreshInterval).UtcTicks);
+            var refresh = emptyLoad ? _options.InitialFailureBackoff : _options.RefreshInterval;
+            Volatile.Write(ref _nextReloadAtTicks, now.Add(refresh).UtcTicks);
             _events.ReloadSucceeded?.Invoke(loaded.Count);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -238,6 +341,7 @@ public sealed class JwtValidationKeySnapshot
         }
         finally
         {
+            _ = Interlocked.CompareExchange(ref _unreadReload, null, done.Task);
             Volatile.Write(ref _inFlight, null);
             done.TrySetResult();
         }
@@ -291,8 +395,19 @@ public sealed record JwtValidationKeySnapshotOptions
     /// <summary>How long a loaded snapshot serves before a background refresh. Default 5 minutes.</summary>
     public TimeSpan RefreshInterval { get; init; } = TimeSpan.FromMinutes(5);
 
-    /// <summary>Least time between two reloads triggered by an unknown key id. Default 10 seconds.</summary>
-    public TimeSpan UnknownKeyIdReloadInterval { get; init; } = TimeSpan.FromSeconds(10);
+    /// <summary>
+    /// Least time between two reloads triggered by an unknown key id. Default 2 seconds: also the
+    /// longest a token signed with a new key waits when forged key ids took the last reload.
+    /// </summary>
+    public TimeSpan UnknownKeyIdReloadInterval { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Longest a request whose token names an unknown key id waits for the reload it asked for.
+    /// Default 5 seconds. Before the first load, the same request first waits up to
+    /// <see cref="FirstLoadWait"/> for that load, so it can wait both: up to 10 seconds with the
+    /// defaults.
+    /// </summary>
+    public TimeSpan UnknownKeyIdWait { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>Wait after the first failed reload; doubles per failure. Default 1 second.</summary>
     public TimeSpan InitialFailureBackoff { get; init; } = TimeSpan.FromSeconds(1);

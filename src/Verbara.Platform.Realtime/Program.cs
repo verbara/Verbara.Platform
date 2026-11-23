@@ -155,10 +155,14 @@ builder.Services
                 }
 
                 // The token check reads its keys from memory and never waits on the key store; a
-                // replica's first connects await the first load here, asynchronously.
+                // replica's first connects await the first load here, asynchronously, and a token
+                // signed with a key not held yet (the first one setup creates, a rotated one) awaits
+                // one rate-limited reload instead of being refused.
+                var keyId = Verbara.Platform.Identity.Auth.Jwt.JwtKeyId.FromRequest(
+                    ctx.Token, ctx.Request.Headers.Authorization.ToString());
                 return ctx.HttpContext.RequestServices
                     .GetRequiredService<Verbara.Platform.Identity.Auth.Jwt.JwtValidationKeySnapshot>()
-                    .EnsureLoadedAsync(ctx.HttpContext.RequestAborted);
+                    .EnsureLoadedAsync(keyId, ctx.HttpContext.RequestAborted);
             },
             // A connection is closed when its token expires; a reconnect on that token is refused
             // here rather than admitted and closed again inside the clock-skew grace. So is an

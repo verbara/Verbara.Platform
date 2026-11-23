@@ -25,6 +25,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the entry routes of a caller-ID pool answer 404 and change nothing when the calendar or pool belongs to another
   tenant; on the tenant's own calendar or pool they answer as before. The OpenAPI document declares the 404 on the
   six operations.
+- **Live updates and API calls accept a new signing key on its first request.** On a fresh install, Realtime (and an
+  Api replica that did not sign the token) refused the admin's first live-update connects for up to 30 s after setup
+  finished: the requests that reached it before the first signing key existed were counted as failed key reads, and
+  the retry wait had grown to 30 s. After a key rotation, the first request signed with the new key could be refused
+  too, and requests naming made-up key ids could stretch that to 10 s. Now an empty key pool is a successful load
+  (read again after 1 s, without the growing wait), and a request whose token names a key the service does not hold
+  waits for one key reload (at most 5 s, plus up to 5 s more for the first key load on a service that has not loaded
+  its keys yet) instead of being refused. Those reloads stay rate-limited — at most one every 2 s, shared by every
+  request waiting — so made-up key ids cannot flood the key store, and a real new key is accepted within that
+  interval. A partial read that leaves out keys still held keeps them, as before. (#648)
+
 - **The compose gateway no longer answers 502 under sustained load.** `docker/nginx-gateway.conf` (mounted by the
   full, production, reference-SMB and demo compose files) opened a new connection to platform-api, realtime or web
   for every request, and each closed one held one of the gateway's ephemeral ports for about 60 s; under sustained
@@ -33,7 +44,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`keepalive 64`), every location speaks HTTP/1.1 with an empty `Connection` header, and `/hubs/` and `/ws/` send
   `Connection: upgrade` only on a WebSocket upgrade, so the hub's negotiate, long-polling and server-sent-events
   requests reuse pooled connections too. Recreate the gateway to pick it up:
-  `docker compose -f <compose file> up -d --force-recreate nginx-gateway`.
+  `docker compose -f <compose file> up -d --force-recreate nginx-gateway`. (#646)
+
+### Dependencies
+
+- **Five dependency updates that the `v2.40.0` release undid are back.** The release commit reset these pins to
+  their earlier versions; they now match the updates merged before it: `AWSSDK.S3` `4.1.0` (#626), `Microsoft.Graph`
+  `6.10.0` (#612), `Scalar.AspNetCore` `2.21.0` (#627), `coverlet.collector` `10.1.1` (#625) and the
+  `dotnet-reportgenerator-globaltool` tool `5.6.0` (#618). `v2.40.0` and `v2.41.0` shipped the earlier versions.
 
 ## [2.41.0] - 2026-11-21
 
