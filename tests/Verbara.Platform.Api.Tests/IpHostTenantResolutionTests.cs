@@ -256,13 +256,13 @@ public sealed class IpHostTenantResolutionTests
         // Partner is rejected for a request that is legitimate.
         SeedTenant("platform", TenantType.Platform, parent: null);
         SeedTenant("partner-zeta", TenantType.Partner, parent: "platform");
-        SeedTenant("partner-zeta-customer", TenantType.Customer, parent: "partner-zeta");
-        var context = CreateContext("127.0.0.1:5199", tenantHeader: "partner-zeta-customer");
+        SeedTenant("partner-zetacust", TenantType.Customer, parent: "partner-zeta");
+        var context = CreateContext("127.0.0.1:5199", tenantHeader: "partner-zetacust");
 
         await RunPipelineAsPrincipalAsync(context, jwtTid: "partner-zeta");
 
         context.Response.StatusCode.Should().NotBe(StatusCodes.Status403Forbidden);
-        _tenantSeenDownstream.Should().Be(new TenantId("partner-zeta-customer"));
+        _tenantSeenDownstream.Should().Be(new TenantId("partner-zetacust"));
     }
 
     // ─── 4.7 A legitimate 403 explains itself (spec Requirement 4) ──────────

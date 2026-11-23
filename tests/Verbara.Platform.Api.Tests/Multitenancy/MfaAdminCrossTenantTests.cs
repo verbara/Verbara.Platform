@@ -68,7 +68,7 @@ public sealed class MfaAdminCrossTenantTests
     [Fact]
     public async Task ResetMfa_ShouldAllow_WhenPartnerTargetsOwnChild()
     {
-        // Partner-Zeta admin resets MFA on a user inside `partner-zeta-customer`
+        // Partner-Zeta admin resets MFA on a user inside `partner-zetacust`
         // (descendant of partner-zeta) — legitimate hierarchy access.
         const string childUserId = "mfa-child-of-partner";
         await SeedUserAsync(

@@ -56,7 +56,7 @@ public sealed class PartnerAdminScopeAttackTests
 
         response.StatusCode.Should().Be(
             HttpStatusCode.Forbidden,
-            because: "a Partner may reach into its OWN subtree only — partner-omega-customer descends "
+            because: "a Partner may reach into its OWN subtree only — partner-omegacust descends "
                    + "from partner-omega, not from partner-zeta");
     }
 
@@ -103,7 +103,7 @@ public sealed class PartnerAdminScopeAttackTests
     [Fact]
     public async Task AdminUsers_ShouldAllow_WhenPartnerTargetsItsOwnCustomer()
     {
-        // The control case the fix must NOT break: partner-zeta-customer's parent IS
+        // The control case the fix must NOT break: partner-zetacust's parent IS
         // partner-zeta, so the reach is legitimate.
         using var client = _fixture.CreatePartnerZetaAdminClient();
 

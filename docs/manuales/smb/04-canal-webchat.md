@@ -174,7 +174,7 @@ O con DNS configurado:
 https://verbara.tu-dominio.com/webchat/demo.html
 ```
 
-La demo trae `data-tenant-id="demo-tenant"` hardcodeado. **Para que el round-trip funcione contra tu instalación**, el tenant `demo-tenant` tiene que existir; en una instalación SMB real probá apuntando la demo a tu Customer: copiá el HTML de la demo a un archivo local y cambiá `data-tenant-id` por tu `$CUSTOMER_TENANT_ID`, o simplemente embebé el snippet de §2 en cualquier página de prueba.
+La demo trae `data-tenant-id="demo"` hardcodeado: es el tenant que crea el stack de demo (`docker/demo/demo-reset.sh`). **Para que el round-trip funcione contra tu instalación SMB**, apuntá la demo a tu Customer: copiá el HTML de la demo a un archivo local y cambiá `data-tenant-id` por tu `$CUSTOMER_TENANT_ID`, o simplemente embebé el snippet de §2 en cualquier página de prueba.
 
 Vas a ver una burbuja flotante en la esquina; click → se abre el panel. También hay un botón "Open chat" que llama `VerbaraWebChat.open()` (API programática del SDK).
 

@@ -229,9 +229,9 @@ public sealed class RecordingStreamEndpointTests : IClassFixture<RecordingStream
     {
         public const string PlatformTenantId = "rec-platform";
         public const string PartnerTenantId = "rec-partner";
-        public const string PartnerCustomerTenantId = "rec-partner-customer";
+        public const string PartnerCustomerTenantId = "rec-partnercust";
         public const string RivalPartnerTenantId = "rec-rival-partner";
-        public const string RivalCustomerTenantId = "rec-rival-customer";
+        public const string RivalCustomerTenantId = "rec-rivalcust";
         public const string PartnerAdminUserId = "rec-partner-admin";
         private const string PartnerAdminEmail = "rec-partner-admin@test.internal";
         private const string RecordingName = "call-recording";

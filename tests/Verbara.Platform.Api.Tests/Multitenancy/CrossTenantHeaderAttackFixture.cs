@@ -21,11 +21,11 @@ namespace Verbara.Platform.Api.Tests.Multitenancy;
 ///   (<c>acme</c>, <c>globex</c>) each with one local Admin.</description></item>
 ///   <item><description>One <see cref="TenantType.Partner"/> tenant
 ///   (<c>partner-zeta</c>) parenting one customer descendant
-///   (<c>partner-zeta-customer</c>) with admins on both sides — used by the
+///   (<c>partner-zetacust</c>) with admins on both sides — used by the
 ///   Partner-cross-tenant control case + Phase 2 MFA-001 hierarchy probes.</description></item>
 ///   <item><description>A second, unrelated <see cref="TenantType.Partner"/> tenant
 ///   (<c>partner-omega</c>) with its own customer descendant
-///   (<c>partner-omega-customer</c>) — the rival-BPO probe for the Partner-admin
+///   (<c>partner-omegacust</c>) — the rival-BPO probe for the Partner-admin
 ///   scope regressions.</description></item>
 ///   <item><description>One management-class API key bound to the platform
 ///   admin so the management-key bypass branch of the new tenant boundary
@@ -45,7 +45,7 @@ public sealed class CrossTenantHeaderAttackFixture : WebApplicationFactory<Progr
     public const string AcmeTenantId = "acme";
     public const string GlobexTenantId = "globex";
     public const string PartnerZetaTenantId = "partner-zeta";
-    public const string PartnerZetaCustomerTenantId = "partner-zeta-customer";
+    public const string PartnerZetaCustomerTenantId = "partner-zetacust";
 
     /// <summary>
     /// A SECOND, unrelated Partner and its customer. Without a rival partner the suite can
@@ -54,15 +54,15 @@ public sealed class CrossTenantHeaderAttackFixture : WebApplicationFactory<Progr
     /// and writing BPO B's client. These two tenants exist for that probe.
     /// </summary>
     public const string PartnerOmegaTenantId = "partner-omega";
-    public const string PartnerOmegaCustomerTenantId = "partner-omega-customer";
+    public const string PartnerOmegaCustomerTenantId = "partner-omegacust";
 
     public const string PlatformAdminUserId = "platform-admin-user";
     public const string AcmeAdminUserId = "acme-admin-user";
     public const string GlobexAdminUserId = "globex-admin-user";
     public const string PartnerZetaAdminUserId = "partner-zeta-admin-user";
-    public const string PartnerZetaCustomerAdminUserId = "partner-zeta-customer-admin-user";
+    public const string PartnerZetaCustomerAdminUserId = "partner-zetacust-admin-user";
     public const string PartnerOmegaAdminUserId = "partner-omega-admin-user";
-    public const string PartnerOmegaCustomerAdminUserId = "partner-omega-customer-admin-user";
+    public const string PartnerOmegaCustomerAdminUserId = "partner-omegacust-admin-user";
 
     public const string ManagementApiKeyRaw = "mgmt-platform-key-mt001";
 
@@ -122,9 +122,9 @@ public sealed class CrossTenantHeaderAttackFixture : WebApplicationFactory<Progr
         SaveAdmin(userStore, AcmeAdminUserId, AcmeTenantId, "acme-admin@test.internal");
         SaveAdmin(userStore, GlobexAdminUserId, GlobexTenantId, "globex-admin@test.internal");
         SaveAdmin(userStore, PartnerZetaAdminUserId, PartnerZetaTenantId, "partner-zeta-admin@test.internal");
-        SaveAdmin(userStore, PartnerZetaCustomerAdminUserId, PartnerZetaCustomerTenantId, "partner-zeta-customer-admin@test.internal");
+        SaveAdmin(userStore, PartnerZetaCustomerAdminUserId, PartnerZetaCustomerTenantId, "partner-zetacust-admin@test.internal");
         SaveAdmin(userStore, PartnerOmegaAdminUserId, PartnerOmegaTenantId, "partner-omega-admin@test.internal");
-        SaveAdmin(userStore, PartnerOmegaCustomerAdminUserId, PartnerOmegaCustomerTenantId, "partner-omega-customer-admin@test.internal");
+        SaveAdmin(userStore, PartnerOmegaCustomerAdminUserId, PartnerOmegaCustomerTenantId, "partner-omegacust-admin@test.internal");
 
         // Management API key bound to platform admin (for the management-key bypass branch test).
         var hashed = Convert.ToHexStringLower(
