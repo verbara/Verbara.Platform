@@ -9,6 +9,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **A new tenant id must be a lowercase slug that no stored tenant id equals or extends.** `POST
+  /api/v1/partner/customers`, `POST /api/v1/management/tenants` and first-run setup accept only 1 to 63 lowercase
+  letters, digits and inner hyphens, and refuse the reserved ids `t` and `platform`, with 400. An id equal to an
+  existing one, or one that extends or is extended by an existing one with `-` (`acme` and `acme-corp`), is refused
+  with 409 on every create route, whatever the stored tenant's status or Partner, and setup refuses it before writing
+  anything. Management create no longer overwrites an existing tenant: it answers 409. A deleted tenant's id cannot be
+  used again.
+- **Existing tenants whose ids break that rule are reported and kept apart.** A new readiness health check,
+  `tenant-ids`, reports them as Degraded (readiness still answers 200), naming both tenants of each pair, and also
+  reports every `Realtime:TenantIds` entry with no stored tenant. Such tenants are not reconciled, and their
+  suspension or deletion removes their credentials, queue memberships and trunks by exact id but never their queues;
+  deleting one of their queues does not remove it from the telephony engine either. They stay in that state, even
+  after one tenant of a pair is deleted, until a tenant rename tool is available.
+
 ### Removed
 
 - **The Api no longer wires the Pro cluster-event bridge, and Realtime no longer has a cluster relay path.** The Api
@@ -21,6 +37,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Suspending, deleting or reconciling a tenant no longer changes another tenant's realtime telephony rows.** A
+  tenant's suspension or deletion (by its Partner, a platform administrator or dunning) and its reconcile pass leave
+  every other tenant's agent endpoints, SIP credentials, queues, queue members, trunks and outbound registrations as
+  they were, whatever the two tenant ids look like.
 - **Holiday-calendar and caller-ID-pool contents stay in their tenant.** The holiday routes of a holiday calendar and
   the entry routes of a caller-ID pool answer 404 and change nothing when the calendar or pool belongs to another
   tenant; on the tenant's own calendar or pool they answer as before. The OpenAPI document declares the 404 on the
