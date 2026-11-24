@@ -1,11 +1,11 @@
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 
-namespace Verbara.Platform.Api.Tests;
+namespace Verbara.Platform.Storage.InMemory;
 
 /// <summary>
-/// In-memory <see cref="ISkillCatalogStore"/> for the Api test hosts (routing-skills-stay-in-their-tenant, design D9),
-/// with the semantics of <c>PostgresSkillCatalogStore</c>: definitions keyed by (tenant, name without case),
+/// In-memory <see cref="ISkillCatalogStore"/> for the host without PostgreSQL and the Api test hosts
+/// (routing-skills-stay-in-their-tenant, design D9), with the semantics of <c>PostgresSkillCatalogStore</c>: definitions keyed by (tenant, name without case),
 /// assignments by (tenant, agent, skill name without case), an upsert or assign replacing the stored spelling. Assign,
 /// unassign and remove-skill are each one atomic step under one lock, returning the replaced and the deleted row from
 /// that step, so no other write interleaves with them. An assign to an agent the tenant does not have reports

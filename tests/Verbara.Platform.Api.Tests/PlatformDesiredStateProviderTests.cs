@@ -1,6 +1,7 @@
 using Verbara.Platform.Api.Services;
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
+using Verbara.Platform.Storage.InMemory;
 using Verbara.Sdk.Pro.Dialer.Models;
 using Verbara.Sdk.Pro.Dialer.Routing;
 using Microsoft.Extensions.Configuration;

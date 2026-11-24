@@ -94,6 +94,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<Verbara.Platform.Queues.Licensing.ILicenseIdSource>(), sp.GetRequiredService<IClock>()));
         services.AddSingleton<ITeamStore, InMemoryTeamStore>();
         services.AddSingleton<IQueueMembershipStore, InMemoryQueueMembershipStore>();
+        services.AddSingleton<ISkillCatalogStore, InMemorySkillCatalogStore>();
         services.AddSingleton<IAgentCapacityStore, InMemoryAgentCapacityStore>();
 
         // Routing — inbound DID → queue routes (Phase 2 voice routing)

@@ -40,6 +40,7 @@ public sealed class ServiceCollectionExtensionsTests
         provider.GetService<IQueueStore>().Should().NotBeNull();
         provider.GetService<IAgentStore>().Should().NotBeNull();
         provider.GetService<ITeamStore>().Should().NotBeNull();
+        provider.GetService<ISkillCatalogStore>().Should().BeOfType<InMemorySkillCatalogStore>();
 
         // Channels
         provider.GetService<ITenantChannelConfigStore>().Should().NotBeNull();

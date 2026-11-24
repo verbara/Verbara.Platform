@@ -409,7 +409,7 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
 
         // Routing skill catalog (routing-skills-stay-in-their-tenant, design D9) — always replace
         RemoveAll<ISkillCatalogStore>(services);
-        services.AddSingleton<ISkillCatalogStore, InMemorySkillCatalogStore>();
+        services.AddSingleton<ISkillCatalogStore, Verbara.Platform.Storage.InMemory.InMemorySkillCatalogStore>();
 
         // Analytics stores — always replace
         RemoveAll<ICompletedSessionStore>(services);
