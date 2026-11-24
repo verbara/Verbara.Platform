@@ -167,12 +167,12 @@ public sealed class RealtimeTenantIsolationLiveDbTests : IClassFixture<Conversat
                 CurrentStage = TenantStatus.Warning, StartedAt = startedAt,
             }, default);
         }
-        var removed = host.Sync.WaitFor(call => call == "CleanupTenant:acme" || call == $"RemoveAgent:acme:{a1}");
+        var suspended = host.Lifecycle.WaitForSuspended("acme");
         var dunning = new DunningService(host.Services.GetRequiredService<IServiceScopeFactory>(),
             host.Services.GetRequiredService<ILogger<DunningService>>(), Microsoft.Extensions.Options.Options.Create(config));
 
         await dunning.StartAsync(default);
-        await removed.WaitAsync(TimeSpan.FromSeconds(60));
+        await suspended.WaitAsync(TimeSpan.FromSeconds(60)); // every handler of acme's suspension has returned
         await dunning.StopAsync(default);
 
         (await host.Services.GetRequiredService<ITenantStore>().GetAsync("acme"))!.Status.Should().Be(TenantStatus.Suspended);
@@ -194,7 +194,7 @@ public sealed class RealtimeTenantIsolationLiveDbTests : IClassFixture<Conversat
         await host.RunOneReconcileCycleAsync();
 
         (await host.RowsAsync()).Should().Contain("queues:demo-corp-sales", "demo is configured but not stored");
-        host.Sync.Calls.Should().NotContain(call => call.StartsWith("RemoveQueue:demo:", StringComparison.Ordinal));
+        host.Sync.Attempts.Should().NotContain(call => call.StartsWith("RemoveQueue:demo:", StringComparison.Ordinal));
     }
 
     // ─── A flagged tenant's suspension or deletion removes its rows by exact id and no queue row ──────────────────
@@ -245,7 +245,7 @@ public sealed class RealtimeTenantIsolationLiveDbTests : IClassFixture<Conversat
         rows.Should().Contain(corp.All);
         host.WarningsNaming("acme-support").Should().NotBeEmpty();
         host.WarningsNaming("acme-corp-x").Should().NotBeEmpty();
-        host.Sync.Calls.Should().NotContain(call => call.StartsWith("CleanupTenant:", StringComparison.Ordinal),
+        host.Sync.Attempts.Should().NotContain(call => call.StartsWith("CleanupTenant:", StringComparison.Ordinal),
             "Pro's lifecycle handler (the only caller of CleanupTenantAsync) is not reached");
     }
 
@@ -363,6 +363,8 @@ internal sealed class RealtimeLiveDbApiFactory : WebApplicationFactory<Program>
 
     public RecordingRealtimeSync Sync => Services.GetRequiredService<RecordingRealtimeSync>();
 
+    public SignallingLifecycleDispatcher Lifecycle => Services.GetRequiredService<SignallingLifecycleDispatcher>();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("ConnectionStrings:Postgres", _connectionString);
@@ -405,6 +407,13 @@ internal sealed class RealtimeLiveDbApiFactory : WebApplicationFactory<Program>
                 services.Add(d);
             services.AddSingleton(sp => new RecordingRealtimeSync((IRealtimeSyncService)sp.GetRequiredService(engineType)));
             services.AddSingleton<IRealtimeSyncService>(sp => sp.GetRequiredService<RecordingRealtimeSync>());
+
+            // Platform's real dispatcher, wrapped so a test can wait until every handler of a lifecycle event returned.
+            var dispatcher = services.Single(d => d.ServiceType == typeof(ITenantLifecycleDispatcher));
+            services.Remove(dispatcher);
+            services.AddSingleton(sp => new SignallingLifecycleDispatcher(
+                (ITenantLifecycleDispatcher)ActivatorUtilities.CreateInstance(sp, dispatcher.ImplementationType!)));
+            services.AddSingleton<ITenantLifecycleDispatcher>(sp => sp.GetRequiredService<SignallingLifecycleDispatcher>());
 
             // One lookup over every key this host hands out; the Partner key is SetupTestAuth's own.
             var apiKeys = (IApiKeyStore)services.Last(d => d.ServiceType == typeof(IApiKeyStore) && !d.IsKeyedService).ImplementationInstance!;
@@ -641,9 +650,13 @@ internal sealed class RealtimeLiveDbApiFactory : WebApplicationFactory<Program>
 internal sealed class RecordingRealtimeSync(IRealtimeSyncService inner) : IRealtimeSyncService
 {
     private readonly ConcurrentQueue<string> _calls = new();
+    private readonly ConcurrentQueue<string> _attempts = new();
     private readonly List<(Func<string, bool> Match, TaskCompletionSource Done)> _waiters = [];
 
     public IReadOnlyList<string> Calls => [.. _calls];
+
+    /// <summary>Every call made, recorded before the write runs: a write that throws is still an attempt.</summary>
+    public IReadOnlyList<string> Attempts => [.. _attempts];
 
     public IObservable<RealtimeSyncEvent> Events => inner.Events;
 
@@ -661,9 +674,10 @@ internal sealed class RecordingRealtimeSync(IRealtimeSyncService inner) : IRealt
         return done.Task;
     }
 
-    private async ValueTask Run(string call, ValueTask write)
+    private async ValueTask Run(string call, Func<ValueTask> write)
     {
-        await write;
+        _attempts.Enqueue(call);
+        await write();
         lock (_waiters)
         {
             _calls.Enqueue(call);
@@ -674,46 +688,68 @@ internal sealed class RecordingRealtimeSync(IRealtimeSyncService inner) : IRealt
 
     public ValueTask SyncAgentAsync(string tenantId, string agentId, string displayName, string extension, string sipPassword,
         long? profileId = null, CancellationToken ct = default) =>
-        Run($"SyncAgent:{tenantId}:{agentId}", inner.SyncAgentAsync(tenantId, agentId, displayName, extension, sipPassword, profileId, ct));
+        Run($"SyncAgent:{tenantId}:{agentId}", () => inner.SyncAgentAsync(tenantId, agentId, displayName, extension, sipPassword, profileId, ct));
 
     public ValueTask RemoveAgentAsync(string tenantId, string agentId, CancellationToken ct = default) =>
-        Run($"RemoveAgent:{tenantId}:{agentId}", inner.RemoveAgentAsync(tenantId, agentId, ct));
+        Run($"RemoveAgent:{tenantId}:{agentId}", () => inner.RemoveAgentAsync(tenantId, agentId, ct));
 
     public ValueTask SyncQueueAsync(string tenantId, string queueName, RealtimeQueueOptions options, CancellationToken ct = default) =>
-        Run($"SyncQueue:{tenantId}:{queueName}", inner.SyncQueueAsync(tenantId, queueName, options, ct));
+        Run($"SyncQueue:{tenantId}:{queueName}", () => inner.SyncQueueAsync(tenantId, queueName, options, ct));
 
     public ValueTask RemoveQueueAsync(string tenantId, string queueName, CancellationToken ct = default) =>
-        Run($"RemoveQueue:{tenantId}:{queueName}", inner.RemoveQueueAsync(tenantId, queueName, ct));
+        Run($"RemoveQueue:{tenantId}:{queueName}", () => inner.RemoveQueueAsync(tenantId, queueName, ct));
 
     public ValueTask AddQueueMemberAsync(string tenantId, string queueName, string agentId, string displayName, int penalty = 0,
         IReadOnlyList<string>? allowedChannels = null, CancellationToken ct = default) =>
         Run($"AddQueueMember:{tenantId}:{queueName}/{agentId}",
-            inner.AddQueueMemberAsync(tenantId, queueName, agentId, displayName, penalty, allowedChannels, ct));
+            () => inner.AddQueueMemberAsync(tenantId, queueName, agentId, displayName, penalty, allowedChannels, ct));
 
     public ValueTask RemoveQueueMemberAsync(string tenantId, string queueName, string agentId, CancellationToken ct = default) =>
-        Run($"RemoveQueueMember:{tenantId}:{queueName}/{agentId}", inner.RemoveQueueMemberAsync(tenantId, queueName, agentId, ct));
+        Run($"RemoveQueueMember:{tenantId}:{queueName}/{agentId}", () => inner.RemoveQueueMemberAsync(tenantId, queueName, agentId, ct));
 
     public ValueTask<bool> QueueMemberExistsAsync(string tenantId, string queueName, string agentId, CancellationToken ct = default) =>
         inner.QueueMemberExistsAsync(tenantId, queueName, agentId, ct);
 
     public ValueTask SyncAgentPausedAsync(string tenantId, string agentId, bool paused, CancellationToken ct = default) =>
-        Run($"SyncAgentPaused:{tenantId}:{agentId}", inner.SyncAgentPausedAsync(tenantId, agentId, paused, ct));
+        Run($"SyncAgentPaused:{tenantId}:{agentId}", () => inner.SyncAgentPausedAsync(tenantId, agentId, paused, ct));
 
     public ValueTask SyncTrunkAsync(string tenantId, Trunk trunk, CancellationToken ct = default) =>
-        Run($"SyncTrunk:{tenantId}:{trunk.Id}", inner.SyncTrunkAsync(tenantId, trunk, ct));
+        Run($"SyncTrunk:{tenantId}:{trunk.Id}", () => inner.SyncTrunkAsync(tenantId, trunk, ct));
 
     public ValueTask RemoveTrunkAsync(string tenantId, long trunkId, CancellationToken ct = default) =>
-        Run($"RemoveTrunk:{tenantId}:{trunkId}", inner.RemoveTrunkAsync(tenantId, trunkId, ct));
+        Run($"RemoveTrunk:{tenantId}:{trunkId}", () => inner.RemoveTrunkAsync(tenantId, trunkId, ct));
 
     public ValueTask SyncAgentBatchAsync(string tenantId, IReadOnlyList<AgentSyncRequest> agents, CancellationToken ct = default) =>
-        Run($"SyncAgentBatch:{tenantId}", inner.SyncAgentBatchAsync(tenantId, agents, ct));
+        Run($"SyncAgentBatch:{tenantId}", () => inner.SyncAgentBatchAsync(tenantId, agents, ct));
 
     public ValueTask SyncQueueBatchAsync(string tenantId, IReadOnlyList<QueueSyncRequest> queues, CancellationToken ct = default) =>
-        Run($"SyncQueueBatch:{tenantId}", inner.SyncQueueBatchAsync(tenantId, queues, ct));
+        Run($"SyncQueueBatch:{tenantId}", () => inner.SyncQueueBatchAsync(tenantId, queues, ct));
 
     public ValueTask ProvisionTenantAsync(string tenantId, CancellationToken ct = default) =>
-        Run($"ProvisionTenant:{tenantId}", inner.ProvisionTenantAsync(tenantId, ct));
+        Run($"ProvisionTenant:{tenantId}", () => inner.ProvisionTenantAsync(tenantId, ct));
 
     public ValueTask CleanupTenantAsync(string tenantId, CancellationToken ct = default) =>
-        Run($"CleanupTenant:{tenantId}", inner.CleanupTenantAsync(tenantId, ct));
+        Run($"CleanupTenant:{tenantId}", () => inner.CleanupTenantAsync(tenantId, ct));
+}
+
+/// <summary>Platform's real <see cref="ITenantLifecycleDispatcher"/>; completes a waiter once a suspension has fully returned.</summary>
+internal sealed class SignallingLifecycleDispatcher(ITenantLifecycleDispatcher inner) : ITenantLifecycleDispatcher
+{
+    private readonly ConcurrentDictionary<string, TaskCompletionSource> _suspended = new(StringComparer.Ordinal);
+
+    /// <summary>Completes when <see cref="SuspendedAsync"/> for <paramref name="tenantId"/> has returned (or already had).</summary>
+    public Task WaitForSuspended(string tenantId) => Suspension(tenantId).Task;
+
+    public ValueTask CreatedAsync(Tenant tenant, CancellationToken ct) => inner.CreatedAsync(tenant, ct);
+
+    public async ValueTask SuspendedAsync(string tenantId, CancellationToken ct)
+    {
+        await inner.SuspendedAsync(tenantId, ct);
+        Suspension(tenantId).TrySetResult();
+    }
+
+    public ValueTask DeletedAsync(string tenantId, CancellationToken ct) => inner.DeletedAsync(tenantId, ct);
+
+    private TaskCompletionSource Suspension(string tenantId) =>
+        _suspended.GetOrAdd(tenantId, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
 }
