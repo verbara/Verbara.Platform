@@ -23,6 +23,26 @@ public sealed class DialerOutboundRouteTenantScopeTests
 
     /// <inheritdoc />
     protected override DialerTenantScopeFactory Factory => _factory;
+
+    // In memory a trunk named by a route's trunkId can be deleted (no foreign key), so only this host can store a
+    // route whose trunkId names no trunk; the live-DB host refuses that delete.
+    [Fact]
+    public async Task UpdateRoute_ShouldReturn200_WhenAWholeRouteEditResendsATrunkIdThatNamesADeletedTrunk()
+    {
+        using var globex = Factory.CreateAdminClient(Globex);
+        var trunk = await CreateTrunkAsync(globex);
+        var routeId = await CreateRouteAsync(globex, trunk, overflowTrunkId: null);
+        await DeleteTrunkAsync(globex, trunk);
+        var pattern = NewPattern();
+
+        using var response = await globex.PutAsync($"{RoutesPath}/{routeId}",
+            RouteBody(pattern, trunk, overflowTrunkId: null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "trunkId {0} is the value route {1} already stores, so the edit adds no trunk reference ({2})",
+            trunk, routeId, await response.Content.ReadAsStringAsync());
+        JsonNode.Parse(await ReadRouteAsync(globex, routeId))!["pattern"]!.GetValue<string>().Should().Be(pattern);
+    }
 }
 
 /// <summary>
@@ -186,6 +206,82 @@ public abstract class OutboundRouteTenantScopeScenarios
         JsonNode.Parse(afterMissing)!["overflowTrunkId"].Should().BeNull("the route still has no overflow trunk");
     }
 
+    // ─── Whole-route edits (design D2: an unchanged trunk id is no new reference) ─────
+
+    [Fact]
+    public async Task UpdateRoute_ShouldReturn200_WhenAWholeRouteEditResendsAnOverflowTrunkIdThatNamesADeletedTrunk()
+    {
+        using var globex = Factory.CreateAdminClient(Globex);
+        var trunk = await CreateTrunkAsync(globex);
+        var overflow = await CreateTrunkAsync(globex);
+        var routeId = await CreateRouteAsync(globex, trunk, overflow);
+        await DeleteTrunkAsync(globex, overflow);
+        var pattern = NewPattern();
+
+        using var response = await globex.PutAsync($"{RoutesPath}/{routeId}", RouteBody(pattern, trunk, overflow));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "overflowTrunkId {0} is the value route {1} already stores, so the edit adds no trunk reference ({2})",
+            overflow, routeId, await response.Content.ReadAsStringAsync());
+        var route = JsonNode.Parse(await ReadRouteAsync(globex, routeId))!;
+        route["pattern"]!.GetValue<string>().Should().Be(pattern, "the edited field is written");
+        route["overflowTrunkId"]!.GetValue<long>().Should().Be(overflow);
+    }
+
+    [Fact]
+    public async Task UpdateRoute_ShouldReturn400AndLeaveTheRouteUnchanged_WhenAWholeRouteEditChangesTheOverflowTrunkToAnotherTenantsTrunk()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var acmeTrunk = await CreateTrunkAsync(acme);
+        var trunk = await CreateTrunkAsync(globex);
+        var overflow = await CreateTrunkAsync(globex);
+        var routeId = await CreateRouteAsync(globex, trunk, overflow);
+        await DeleteTrunkAsync(globex, overflow);
+        var before = await ReadRouteAsync(globex, routeId);
+
+        using var response = await globex.PutAsync($"{RoutesPath}/{routeId}", RouteBody(NewPattern(), trunk, acmeTrunk));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "overflowTrunkId changes to {0}, which is no trunk of globex's", acmeTrunk);
+        await AssertErrorResponseAsync(response);
+        (await ReadRouteAsync(globex, routeId)).Should().Be(before, "a refused update changes no field of the route");
+    }
+
+    [Fact]
+    public async Task UpdateRoute_ShouldReturn200_WhenAWholeRouteEditResendsTheStoredTrunks()
+    {
+        using var globex = Factory.CreateAdminClient(Globex);
+        var trunk = await CreateTrunkAsync(globex);
+        var overflow = await CreateTrunkAsync(globex);
+        var routeId = await CreateRouteAsync(globex, trunk, overflow);
+        var pattern = NewPattern();
+
+        using var response = await globex.PutAsync($"{RoutesPath}/{routeId}", RouteBody(pattern, trunk, overflow));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        JsonNode.Parse(await ReadRouteAsync(globex, routeId))!["pattern"]!.GetValue<string>().Should().Be(pattern);
+    }
+
+    [Fact]
+    public async Task UpdateRoute_ShouldReturn400AndLeaveTheRouteUnchanged_WhenAWholeRouteEditChangesTheTrunkToAnotherTenantsTrunk()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var acmeTrunk = await CreateTrunkAsync(acme);
+        var trunk = await CreateTrunkAsync(globex);
+        var routeId = await CreateRouteAsync(globex, trunk, overflowTrunkId: null);
+        var before = await ReadRouteAsync(globex, routeId);
+
+        using var response = await globex.PutAsync($"{RoutesPath}/{routeId}",
+            RouteBody(NewPattern(), acmeTrunk, overflowTrunkId: null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "trunkId changes to {0}, which is no trunk of globex's", acmeTrunk);
+        await AssertErrorResponseAsync(response);
+        (await ReadRouteAsync(globex, routeId)).Should().Be(before, "a refused update changes no field of the route");
+    }
+
     // ─── Own trunks ──────────────────────────────────────────────────────────────
 
     [Fact]
@@ -252,6 +348,13 @@ public abstract class OutboundRouteTenantScopeScenarios
         }));
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         return JsonNode.Parse(await response.Content.ReadAsStringAsync())!["id"]!.GetValue<long>();
+    }
+
+    /// <summary>Deletes a trunk of the client's tenant through the API.</summary>
+    protected static async Task DeleteTrunkAsync(HttpClient client, long trunkId)
+    {
+        using var response = await client.DeleteAsync($"{TrunksPath}/{trunkId}");
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, await response.Content.ReadAsStringAsync());
     }
 
     /// <summary>Creates a route of the client's tenant on its own trunk and returns its id.</summary>
