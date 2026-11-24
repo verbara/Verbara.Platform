@@ -1,3 +1,4 @@
+using Verbara.Platform.Api.Endpoints.Shared;
 using Verbara.Platform.Audit;
 using Verbara.Platform.Core;
 using Verbara.Sdk.Pro.Dialer.Models;
@@ -44,14 +45,19 @@ internal static class OutboundRouteEndpoints
         return route is null ? TypedResults.NotFound() : TypedResults.Ok(MapToDto(route));
     }
 
-    private static async Task<IResult> CreateRoute(
+    private static async Task<Results<Created<OutboundRouteDto>, BadRequest<ErrorResponse>>> CreateRoute(
         HttpContext context,
         [FromBody] CreateOutboundRouteRequest body,
         OutboundRouteStoreBase routeStore,
+        [FromServices] TrunkStoreBase trunkStore,
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
         var tenantId = GetTenantId(context);
+        var refusal = await RefuseTrunksOutsideTenantAsync(trunkStore, body.TrunkId, body.OverflowTrunkId, tenantId, ct);
+        if (refusal is not null)
+            return refusal;
+
         var route = new OutboundRoute
         {
             CampaignId = body.CampaignId,
@@ -75,14 +81,15 @@ internal static class OutboundRouteEndpoints
                 ["endpoint"] = context.Request.Path.Value ?? "",
             },
             ct: ct);
-        return Results.Created($"/admin/routes/{id}", MapToDto(route));
+        return TypedResults.Created($"/admin/routes/{id}", MapToDto(route));
     }
 
-    private static async Task<Results<Ok<OutboundRouteDto>, NotFound>> UpdateRoute(
+    private static async Task<Results<Ok<OutboundRouteDto>, NotFound, BadRequest<ErrorResponse>>> UpdateRoute(
         long id,
         HttpContext context,
         [FromBody] UpdateOutboundRouteRequest body,
         OutboundRouteStoreBase routeStore,
+        [FromServices] TrunkStoreBase trunkStore,
         [FromServices] IAuditService audit,
         CancellationToken ct)
     {
@@ -90,6 +97,12 @@ internal static class OutboundRouteEndpoints
         var route = await routeStore.GetAsync(id, tenantId, ct);
         if (route is null)
             return TypedResults.NotFound();
+
+        // Only the trunk ids this request supplies are checked (design D2): a partial update that leaves the trunk
+        // alone keeps working on a route written before the guard existed.
+        var refusal = await RefuseTrunksOutsideTenantAsync(trunkStore, body.TrunkId, body.OverflowTrunkId, tenantId, ct);
+        if (refusal is not null)
+            return refusal;
 
         var before = MapToDto(route);
 
@@ -114,6 +127,22 @@ internal static class OutboundRouteEndpoints
             },
             ct: ct);
         return TypedResults.Ok(MapToDto(route));
+    }
+
+    /// <summary>
+    /// The trunk guard of a route write (design D1): each supplied trunk id must be a trunk of the caller's tenant,
+    /// looked up through the tenant-scoped <see cref="TrunkStoreBase.GetAsync"/>. A trunk of another tenant and an id
+    /// that names no trunk get the same 400 body, so the answer reveals nothing about another tenant. Returns null
+    /// when every supplied id passes. A trunk's tenant never changes, so the check holds at the write.
+    /// </summary>
+    private static async Task<BadRequest<ErrorResponse>?> RefuseTrunksOutsideTenantAsync(
+        TrunkStoreBase trunkStore, long? trunkId, long? overflowTrunkId, string tenantId, CancellationToken ct)
+    {
+        if (trunkId.HasValue && await trunkStore.GetAsync(trunkId.Value, tenantId, ct) is null)
+            return TypedResults.BadRequest(new ErrorResponse("trunkId is not a trunk of this tenant"));
+        if (overflowTrunkId.HasValue && await trunkStore.GetAsync(overflowTrunkId.Value, tenantId, ct) is null)
+            return TypedResults.BadRequest(new ErrorResponse("overflowTrunkId is not a trunk of this tenant"));
+        return null;
     }
 
     private static async Task<IResult> DeleteRoute(
