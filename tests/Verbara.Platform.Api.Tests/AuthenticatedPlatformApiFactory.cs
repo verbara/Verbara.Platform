@@ -407,6 +407,10 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
         RemoveAll<IQueueMembershipStore>(services);
         services.AddSingleton<IQueueMembershipStore, InMemoryQueueMembershipStore>();
 
+        // Routing skill catalog (routing-skills-stay-in-their-tenant, design D9) — always replace
+        RemoveAll<ISkillCatalogStore>(services);
+        services.AddSingleton<ISkillCatalogStore, InMemorySkillCatalogStore>();
+
         // Analytics stores — always replace
         RemoveAll<ICompletedSessionStore>(services);
         services.AddSingleton<ICompletedSessionStore, InMemoryCompletedSessionStore>();
