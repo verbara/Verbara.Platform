@@ -11,9 +11,28 @@ namespace Verbara.Platform.Storage.Postgres.Tests.Stores;
 /// assembly to a clean database — exercising the actual migration files
 /// (incl. <c>002_reason_hints.sql</c>) and their name-ordinal ordering, mirroring
 /// the production <c>DatabaseMigrationService</c> runner. Used by
-/// <see cref="MigrationsTests"/> to assert the resulting schema.
+/// <see cref="MigrationsTests"/> to assert the resulting schema. Runs on the floating
+/// <c>postgres:16-alpine</c> tag, as it always has.
 /// </summary>
-public sealed class MigrationsFixture : IAsyncLifetime
+public sealed class MigrationsFixture() : MigratedPostgresFixture("postgres:16-alpine");
+
+/// <summary>
+/// The same fixture on <c>postgres:18-alpine</c> pinned by digest — the image the product runs, at the digest the
+/// routing skill catalog's statements were measured on (card PLT-SKL-01). The tests of
+/// routing-skills-stay-in-their-tenant run here; every other test stays on <see cref="MigrationsFixture"/>.
+/// </summary>
+public sealed class PinnedPostgres18MigrationsFixture() : MigratedPostgresFixture(Image)
+{
+    /// <summary>The pinned image reference, by digest, never the tag.</summary>
+    public const string Image =
+        "postgres:18-alpine@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71";
+}
+
+/// <summary>
+/// A Testcontainers Postgres on <paramref name="image"/> with every embedded migration applied in name order, and
+/// the schema probes the migration tests read.
+/// </summary>
+public abstract class MigratedPostgresFixture(string image) : IAsyncLifetime
 {
     private IContainer? _container;
 
@@ -25,7 +44,7 @@ public sealed class MigrationsFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _container = new ContainerBuilder("postgres:16-alpine")
+        _container = new ContainerBuilder(image)
             .WithEnvironment("POSTGRES_PASSWORD", "postgres")
             .WithEnvironment("POSTGRES_DB", "postgres")
             .WithPortBinding(5432, true)

@@ -57,6 +57,7 @@ public sealed class ServiceCollectionExtensionsTests
         // Queues
         provider.GetService<IQueueStore>().Should().NotBeNull();
         provider.GetService<IAgentStore>().Should().NotBeNull();
+        provider.GetService<ISkillCatalogStore>().Should().BeOfType<Verbara.Platform.Storage.Postgres.Stores.PostgresSkillCatalogStore>();
 
         // Channels
         provider.GetService<ITenantChannelConfigStore>().Should().NotBeNull();

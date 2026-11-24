@@ -163,8 +163,8 @@ public class MigrationsTests : IClassFixture<MigrationsFixture>
             .Should().Be(("boolean", true));
     }
 
-    // agent-assist-works-end-to-end: the shared Agent Assist feature state (one row) and the per-call claims, the last
-    // migration, idempotent.
+    // agent-assist-works-end-to-end: the shared Agent Assist feature state (one row) and the per-call claims, right
+    // after 030, idempotent.
     [Fact]
     public async Task Migration031_ShouldCreateTheAgentAssistStateAndCallClaimTables_AndBeIdempotent()
     {
@@ -173,8 +173,9 @@ public class MigrationsTests : IClassFixture<MigrationsFixture>
                         && n.EndsWith(".sql", StringComparison.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToList();
-        names[^1].Should().Be("Verbara.Platform.Storage.Postgres.Migrations.031_AgentAssistSharedState.sql",
-            "031 runs after 030, the last migration before it");
+        names.IndexOf("Verbara.Platform.Storage.Postgres.Migrations.031_AgentAssistSharedState.sql")
+            .Should().Be(names.IndexOf("Verbara.Platform.Storage.Postgres.Migrations.030_QueueLastAgentRouting.sql") + 1,
+                "031 runs right after 030");
         names.Should().ContainSingle(n => n.Contains(".031_", StringComparison.Ordinal), "one migration per ordinal");
 
         await AssertAgentAssistTablesAsync();

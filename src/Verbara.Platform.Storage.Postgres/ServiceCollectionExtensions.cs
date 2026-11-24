@@ -156,6 +156,8 @@ public static class ServiceCollectionExtensions
             new PostgresLicensedAgentReportReader(sp.GetRequiredService<NpgsqlDataSource>()));
         services.AddSingleton<ITeamStore, PostgresTeamStore>();
         services.AddSingleton<IQueueMembershipStore, PostgresQueueMembershipStore>();
+        // routing-skills-stay-in-their-tenant (design D2): the tenant-scoped, durable routing skill catalog.
+        services.AddSingleton<ISkillCatalogStore, PostgresSkillCatalogStore>();
         services.AddSingleton<IAgentCapacityStore, PostgresAgentCapacityStore>();
 
         // Routing — inbound DID → queue routes (Phase 2 voice routing)
