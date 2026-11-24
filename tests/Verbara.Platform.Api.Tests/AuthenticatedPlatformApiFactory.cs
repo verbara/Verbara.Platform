@@ -51,6 +51,12 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
     /// <summary>The host's log records, when <see cref="CaptureLogs"/> was set.</summary>
     internal LogRecordCapture CapturedLogs { get; } = new();
 
+    /// <summary>
+    /// When set before the host is built, the host keeps the <see cref="ISkillCatalogStore"/> the composition root
+    /// registered (PostgreSQL when a <c>Postgres</c> connection string is configured) instead of the in-memory one.
+    /// </summary>
+    internal bool KeepsComposedSkillCatalog { get; init; }
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -73,7 +79,16 @@ public class AuthenticatedPlatformApiFactory : WebApplicationFactory<Program>
                 services.AddSingleton<byte[]>([]);
 
             // ── Dialer + Analytics stores ────────────────────────────────────
+            var composedSkillCatalog = KeepsComposedSkillCatalog
+                ? services.Where(d => d.ServiceType == typeof(ISkillCatalogStore)).ToList()
+                : [];
             RegisterInMemoryStores(services);
+            if (composedSkillCatalog.Count > 0)
+            {
+                RemoveAll<ISkillCatalogStore>(services);
+                foreach (var descriptor in composedSkillCatalog)
+                    services.Add(descriptor);
+            }
 
             // ── Realtime sync (overridable) ──────────────────────────────────
             // RegisterInMemoryStores already left a default no-op mock; this ADDS an
