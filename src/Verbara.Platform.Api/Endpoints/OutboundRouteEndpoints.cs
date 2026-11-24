@@ -98,9 +98,15 @@ internal static class OutboundRouteEndpoints
         if (route is null)
             return TypedResults.NotFound();
 
-        // Only the trunk ids this request supplies are checked (design D2): a partial update that leaves the trunk
-        // alone keeps working on a route written before the guard existed.
-        var refusal = await RefuseTrunksOutsideTenantAsync(trunkStore, body.TrunkId, body.OverflowTrunkId, tenantId, ct);
+        // Only a trunk id this request supplies and that differs from the route's stored value is checked (design D2):
+        // a value sent back unchanged adds no trunk reference, so a client that resends the whole route keeps
+        // working when its overflow trunk was since deleted (overflow_trunk_id has no foreign key).
+        var refusal = await RefuseTrunksOutsideTenantAsync(
+            trunkStore,
+            body.TrunkId != route.TrunkId ? body.TrunkId : null,
+            body.OverflowTrunkId != route.OverflowTrunkId ? body.OverflowTrunkId : null,
+            tenantId,
+            ct);
         if (refusal is not null)
             return refusal;
 
