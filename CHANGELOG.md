@@ -18,6 +18,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   after any restart, so no queue penalty changes. The OpenAPI document declares the 404 on the three agent skill
   operations, and now declares the success codes these routes already return: 201 with the assignment when a skill is
   assigned, 204 when one is removed (it declared 200 for both).
+- **Outbound routes use only the tenant's own trunks.** Creating or updating an outbound route answers 400 and changes
+  nothing when its trunk or overflow trunk is not a trunk of the tenant, including an id that does not exist; a route
+  naming a trunk that does not exist used to fail with a server error. The OpenAPI document declares the 400 on both
+  operations, and now declares the 201 that creating a route already returns (it declared 200).
 
 ## [2.41.1] - 2026-11-24
 
