@@ -60,10 +60,8 @@ internal sealed partial class TenantIdHealthCheck : IHealthCheck
         foreach (var f in report.Flags.Where(f => !paired.Contains((f.TenantId, f.Reason))))
             details.Add($"{f.TenantId}: {f.Reason} ({f.Status})");
         var unstored = 0;
-        foreach (var id in PlatformDesiredStateProvider.ReadConfiguredTenantIds(_configuration))
+        foreach (var id in PlatformDesiredStateProvider.ReadConfiguredTenantIds(_configuration).Where(id => report.Find(id) is null))
         {
-            if (report.Find(id) is not null)
-                continue;
             unstored++;
             details.Add($"configured realtime tenant '{id}' does not exist");
         }

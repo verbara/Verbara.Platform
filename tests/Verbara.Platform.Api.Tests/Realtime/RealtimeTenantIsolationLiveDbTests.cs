@@ -333,16 +333,16 @@ internal sealed class RealtimeLiveDbApiFactory : WebApplicationFactory<Program>
     private const string EngineTypeName = "Verbara.Sdk.Pro.Realtime.Engine.RealtimeSyncEngine";
     private const string ReconcilerTypeName = "Verbara.Sdk.Pro.Realtime.Engine.RealtimeReconciler";
 
-    private static readonly string[] s_rowQueries =
-    [
-        "SELECT 'ps_endpoints:' || id FROM ps_endpoints",
-        "SELECT 'ps_auths:' || id FROM ps_auths",
-        "SELECT 'ps_aors:' || id FROM ps_aors",
-        "SELECT 'ps_registrations:' || id FROM ps_registrations",
-        "SELECT 'ps_endpoint_id_ips:' || id FROM ps_endpoint_id_ips",
-        "SELECT 'queues:' || name FROM queues",
-        "SELECT 'queue_members:' || queue_name || '|' || interface FROM queue_members",
-    ];
+    /// <summary>Every row of the realtime tables, as <c>table:id</c> (queue members as <c>queue_members:queue|interface</c>).</summary>
+    private const string RowsSql = """
+        SELECT 'ps_endpoints:' || id FROM ps_endpoints
+        UNION ALL SELECT 'ps_auths:' || id FROM ps_auths
+        UNION ALL SELECT 'ps_aors:' || id FROM ps_aors
+        UNION ALL SELECT 'ps_registrations:' || id FROM ps_registrations
+        UNION ALL SELECT 'ps_endpoint_id_ips:' || id FROM ps_endpoint_id_ips
+        UNION ALL SELECT 'queues:' || name FROM queues
+        UNION ALL SELECT 'queue_members:' || queue_name || '|' || interface FROM queue_members
+        """;
 
     private readonly string _connectionString;
     private readonly string _partnerTenantId;
@@ -546,13 +546,10 @@ internal sealed class RealtimeLiveDbApiFactory : WebApplicationFactory<Program>
     {
         var rows = new HashSet<string>(StringComparer.Ordinal);
         await using var db = NpgsqlDataSource.Create(_connectionString);
-        foreach (var sql in s_rowQueries)
-        {
-            await using var cmd = db.CreateCommand(sql);
-            await using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-                rows.Add(reader.GetString(0));
-        }
+        await using var cmd = db.CreateCommand(RowsSql);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            rows.Add(reader.GetString(0));
         return rows;
     }
 

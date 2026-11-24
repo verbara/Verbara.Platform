@@ -77,7 +77,7 @@ internal sealed partial class TenantLifecycleDispatcher : ITenantLifecycleDispat
         {
             await action(handler).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogHandlerFailed(_logger, handler.GetType().Name, tenantId, ex);
         }

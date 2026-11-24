@@ -118,11 +118,8 @@ internal sealed class TenantIdAudit
         {
             while (chain.Count > 0 && !current.Key.StartsWith(chain[^1].Key, StringComparison.Ordinal))
                 chain.RemoveAt(chain.Count - 1);
-            foreach (var earlier in chain)
-            {
-                if (TenantIdRule.Overlaps(earlier.Id.TenantId, current.Id.TenantId))
-                    yield return (earlier.Id, current.Id);
-            }
+            foreach (var earlier in chain.Where(e => TenantIdRule.Overlaps(e.Id.TenantId, current.Id.TenantId)))
+                yield return (earlier.Id, current.Id);
             chain.Add(current);
         }
     }

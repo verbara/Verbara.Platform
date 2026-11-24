@@ -97,7 +97,7 @@ internal sealed partial class FlaggedTenantRealtimeRemoval
         {
             return await read().ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogReadFailed(_logger, what, tenantId, ex);
             return null;
@@ -110,7 +110,7 @@ internal sealed partial class FlaggedTenantRealtimeRemoval
         {
             await call().ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogRemovalFailed(_logger, operation, target, tenantId, ex);
         }

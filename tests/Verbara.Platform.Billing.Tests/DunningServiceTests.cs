@@ -399,6 +399,7 @@ internal sealed class EveryHandlerDispatcher(IEnumerable<ITenantLifecycleHandler
         }
         catch (InvalidOperationException)
         {
+            // A handler that throws is the case under test: the next handler still runs.
         }
     }
 }

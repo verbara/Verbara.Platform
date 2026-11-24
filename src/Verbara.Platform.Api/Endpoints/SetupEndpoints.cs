@@ -108,10 +108,8 @@ internal static class SetupEndpoints
         // re-POST stays possible.
         var storedIds = await tenantIds.ListAllIdsAsync(ct);
         var hostStored = storedIds.Any(s => s.TenantId == HostTenantId);
-        foreach (var stored in storedIds)
+        foreach (var stored in storedIds.Where(s => s.TenantId != HostTenantId))
         {
-            if (stored.TenantId == HostTenantId)
-                continue;
             if (!hostStored && TenantIdRule.Overlaps(stored.TenantId, HostTenantId))
                 return Results.Conflict(new ErrorResponse(TenantIdRefusal.Unavailable(HostTenantId)));
             if (stored.TenantId == customerTenantIdNormalized)

@@ -60,7 +60,7 @@ public sealed class TenantIdRuleLiveDbTests : IClassFixture<ConversationClockRec
             statuses.Should().BeEquivalentTo([HttpStatusCode.Created, HttpStatusCode.Conflict], $"round {round}");
             var exist = 0;
             foreach (var id in new[] { shorter, longer })
-                if (await store.GetAsync(id) is not null) exist++;
+                exist += await store.GetAsync(id) is null ? 0 : 1;
             exist.Should().Be(1, $"round {round}: exactly one of the two tenants exists");
         }
     }

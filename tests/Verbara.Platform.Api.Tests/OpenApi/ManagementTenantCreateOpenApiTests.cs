@@ -63,10 +63,10 @@ public sealed class ManagementTenantCreateOpenApiTests : IClassFixture<Superviso
         var (document, operation) = await CreateOperationAsync();
 
         var conflict = operation["responses"]?["409"];
-        conflict.Should().NotBeNull("the create route answers 409");
-        var schema = conflict!["content"]?["application/json"]?["schema"];
+        (conflict is not null).Should().BeTrue("the create route answers 409");
+        var schema = conflict?["content"]?["application/json"]?["schema"];
         SchemaNames(schema).Should().Contain(["ErrorResponse", "PlanAboveParentRefusal"],
-            $"the 409 is an unavailable tenant id or a plan above the parent's; it declares {conflict.ToJsonString()}");
+            $"the 409 is an unavailable tenant id or a plan above the parent's; it declares {conflict?.ToJsonString()}");
         var components = document["components"]!["schemas"]!.AsObject();
         components.ContainsKey("ErrorResponse").Should().BeTrue("each referenced body has a component schema");
         components.ContainsKey("PlanAboveParentRefusal").Should().BeTrue("each referenced body has a component schema");
