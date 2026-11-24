@@ -237,18 +237,18 @@ public abstract class OutboundRouteTenantScopeScenarios
         using var response = await client.PostAsync(TrunksPath, JsonContent.Create(new
         {
             name = $"trk-{Guid.NewGuid():N}"[..20],
-            displayName = (string?)null,
+            displayName = default(string),
             type = "pjsip",
             isActive = true,
             maxChannels = 10,
             transport = "transport-udp",
             codecs = "ulaw,alaw",
-            authUsername = (string?)null,
-            authPassword = (string?)null,
-            registrationUri = (string?)null,
-            clientUri = (string?)null,
+            authUsername = default(string),
+            authPassword = default(string),
+            registrationUri = default(string),
+            clientUri = default(string),
             context = "from-trunk",
-            matchHost = (string?)null,
+            matchHost = default(string),
         }));
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         return JsonNode.Parse(await response.Content.ReadAsStringAsync())!["id"]!.GetValue<long>();
@@ -282,12 +282,12 @@ public abstract class OutboundRouteTenantScopeScenarios
     /// <summary>A route create body.</summary>
     protected static JsonContent RouteBody(string pattern, long trunkId, long? overflowTrunkId) => JsonContent.Create(new
     {
-        campaignId = (long?)null,
+        campaignId = default(long?),
         pattern,
         patternType = "prefix",
         trunkId,
         overflowTrunkId,
-        dialPrefix = (string?)null,
+        dialPrefix = default(string),
         priority = 1,
     });
 
