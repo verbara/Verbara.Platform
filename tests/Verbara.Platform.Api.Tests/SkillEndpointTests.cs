@@ -1,15 +1,19 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
+using Verbara.Platform.Core;
+using Verbara.Platform.Queues;
 
 namespace Verbara.Platform.Api.Tests;
 
 public sealed class SkillEndpointTests : IClassFixture<UnifiedPlatformApiFactory>
 {
+    private readonly UnifiedPlatformApiFactory _factory;
     private readonly HttpClient _client;
 
     public SkillEndpointTests(UnifiedPlatformApiFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateAuthenticatedClient();
     }
 
@@ -113,8 +117,19 @@ public sealed class SkillEndpointTests : IClassFixture<UnifiedPlatformApiFactory
         resp.EnsureSuccessStatusCode();
     }
 
+    /// <summary>Assigns the skill to an agent of the caller's tenant, seeding the agent first (the route answers 404 for
+    /// an agent the tenant does not have).</summary>
     private async Task AssignSkillToAgentAsync(string agentId, string skillName, int proficiency = 5)
     {
+        await _factory.AgentStore.SaveAsync(new Agent
+        {
+            AgentId = EntityId.From(agentId),
+            TenantId = new TenantId(UnifiedPlatformApiFactory.TestTenantId),
+            UserId = EntityId.From($"user-{agentId}"),
+            DisplayName = $"Agent {agentId}",
+            State = AgentState.Available,
+            CreatedAt = DateTimeOffset.UtcNow,
+        }, CancellationToken.None);
         var body = JsonContent.Create(new { skillName, proficiency });
         var resp = await _client.PostAsync($"/api/admin/agents/{agentId}/skills", body);
         resp.EnsureSuccessStatusCode();

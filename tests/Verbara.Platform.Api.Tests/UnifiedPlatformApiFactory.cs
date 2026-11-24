@@ -50,6 +50,10 @@ public class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
     /// CreateHost so it wins over the realtime-sync decorator's unkeyed alias.</summary>
     protected virtual IAgentStore CreateAgentStore() => AgentStore;
 
+    /// <summary>The <see cref="ISkillCatalogStore"/> the host serves instead of the in-memory one, or null to keep it. A
+    /// subclass returns a double to drive what the skill handlers record. Registered after the in-memory stores.</summary>
+    protected virtual ISkillCatalogStore? CreateSkillCatalogStore() => null;
+
     /// <summary>The Pro features the host's licence status reports as licensed. Defaults to every feature; a subclass
     /// narrows it to drive a route's licence refusal.</summary>
     protected virtual LicenseFeature LicensedFeatures => LicenseTestHelpers.AllProFeatures;
@@ -90,6 +94,10 @@ public class UnifiedPlatformApiFactory : WebApplicationFactory<Program>
             // ── Agent store (override the realtime-sync decorator's unkeyed alias with a
             //    test-accessible instance so Analytics agent-name enrichment can be seeded) ──
             UpsertStore(services, CreateAgentStore());
+
+            // ── Skill catalog (a subclass can substitute a double) ────────────
+            if (CreateSkillCatalogStore() is { } skillCatalog)
+                UpsertStore(services, skillCatalog);
         });
 
         var host = base.CreateHost(builder);
