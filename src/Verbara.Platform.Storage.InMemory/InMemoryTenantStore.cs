@@ -5,7 +5,8 @@ namespace Verbara.Platform.Storage.InMemory;
 
 public sealed class InMemoryTenantStore : ITenantStore
 {
-    private readonly ConcurrentDictionary<string, Tenant> _tenants = new(StringComparer.OrdinalIgnoreCase);
+    // Ordinal, as the database keys tenant ids (tenants.tenant_id TEXT PRIMARY KEY): ACME and acme are two tenants.
+    private readonly ConcurrentDictionary<string, Tenant> _tenants = new(StringComparer.Ordinal);
 
     public ValueTask<Tenant?> GetAsync(string tenantId, CancellationToken cancellationToken = default)
     {
