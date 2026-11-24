@@ -55,7 +55,6 @@ using Verbara.Sdk.Pro.AgentAssist.Storage.Postgres.Retention;
 using Verbara.Platform.Api.Serialization;
 using Verbara.Platform.Api.Services;
 using Verbara.Sdk.Pro.AgentAssist.Engine;
-using Verbara.Sdk.Pro.Routing.Skills;
 using Verbara.Sdk.Pro.Realtime;
 using Verbara.Sdk.Pro.Realtime.DependencyInjection;
 using Verbara.Sdk.Pro.Realtime.Storage.Postgres.DependencyInjection;
@@ -458,9 +457,6 @@ builder.Services.AddKeyedSingleton<Verbara.Sdk.Resilience.ResiliencePolicy>(
         .WithRetry(maxAttempts: 3, baseDelay: TimeSpan.FromMilliseconds(500))
         .WithTimeout(TimeSpan.FromSeconds(30))
         .Build());
-
-// ─── Pro.Routing — Skill Catalog (in-memory, singleton) ─────────────────────
-builder.Services.AddSingleton<SkillCatalogBase>(new InMemorySkillCatalog());
 
 // ─── Agent Assist: config store (mutable admin config) + session read seams ──
 builder.Services.AddSingleton<AgentAssistConfigStore>().AddAgentAssistReadSeams();
