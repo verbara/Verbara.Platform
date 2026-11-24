@@ -132,11 +132,9 @@ internal static class ManagementTenantEndpoints
             var hostTenantId = (await store.GetHostTenantAsync(ct))?.TenantId;
 
             // Ordinal, as the store keys tenant ids.
-            if (!string.Equals(callerTenantId, hostTenantId, StringComparison.Ordinal))
-            {
-                if (!string.Equals(parentId, callerTenantId, StringComparison.Ordinal))
-                    return Results.Problem("Non-platform tenants can only create children under their own tenant.", statusCode: 403);
-            }
+            if (!string.Equals(callerTenantId, hostTenantId, StringComparison.Ordinal)
+                && !string.Equals(parentId, callerTenantId, StringComparison.Ordinal))
+                return Results.Problem("Non-platform tenants can only create children under their own tenant.", statusCode: 403);
         }
 
         // Parent must be active
