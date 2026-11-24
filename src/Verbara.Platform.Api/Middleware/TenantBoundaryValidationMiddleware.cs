@@ -88,8 +88,9 @@ internal sealed class TenantBoundaryValidationMiddleware
             return;
         }
 
-        // Header / subdomain matches principal: nothing to enforce.
-        if (string.Equals(jwtTid, resolved.Value, StringComparison.OrdinalIgnoreCase))
+        // Header / subdomain matches principal: nothing to enforce. Ordinal, as the store keys tenant ids: a tenant id
+        // that differs only in case is a different tenant.
+        if (string.Equals(jwtTid, resolved.Value, StringComparison.Ordinal))
         {
             await _next(context);
             return;

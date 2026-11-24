@@ -61,7 +61,8 @@ internal sealed class PlatformAdminAuthorizationHandler : AuthorizationHandler<P
         if (hostTenantId is null)
             return; // No host tenant exists yet — only /api/setup is accessible
 
-        var isHostTenant = string.Equals(tenantIdClaim, hostTenantId, StringComparison.OrdinalIgnoreCase);
+        // Ordinal: a tenant whose id differs from the host's only in case is another tenant, not the host.
+        var isHostTenant = string.Equals(tenantIdClaim, hostTenantId, StringComparison.Ordinal);
 
         if (!isHostTenant)
         {

@@ -5,7 +5,8 @@ namespace Verbara.Platform.Api.Services;
 
 internal sealed class TenantTierCache
 {
-    private readonly ConcurrentDictionary<string, RateLimitTier> _cache = new(StringComparer.OrdinalIgnoreCase);
+    // Ordinal, as the store keys tenant ids: two tenants whose ids differ only in case never share a tier.
+    private readonly ConcurrentDictionary<string, RateLimitTier> _cache = new(StringComparer.Ordinal);
 
     public RateLimitTier GetTier(string tenantId)
         => _cache.GetValueOrDefault(tenantId, RateLimitTier.Standard);

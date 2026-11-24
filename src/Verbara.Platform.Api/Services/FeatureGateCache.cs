@@ -13,7 +13,8 @@ internal sealed record ResolvedFeatures(
 
 internal sealed class FeatureGateCache
 {
-    private readonly ConcurrentDictionary<string, ResolvedFeatures> _cache = new(StringComparer.OrdinalIgnoreCase);
+    // Ordinal, as the store keys tenant ids: two tenants whose ids differ only in case never share an entry.
+    private readonly ConcurrentDictionary<string, ResolvedFeatures> _cache = new(StringComparer.Ordinal);
 
     public ResolvedFeatures? Get(string tenantId)
         => _cache.GetValueOrDefault(tenantId);

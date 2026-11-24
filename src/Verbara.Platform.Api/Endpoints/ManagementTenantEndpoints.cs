@@ -131,9 +131,10 @@ internal static class ManagementTenantEndpoints
         {
             var hostTenantId = (await store.GetHostTenantAsync(ct))?.TenantId;
 
-            if (!string.Equals(callerTenantId, hostTenantId, StringComparison.OrdinalIgnoreCase))
+            // Ordinal, as the store keys tenant ids.
+            if (!string.Equals(callerTenantId, hostTenantId, StringComparison.Ordinal))
             {
-                if (!string.Equals(parentId, callerTenantId, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(parentId, callerTenantId, StringComparison.Ordinal))
                     return Results.Problem("Non-platform tenants can only create children under their own tenant.", statusCode: 403);
             }
         }
