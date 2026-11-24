@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 
 namespace Verbara.Platform.Api.Tests.Multitenancy;
 
@@ -127,5 +128,45 @@ public sealed class TenantIdCaseBoundaryTests : IClassFixture<CaseVariantTenantF
         var response = await client.GetAsync("/api/management/tenants");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    // ─── Creating a child tenant ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateTenant_ShouldCreateChildUnderAnyParent_WhenCallerIsHostTenantExactly()
+    {
+        var client = _fixture.CreateAdminClient(CaseVariantTenantFixture.HostTenantId);
+        var childId = "case-child-" + Guid.NewGuid().ToString("N")[..8];
+
+        var response = await client.PostAsJsonAsync("/api/management/tenants", new
+        {
+            tenantId = childId,
+            name = "Case child",
+            type = 2, // Customer
+            parentTenantId = CaseVariantTenantFixture.PartnerTenantId,
+        });
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Created,
+            because: "the host tenant may create a child under a Partner it does not belong to");
+    }
+
+    [Fact]
+    public async Task CreateTenant_ShouldReturn403_WhenCallerTenantDiffersFromHostOnlyInCase()
+    {
+        var client = _fixture.CreateAdminClient(CaseVariantTenantFixture.HostVariantTenantId);
+        var childId = "case-child-" + Guid.NewGuid().ToString("N")[..8];
+
+        var response = await client.PostAsJsonAsync("/api/management/tenants", new
+        {
+            tenantId = childId,
+            name = "Case child",
+            type = 2, // Customer
+            parentTenantId = CaseVariantTenantFixture.PartnerTenantId,
+        });
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            because: "'PLATFORM' is a Customer, not the host tenant 'platform'");
     }
 }
