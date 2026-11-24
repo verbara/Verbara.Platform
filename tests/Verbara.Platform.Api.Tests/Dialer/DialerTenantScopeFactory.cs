@@ -31,7 +31,7 @@ namespace Verbara.Platform.Api.Tests.Dialer;
 /// <see cref="TrunkStoreBase"/> and <see cref="OutboundRouteStoreBase"/> descriptors (the trunk store as
 /// <c>Program.cs</c> wires it, Pro's Postgres store decorated by Platform's <c>RegistrationReloadingTrunkStore</c>),
 /// re-adding them after <see cref="AuthenticatedPlatformApiFactory.RegisterInMemoryStores"/>, so the routes run against
-/// Pro's Postgres stores. Without one, the in-memory stores answer, which follow the Pro <c>2.31.0-pro</c>
+/// Pro's Postgres stores. Without one, the in-memory stores answer, which follow the Pro <c>2.32.0-pro</c>
 /// campaign-addressed contract and keep each trunk and outbound route in its tenant.
 /// </remarks>
 public sealed class DialerTenantScopeFactory : WebApplicationFactory<Program>

@@ -734,8 +734,7 @@ internal sealed class InMemoryTrunkStore : TrunkStoreBase
 /// (dialer-references-stay-in-their-tenant, design D4): a route belongs to the tenant it was created for, and every
 /// read and write acts only on that tenant's routes. Like a database row, a route is copied in and out, so a caller
 /// that changes a route it read changes the store only through <see cref="UpdateAsync"/>. The store accepts any trunk
-/// id, existing or not; Pro's Postgres store accepts any existing trunk id, of any tenant, and refuses a missing one
-/// through its foreign key, which only the live-DB suite shows.
+/// id: which trunks a route may name is the route endpoints' rule, and the tests assert it over HTTP.
 /// </summary>
 internal sealed class InMemoryOutboundRouteStore : OutboundRouteStoreBase
 {

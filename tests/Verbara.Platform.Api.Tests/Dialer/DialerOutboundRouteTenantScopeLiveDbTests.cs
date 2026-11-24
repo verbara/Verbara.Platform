@@ -7,8 +7,8 @@ namespace Verbara.Platform.Api.Tests.Dialer;
 /// dialer-references-stay-in-their-tenant, against Pro's Postgres stores: the real Api <c>Program</c> with the dialer
 /// registered over a Testcontainers Postgres (<see cref="DialerTenantScopeFactory"/> in live-DB mode keeps Pro's trunk
 /// store, as <c>Program.cs</c> decorates it, and Pro's outbound-route store). The scenarios of
-/// <see cref="OutboundRouteTenantScopeScenarios"/> run here too, where the foreign key on <c>outbound_routes.trunk_id</c>
-/// is real: a route on another tenant's trunk blocks that trunk's delete, and a missing trunk id fails the insert.
+/// <see cref="OutboundRouteTenantScopeScenarios"/> run here too, over real rows: a route names only trunks of the
+/// caller's tenant, and a refused request writes nothing, which the trunk delete below also checks by SQL.
 /// </summary>
 public sealed class DialerOutboundRouteTenantScopeLiveDbTests
     : OutboundRouteTenantScopeScenarios, IClassFixture<DialerTenantScopeLiveDbFixture>
@@ -24,7 +24,7 @@ public sealed class DialerOutboundRouteTenantScopeLiveDbTests
     protected override DialerTenantScopeFactory Factory => _fixture.Factory;
 
     [Fact]
-    public async Task DeleteTrunk_ShouldReturn204AndRemoveTheTrunk_WhenAnotherTenantWasRefusedARouteOnIt()
+    public async Task DeleteTrunk_ShouldReturn204AndRemoveTheTrunk_WhenARouteCreateNamingItWasRefused()
     {
         using var acme = Factory.CreateAdminClient(Acme);
         using var globex = Factory.CreateAdminClient(Globex);
@@ -35,7 +35,7 @@ public sealed class DialerOutboundRouteTenantScopeLiveDbTests
         using var response = await acme.DeleteAsync($"{TrunksPath}/{acmeTrunk}");
 
         ((int)response.StatusCode).Should().Be(204,
-            "trunk {0} is acme's, and globex's route on it was refused (globex's create answered {1})",
+            "trunk {0} is acme's, and the route create naming it was refused (it answered {1})",
             acmeTrunk, refusedStatus);
         (await CountAsync("SELECT COUNT(*) FROM trunks WHERE id = @Id", acmeTrunk))
             .Should().Be(0, "acme's trunk {0} is gone", acmeTrunk);
