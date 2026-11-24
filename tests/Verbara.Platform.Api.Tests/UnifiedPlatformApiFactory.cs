@@ -682,20 +682,27 @@ public sealed class InMemoryIntervalSnapshotStore : IIntervalSnapshotStore
 
 // ─── v0.5.0 Dialer Config In-Memory Store Implementations ─────────────────────
 
+/// <summary>
+/// In-memory <see cref="TrunkStoreBase"/> with the tenant semantics of Pro's <c>PostgresTrunkStore</c>
+/// (dialer-references-stay-in-their-tenant, design D4): a trunk belongs to the tenant it was created for, and
+/// <see cref="GetAsync"/>, <see cref="ListAsync"/>, <see cref="UpdateAsync"/> and <see cref="DeleteAsync"/> act only on
+/// that tenant's trunks (<see langword="null"/>, empty or no-op otherwise). <c>ListActiveAsync</c> and
+/// <c>GetByNameAsync</c> stay unimplemented (inherited, they throw <see cref="NotSupportedException"/>), as before.
+/// </summary>
 internal sealed class InMemoryTrunkStore : TrunkStoreBase
 {
     private long _nextId = 1;
-    private readonly ConcurrentDictionary<long, Trunk> _trunks = new();
+    private readonly ConcurrentDictionary<long, (string TenantId, Trunk Trunk)> _trunks = new();
 
     public override ValueTask<IReadOnlyList<Trunk>> ListAsync(string tenantId, CancellationToken ct = default)
     {
-        IReadOnlyList<Trunk> result = [.. _trunks.Values];
+        IReadOnlyList<Trunk> result = [.. _trunks.Values.Where(e => e.TenantId == tenantId).Select(e => e.Trunk)];
         return new ValueTask<IReadOnlyList<Trunk>>(result);
     }
 
     public override ValueTask<Trunk?> GetAsync(long id, string tenantId, CancellationToken ct = default)
     {
-        _trunks.TryGetValue(id, out var trunk);
+        var trunk = _trunks.TryGetValue(id, out var entry) && entry.TenantId == tenantId ? entry.Trunk : null;
         return new ValueTask<Trunk?>(trunk);
     }
 
@@ -703,37 +710,48 @@ internal sealed class InMemoryTrunkStore : TrunkStoreBase
     {
         var id = Interlocked.Increment(ref _nextId);
         trunk.Id = id;
-        _trunks[id] = trunk;
+        _trunks[id] = (tenantId, trunk);
         return new ValueTask<long>(id);
     }
 
     public override ValueTask UpdateAsync(Trunk trunk, string tenantId, CancellationToken ct = default)
     {
-        _trunks[trunk.Id] = trunk;
+        if (_trunks.TryGetValue(trunk.Id, out var entry) && entry.TenantId == tenantId)
+            _trunks[trunk.Id] = (tenantId, trunk);
         return ValueTask.CompletedTask;
     }
 
     public override ValueTask DeleteAsync(long id, string tenantId, CancellationToken ct = default)
     {
-        _trunks.TryRemove(id, out _);
+        if (_trunks.TryGetValue(id, out var entry) && entry.TenantId == tenantId)
+            _trunks.TryRemove(new KeyValuePair<long, (string, Trunk)>(id, entry));
         return ValueTask.CompletedTask;
     }
 }
 
+/// <summary>
+/// In-memory <see cref="OutboundRouteStoreBase"/> with the tenant semantics of Pro's <c>PostgresOutboundRouteStore</c>
+/// (dialer-references-stay-in-their-tenant, design D4): a route belongs to the tenant it was created for, and every
+/// read and write acts only on that tenant's routes. Like a database row, a route is copied in and out, so a caller
+/// that changes a route it read changes the store only through <see cref="UpdateAsync"/>. The store accepts any trunk
+/// id, existing or not; Pro's Postgres store accepts any existing trunk id, of any tenant, and refuses a missing one
+/// through its foreign key, which only the live-DB suite shows.
+/// </summary>
 internal sealed class InMemoryOutboundRouteStore : OutboundRouteStoreBase
 {
     private long _nextId = 1;
-    private readonly ConcurrentDictionary<long, OutboundRoute> _routes = new();
+    private readonly ConcurrentDictionary<long, (string TenantId, OutboundRoute Route)> _routes = new();
 
     public override ValueTask<IReadOnlyList<OutboundRoute>> ListByPriorityAsync(string tenantId, CancellationToken ct = default)
     {
-        IReadOnlyList<OutboundRoute> result = [.. _routes.Values.OrderBy(r => r.Priority)];
+        IReadOnlyList<OutboundRoute> result =
+            [.. _routes.Values.Where(e => e.TenantId == tenantId).Select(e => Copy(e.Route)).OrderBy(r => r.Priority)];
         return new ValueTask<IReadOnlyList<OutboundRoute>>(result);
     }
 
     public override ValueTask<OutboundRoute?> GetAsync(long id, string tenantId, CancellationToken ct = default)
     {
-        _routes.TryGetValue(id, out var route);
+        var route = _routes.TryGetValue(id, out var entry) && entry.TenantId == tenantId ? Copy(entry.Route) : null;
         return new ValueTask<OutboundRoute?>(route);
     }
 
@@ -741,19 +759,21 @@ internal sealed class InMemoryOutboundRouteStore : OutboundRouteStoreBase
     {
         var id = Interlocked.Increment(ref _nextId);
         route.Id = id;
-        _routes[id] = route;
+        _routes[id] = (tenantId, Copy(route));
         return new ValueTask<long>(id);
     }
 
     public override ValueTask UpdateAsync(OutboundRoute route, string tenantId, CancellationToken ct = default)
     {
-        _routes[route.Id] = route;
+        if (_routes.TryGetValue(route.Id, out var entry) && entry.TenantId == tenantId)
+            _routes[route.Id] = (tenantId, Copy(route));
         return ValueTask.CompletedTask;
     }
 
     public override ValueTask DeleteAsync(long id, string tenantId, CancellationToken ct = default)
     {
-        _routes.TryRemove(id, out _);
+        if (_routes.TryGetValue(id, out var entry) && entry.TenantId == tenantId)
+            _routes.TryRemove(new KeyValuePair<long, (string, OutboundRoute)>(id, entry));
         return ValueTask.CompletedTask;
     }
 
@@ -761,11 +781,23 @@ internal sealed class InMemoryOutboundRouteStore : OutboundRouteStoreBase
     {
         for (var i = 0; i < orderedIds.Count; i++)
         {
-            if (_routes.TryGetValue(orderedIds[i], out var route))
-                route.Priority = i;
+            if (_routes.TryGetValue(orderedIds[i], out var entry) && entry.TenantId == tenantId)
+                entry.Route.Priority = i;
         }
         return ValueTask.CompletedTask;
     }
+
+    private static OutboundRoute Copy(OutboundRoute r) => new()
+    {
+        Id = r.Id,
+        CampaignId = r.CampaignId,
+        Pattern = r.Pattern,
+        PatternType = r.PatternType,
+        TrunkId = r.TrunkId,
+        OverflowTrunkId = r.OverflowTrunkId,
+        DialPrefix = r.DialPrefix,
+        Priority = r.Priority,
+    };
 }
 
 /// <summary>

@@ -27,9 +27,12 @@ namespace Verbara.Platform.Api.Tests.Dialer;
 /// With a dialer connection string (a Testcontainers Postgres) <c>Program.cs</c> registers the dialer over it, and
 /// this host keeps the <see cref="DncListStoreBase"/>, <see cref="CampaignStoreBase"/>,
 /// <see cref="ContactListStoreBase"/>, <see cref="DispositionCodeStoreBase"/>, <see cref="HolidayCalendarStoreBase"/>
-/// and <see cref="CallerIdPoolStoreBase"/> descriptors <c>UsePostgresDialerStorage</c> registered, re-adding them after
-/// <see cref="AuthenticatedPlatformApiFactory.RegisterInMemoryStores"/>, so the routes run against Pro's Postgres
-/// stores. Without one, the in-memory stores answer, which follow the Pro <c>2.31.0-pro</c> campaign-addressed contract.
+/// and <see cref="CallerIdPoolStoreBase"/> descriptors <c>UsePostgresDialerStorage</c> registered, and the
+/// <see cref="TrunkStoreBase"/> and <see cref="OutboundRouteStoreBase"/> descriptors (the trunk store as
+/// <c>Program.cs</c> wires it, Pro's Postgres store decorated by Platform's <c>RegistrationReloadingTrunkStore</c>),
+/// re-adding them after <see cref="AuthenticatedPlatformApiFactory.RegisterInMemoryStores"/>, so the routes run against
+/// Pro's Postgres stores. Without one, the in-memory stores answer, which follow the Pro <c>2.31.0-pro</c>
+/// campaign-addressed contract and keep each trunk and outbound route in its tenant.
 /// </remarks>
 public sealed class DialerTenantScopeFactory : WebApplicationFactory<Program>
 {
@@ -64,15 +67,18 @@ public sealed class DialerTenantScopeFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>
-    /// The contact-list, disposition-code, holiday-calendar and caller-ID-pool store descriptors, kept only in live-DB
-    /// mode: the in-memory suite reads the <see cref="InMemoryContactListStore"/>,
+    /// The contact-list, disposition-code, holiday-calendar, caller-ID-pool, trunk and outbound-route store
+    /// descriptors, kept only in live-DB mode: the in-memory suite reads the <see cref="InMemoryContactListStore"/>,
     /// <see cref="InMemoryDispositionCodeStore"/>, <see cref="InMemoryHolidayCalendarStore"/> and
-    /// <see cref="InMemoryCallerIdPoolStore"/> directly.
+    /// <see cref="InMemoryCallerIdPoolStore"/> directly, and runs the trunk and route routes over
+    /// <see cref="InMemoryTrunkStore"/> and <see cref="InMemoryOutboundRouteStore"/>. Every descriptor of a kept type is
+    /// re-added in registration order, so the last one (the trunk store's decoration) still wins.
     /// </summary>
     private static readonly HashSet<Type> LiveDbOnlyStores =
     [
         typeof(ContactListStoreBase), typeof(DispositionCodeStoreBase),
         typeof(HolidayCalendarStoreBase), typeof(CallerIdPoolStoreBase),
+        typeof(TrunkStoreBase), typeof(OutboundRouteStoreBase),
     ];
 
     /// <inheritdoc />

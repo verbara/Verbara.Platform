@@ -1,0 +1,297 @@
+using System.Globalization;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json.Nodes;
+
+namespace Verbara.Platform.Api.Tests.Dialer;
+
+/// <summary>
+/// dialer-references-stay-in-their-tenant: an outbound route's create and update name only trunks of the caller's
+/// tenant, through the HTTP pipeline with two Customer tenants (<c>acme</c>, <c>globex</c>) authenticated by real JWTs
+/// (<see cref="DialerTenantScopeFactory"/>). The stores are the tenant-aware in-memory ones, which accept any trunk id;
+/// <see cref="DialerOutboundRouteTenantScopeLiveDbTests"/> runs the same scenarios against Pro's Postgres stores.
+/// </summary>
+public sealed class DialerOutboundRouteTenantScopeTests
+    : OutboundRouteTenantScopeScenarios, IClassFixture<DialerTenantScopeFactory>
+{
+    private readonly DialerTenantScopeFactory _factory;
+
+    public DialerOutboundRouteTenantScopeTests(DialerTenantScopeFactory factory)
+    {
+        _factory = factory;
+    }
+
+    /// <inheritdoc />
+    protected override DialerTenantScopeFactory Factory => _factory;
+}
+
+/// <summary>
+/// The scenarios of the requirement "An outbound route names only trunks of the caller's tenant", shared by the
+/// in-memory and the live-DB host. Every assertion goes through HTTP, so both hosts answer the same test.
+/// </summary>
+public abstract class OutboundRouteTenantScopeScenarios
+{
+    /// <summary>The route group.</summary>
+    protected const string RoutesPath = "/api/v1/admin/routes";
+
+    /// <summary>The trunk group.</summary>
+    protected const string TrunksPath = "/api/v1/admin/trunks";
+
+    /// <summary>A trunk id no trunk has.</summary>
+    protected const long MissingTrunkId = 999_999;
+
+    /// <summary>The tenant that owns the trunk another tenant names.</summary>
+    protected const string Acme = DialerTenantScopeFactory.AcmeTenantId;
+
+    /// <summary>The tenant that names another tenant's trunk.</summary>
+    protected const string Globex = DialerTenantScopeFactory.GlobexTenantId;
+
+    /// <summary>The host the scenarios run on.</summary>
+    protected abstract DialerTenantScopeFactory Factory { get; }
+
+    // ─── Create ──────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateRoute_ShouldReturn400AndCreateNoRoute_WhenTheTrunkBelongsToAnotherTenant()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var acmeTrunk = await CreateTrunkAsync(acme);
+        var pattern = NewPattern();
+
+        using var response = await globex.PostAsync(RoutesPath, RouteBody(pattern, acmeTrunk, overflowTrunkId: null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "trunk {0} belongs to acme, so it is no trunk of globex's", acmeTrunk);
+        await AssertErrorResponseAsync(response);
+        (await RoutePatternsAsync(globex)).Should().NotContain(pattern, "no route of globex is written on acme's trunk");
+    }
+
+    [Fact]
+    public async Task CreateRoute_ShouldAnswerTheSame_WhenTheTrunkBelongsToAnotherTenantOrDoesNotExist()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var acmeTrunk = await CreateTrunkAsync(acme);
+        var foreignPattern = NewPattern();
+        var missingPattern = NewPattern();
+
+        using var foreign = await globex.PostAsync(RoutesPath, RouteBody(foreignPattern, acmeTrunk, overflowTrunkId: null));
+        using var missing = await globex.PostAsync(RoutesPath, RouteBody(missingPattern, MissingTrunkId, overflowTrunkId: null));
+
+        await AssertSameRefusalAsync(foreign, missing, "trunkId", acmeTrunk);
+        var patterns = await RoutePatternsAsync(globex);
+        patterns.Should().NotContain(foreignPattern);
+        patterns.Should().NotContain(missingPattern);
+    }
+
+    [Fact]
+    public async Task CreateRoute_ShouldReturn400AndCreateNoRoute_WhenTheOverflowTrunkBelongsToAnotherTenant()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var acmeTrunk = await CreateTrunkAsync(acme);
+        var globexTrunk = await CreateTrunkAsync(globex);
+        var pattern = NewPattern();
+
+        using var response = await globex.PostAsync(RoutesPath, RouteBody(pattern, globexTrunk, acmeTrunk));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "overflow trunk {0} belongs to acme, so it is no trunk of globex's", acmeTrunk);
+        await AssertErrorResponseAsync(response);
+        (await RoutePatternsAsync(globex)).Should().NotContain(pattern);
+    }
+
+    [Fact]
+    public async Task CreateRoute_ShouldAnswerTheSame_WhenTheOverflowTrunkBelongsToAnotherTenantOrDoesNotExist()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var acmeTrunk = await CreateTrunkAsync(acme);
+        var globexTrunk = await CreateTrunkAsync(globex);
+        var foreignPattern = NewPattern();
+        var missingPattern = NewPattern();
+
+        using var foreign = await globex.PostAsync(RoutesPath, RouteBody(foreignPattern, globexTrunk, acmeTrunk));
+        using var missing = await globex.PostAsync(RoutesPath, RouteBody(missingPattern, globexTrunk, MissingTrunkId));
+
+        await AssertSameRefusalAsync(foreign, missing, "overflowTrunkId", acmeTrunk);
+        var patterns = await RoutePatternsAsync(globex);
+        patterns.Should().NotContain(foreignPattern);
+        patterns.Should().NotContain(missingPattern);
+    }
+
+    // ─── Update ──────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateRoute_ShouldReturn400AndLeaveTheRouteUnchanged_WhenTheTrunkBelongsToAnotherTenant()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var acmeTrunk = await CreateTrunkAsync(acme);
+        var globexTrunk = await CreateTrunkAsync(globex);
+        var routeId = await CreateRouteAsync(globex, globexTrunk, overflowTrunkId: null);
+        var before = await ReadRouteAsync(globex, routeId);
+
+        using var response = await globex.PutAsync($"{RoutesPath}/{routeId}", JsonContent.Create(new { trunkId = acmeTrunk }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "trunk {0} belongs to acme, so route {1} cannot move onto it", acmeTrunk, routeId);
+        await AssertErrorResponseAsync(response);
+        var after = await ReadRouteAsync(globex, routeId);
+        after.Should().Be(before, "a refused update changes no field of the route");
+        JsonNode.Parse(after)!["trunkId"]!.GetValue<long>().Should().Be(globexTrunk);
+    }
+
+    [Fact]
+    public async Task UpdateRoute_ShouldAnswerTheSame_WhenTheTrunkBelongsToAnotherTenantOrDoesNotExist()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var acmeTrunk = await CreateTrunkAsync(acme);
+        var globexTrunk = await CreateTrunkAsync(globex);
+        var routeId = await CreateRouteAsync(globex, globexTrunk, overflowTrunkId: null);
+        var before = await ReadRouteAsync(globex, routeId);
+
+        using var foreign = await globex.PutAsync($"{RoutesPath}/{routeId}", JsonContent.Create(new { trunkId = acmeTrunk }));
+        var afterForeign = await ReadRouteAsync(globex, routeId);
+        using var missing = await globex.PutAsync($"{RoutesPath}/{routeId}", JsonContent.Create(new { trunkId = MissingTrunkId }));
+        var afterMissing = await ReadRouteAsync(globex, routeId);
+
+        await AssertSameRefusalAsync(foreign, missing, "trunkId", acmeTrunk);
+        afterForeign.Should().Be(before, "the update to acme's trunk changes no field of the route");
+        afterMissing.Should().Be(before, "the update to a missing trunk changes no field of the route");
+    }
+
+    [Fact]
+    public async Task UpdateRoute_ShouldAnswerTheSame_WhenTheOverflowTrunkBelongsToAnotherTenantOrDoesNotExist()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        using var globex = Factory.CreateAdminClient(Globex);
+        var acmeTrunk = await CreateTrunkAsync(acme);
+        var globexTrunk = await CreateTrunkAsync(globex);
+        var routeId = await CreateRouteAsync(globex, globexTrunk, overflowTrunkId: null);
+        var before = await ReadRouteAsync(globex, routeId);
+
+        using var foreign = await globex.PutAsync($"{RoutesPath}/{routeId}",
+            JsonContent.Create(new { overflowTrunkId = acmeTrunk }));
+        var afterForeign = await ReadRouteAsync(globex, routeId);
+        using var missing = await globex.PutAsync($"{RoutesPath}/{routeId}",
+            JsonContent.Create(new { overflowTrunkId = MissingTrunkId }));
+        var afterMissing = await ReadRouteAsync(globex, routeId);
+
+        await AssertSameRefusalAsync(foreign, missing, "overflowTrunkId", acmeTrunk);
+        afterForeign.Should().Be(before, "the overflow update to acme's trunk changes no field of the route");
+        afterMissing.Should().Be(before, "the overflow update to a missing trunk changes no field of the route");
+        JsonNode.Parse(afterMissing)!["overflowTrunkId"].Should().BeNull("the route still has no overflow trunk");
+    }
+
+    // ─── Own trunks ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RouteCreateAndUpdate_ShouldAnswerAsBefore_WhenTheTrunksBelongToTheTenant()
+    {
+        using var globex = Factory.CreateAdminClient(Globex);
+        var trunk8 = await CreateTrunkAsync(globex);
+        var trunk9 = await CreateTrunkAsync(globex);
+
+        using var create = await globex.PostAsync(RoutesPath, RouteBody(NewPattern(), trunk8, trunk9));
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var routeId = JsonNode.Parse(await create.Content.ReadAsStringAsync())!["id"]!.GetValue<long>();
+
+        using var update = await globex.PutAsync($"{RoutesPath}/{routeId}", JsonContent.Create(new { trunkId = trunk9 }));
+        update.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var route = JsonNode.Parse(await ReadRouteAsync(globex, routeId))!;
+        route["trunkId"]!.GetValue<long>().Should().Be(trunk9);
+        route["overflowTrunkId"]!.GetValue<long>().Should().Be(trunk9);
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+    /// <summary>Both refusals are 400 with the same <c>ErrorResponse</c> body, byte for byte.</summary>
+    protected static async Task AssertSameRefusalAsync(
+        HttpResponseMessage foreign, HttpResponseMessage missing, string field, long foreignTrunkId)
+    {
+        var foreignBody = await foreign.Content.ReadAsStringAsync();
+        var missingBody = await missing.Content.ReadAsStringAsync();
+        ((int)foreign.StatusCode, (int)missing.StatusCode).Should().Be((400, 400),
+            "{0} {1} belongs to another tenant and {2} names no trunk; both are no trunk of the caller's " +
+            "(foreign answered {3} {4}, missing answered {5} {6})",
+            field, foreignTrunkId, MissingTrunkId,
+            (int)foreign.StatusCode, foreignBody, (int)missing.StatusCode, missingBody);
+        missingBody.Should().Be(foreignBody, "the answer must not tell a foreign trunk from a missing one");
+        await AssertErrorResponseAsync(foreign);
+    }
+
+    /// <summary>The body is the <c>ErrorResponse</c> shape, <c>{"error": "…"}</c>.</summary>
+    protected static async Task AssertErrorResponseAsync(HttpResponseMessage response)
+    {
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        body.Select(kv => kv.Key).Should().Equal("error");
+    }
+
+    /// <summary>Creates a trunk of the client's tenant through the API and returns its id.</summary>
+    protected static async Task<long> CreateTrunkAsync(HttpClient client)
+    {
+        using var response = await client.PostAsync(TrunksPath, JsonContent.Create(new
+        {
+            name = $"trk-{Guid.NewGuid():N}"[..20],
+            displayName = (string?)null,
+            type = "pjsip",
+            isActive = true,
+            maxChannels = 10,
+            transport = "transport-udp",
+            codecs = "ulaw,alaw",
+            authUsername = (string?)null,
+            authPassword = (string?)null,
+            registrationUri = (string?)null,
+            clientUri = (string?)null,
+            context = "from-trunk",
+            matchHost = (string?)null,
+        }));
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        return JsonNode.Parse(await response.Content.ReadAsStringAsync())!["id"]!.GetValue<long>();
+    }
+
+    /// <summary>Creates a route of the client's tenant on its own trunk and returns its id.</summary>
+    protected static async Task<long> CreateRouteAsync(HttpClient client, long trunkId, long? overflowTrunkId)
+    {
+        using var response = await client.PostAsync(RoutesPath, RouteBody(NewPattern(), trunkId, overflowTrunkId));
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        return JsonNode.Parse(await response.Content.ReadAsStringAsync())!["id"]!.GetValue<long>();
+    }
+
+    /// <summary>The route as its tenant reads it, as raw JSON.</summary>
+    protected static async Task<string> ReadRouteAsync(HttpClient client, long routeId)
+    {
+        using var response = await client.GetAsync($"{RoutesPath}/{routeId}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "route {0} is the caller's own", routeId);
+        return await response.Content.ReadAsStringAsync();
+    }
+
+    /// <summary>The patterns of the client's tenant's routes.</summary>
+    protected static async Task<IReadOnlyList<string>> RoutePatternsAsync(HttpClient client)
+    {
+        using var response = await client.GetAsync(RoutesPath);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        return [.. JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsArray()
+            .Select(n => n!["pattern"]!.GetValue<string>())];
+    }
+
+    /// <summary>A route create body.</summary>
+    protected static JsonContent RouteBody(string pattern, long trunkId, long? overflowTrunkId) => JsonContent.Create(new
+    {
+        campaignId = (long?)null,
+        pattern,
+        patternType = "prefix",
+        trunkId,
+        overflowTrunkId,
+        dialPrefix = (string?)null,
+        priority = 1,
+    });
+
+    /// <summary>A dial pattern no other test uses, so a route is found by it.</summary>
+    protected static string NewPattern() =>
+        "9" + Random.Shared.NextInt64(1_000_000_000, 9_999_999_999).ToString(CultureInfo.InvariantCulture);
+}
