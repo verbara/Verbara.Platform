@@ -27,7 +27,7 @@ public sealed class PlatformDesiredStateProviderTests
             .AddInMemoryCollection(_configData!)
             .Build();
 
-        var skillCatalog = new Verbara.Sdk.Pro.Routing.Skills.InMemorySkillCatalog();
+        var skillCatalog = new InMemorySkillCatalogStore(_agentStore);
         _membershipService = new QueueMembershipService(
             _queueStore, _agentStore, skillCatalog, _membershipStore,
             NullLogger<QueueMembershipService>.Instance);

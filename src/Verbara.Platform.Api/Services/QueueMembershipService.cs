@@ -1,7 +1,6 @@
 using Verbara.Platform.Core;
 using Verbara.Platform.Queues;
 using Verbara.Platform.Queues.Services;
-using Verbara.Sdk.Pro.Routing.Skills;
 
 namespace Verbara.Platform.Api.Services;
 
@@ -13,14 +12,14 @@ internal sealed class QueueMembershipService
 {
     private readonly IQueueStore _queueStore;
     private readonly IAgentStore _agentStore;
-    private readonly SkillCatalogBase _skillCatalog;
+    private readonly ISkillCatalogStore _skillCatalog;
     private readonly IQueueMembershipStore _membershipStore;
     private readonly ILogger<QueueMembershipService> _logger;
 
     public QueueMembershipService(
         IQueueStore queueStore,
         IAgentStore agentStore,
-        SkillCatalogBase skillCatalog,
+        ISkillCatalogStore skillCatalog,
         IQueueMembershipStore membershipStore,
         ILogger<QueueMembershipService> logger)
     {
@@ -46,6 +45,12 @@ internal sealed class QueueMembershipService
         var agents = await _agentStore.ListAllAsync(tid, ct);
         var agentsById = agents.ToDictionary(a => a.AgentId);
 
+        // The tenant's proficiencies, read once per computation and looked up in memory (design D6).
+        var proficiencies = await _skillCatalog.ListProficienciesAsync(tid, ct);
+        var proficienciesByAgent = proficiencies
+            .GroupBy(p => p.AgentId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
         // 2. Build skill-derived memberships
         var skillDerived = new List<EffectiveQueueMember>();
         foreach (var queue in queues.Items.Where(q => q.IsActive))
@@ -62,7 +67,7 @@ internal sealed class QueueMembershipService
                 if (matchingSkills.Count == 0) continue;
 
                 // Compute penalty from proficiency
-                var agentSkills = await _skillCatalog.GetAgentSkillsAsync(agent.AgentId.Value, ct);
+                var agentSkills = proficienciesByAgent.GetValueOrDefault(agent.AgentId) ?? [];
                 var avgProficiency = matchingSkills
                     .Select(s => agentSkills.FirstOrDefault(a => a.SkillName == s)?.Proficiency ?? 5)
                     .Average();

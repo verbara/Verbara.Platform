@@ -79,7 +79,7 @@ public sealed class ListenEndpointIsNotAnAgentTests
         {
             TenantId = TenantId, QueueId = queue.QueueId, AgentId = agent.AgentId, Penalty = 0, Source = MembershipSource.Manual, CreatedAt = DateTimeOffset.UnixEpoch,
         }, CancellationToken.None);
-        var membership = new QueueMembershipService(queueStore, agentStore, new Verbara.Sdk.Pro.Routing.Skills.InMemorySkillCatalog(),
+        var membership = new QueueMembershipService(queueStore, agentStore, new InMemorySkillCatalogStore(agentStore),
             memberships, NullLogger<QueueMembershipService>.Instance);
         var endpointProfiles = Substitute.For<EndpointProfileStoreBase>();
         IReadOnlyList<Verbara.Sdk.Pro.Realtime.Models.EndpointProfile> listenProfiles = [new() { Id = 7, TenantId = Tenant, Name = "supervisor-listen" }];
