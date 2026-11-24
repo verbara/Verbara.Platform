@@ -42,9 +42,9 @@ public sealed class AgentSkillRoutesOpenApiTests : IClassFixture<SupervisorListe
         var responses = await ResponsesAsync(AgentSkillsPath, "get");
 
         responses.ContainsKey("200").Should().BeTrue();
-        var schema = responses["200"]!["content"]?["application/json"]?["schema"];
-        schema.Should().NotBeNull("the list answers a JSON body");
-        schema!["type"]?.GetValue<string>().Should().Be("array");
+        var schema = responses["200"]!["content"]?["application/json"]?["schema"]
+            ?? throw new InvalidOperationException("the list answers a JSON body, but its 200 declares no JSON schema");
+        (schema["type"]?.GetValue<string>()).Should().Be("array");
         SchemaName(schema["items"]).Should().Be("AgentSkillDto");
     }
 

@@ -118,7 +118,7 @@ public sealed class SkillCatalogDurabilityLiveDbTests : IClassFixture<SkillCatal
     private static async Task CreateSkillAsync(HttpClient client, string name, string category)
     {
         using var response = await client.PostAsync(SkillsPath,
-            JsonContent.Create(new { name, category, description = (string?)null }));
+            JsonContent.Create(new { name, category, description = default(string) }));
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
     }
 

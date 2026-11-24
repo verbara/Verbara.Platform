@@ -58,7 +58,7 @@ public sealed class SkillCatalogTenantScopeTests : IClassFixture<DialerTenantSco
         await CreateSkillAsync(acme, skill, "product");
 
         using var response = await globex.PutAsync($"{SkillsPath}/{skill}",
-            JsonContent.Create(new { category = "finance", description = (string?)null }));
+            JsonContent.Create(new { category = "finance", description = default(string) }));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await CategoryOfAsync(globex, skill)).Should().Be("finance");
@@ -422,7 +422,7 @@ public sealed class SkillCatalogTenantScopeTests : IClassFixture<DialerTenantSco
     private static async Task CreateSkillAsync(HttpClient client, string name, string category)
     {
         using var response = await client.PostAsync(SkillsPath,
-            JsonContent.Create(new { name, category, description = (string?)null }));
+            JsonContent.Create(new { name, category, description = default(string) }));
         response.StatusCode.Should().Be(HttpStatusCode.Created);
     }
 
