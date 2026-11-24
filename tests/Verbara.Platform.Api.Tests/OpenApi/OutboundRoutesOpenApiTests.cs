@@ -50,7 +50,8 @@ public sealed class OutboundRoutesOpenApiTests : IClassFixture<SupervisorListenO
     {
         var responses = await ResponsesAsync(path, method);
 
-        var schemaRef = responses["400"]?["content"]?["application/json"]?["schema"]?["$ref"]?.GetValue<string>();
+        var schemaRef = responses["400"]?["content"]?["application/json"]?["schema"]?["$ref"]?.GetValue<string>()
+            ?? "(no schema $ref)";
         schemaRef.Should().Be("#/components/schemas/ErrorResponse",
             $"{method} {path} answers 400 with an ErrorResponse body; its 400 is {responses["400"]?.ToJsonString() ?? "undeclared"}");
     }
