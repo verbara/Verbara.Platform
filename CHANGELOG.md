@@ -22,14 +22,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nothing when its trunk or overflow trunk is not a trunk of the tenant, including an id that does not exist; a route
   naming a trunk that does not exist used to fail with a server error. The OpenAPI document declares the 400 on both
   operations, and now declares the 201 that creating a route already returns (it declared 200).
-- **A tenant id that differs only in case is a different tenant.** Tenant ids are stored case-sensitively, and now
-  every check that decides which tenant a caller may act in compares them exactly too: a request whose `X-Tenant-Id`
-  header or subdomain names a tenant that differs from the caller's own only in case is refused with 403, like any
-  other tenant, unless the caller is the Platform host or a Partner reaching its own customer; only the host tenant's
-  exact id passes the Platform-administrator checks; and plan features and rate-limit tiers are no longer shared
-  between two such tenants. A client that sends its own tenant id in a different case from the stored one now gets
-  403; send the id exactly as stored. Tenant ids that differ only in case can exist only from before 2.41.1; the
-  `tenant-ids` readiness check reports them and the Api log names both tenants of each pair.
+- **A tenant id that differs only in case is a different tenant.** Tenant ids are stored case-sensitively, and every
+  check that resolves, authorizes or caches a tenant now compares them exactly as well. A client that sends its own
+  tenant id in a different case from the stored one now gets 403; send the id exactly as stored. Hostnames reach the
+  server in lowercase, so a tenant created before 2.41.1 whose id has uppercase letters is not reachable through the
+  subdomain fallback; reach it with the `X-Tenant-Id` header.
 
 ## [2.41.1] - 2026-11-24
 
