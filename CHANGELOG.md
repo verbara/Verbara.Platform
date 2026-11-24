@@ -69,6 +69,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Dependencies
 
+- **The Pro packages move to `2.32.0-pro`.** Every `Verbara.Sdk.Pro.*` pin goes from `2.31.0-pro` to
+  `2.32.0-pro`, whose realtime cleanup and reconcile pass match a tenant's rows by its exact id instead of a name
+  pattern; together with the tenant fixes above, that is what keeps one tenant's suspension, deletion or reconcile
+  pass away from another tenant's telephony rows. The release also drops Pro's conversation-state push bridge, which
+  the Api no longer used.
 - **Five dependency updates that the `v2.40.0` release undid are back.** The release commit reset these pins to
   their earlier versions; they now match the updates merged before it: `AWSSDK.S3` `4.1.0` (#626), `Microsoft.Graph`
   `6.10.0` (#612), `Scalar.AspNetCore` `2.21.0` (#627), `coverlet.collector` `10.1.1` (#625) and the
