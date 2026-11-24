@@ -9,6 +9,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.41.1] - 2026-11-24
+
+Suspending, deleting or reconciling a tenant no longer touches another tenant's realtime telephony rows, and a new
+tenant id must be a lowercase slug that no stored tenant id equals or extends (#656). Holiday-calendar and
+caller-ID-pool contents stay in their tenant (#652). A new signing key is accepted on its first request (#648), the
+compose gateway reuses upstream connections and no longer answers 502 under sustained load (#646), and the Api drops
+the unused Pro cluster bridge (#644). Verbara.Sdk.Pro `2.32.0-pro`; Verbara.Sdk stays at `2.10.1`. There is no
+database migration. Read **Changed** first: tenant create routes now refuse some ids, and Management create no
+longer overwrites an existing tenant.
+
 ### Changed
 
 - **A new tenant id must be a lowercase slug that no stored tenant id equals or extends.** `POST
@@ -17,14 +27,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   existing one, or one that extends or is extended by an existing one with `-` (`acme` and `acme-corp`), is refused
   with 409 on every create route, whatever the stored tenant's status or Partner, and setup refuses it before writing
   anything. Management create no longer overwrites an existing tenant: it answers 409. A deleted tenant's id cannot be
-  used again.
+  used again. (#656)
 - **Existing tenants whose ids break that rule are reported and kept apart.** A new readiness health check,
   `tenant-ids`, reports them as Degraded (readiness still answers 200), and also reports every `Realtime:TenantIds`
   entry with no stored tenant. Readiness shows counts only; the Api log names the tenants, both tenants of each pair,
   and the unstored entries at Warning each time that set changes. Such tenants are not reconciled, and their
   suspension or deletion removes their credentials, queue memberships and trunks by exact id but never their queues;
   deleting one of their queues does not remove it from the telephony engine either. They stay in that state, even
-  after one tenant of a pair is deleted, until a tenant rename tool is available.
+  after one tenant of a pair is deleted, until a tenant rename tool is available. (#656)
 
 ### Removed
 
@@ -41,11 +51,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Suspending, deleting or reconciling a tenant no longer changes another tenant's realtime telephony rows.** A
   tenant's suspension or deletion (by its Partner, a platform administrator or dunning) and its reconcile pass leave
   every other tenant's agent endpoints, SIP credentials, queues, queue members, trunks and outbound registrations as
-  they were, whatever the two tenant ids look like.
+  they were, whatever the two tenant ids look like. (#656)
 - **Holiday-calendar and caller-ID-pool contents stay in their tenant.** The holiday routes of a holiday calendar and
   the entry routes of a caller-ID pool answer 404 and change nothing when the calendar or pool belongs to another
   tenant; on the tenant's own calendar or pool they answer as before. The OpenAPI document declares the 404 on the
-  six operations.
+  six operations. (#652)
 - **Live updates and API calls accept a new signing key on its first request.** On a fresh install, Realtime (and an
   Api replica that did not sign the token) refused the admin's first live-update connects for up to 30 s after setup
   finished: the requests that reached it before the first signing key existed were counted as failed key reads, and
@@ -56,7 +66,6 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its keys yet) instead of being refused. Those reloads stay rate-limited — at most one every 2 s, shared by every
   request waiting — so made-up key ids cannot flood the key store, and a real new key is accepted within that
   interval. A partial read that leaves out keys still held keeps them, as before. (#648)
-
 - **The compose gateway no longer answers 502 under sustained load.** `docker/nginx-gateway.conf` (mounted by the
   full, production, reference-SMB and demo compose files) opened a new connection to platform-api, realtime or web
   for every request, and each closed one held one of the gateway's ephemeral ports for about 60 s; under sustained
@@ -73,11 +82,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `2.32.0-pro`, whose realtime cleanup and reconcile pass match a tenant's rows by its exact id instead of a name
   pattern; together with the tenant fixes above, that is what keeps one tenant's suspension, deletion or reconcile
   pass away from another tenant's telephony rows. The release also drops Pro's conversation-state push bridge, which
-  the Api no longer used.
+  the Api no longer used. (#656)
 - **Five dependency updates that the `v2.40.0` release undid are back.** The release commit reset these pins to
   their earlier versions; they now match the updates merged before it: `AWSSDK.S3` `4.1.0` (#626), `Microsoft.Graph`
   `6.10.0` (#612), `Scalar.AspNetCore` `2.21.0` (#627), `coverlet.collector` `10.1.1` (#625) and the
-  `dotnet-reportgenerator-globaltool` tool `5.6.0` (#618). `v2.40.0` and `v2.41.0` shipped the earlier versions.
+  `dotnet-reportgenerator-globaltool` tool `5.6.0` (#618). `v2.40.0` and `v2.41.0` shipped the earlier versions. (#651)
 
 ## [2.41.0] - 2026-11-21
 
