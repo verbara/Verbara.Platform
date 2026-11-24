@@ -13,8 +13,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Routing skills and agent skill proficiencies stay in their tenant and survive a restart (#658), outbound routes use
 only the tenant's own trunks (#661), and every check that resolves, authorizes or caches a tenant compares tenant ids
-exactly (#662). Verbara.Sdk.Pro stays at `2.32.0-pro` and Verbara.Sdk at `2.10.1`. There is no database migration.
-A client that sends its own tenant id in a different case from the stored one now gets 403.
+exactly (#662). Verbara.Sdk.Pro stays at `2.32.0-pro` and Verbara.Sdk at `2.10.1`. Migration `032` runs at
+start-up: it adds two empty tables, `routing_skills` and `agent_skill_proficiencies`, and changes no existing table;
+a rollback to v2.41.1 leaves both unused (#658). A client that sends its own tenant id in a different case from the
+stored one now gets 403.
 
 ### Fixed
 
