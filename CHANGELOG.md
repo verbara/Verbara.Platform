@@ -19,13 +19,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stack already did. Asterisk's container now also writes a database name, user or password that holds `/`, `&`,
   `\`, `;`, a quote or a space exactly as given; before, such a password was dropped or mangled. A new CI check,
   `scripts/check-asterisk-realtime.py`, fails when a stack under `docker/` that builds Asterisk points it at another
-  database, user or password than its Postgres.
+  database, user or password than its Postgres. (#667)
 - **An ended Agent Assist session leaves the Monitor list sooner when the shared store blips.** With Redis, a failed
   removal of a session's Monitor record, when the session ends or its tenants come into conflict, is now retried up
   to four times in about 1.75 s instead of being left until the record expires (last update + 15 s). Until the
   removal lands the session can still be listed and whispered to in its own tenant; after the last attempt the
   record's expiry still bounds it. A late retry removes only the record its own session wrote, so a call that is
-  transferred or reconnects and is listed again keeps its new row.
+  transferred or reconnects and is listed again keeps its new row. (#668)
 
 ### Dependencies
 
