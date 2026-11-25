@@ -412,7 +412,7 @@ $ docker exec verbara-asterisk asterisk -rx 'realtime show pgsql status'
 Connected to verbara@127.0.0.1, port 5432 with username platform
 
 # Si dice "Failed to connect" → revisar:
-$ docker exec verbara-asterisk grep dbhost /etc/asterisk/res_config_pgsql.conf
+$ docker exec verbara-asterisk grep dbhost /etc/asterisk/res_pgsql.conf
 dbhost = 127.0.0.1                      ; debe ser 127.0.0.1, NO postgres
 
 $ docker exec verbara-asterisk env | grep PG_REALTIME

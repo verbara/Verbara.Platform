@@ -47,7 +47,6 @@ services:
     volumes:
       - ../asterisk-config:/etc/asterisk
       - ./demo-overrides/extensions.conf:/etc/asterisk/extensions.conf:ro
-      - ./demo-overrides/res_config_pgsql.conf:/etc/asterisk/res_config_pgsql.conf:ro
       - ./demo-overrides/ari.conf:/etc/asterisk/ari.conf:ro
       - ./demo-overrides/manager.conf:/etc/asterisk/manager.conf:ro
       - ./certs/asterisk.pem:/etc/asterisk/keys/asterisk.pem:ro
