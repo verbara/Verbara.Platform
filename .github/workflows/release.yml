@@ -42,11 +42,15 @@ env:
 jobs:
   # Releases are cut only from main. CI runs on pull requests into main and on the merge
   # queue, never on a tag, so a tag on a commit that is not on main would build, push and
-  # sign an image no CI run ever tested. This job fails the run first, and every job below
-  # `needs:` it: `release` directly, `github-release` and `smoke` both directly and through
-  # `release`. The check is scripts/ci/check-tag-on-main.sh (tests:
-  # scripts/tests/test_check_tag_on_main.py). A retroactive tag (ADR-0024 marker, read the
-  # same way as the `retro` step below) passes it, because that run builds nothing.
+  # sign images without the PR CI suite (tests and invariant scripts) having run on that
+  # tree. This job fails the run first, and every job below `needs:` it: `release` directly,
+  # `github-release` and `smoke` both directly and through `release`. The check is
+  # scripts/ci/check-tag-on-main.sh (tests: scripts/tests/test_check_tag_on_main.py; the
+  # wiring in this file: scripts/tests/test_release_tag_on_main_wiring.py). A retroactive tag
+  # (ADR-0024 marker, read the same way as the `retro` step below) passes it, because that
+  # run builds nothing. A tag-push run uses the release.yml of the tagged commit, so this
+  # guards against an accidental off-main tag on a tree that carries it; a tag ruleset would
+  # be the hard enforcement.
   tag-on-main:
     name: Tag commit is on main
     runs-on: ubuntu-24.04

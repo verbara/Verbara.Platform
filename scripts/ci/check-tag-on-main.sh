@@ -3,8 +3,11 @@
 #
 # release.yml builds, pushes and cosign-signs images on ANY pushed `v*` tag, and CI runs only
 # on pull requests into main and on the merge queue. A tag on a commit that never reached main
-# would ship a signed image no CI run ever tested. The `tag-on-main` job runs this script before
-# every build/push/sign job, and they all `needs:` it.
+# would ship a signed image without the PR CI suite (tests and invariant scripts) having run on
+# that tree. The `tag-on-main` job runs this script before every build/push/sign job, and they
+# all `needs:` it (scripts/tests/test_release_tag_on_main_wiring.py checks that wiring). It
+# guards against an accidental off-main tag on a tree that carries it: a tag-push run uses the
+# tagged commit's release.yml, so a tag ruleset would be the hard enforcement.
 #
 # usage: check-tag-on-main.sh <tag-name> [main-ref]     (main-ref defaults to refs/remotes/origin/main)
 #
