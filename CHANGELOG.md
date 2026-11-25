@@ -9,23 +9,30 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.41.3] - 2026-11-25
+
+Verbara.Sdk.Pro moves to `2.33.0-pro`, which keeps every trunk, caller-ID pool, holiday calendar, contact and
+disposition code a dialer row names inside that row's tenant (#665). Verbara.Sdk stays at `2.10.1`. There is no
+database migration. A call attempt's disposition now needs a code of the tenant, and an outbound route write whose
+trunk is deleted meanwhile answers 400 instead of 500 or a dangling trunk id.
+
 ### Changed
 
 - **Verbara.Sdk.Pro `2.33.0-pro`** (from `2.32.0-pro`; Verbara.Sdk stays at `2.10.1`, no other dependency moves, no
   database migration). The dialer now keeps every trunk, caller-ID pool, holiday calendar, contact and disposition
   code a dialer row names inside that row's tenant. The Pro routing skill catalog is gone; Platform already keeps its
-  own per-tenant catalog, so nothing changes for skills.
+  own per-tenant catalog, so nothing changes for skills (#665).
 - **Setting a call attempt's disposition needs a code of the tenant.** `PUT
   /api/v1/admin/call-attempts/{id}/disposition` now answers 404, and changes nothing, when `dispositionId` is not a
   disposition code of the caller's tenant for the attempt's campaign or tenant-wide, including an id no code has; it
-  used to store any id. An inactive code of the tenant is still accepted. The 404 was already declared.
+  used to store any id. An inactive code of the tenant is still accepted. The 404 was already declared (#665).
 
 ### Fixed
 
 - **An outbound route write that names a trunk deleted meanwhile answers 400.** When a trunk passes the route
   endpoint's check and is deleted before the write, `POST /api/v1/admin/routes` and `PUT /api/v1/admin/routes/{id}`
   now answer 400, change nothing and record no audit entry. A deleted main trunk used to answer 500; a deleted
-  overflow trunk used to be stored as a dangling id.
+  overflow trunk used to be stored as a dangling id (#665).
 
 ## [2.41.2] - 2026-11-24
 
