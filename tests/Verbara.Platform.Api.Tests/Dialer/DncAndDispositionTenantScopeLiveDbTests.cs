@@ -14,8 +14,10 @@ namespace Verbara.Platform.Api.Tests.Dialer;
 /// <summary>
 /// dnc-and-dispositions-are-tenant-scoped, against Pro's Postgres stores: the real Api <c>Program</c> with the dialer
 /// registered over a Testcontainers Postgres (<see cref="DialerTenantScopeFactory"/>). The DNC entry routes and
-/// the disposition route answer 404 for a list or a call attempt of another tenant and change nothing; the tenant's
-/// own list and attempt work; and the host tenant is the platform DNC tenant the dialer's checker reads.
+/// the disposition route answer 404 for a list or a call attempt of another tenant and change nothing; the disposition
+/// route also answers 404 for a code that is another tenant's, another campaign's or missing (Pro <c>2.33.0-pro</c>);
+/// the tenant's own list, attempt and code work; and the host tenant is the platform DNC tenant the dialer's checker
+/// reads.
 /// </summary>
 public sealed class DncAndDispositionTenantScopeLiveDbTests : IClassFixture<DialerTenantScopeLiveDbFixture>
 {
@@ -76,11 +78,12 @@ public sealed class DncAndDispositionTenantScopeLiveDbTests : IClassFixture<Dial
     [Fact]
     public async Task UpdateCallAttemptDisposition_ShouldReturn404AndChangeNothing_WhenTheAttemptBelongsToAnotherTenant()
     {
-        var attemptId = await SeedCallAttemptAsync(Acme);
+        var (attemptId, campaignId) = await SeedCallAttemptAsync(Acme);
+        var codeId = await SeedDispositionCodeAsync(Acme, campaignId);
         using var globex = Factory.CreateAdminClient(Globex);
 
         using var response = await globex.PutAsync($"/api/admin/call-attempts/{attemptId}/disposition",
-            JsonContent.Create(new { dispositionId = 5, agentComment = "not mine" }));
+            JsonContent.Create(new { dispositionId = codeId, agentComment = "not mine" }));
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         var (dispositionId, comment) = await DispositionAsync(attemptId);
@@ -88,19 +91,52 @@ public sealed class DncAndDispositionTenantScopeLiveDbTests : IClassFixture<Dial
         comment.Should().BeNull();
     }
 
-    [Fact]
-    public async Task UpdateCallAttemptDisposition_ShouldReturn204AndStoreIt_WhenTheAttemptBelongsToTheTenant()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UpdateCallAttemptDisposition_ShouldReturn204AndStoreIt_WhenTheAttemptAndTheCodeBelongToTheTenant(
+        bool codeOfTheCampaign)
     {
-        var attemptId = await SeedCallAttemptAsync(Acme);
+        var (attemptId, campaignId) = await SeedCallAttemptAsync(Acme);
+        var codeId = await SeedDispositionCodeAsync(Acme, codeOfTheCampaign ? campaignId : null);
         using var acme = Factory.CreateAdminClient(Acme);
 
         using var response = await acme.PutAsync($"/api/admin/call-attempts/{attemptId}/disposition",
-            JsonContent.Create(new { dispositionId = 5, agentComment = "callback tomorrow" }));
+            JsonContent.Create(new { dispositionId = codeId, agentComment = "callback tomorrow" }));
 
-        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent,
+            "code {0} is acme's, for the attempt's campaign or tenant-wide", codeId);
         var (dispositionId, comment) = await DispositionAsync(attemptId);
-        dispositionId.Should().Be(5);
+        dispositionId.Should().Be(codeId);
         comment.Should().Be("callback tomorrow");
+    }
+
+    /// <summary>The code of the request is not one the attempt can carry: which one, for the three cases.</summary>
+    public static TheoryData<string> CodesTheAttemptCannotCarry => new() { "another-tenant", "another-campaign", "missing" };
+
+    [Theory]
+    [MemberData(nameof(CodesTheAttemptCannotCarry))]
+    public async Task UpdateCallAttemptDisposition_ShouldReturn404AndChangeNothing_WhenTheCodeIsNotACodeOfTheAttempt(
+        string code)
+    {
+        var (attemptId, _) = await SeedCallAttemptAsync(Acme);
+        var codeId = code switch
+        {
+            "another-tenant" => await SeedDispositionCodeAsync(Globex, (await SeedCallAttemptAsync(Globex)).CampaignId),
+            "another-campaign" => await SeedDispositionCodeAsync(Acme, (await SeedCallAttemptAsync(Acme)).CampaignId),
+            "missing" => await MissingDispositionCodeIdAsync(),
+            _ => throw new ArgumentOutOfRangeException(nameof(code), code, null),
+        };
+        using var acme = Factory.CreateAdminClient(Acme);
+
+        using var response = await acme.PutAsync($"/api/admin/call-attempts/{attemptId}/disposition",
+            JsonContent.Create(new { dispositionId = codeId, agentComment = "wrong code" }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "code {0} ({1}) is not a code of acme for the attempt's campaign or tenant-wide", codeId, code);
+        var (dispositionId, comment) = await DispositionAsync(attemptId);
+        dispositionId.Should().BeNull();
+        comment.Should().BeNull();
     }
 
     [Fact]
@@ -138,8 +174,8 @@ public sealed class DncAndDispositionTenantScopeLiveDbTests : IClassFixture<Dial
 
     // ─── Postgres seeding ───────────────────────────────────────────────────────
 
-    /// <summary>One dialed contact of a campaign of <paramref name="tenantId"/>, and its call attempt.</summary>
-    private async Task<long> SeedCallAttemptAsync(string tenantId)
+    /// <summary>One dialed contact of a new campaign of <paramref name="tenantId"/>, and its call attempt.</summary>
+    private async Task<(long AttemptId, long CampaignId)> SeedCallAttemptAsync(string tenantId)
     {
         await using var conn = new NpgsqlConnection(ConnectionString());
         await conn.OpenAsync();
@@ -150,9 +186,37 @@ public sealed class DncAndDispositionTenantScopeLiveDbTests : IClassFixture<Dial
                  p AS (INSERT INTO contact_phones (contact_id, phone_number) SELECT k.id, '573004440000' FROM k RETURNING id, contact_id)
             INSERT INTO call_attempts (tenant_id, campaign_id, contact_id, contact_list_id, contact_phone_id, phone_number)
             SELECT @T, l.campaign_id, k.id, k.contact_list_id, p.id, '573004440000' FROM l, k, p
+            RETURNING id, campaign_id
+            """, conn);
+        cmd.Parameters.AddWithValue("T", tenantId);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        (await reader.ReadAsync()).Should().BeTrue();
+        return (reader.GetInt64(0), reader.GetInt64(1));
+    }
+
+    /// <summary>
+    /// A disposition code of <paramref name="tenantId"/>, for <paramref name="campaignId"/> or, when null, tenant-wide.
+    /// </summary>
+    private async Task<long> SeedDispositionCodeAsync(string tenantId, long? campaignId)
+    {
+        await using var conn = new NpgsqlConnection(ConnectionString());
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand("""
+            INSERT INTO disposition_codes (tenant_id, campaign_id, code, label)
+            VALUES (@T, @C, 'CB', 'Callback')
             RETURNING id
             """, conn);
         cmd.Parameters.AddWithValue("T", tenantId);
+        cmd.Parameters.Add(new NpgsqlParameter("C", NpgsqlTypes.NpgsqlDbType.Bigint) { Value = (object?)campaignId ?? DBNull.Value });
+        return (long)(await cmd.ExecuteScalarAsync())!;
+    }
+
+    /// <summary>A disposition code id no code has.</summary>
+    private async Task<long> MissingDispositionCodeIdAsync()
+    {
+        await using var conn = new NpgsqlConnection(ConnectionString());
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand("SELECT COALESCE(MAX(id), 0) + 1000 FROM disposition_codes", conn);
         return (long)(await cmd.ExecuteScalarAsync())!;
     }
 

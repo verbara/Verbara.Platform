@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using Npgsql;
 using static Verbara.Platform.Api.Tests.Dialer.DialerSubResourceTenantScopeTests;
@@ -203,7 +204,62 @@ public sealed class DialerSubResourceTenantScopeLiveDbTests : IClassFixture<Dial
         (await StoredEntriesAsync(poolId)).Should().BeEmpty();
     }
 
+    // ─── Campaign references ─────────────────────────────────────────────────────
+
+    // Pro 2.33.0-pro refuses a campaign write that names a caller-ID pool or holiday calendar of another tenant, but
+    // not one the campaign already stores. The campaign routes never set either field and the update writes the stored
+    // campaign back, so an update of a campaign whose row names another tenant's pool and calendar (written before)
+    // still answers 200 and keeps both values.
+    [Fact]
+    public async Task UpdateCampaign_ShouldReturn200AndKeepTheStoredReferences_WhenTheyNameAnotherTenantsPoolAndCalendar()
+    {
+        using var acme = Factory.CreateAdminClient(Acme);
+        var (campaignId, poolId, calendarId) = await SeedCampaignNamingAnotherTenantsReferencesAsync(Acme, Globex);
+        var name = $"renamed-{Guid.NewGuid():N}";
+
+        using var response = await acme.PutAsync($"/api/admin/campaigns/{campaignId}",
+            JsonContent.Create(new { name }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        (await StoredCampaignAsync(campaignId)).Should().Be((name, poolId, calendarId),
+            "the update writes the stored pool and calendar back unchanged, and Pro does not re-check a stored value");
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A campaign of <paramref name="tenantId"/> whose row names a caller-ID pool and a holiday calendar of
+    /// <paramref name="otherTenantId"/>, written by SQL as a row stored before Pro <c>2.33.0-pro</c> could be.
+    /// </summary>
+    private async Task<(long CampaignId, long PoolId, long CalendarId)> SeedCampaignNamingAnotherTenantsReferencesAsync(
+        string tenantId, string otherTenantId)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = new NpgsqlCommand("""
+            WITH p AS (INSERT INTO caller_id_pools (tenant_id, name) VALUES (@O, 'other pool') RETURNING id),
+                 h AS (INSERT INTO holiday_calendars (tenant_id, name) VALUES (@O, 'other calendar') RETURNING id)
+            INSERT INTO campaigns (tenant_id, name, caller_id_pool_id, holiday_calendar_id)
+            SELECT @T, 'planted', p.id, h.id FROM p, h
+            RETURNING id, caller_id_pool_id, holiday_calendar_id
+            """, conn);
+        cmd.Parameters.AddWithValue("T", tenantId);
+        cmd.Parameters.AddWithValue("O", otherTenantId);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        (await reader.ReadAsync()).Should().BeTrue();
+        return (reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2));
+    }
+
+    /// <summary>The campaign's name, caller-ID pool and holiday calendar, read by SQL.</summary>
+    private async Task<(string Name, long? PoolId, long? CalendarId)> StoredCampaignAsync(long campaignId)
+    {
+        await using var conn = await OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            "SELECT name, caller_id_pool_id, holiday_calendar_id FROM campaigns WHERE id = @Id", conn);
+        cmd.Parameters.AddWithValue("Id", campaignId);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        (await reader.ReadAsync()).Should().BeTrue();
+        return (reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetInt64(1), reader.IsDBNull(2) ? null : reader.GetInt64(2));
+    }
 
     /// <summary>The calendar's holidays as (date, name), read by SQL.</summary>
     private async Task<IReadOnlyList<(string Date, string Name)>> StoredHolidaysAsync(long calendarId)

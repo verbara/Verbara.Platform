@@ -9,6 +9,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Verbara.Sdk.Pro `2.33.0-pro`** (from `2.32.0-pro`; Verbara.Sdk stays at `2.10.1`, no other dependency moves, no
+  database migration). The dialer now keeps every trunk, caller-ID pool, holiday calendar, contact and disposition
+  code a dialer row names inside that row's tenant. The Pro routing skill catalog is gone; Platform already keeps its
+  own per-tenant catalog, so nothing changes for skills.
+- **Setting a call attempt's disposition needs a code of the tenant.** `PUT
+  /api/v1/admin/call-attempts/{id}/disposition` now answers 404, and changes nothing, when `dispositionId` is not a
+  disposition code of the caller's tenant for the attempt's campaign or tenant-wide, including an id no code has; it
+  used to store any id. An inactive code of the tenant is still accepted. The 404 was already declared.
+
+### Fixed
+
+- **An outbound route that could not be written is no longer reported as created.** When a trunk is deleted while a
+  route naming it is being created, `POST /api/v1/admin/routes` now answers 400 and records no audit entry; it used
+  to answer 201 with route id 0.
+
 ## [2.41.2] - 2026-11-24
 
 Routing skills and agent skill proficiencies stay in their tenant and survive a restart (#658), outbound routes use
