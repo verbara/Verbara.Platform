@@ -734,7 +734,8 @@ internal sealed class InMemoryTrunkStore : TrunkStoreBase
 /// (dialer-references-stay-in-their-tenant, design D4): a route belongs to the tenant it was created for, and every
 /// read and write acts only on that tenant's routes. Like a database row, a route is copied in and out, so a caller
 /// that changes a route it read changes the store only through <see cref="UpdateAsync"/>. The store accepts any trunk
-/// id: which trunks a route may name is the route endpoints' rule, and the tests assert it over HTTP.
+/// id: which trunks a route may name is the route endpoints' rule, and the tests assert it over HTTP. Pro's store also
+/// refuses another tenant's trunk from <c>2.33.0-pro</c>; <see cref="RefuseNextCreate"/> stands for that refusal.
 /// </summary>
 internal sealed class InMemoryOutboundRouteStore : OutboundRouteStoreBase
 {
@@ -754,8 +755,19 @@ internal sealed class InMemoryOutboundRouteStore : OutboundRouteStoreBase
         return new ValueTask<OutboundRoute?>(route);
     }
 
+    private int _refuseNextCreate;
+
+    /// <summary>
+    /// Makes the next <see cref="CreateAsync"/> write nothing and answer 0, as Pro's Postgres store does (Pro
+    /// <c>2.33.0-pro</c>) when a trunk is not one of the tenant's at the write: for a trunk deleted after the route
+    /// endpoint checked it.
+    /// </summary>
+    public void RefuseNextCreate() => Volatile.Write(ref _refuseNextCreate, 1);
+
     public override ValueTask<long> CreateAsync(OutboundRoute route, string tenantId, CancellationToken ct = default)
     {
+        if (Interlocked.Exchange(ref _refuseNextCreate, 0) == 1)
+            return new ValueTask<long>(0L);
         var id = Interlocked.Increment(ref _nextId);
         route.Id = id;
         _routes[id] = (tenantId, Copy(route));

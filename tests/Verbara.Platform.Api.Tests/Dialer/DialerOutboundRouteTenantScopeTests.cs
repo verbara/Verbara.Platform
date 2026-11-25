@@ -2,6 +2,10 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.DependencyInjection;
+using Verbara.Platform.Audit;
+using Verbara.Platform.Core;
+using Verbara.Sdk.Pro.Dialer.Routing;
 
 namespace Verbara.Platform.Api.Tests.Dialer;
 
@@ -42,6 +46,30 @@ public sealed class DialerOutboundRouteTenantScopeTests
             "trunkId {0} is the value route {1} already stores, so the edit adds no trunk reference ({2})",
             trunk, routeId, await response.Content.ReadAsStringAsync());
         JsonNode.Parse(await ReadRouteAsync(globex, routeId))!["pattern"]!.GetValue<string>().Should().Be(pattern);
+    }
+
+    // Pro 2.33.0-pro: the route store writes no row and answers 0 when a trunk is not one of the tenant's at the write.
+    // The endpoint's trunk check runs first, so only a trunk deleted between that check and the write reaches it; the
+    // in-memory store is told to refuse the next create to stand for that window.
+    [Fact]
+    public async Task CreateRoute_ShouldReturn400AndCreateNoRoute_WhenTheStoreRefusesTheWriteAfterTheTrunkCheck()
+    {
+        using var globex = Factory.CreateAdminClient(Globex);
+        var trunk = await CreateTrunkAsync(globex);
+        var pattern = NewPattern();
+        var routes = (InMemoryOutboundRouteStore)_factory.Services.GetRequiredService<OutboundRouteStoreBase>();
+        routes.RefuseNextCreate();
+
+        using var response = await globex.PostAsync(RoutesPath, RouteBody(pattern, trunk, overflowTrunkId: null));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "the store wrote no route, so there is no route to answer 201 with ({0})",
+            await response.Content.ReadAsStringAsync());
+        await AssertErrorResponseAsync(response);
+        (await RoutePatternsAsync(globex)).Should().NotContain(pattern);
+        var audit = _factory.Services.GetRequiredService<IAuditStore>();
+        (await audit.GetByEntityAsync(new TenantId(Globex), "outbound_route", "0", CancellationToken.None))
+            .Should().BeEmpty("no route was written, so none is audited as created");
     }
 }
 
