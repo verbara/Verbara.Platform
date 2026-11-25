@@ -9,6 +9,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Dependencies
+
+- **The Api no longer references `Verbara.Sdk.Pro.Routing`.** No Platform code used the package: inbound routing,
+  skills and overflow are Platform's own (`Verbara.Platform.Routing.Inbound`). Its `PackageReference` and its
+  `2.33.0-pro` pin are gone, so the Native AOT image carries one Pro package fewer; no other package leaves the
+  restored graph, and no behavior or endpoint changes. The ADR-0023 guard that keeps the package out of the non-AOT
+  microservices stays as it is.
+
 ## [2.41.3] - 2026-11-25
 
 Verbara.Sdk.Pro moves to `2.33.0-pro`, which keeps every trunk, caller-ID pool, holiday calendar, contact and
