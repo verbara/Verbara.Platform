@@ -91,21 +91,24 @@ public sealed class DncAndDispositionTenantScopeLiveDbTests : IClassFixture<Dial
         comment.Should().BeNull();
     }
 
+    // An inactive code of the tenant is still accepted: the rule is whose code it is, not whether it is offered.
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
     public async Task UpdateCallAttemptDisposition_ShouldReturn204AndStoreIt_WhenTheAttemptAndTheCodeBelongToTheTenant(
-        bool codeOfTheCampaign)
+        bool codeOfTheCampaign, bool codeIsActive)
     {
         var (attemptId, campaignId) = await SeedCallAttemptAsync(Acme);
-        var codeId = await SeedDispositionCodeAsync(Acme, codeOfTheCampaign ? campaignId : null);
+        var codeId = await SeedDispositionCodeAsync(Acme, codeOfTheCampaign ? campaignId : null, codeIsActive);
         using var acme = Factory.CreateAdminClient(Acme);
 
         using var response = await acme.PutAsync($"/api/admin/call-attempts/{attemptId}/disposition",
             JsonContent.Create(new { dispositionId = codeId, agentComment = "callback tomorrow" }));
 
         response.StatusCode.Should().Be(HttpStatusCode.NoContent,
-            "code {0} is acme's, for the attempt's campaign or tenant-wide", codeId);
+            "code {0} is acme's, for the attempt's campaign or tenant-wide (active: {1})", codeId, codeIsActive);
         var (dispositionId, comment) = await DispositionAsync(attemptId);
         dispositionId.Should().Be(codeId);
         comment.Should().Be("callback tomorrow");
@@ -197,17 +200,18 @@ public sealed class DncAndDispositionTenantScopeLiveDbTests : IClassFixture<Dial
     /// <summary>
     /// A disposition code of <paramref name="tenantId"/>, for <paramref name="campaignId"/> or, when null, tenant-wide.
     /// </summary>
-    private async Task<long> SeedDispositionCodeAsync(string tenantId, long? campaignId)
+    private async Task<long> SeedDispositionCodeAsync(string tenantId, long? campaignId, bool isActive = true)
     {
         await using var conn = new NpgsqlConnection(ConnectionString());
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand("""
-            INSERT INTO disposition_codes (tenant_id, campaign_id, code, label)
-            VALUES (@T, @C, 'CB', 'Callback')
+            INSERT INTO disposition_codes (tenant_id, campaign_id, code, label, is_active)
+            VALUES (@T, @C, 'CB', 'Callback', @A)
             RETURNING id
             """, conn);
         cmd.Parameters.AddWithValue("T", tenantId);
         cmd.Parameters.Add(new NpgsqlParameter("C", NpgsqlTypes.NpgsqlDbType.Bigint) { Value = (object?)campaignId ?? DBNull.Value });
+        cmd.Parameters.AddWithValue("A", isActive);
         return (long)(await cmd.ExecuteScalarAsync())!;
     }
 

@@ -22,9 +22,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **An outbound route that could not be written is no longer reported as created.** When a trunk is deleted while a
-  route naming it is being created, `POST /api/v1/admin/routes` now answers 400 and records no audit entry; it used
-  to answer 201 with route id 0.
+- **An outbound route write that names a trunk deleted meanwhile answers 400.** When a trunk passes the route
+  endpoint's check and is deleted before the write, `POST /api/v1/admin/routes` and `PUT /api/v1/admin/routes/{id}`
+  now answer 400, change nothing and record no audit entry. A deleted main trunk used to answer 500; a deleted
+  overflow trunk used to be stored as a dangling id.
 
 ## [2.41.2] - 2026-11-24
 

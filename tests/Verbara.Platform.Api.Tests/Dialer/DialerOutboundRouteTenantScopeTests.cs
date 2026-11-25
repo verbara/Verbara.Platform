@@ -71,6 +71,32 @@ public sealed class DialerOutboundRouteTenantScopeTests
         (await audit.GetByEntityAsync(new TenantId(Globex), "outbound_route", "0", CancellationToken.None))
             .Should().BeEmpty("no route was written, so none is audited as created");
     }
+
+    // Pro 2.33.0-pro: the route store changes no row, and reports nothing, when a new trunk is not one of the tenant's
+    // at the write. The endpoint reads the route back; the in-memory store is told to refuse the next update to stand
+    // for a trunk deleted between the endpoint's check and the write.
+    [Fact]
+    public async Task UpdateRoute_ShouldReturn400AndKeepTheRoute_WhenTheStoreRefusesTheWriteAfterTheTrunkCheck()
+    {
+        using var globex = Factory.CreateAdminClient(Globex);
+        var trunk = await CreateTrunkAsync(globex);
+        var newTrunk = await CreateTrunkAsync(globex);
+        var routeId = await CreateRouteAsync(globex, trunk, overflowTrunkId: null);
+        var routes = (InMemoryOutboundRouteStore)_factory.Services.GetRequiredService<OutboundRouteStoreBase>();
+        routes.RefuseNextUpdate();
+
+        using var response = await globex.PutAsync($"{RoutesPath}/{routeId}", JsonContent.Create(new { trunkId = newTrunk }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "the store changed nothing, so the route still names trunk {0} ({1})",
+            trunk, await response.Content.ReadAsStringAsync());
+        await AssertErrorResponseAsync(response);
+        JsonNode.Parse(await ReadRouteAsync(globex, routeId))!["trunkId"]!.GetValue<long>().Should().Be(trunk);
+        var audit = _factory.Services.GetRequiredService<IAuditStore>();
+        (await audit.GetByEntityAsync(new TenantId(Globex), "outbound_route",
+                routeId.ToString(CultureInfo.InvariantCulture), CancellationToken.None))
+            .Should().NotContain(e => e.Action == "outbound_route.updated", "no change was written, so none is audited");
+    }
 }
 
 /// <summary>

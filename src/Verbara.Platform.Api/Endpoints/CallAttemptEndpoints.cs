@@ -19,7 +19,10 @@ internal static class CallAttemptEndpoints
         group.MapPut("/{id:long}/disposition", UpdateDisposition);
     }
 
-    /// <summary>Sets the disposition of call attempt <paramref name="id"/>; 404 when it is no attempt of the caller's tenant.</summary>
+    /// <summary>
+    /// Sets the disposition of call attempt <paramref name="id"/>; 404, changing nothing, when it is no attempt of the
+    /// caller's tenant or when the disposition id is not a code of that tenant, for the attempt's campaign or tenant-wide.
+    /// </summary>
     private static async Task<Results<NoContent, NotFound>> UpdateDisposition(
         long id, UpdateCallAttemptDispositionRequest request,
         HttpContext context, CampaignStoreBase store, CancellationToken ct)
