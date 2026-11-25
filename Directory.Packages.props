@@ -60,7 +60,6 @@
     <PackageVersion Include="Verbara.Sdk.Pro.CsatRunner" Version="2.33.0-pro" />
     <PackageVersion Include="Verbara.Sdk.Pro.AgentAssist" Version="2.33.0-pro" />
     <PackageVersion Include="Verbara.Sdk.Pro.AgentAssist.Storage.Postgres" Version="2.33.0-pro" />
-    <PackageVersion Include="Verbara.Sdk.Pro.Routing" Version="2.33.0-pro" />
     <PackageVersion Include="Verbara.Sdk.Pro.Realtime" Version="2.33.0-pro" />
     <PackageVersion Include="Verbara.Sdk.Pro.Realtime.Storage.Postgres" Version="2.33.0-pro" />
     <PackageVersion Include="Verbara.Sdk.Pro.Cluster" Version="2.33.0-pro" />

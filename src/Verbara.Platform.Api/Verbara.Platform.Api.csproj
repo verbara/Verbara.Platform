@@ -123,7 +123,6 @@
     <PackageReference Include="Verbara.Sdk.Pro.CsatRunner" />
     <PackageReference Include="Verbara.Sdk.Pro.AgentAssist" />
     <PackageReference Include="Verbara.Sdk.Pro.AgentAssist.Storage.Postgres" />
-    <PackageReference Include="Verbara.Sdk.Pro.Routing" />
     <PackageReference Include="Verbara.Sdk.Pro.Realtime" />
     <PackageReference Include="Verbara.Sdk.Pro.Realtime.Storage.Postgres" />
     <PackageReference Include="Verbara.Sdk.Pro.Cluster" />
