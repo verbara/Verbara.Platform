@@ -15,7 +15,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   removal of a session's Monitor record, when the session ends or its tenants come into conflict, is now retried up
   to four times in about 1.75 s instead of being left until the record expires (last update + 15 s). Until the
   removal lands the session can still be listed and whispered to in its own tenant; after the last attempt the
-  record's expiry still bounds it (#650).
+  record's expiry still bounds it. A late retry removes only the record its own session wrote, so a call that is
+  transferred or reconnects and is listed again keeps its new row (#650).
 
 ## [2.41.3] - 2026-11-25
 

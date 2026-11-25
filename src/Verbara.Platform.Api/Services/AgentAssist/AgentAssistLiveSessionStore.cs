@@ -54,8 +54,12 @@ internal interface IAgentAssistLiveSessionStore
     /// <summary>Files <paramref name="record"/> under its owner tenant until <paramref name="expiresAt"/>, replacing the previous copy.</summary>
     Task FileAsync(LiveSessionRecord record, DateTimeOffset expiresAt, CancellationToken ct);
 
-    /// <summary>Removes the record of <paramref name="sessionId"/> filed under <paramref name="ownerTenant"/>, if any.</summary>
-    Task RemoveAsync(string ownerTenant, string sessionId, CancellationToken ct);
+    /// <summary>
+    /// Removes the record of <paramref name="sessionId"/> filed under <paramref name="ownerTenant"/>, if any. With
+    /// <paramref name="filedUntil"/>, only while the record is still the copy filed with that expiry: a copy filed since,
+    /// by a later filing of the same session (a new generation after a transfer), is kept.
+    /// </summary>
+    Task RemoveAsync(string ownerTenant, string sessionId, DateTimeOffset? filedUntil, CancellationToken ct);
 
     /// <summary>The unexpired records filed under <paramref name="tenant"/>.</summary>
     Task<IReadOnlyList<LiveSessionRecord>> ListAsync(string tenant, CancellationToken ct);
@@ -82,7 +86,7 @@ internal sealed class InProcessAgentAssistLiveSessionStore(IAgentAssistLiveSessi
     public Task FileAsync(LiveSessionRecord record, DateTimeOffset expiresAt, CancellationToken ct) => Task.CompletedTask;
 
     /// <inheritdoc />
-    public Task RemoveAsync(string ownerTenant, string sessionId, CancellationToken ct) => Task.CompletedTask;
+    public Task RemoveAsync(string ownerTenant, string sessionId, DateTimeOffset? filedUntil, CancellationToken ct) => Task.CompletedTask;
 
     /// <inheritdoc />
     public Task<IReadOnlyList<LiveSessionRecord>> ListAsync(string tenant, CancellationToken ct) =>
@@ -156,10 +160,13 @@ internal sealed class RedisAgentAssistLiveSessionStore(IConnectionMultiplexer re
     }
 
     /// <inheritdoc />
-    public async Task RemoveAsync(string ownerTenant, string sessionId, CancellationToken ct)
+    public async Task RemoveAsync(string ownerTenant, string sessionId, DateTimeOffset? filedUntil, CancellationToken ct)
     {
         var db = redis.GetDatabase();
         var tx = db.CreateTransaction();
+        // The index score is the expiry of the copy filed last; a later filing of the session wrote another one.
+        if (filedUntil is { } until)
+            tx.AddCondition(Condition.SortedSetEqual(IndexKey(ownerTenant), sessionId, until.ToUnixTimeMilliseconds()));
         _ = tx.SortedSetRemoveAsync(IndexKey(ownerTenant), sessionId);
         _ = tx.KeyDeleteAsync(RecordKey(ownerTenant, sessionId));
         await tx.ExecuteAsync().WaitAsync(ct).ConfigureAwait(false);

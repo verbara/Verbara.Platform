@@ -31,12 +31,16 @@ internal sealed class MemoryLiveSessionStore(TimeProvider time) : IAgentAssistLi
         return Task.CompletedTask;
     }
 
-    public Task RemoveAsync(string ownerTenant, string sessionId, CancellationToken ct)
+    public Task RemoveAsync(string ownerTenant, string sessionId, DateTimeOffset? filedUntil, CancellationToken ct)
     {
         lock (_gate)
         {
             Writes++;
-            if (_tenants.TryGetValue(ownerTenant, out var index))
+            // The Redis store's fence: with filedUntil, only the copy filed with that expiry is removed (to the millisecond).
+            if (_tenants.TryGetValue(ownerTenant, out var index)
+                && (filedUntil is not { } until
+                    || (index.TryGetValue(sessionId, out var entry)
+                        && entry.ExpiresAt.ToUnixTimeMilliseconds() == until.ToUnixTimeMilliseconds())))
                 index.Remove(sessionId);
         }
 

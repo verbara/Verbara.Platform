@@ -108,6 +108,49 @@ public sealed class AgentAssistSessionFilingRemovalRetryTests : IDisposable
         _store.RemovalAttempts.Should().Be(2);
     }
 
+    [Fact]
+    public async Task EndAsync_ShouldKeepTheRecordALaterFilingWrote_WhenARetriedRemovalLandsAfterTheSessionIsFiledAgain()
+    {
+        // A transferred or reconnected call starts a new generation of the same session id, filed under the same tenant.
+        var ended = await StartAsync(Demo, Call(Demo));
+        _store.FailNextRemovals(1);
+        await ended.EndAsync();
+
+        _time.Advance(TimeSpan.FromMilliseconds(100));
+        var next = await StartAsync(Demo, Call(Demo));
+        (await FindAsync(Demo)).Should().NotBeNull("precondition: the new generation filed its record");
+
+        await StepAsync(ended, 8);   // the ended filing's retry fires and lands
+        await next.WhenIdleAsync();
+
+        _store.RemovalAttempts.Should().Be(2, "precondition: the ended filing retried its removal");
+        (await FindAsync(Demo)).Should().NotBeNull(
+            "a retry removes only the copy its own filing wrote, never one a later filing of the same session wrote");
+    }
+
+    [Fact]
+    public async Task EndAsync_ShouldRetryTheRemoval_WhenAnEarlierConflictRemovalGaveUpAndTheOwnerCameBack()
+    {
+        var call = Call(Demo);
+        var filing = await StartAsync(Demo, call);
+        _store.FailNextRemovals(AgentAssistSessionFiling.MaxRemovalAttempts);
+        call.TenantId = Acme;
+        filing.OnEmission();
+        await filing.WhenIdleAsync();
+        await StepAsync(filing, 8);   // every retry of the conflict's removal fails: it gives up
+        _store.RemovalAttempts.Should().Be(AgentAssistSessionFiling.MaxRemovalAttempts, "precondition: it gave up");
+
+        call.TenantId = Demo;         // the conflict ends; the record is still filed under demo
+        filing.OnEmission();
+        await StepAsync(filing, 13);  // past the next heartbeat, which refreshes it
+        _store.FailNextRemovals(1);
+
+        await filing.EndAsync();
+        await StepAsync(filing, 8);
+
+        (await FindAsync(Demo)).Should().BeNull("the end's removal has its own retries, whatever an earlier removal used");
+    }
+
     /// <summary>A <see cref="MemoryLiveSessionStore"/> whose next removals fail as a Redis outage does.</summary>
     private sealed class FailingRemovalStore(MemoryLiveSessionStore inner) : IAgentAssistLiveSessionStore
     {
@@ -122,7 +165,7 @@ public sealed class AgentAssistSessionFilingRemovalRetryTests : IDisposable
         public Task FileAsync(LiveSessionRecord record, DateTimeOffset expiresAt, CancellationToken ct) =>
             inner.FileAsync(record, expiresAt, ct);
 
-        public Task RemoveAsync(string ownerTenant, string sessionId, CancellationToken ct)
+        public Task RemoveAsync(string ownerTenant, string sessionId, DateTimeOffset? filedUntil, CancellationToken ct)
         {
             RemovalAttempts++;
             if (_failures > 0)
@@ -131,7 +174,7 @@ public sealed class AgentAssistSessionFilingRemovalRetryTests : IDisposable
                 return Task.FromException(new RedisException("removal failed"));
             }
 
-            return inner.RemoveAsync(ownerTenant, sessionId, ct);
+            return inner.RemoveAsync(ownerTenant, sessionId, filedUntil, ct);
         }
 
         public Task<IReadOnlyList<LiveSessionRecord>> ListAsync(string tenant, CancellationToken ct) => inner.ListAsync(tenant, ct);

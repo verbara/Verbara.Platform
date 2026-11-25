@@ -22,7 +22,10 @@ namespace Verbara.Platform.Api.Services.AgentAssist;
 /// that label differs from the one last filed re-files the record at once.
 /// Every write runs on one queue per session, so a heartbeat that runs after the end re-writes nothing.
 /// A failed removal, at the end or at a conflict, is retried after <see cref="RemovalRetryDelay"/>, doubling each time, up
-/// to <see cref="MaxRemovalAttempts"/> attempts in all (about 1.75 s); after that the record is left to its expiry.
+/// to <see cref="MaxRemovalAttempts"/> attempts in all (about 1.75 s); after that the record is left to its expiry. A retry
+/// removes the record only while it is still the copy this filing wrote last, so a later filing of the same session id (a
+/// new generation after a transfer or a reconnect, on this replica or another) keeps its record. The end's removal gets
+/// its own attempts, whatever an earlier removal used.
 /// </summary>
 internal sealed partial class AgentAssistSessionFiling : IDisposable
 {
@@ -57,6 +60,7 @@ internal sealed partial class AgentAssistSessionFiling : IDisposable
 
     // Written only by the queued work, which runs one item at a time.
     private string? _filedUnder;
+    private DateTimeOffset? _filedUntil;   // the expiry of the latest filing attempt: the copy a retry may remove
     private int _failedRemovals;
 
     // Read on each event without the queue: the owner the record was last filed under, or null.
@@ -127,7 +131,7 @@ internal sealed partial class AgentAssistSessionFiling : IDisposable
             _ended = true;
             _heartbeat.Dispose();
             _bindCheck.Dispose();
-            _tail = Then(_tail, RemoveFiledAsync);
+            _tail = Then(_tail, EndRemovalAsync);
             return _tail;
         }
     }
@@ -205,11 +209,21 @@ internal sealed partial class AgentAssistSessionFiling : IDisposable
 
         var sentiment = _sentiment();
         var record = LiveSessionRecord.Of(_sessionId, owner, _call, sentiment);
-        await _store.FileAsync(record, _time.GetUtcNow() + RecordTtl, CancellationToken.None).ConfigureAwait(false);
+        var expiresAt = _time.GetUtcNow() + RecordTtl;
+        _filedUntil = expiresAt;   // before the write: a write that times out may still have landed
+        await _store.FileAsync(record, expiresAt, CancellationToken.None).ConfigureAwait(false);
+        _failedRemovals = 0;       // filed under the owner again: no earlier removal is pending
         _filedUnder = owner;
         _lastOwner = owner;
         _lastSentiment = sentiment;
         _bindCheck.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+    }
+
+    /// <summary>The end's removal, with its own <see cref="MaxRemovalAttempts"/> attempts.</summary>
+    private Task EndRemovalAsync()
+    {
+        _failedRemovals = 0;
+        return RemoveFiledAsync();
     }
 
     private async Task RemoveFiledAsync()
@@ -225,13 +239,16 @@ internal sealed partial class AgentAssistSessionFiling : IDisposable
     /// <summary>
     /// Removes the record filed under <paramref name="filed"/>. A failed attempt is logged and, below
     /// <see cref="MaxRemovalAttempts"/>, a retry is scheduled after a doubling delay; the last one gives up and leaves the
-    /// record to its expiry. <see langword="false"/> when the record may still be filed.
+    /// record to its expiry. A retry removes only the copy this filing wrote last (<see cref="_filedUntil"/>): by the time it
+    /// runs, a later filing of the same session may have filed its own. <see langword="false"/> when the record may still be
+    /// filed.
     /// </summary>
     private async Task<bool> TryRemoveAsync(string filed)
     {
         try
         {
-            await _store.RemoveAsync(filed, _sessionId, CancellationToken.None).ConfigureAwait(false);
+            var onlyOurCopy = _failedRemovals > 0 ? _filedUntil : null;
+            await _store.RemoveAsync(filed, _sessionId, onlyOurCopy, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is RedisException or TimeoutException or OperationCanceledException)
         {

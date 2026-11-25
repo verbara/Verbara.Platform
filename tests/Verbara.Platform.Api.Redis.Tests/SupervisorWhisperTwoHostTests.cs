@@ -294,7 +294,8 @@ public sealed class SupervisorWhisperTwoHostTests : IAsyncLifetime
 
         public Task FileAsync(LiveSessionRecord record, DateTimeOffset expiresAt, CancellationToken ct) => inner.FileAsync(record, expiresAt, ct);
 
-        public Task RemoveAsync(string ownerTenant, string sessionId, CancellationToken ct) => inner.RemoveAsync(ownerTenant, sessionId, ct);
+        public Task RemoveAsync(string ownerTenant, string sessionId, DateTimeOffset? filedUntil, CancellationToken ct) =>
+            inner.RemoveAsync(ownerTenant, sessionId, filedUntil, ct);
 
         public Task<IReadOnlyList<LiveSessionRecord>> ListAsync(string tenant, CancellationToken ct) => inner.ListAsync(tenant, ct);
 

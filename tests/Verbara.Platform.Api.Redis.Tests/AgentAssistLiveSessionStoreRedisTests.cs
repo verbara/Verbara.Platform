@@ -255,6 +255,28 @@ public sealed class AgentAssistLiveSessionStoreRedisTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Remove_ShouldRemoveOnlyTheCopyFiledWithTheExpiryGiven_WhenALaterFilingOfTheSessionFiledAgain()
+    {
+        const string sessionId = "as-remove-fenced";
+        var record = LiveSessionRecord.Of(sessionId, _demo, Call(_demo));
+        var first = _time.GetUtcNow() + AgentAssistSessionFiling.RecordTtl;
+        await StoreA.FileAsync(record, first, CancellationToken.None);
+        _time.Advance(TimeSpan.FromMilliseconds(100));
+        var second = _time.GetUtcNow() + AgentAssistSessionFiling.RecordTtl;
+        await StoreB.FileAsync(record, second, CancellationToken.None);   // a new generation of the session, on replica B
+
+        await StoreA.RemoveAsync(_demo, sessionId, first, CancellationToken.None);
+
+        (await StoreB.FindAsync(_demo, sessionId, CancellationToken.None)).Should().NotBeNull(
+            "replica A's late removal names the copy it filed, and replica B has filed another since");
+
+        await StoreB.RemoveAsync(_demo, sessionId, second, CancellationToken.None);
+
+        (await StoreB.FindAsync(_demo, sessionId, CancellationToken.None)).Should().BeNull("the copy filed with that expiry is removed");
+        (await IndexLengthAsync(_demo)).Should().Be(0, "with its index member");
+    }
+
+    [Fact]
     public async Task Find_ShouldReturnNull_WhenTheIndexMemberHasExpired()
     {
         var filing = await StartOnAAsync("as-find-expired", _demo, Call(_demo));
