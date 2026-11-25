@@ -51,7 +51,11 @@ services:
       # 14 stores. ConnectionStringDefaults in Program.cs would apply the
       # same defaults if absent — specifying here is belt-and-suspenders
       # + makes the tuning visible in operator-facing config.
-      ConnectionStrings__Postgres: "Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret};Maximum Pool Size=10;Minimum Pool Size=2;Connection Idle Lifetime=300;Pooling=true"
+      ConnectionStrings__Postgres: "Host=postgres;Database=verbara;Username=platform;Maximum Pool Size=10;Minimum Pool Size=2;Connection Idle Lifetime=300;Pooling=true"
+      # Npgsql reads the password from PGPASSWORD when the connection string has none. Pasted into
+      # Password=, a ; quote or space in POSTGRES_PASSWORD would break the string; compose sets PGPASSWORD
+      # as given. scripts/check-compose-postgres-password.py keeps every stack this way.
+      PGPASSWORD: ${POSTGRES_PASSWORD:-platform_secret}
 
   postgres:
     # ADR-0015 Phase 2 — max_connections=200 is operator headroom over the

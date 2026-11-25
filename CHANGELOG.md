@@ -20,6 +20,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `\`, `;`, a quote or a space exactly as given; before, such a password was dropped or mangled. A new CI check,
   `scripts/check-asterisk-realtime.py`, fails when a stack under `docker/` that builds Asterisk points it at another
   database, user or password than its Postgres. (#667)
+- **The Docker stacks and the Helm chart accept any Postgres password.** The Api, the realtime service and the mail
+  service built their database connection strings by pasting `POSTGRES_PASSWORD` into `Password=`, so a password
+  with `;`, a quote or a leading or trailing space ended the value early or was read differently, and those services
+  could not reach Postgres while Asterisk could. Every stack under `docker/` (full, demo, SMB, reference SMB, scale)
+  now hands each service the password as `PGPASSWORD`, which the database driver reads as given, and leaves it out of
+  the connection string; the Helm chart's Api and realtime do the same with their password secret. The `.env`
+  setting and its defaults are unchanged, and a connection string you set yourself with a `Password=` still wins. A
+  new CI check, `scripts/check-compose-postgres-password.py`, fails when a stack pastes the password into a
+  connection string again. (#673)
 - **An ended Agent Assist session leaves the Monitor list sooner when the shared store blips.** With Redis, a failed
   removal of a session's Monitor record, when the session ends or its tenants come into conflict, is now retried up
   to four times in about 1.75 s instead of being left until the record expires (last update + 15 s). Until the
