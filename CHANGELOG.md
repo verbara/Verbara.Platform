@@ -9,6 +9,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **An ended Agent Assist session leaves the Monitor list sooner when the shared store blips.** With Redis, a failed
+  removal of a session's Monitor record, when the session ends or its tenants come into conflict, is now retried up
+  to four times in about 1.75 s instead of being left until the record expires (last update + 15 s). Until the
+  removal lands the session can still be listed and whispered to in its own tenant; after the last attempt the
+  record's expiry still bounds it (#650).
+
 ## [2.41.3] - 2026-11-25
 
 Verbara.Sdk.Pro moves to `2.33.0-pro`, which keeps every trunk, caller-ID pool, holiday calendar, contact and
