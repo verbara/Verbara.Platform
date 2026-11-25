@@ -16,8 +16,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `docker/docker-compose.full.yml`) and with a password the stack does not use (the demo stack's, and any stack started
   with its own `POSTGRES_PASSWORD`), so `pjsip show endpoints` answered "No objects found" and no call could reach an
   agent. Both stacks now hand Asterisk the database, user and password of their own Postgres, as the reference SMB
-  stack already did. A new CI check, `scripts/check-asterisk-realtime.py`, fails when a stack under `docker/` that
-  builds Asterisk points it at another database, user or password than its Postgres.
+  stack already did. Asterisk's container now also writes a database name, user or password that holds `/`, `&`,
+  `\`, `;`, a quote or a space exactly as given; before, such a password was dropped or mangled. A new CI check,
+  `scripts/check-asterisk-realtime.py`, fails when a stack under `docker/` that builds Asterisk points it at another
+  database, user or password than its Postgres.
 
 ## [2.41.3] - 2026-11-25
 

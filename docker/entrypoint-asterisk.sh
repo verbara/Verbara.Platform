@@ -38,21 +38,38 @@ fi
 # unreachable from host network, so dbhost has to be the loopback / LAN IP
 # where Postgres is bound. Optional in all other stacks (defaults preserved
 # when env vars unset).
+#
+# set_realtime KEY VALUE writes `KEY = VALUE` so that Postgres receives VALUE
+# byte for byte. Three readers stand between: res_config_pgsql pastes each
+# value into its libpq connection string unquoted ("dbname=%s"), where a
+# backslash takes the next character literally and whitespace would end the
+# value (so \ and ' get a backslash, and a value holding whitespace is
+# single-quoted); Asterisk's config parser, where a bare ; starts a comment
+# (so ; becomes \;); and sed's replacement (so \, & and the | delimiter get a
+# backslash). A plain value is written unchanged.
+set_realtime() {
+    _rt=$(printf '%s' "$2" | sed -e "s/[\\\\']/\\\\&/g")
+    case "$_rt" in
+        *" "*|*"	"*) _rt="'$_rt'" ;;
+    esac
+    _rt=$(printf '%s' "$_rt" | sed -e 's/[;]/\\&/g' -e 's/[\\&|]/\\&/g')
+    sed -i "s|^$1 = .*|$1 = $_rt|" "$PGSQL_CONF"
+}
 if [ -n "$PG_REALTIME_HOST" ] && [ -f "$PGSQL_CONF" ]; then
-    sed -i "s/^dbhost = .*/dbhost = $PG_REALTIME_HOST/" "$PGSQL_CONF"
+    set_realtime dbhost "$PG_REALTIME_HOST"
     echo "[entrypoint] Realtime dbhost set to $PG_REALTIME_HOST"
 fi
 if [ -n "$PG_REALTIME_PORT" ] && [ -f "$PGSQL_CONF" ]; then
-    sed -i "s/^dbport = .*/dbport = $PG_REALTIME_PORT/" "$PGSQL_CONF"
+    set_realtime dbport "$PG_REALTIME_PORT"
 fi
 if [ -n "$PG_REALTIME_DB" ] && [ -f "$PGSQL_CONF" ]; then
-    sed -i "s/^dbname = .*/dbname = $PG_REALTIME_DB/" "$PGSQL_CONF"
+    set_realtime dbname "$PG_REALTIME_DB"
 fi
 if [ -n "$PG_REALTIME_USER" ] && [ -f "$PGSQL_CONF" ]; then
-    sed -i "s/^dbuser = .*/dbuser = $PG_REALTIME_USER/" "$PGSQL_CONF"
+    set_realtime dbuser "$PG_REALTIME_USER"
 fi
 if [ -n "$PG_REALTIME_PASSWORD" ] && [ -f "$PGSQL_CONF" ]; then
-    sed -i "s/^dbpass = .*/dbpass = $PG_REALTIME_PASSWORD/" "$PGSQL_CONF"
+    set_realtime dbpass "$PG_REALTIME_PASSWORD"
 fi
 
 if [ -n "$EXTERNAL_IP" ] && [ -f "$PJSIP_CONF" ]; then
