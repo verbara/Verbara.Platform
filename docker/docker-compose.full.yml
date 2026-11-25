@@ -21,6 +21,12 @@ services:
       EXTERNAL_IP: ${EXTERNAL_IP:-}
       AMI_PASSWORD: ${AMI_PASSWORD:-platform_secret}
       ARI_PASSWORD: ${ARI_PASSWORD:-platform_secret}
+      # Realtime (endpoints, queues, trunks) comes from the postgres service below: entrypoint-asterisk.sh
+      # writes these into res_pgsql.conf, whose template names another database and password.
+      # scripts/check-asterisk-realtime.py keeps them equal to the postgres service's settings.
+      PG_REALTIME_DB: verbara
+      PG_REALTIME_USER: platform
+      PG_REALTIME_PASSWORD: ${POSTGRES_PASSWORD:-platform_secret}
     volumes:
       - ./asterisk-config:/etc/asterisk
       - recordings:/var/spool/asterisk/recording

@@ -120,7 +120,7 @@ services:
       # Realtime DB on the loopback (Postgres binds 127.0.0.1:5432 below).
       # Asterisk on host network can't resolve the docker DNS name `postgres`,
       # so we point dbhost at 127.0.0.1. entrypoint-asterisk.sh rewrites
-      # res_config_pgsql.conf when these are set.
+      # res_pgsql.conf when these are set.
       PG_REALTIME_HOST: ${PG_REALTIME_HOST:-127.0.0.1}
       PG_REALTIME_PORT: ${PG_REALTIME_PORT:-5432}
       PG_REALTIME_DB: ${POSTGRES_DB:-verbara}
