@@ -655,6 +655,11 @@ jobs:
         run: python3 scripts/check-scale-backplane.py
       - name: Install PyYAML (pinned)
         run: pip install --disable-pip-version-check pyyaml==6.0.2
+      # Every compose file under docker/ that builds Asterisk next to a postgres service points Asterisk's realtime
+      # (res_pgsql.conf, rendered from PG_REALTIME_* by entrypoint-asterisk.sh) at that Postgres: same database, user
+      # and password, with and without the operator's POSTGRES_* in .env. Found by scanning, not by a list.
+      - name: Asterisk realtime database
+        run: python3 scripts/check-asterisk-realtime.py
       # Agent Assist audio on Kubernetes: the chart declares and advertises the audio port, every container port
       # name is a valid (<= 15 character) name, the r55-platform NetworkPolicy admits the port from r55-asterisk,
       # and platform-api and realtime render the same ConnectionStrings__Redis (`helm template`).

@@ -32,6 +32,11 @@ services:
       - EXTERNAL_IP=${EXTERNAL_IP:-}
       - AMI_PASSWORD=${AMI_PASSWORD:-platform_secret}
       - ARI_PASSWORD=${ARI_PASSWORD:-platform_secret}
+      # Realtime from the postgres service above (entrypoint-asterisk.sh writes these into res_pgsql.conf;
+      # scripts/check-asterisk-realtime.py keeps them equal to the postgres service's settings).
+      - PG_REALTIME_DB=${POSTGRES_DB:-platform}
+      - PG_REALTIME_USER=${POSTGRES_USER:-platform}
+      - PG_REALTIME_PASSWORD=${POSTGRES_PASSWORD:-platform_demo}
     ports:
       - "5038:5038"
       - "5060:5060/udp"
