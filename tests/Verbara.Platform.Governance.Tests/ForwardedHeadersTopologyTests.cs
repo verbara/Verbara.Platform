@@ -149,7 +149,7 @@ public sealed partial class ForwardedHeadersTopologyTests
     }
 
     /// <summary>The text of each service under the top-level <c>services:</c> key, by service name.</summary>
-    private static Dictionary<string, string> ServiceBlocks(string compose)
+    internal static Dictionary<string, string> ServiceBlocks(string compose)
     {
         var blocks = new Dictionary<string, string>(StringComparer.Ordinal);
         var inServices = false;

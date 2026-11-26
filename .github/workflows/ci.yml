@@ -515,7 +515,8 @@ jobs:
         run: python3 -m unittest discover scripts/tests
       # SMB reference stack pin guard (OpenSpec bump-smb-reference-stack-pins, design Decision 3): every
       # Platform/Web image default in docker/docker-compose.reference-smb.yml must equal the template's
-      # PLATFORM_API_TAG / PLATFORM_WEB_TAG. Agreement only (offline); the Web-floor check needs the sibling
+      # PLATFORM_API_TAG / PLATFORM_WEB_TAG, and docker/docker-compose.production.yml's Web image must follow the
+      # same PLATFORM_WEB_TAG. Agreement only (offline); the Web-floor check needs the sibling
       # Verbara.Platform.Web checkout and runs locally whenever the pins move (--web-changelog).
       - name: SMB stack pin agreement
         run: python3 scripts/check-smb-pins.py

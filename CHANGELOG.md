@@ -11,6 +11,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The production stack runs the web console.** `docker/docker-compose.production.yml` started a gateway that sends
+  the console's pages to a `web` service, but the stack had none, so the gateway restarted in a loop (`host not found
+  in upstream "web:80"`) and neither the console nor the Api was reachable through it. The stack now runs the
+  published Web image as `web`, at the same release as the reference SMB stack (`PLATFORM_WEB_TAG`, read from the
+  shell or `docker/.env`; `scripts/check-smb-pins.py` keeps the two stacks on one release). A new governance test
+  reads the nginx configuration each compose service mounts and fails when the stack has no service for a host it
+  proxies to, or starts that service only under a profile the proxy does not share. (#688)
 - **The production stack starts from its example settings.** `docker/.env.production.example` left out settings the
   services of `docker/docker-compose.production.yml` refuse to start without, so a stack started from a copy of it
   restarted in a loop with the reason only in the logs: the mail service stopped without `Imap__TokenSigningSecret`,
