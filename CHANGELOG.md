@@ -11,6 +11,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Asterisk installed with the Kubernetes Helm chart loads its endpoints from the platform's database.** The chart
+  passed the database settings under names nothing read, and its start command replaced the image's own, so Asterisk
+  kept a sample configuration, never connected to Postgres and loaded no endpoints, queues or trunks from it. The
+  chart now passes `PG_REALTIME_HOST`, `_PORT`, `_DB`, `_USER` and `_PASSWORD`, the names the Docker stacks use, and
+  its start command writes Asterisk's database configuration from them, with a password that holds `;`, a quote, a
+  backslash or a space kept exactly as given. It also ships the realtime mappings, so `pjsip show endpoints` lists the
+  endpoints stored in Postgres next to the chart's own load-test endpoint. Asterisk now refuses to start when one of
+  the five settings is empty. `scripts/check-asterisk-realtime.py` now also checks the chart against the platform
+  chart's database settings. (#682)
 - **Asterisk in the full stack and the demo stack loads its endpoints, queues and trunks again.** Asterisk read its
   configuration from a database the stack does not create (`platform` instead of `verbara` in
   `docker/docker-compose.full.yml`) and with a password the stack does not use (the demo stack's, and any stack started

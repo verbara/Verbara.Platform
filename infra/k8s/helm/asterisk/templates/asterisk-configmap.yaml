@@ -71,6 +71,13 @@ data:
   modules.conf: |
     [modules]
     autoload=yes
+    ; PostgreSQL and sorcery load before any realtime-dependent module, as in
+    ; docker/asterisk-config/modules.conf.
+    preload => res_config_pgsql.so
+    preload => res_sorcery_config.so
+    preload => res_sorcery_memory.so
+    preload => res_sorcery_memory_cache.so
+    preload => res_sorcery_realtime.so
     noload => chan_sip.so
 
   # Platform's AMI user. Same [general] and the same read/write/deny/permit lines
@@ -113,3 +120,57 @@ data:
     enabled = yes
     bindaddr = 0.0.0.0
     bindport = 8088
+
+  # Realtime database. The container command renders /etc/asterisk/res_pgsql.conf
+  # from this template, replacing each `key = ` line with the PG_REALTIME_* value
+  # (asterisk.postgres.*, the password from its Secret); the placeholders never
+  # reach Asterisk. Asterisk's res_config_pgsql reads res_pgsql.conf.
+  res_pgsql.conf.template: |
+    [general]
+    dbhost = __PG_REALTIME_HOST__
+    dbport = __PG_REALTIME_PORT__
+    dbname = __PG_REALTIME_DB__
+    dbuser = __PG_REALTIME_USER__
+    dbpass = __PG_REALTIME_PASSWORD__
+    requirements = createclose
+
+  # The realtime families Platform writes (Verbara.Sdk.Pro.Realtime), as in
+  # docker/asterisk-config/extconfig.conf.
+  extconfig.conf: |
+    [settings]
+    ps_endpoints => pgsql,general,ps_endpoints
+    ps_auths => pgsql,general,ps_auths
+    ps_aors => pgsql,general,ps_aors
+    ps_contacts => pgsql,general,ps_contacts
+    ps_registrations => pgsql,general,ps_registrations
+    ps_domain_aliases => pgsql,general,ps_domain_aliases
+    ps_endpoint_id_ips => pgsql,general,ps_endpoint_id_ips
+    queues => pgsql,general,queues
+    queue_members => pgsql,general,queue_members
+    voicemail => pgsql,general,voicemail
+
+  # PJSIP objects from realtime, as in docker/asterisk-config/sorcery.conf, and
+  # also from pjsip.conf above for endpoints, auths and aors so the load-test
+  # `anonymous` endpoint keeps answering. Each cache comes first, as in the
+  # Docker file: with the cache between pjsip.conf and realtime, `pjsip show
+  # endpoints` listed `anonymous` only and none of the realtime endpoints.
+  sorcery.conf: |
+    [res_pjsip]
+    endpoint/cache = memory_cache,name=pjsip_endpoint_cache,maximum_objects=5000,object_lifetime_maximum=900,expire_on_reload=yes
+    endpoint = config,pjsip.conf,criteria=type=endpoint
+    endpoint = realtime,ps_endpoints
+    auth/cache = memory_cache,name=pjsip_auth_cache,maximum_objects=5000,object_lifetime_maximum=900,expire_on_reload=yes
+    auth = config,pjsip.conf,criteria=type=auth
+    auth = realtime,ps_auths
+    aor/cache = memory_cache,name=pjsip_aor_cache,maximum_objects=5000,object_lifetime_maximum=900,expire_on_reload=yes
+    aor = config,pjsip.conf,criteria=type=aor
+    aor = realtime,ps_aors
+    contact = astdb,registrator
+
+    [res_pjsip_endpoint_identifier_ip]
+    identify = config,pjsip.conf,criteria=type=identify
+    identify = realtime,ps_endpoint_id_ips
+
+    [res_pjsip_outbound_registration]
+    registration = config,pjsip.conf,criteria=type=registration
+    registration = realtime,ps_registrations

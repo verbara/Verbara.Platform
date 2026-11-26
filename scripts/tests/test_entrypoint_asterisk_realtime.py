@@ -10,8 +10,14 @@ way Asterisk 22 does:
     "host=%s port=%d dbname=%s user=%s" and " password=%s", with no quoting, and handed to PQconnectdb;
   - libpq's conninfo parser: an unquoted value ends at whitespace, a single-quoted one at the closing quote, and in
     both a backslash takes the next character literally.
+
+The Kubernetes chart replaces the image's entrypoint with its own command, which renders res_pgsql.conf with awk. That
+step is cut out of infra/k8s/helm/asterisk/templates/asterisk-statefulset.yaml the same way (from its `# Realtime:`
+comment to the `chmod`), run with `sh` against the chart's own res_pgsql.conf.template (from the ConfigMap template),
+and read back with the same parsers, so both render paths hand Postgres the same bytes.
 """
 import os
+import textwrap
 import shutil
 import subprocess
 import tempfile
@@ -24,6 +30,33 @@ _TEMPLATE = os.path.join(_REPO, "docker", "asterisk-config", "res_pgsql.conf.tem
 
 _START = "# Realtime Postgres rewiring"
 _END = 'if [ -n "$EXTERNAL_IP" ]'
+
+_CHART = os.path.join(_REPO, "infra", "k8s", "helm", "asterisk", "templates")
+_CHART_START = "# Realtime: the same value encoding"
+_CHART_END = "chmod 600"
+_CHART_TEMPLATE_KEY = "  res_pgsql.conf.template: |\n"
+
+
+def _chart_block():
+    with open(os.path.join(_CHART, "asterisk-statefulset.yaml"), encoding="utf-8") as fh:
+        text = fh.read()
+    start = text.index(_CHART_START)
+    start = text.rindex("\n", 0, start) + 1
+    end = text.index(_CHART_END, start)
+    end = text.rindex("\n", 0, end) + 1
+    return textwrap.dedent(text[start:end])
+
+
+def _chart_template():
+    with open(os.path.join(_CHART, "asterisk-configmap.yaml"), encoding="utf-8") as fh:
+        text = fh.read()
+    start = text.index(_CHART_TEMPLATE_KEY) + len(_CHART_TEMPLATE_KEY)
+    lines = []
+    for line in text[start:].splitlines():
+        if line and not line.startswith("    "):
+            break
+        lines.append(line[4:])
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def _realtime_block():
@@ -173,6 +206,42 @@ class EntrypointRealtimeTests(unittest.TestCase):
         conf = self._render()
         with open(_TEMPLATE, encoding="utf-8") as fh:
             self.assertEqual(conf, fh.read())
+
+
+class ChartRealtimeTests(EntrypointRealtimeTests):
+    """The same cases through the Kubernetes chart's command; every test above runs again here."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.conf = os.path.join(self.tmp, "res_pgsql.conf")
+        self.template = os.path.join(self.tmp, "res_pgsql.conf.template")
+        with open(self.template, "w", encoding="utf-8") as fh:
+            fh.write(_chart_template())
+        self.block = os.path.join(self.tmp, "block.sh")
+        with open(self.block, "w", encoding="utf-8") as fh:
+            fh.write(_chart_block().replace("/etc/asterisk/", self.tmp + "/"))
+
+    def _render(self, **env):
+        # The chart sets all five (its command refuses to start otherwise); a case that names only some keeps a
+        # plain host and port.
+        run_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PG_REALTIME_HOST": "postgres",
+                   "PG_REALTIME_PORT": "5432"}
+        run_env.update(env)
+        result = subprocess.run(["sh", self.block], env=run_env, capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "", "the block writes no error")
+        with open(self.conf, encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_realtime_block_should_keep_the_template_values_when_no_variable_is_set(self):
+        self.skipTest("the chart's command refuses to start with an unset PG_REALTIME_* (`:?`), so none is unset")
+
+    def test_chart_block_should_replace_every_placeholder(self):
+        conf = self._render(
+            PG_REALTIME_HOST="postgres-pooler.r55-data.svc.cluster.local", PG_REALTIME_PORT="5432",
+            PG_REALTIME_DB="verbara", PG_REALTIME_USER="platform", PG_REALTIME_PASSWORD="pw")
+        self.assertNotIn("__PG_REALTIME_", conf)
+        self.assertIn("requirements = createclose", conf.splitlines())
 
 
 if __name__ == "__main__":
