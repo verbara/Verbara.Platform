@@ -40,10 +40,14 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           # Renders Platform's AMI and ARI users from the mounted templates with the
-          # passwords from the Secrets, sets a per-pod systemname (unique channel ids
-          # if this ever runs more than one Asterisk), then execs Asterisk as before.
-          # awk reads the passwords from ENVIRON, so "/", "&" and "\" stay literal
-          # (no sed replacement). Re-run on every container start: idempotent.
+          # passwords from the Secrets, renders res_pgsql.conf (realtime: PJSIP
+          # endpoints, queues and trunks) from PG_REALTIME_*, sets a per-pod
+          # systemname (unique channel ids if this ever runs more than one Asterisk),
+          # then execs Asterisk as before. This command replaces the image's
+          # entrypoint, so docker/entrypoint-asterisk.sh never runs here and this
+          # block does its realtime step. awk reads every value from ENVIRON, so "/",
+          # "&" and "\" stay literal (no sed replacement). Re-run on every container
+          # start: idempotent.
           command:
             - sh
             - -c
@@ -52,11 +56,34 @@ spec:
               : "${AMI_PASSWORD:?AMI_PASSWORD is empty: set asterisk.ami.password or create the asterisk.ami.passwordSecret Secret}"
               : "${ARI_PASSWORD:?ARI_PASSWORD is empty: set asterisk.ari.password or create the asterisk.ari.passwordSecret Secret}"
               : "${POD_NAME:?POD_NAME is empty}"
+              : "${PG_REALTIME_HOST:?PG_REALTIME_HOST is empty: set asterisk.postgres.host}"
+              : "${PG_REALTIME_PORT:?PG_REALTIME_PORT is empty: set asterisk.postgres.port}"
+              : "${PG_REALTIME_DB:?PG_REALTIME_DB is empty: set asterisk.postgres.database}"
+              : "${PG_REALTIME_USER:?PG_REALTIME_USER is empty: set asterisk.postgres.user}"
+              : "${PG_REALTIME_PASSWORD:?PG_REALTIME_PASSWORD is empty: create the asterisk.postgres.passwordSecret Secret}"
               awk '/^secret = /{print "secret = " ENVIRON["AMI_PASSWORD"]; next} {print}' \
                 /etc/asterisk/manager.conf.template > /etc/asterisk/manager.conf
               awk '/^password = /{print "password = " ENVIRON["ARI_PASSWORD"]; next} {print}' \
                 /etc/asterisk/ari.conf.template > /etc/asterisk/ari.conf
-              chmod 600 /etc/asterisk/manager.conf /etc/asterisk/ari.conf
+              # Realtime: the same value encoding as entrypoint-asterisk.sh's set_realtime.
+              # res_config_pgsql pastes each value into its libpq connection string
+              # unquoted, so \ and ' get a backslash and a value holding whitespace is
+              # single-quoted; Asterisk's config parser reads a bare ; as a comment, so
+              # ; becomes \;. A plain value is written unchanged.
+              awk 'function rt(v,   i, c, o, r, q, b) {
+                  q = sprintf("%c", 39); b = sprintf("%c", 92); o = ""; r = ""
+                  for (i = 1; i <= length(v); i++) { c = substr(v, i, 1); if (c == b || c == q) o = o b; o = o c }
+                  if (o ~ /[ \t]/) o = q o q
+                  for (i = 1; i <= length(o); i++) { c = substr(o, i, 1); if (c == ";") r = r b; r = r c }
+                  return r
+                }
+                /^dbhost = / { print "dbhost = " rt(ENVIRON["PG_REALTIME_HOST"]); next }
+                /^dbport = / { print "dbport = " rt(ENVIRON["PG_REALTIME_PORT"]); next }
+                /^dbname = / { print "dbname = " rt(ENVIRON["PG_REALTIME_DB"]); next }
+                /^dbuser = / { print "dbuser = " rt(ENVIRON["PG_REALTIME_USER"]); next }
+                /^dbpass = / { print "dbpass = " rt(ENVIRON["PG_REALTIME_PASSWORD"]); next }
+                { print }' /etc/asterisk/res_pgsql.conf.template > /etc/asterisk/res_pgsql.conf
+              chmod 600 /etc/asterisk/manager.conf /etc/asterisk/ari.conf /etc/asterisk/res_pgsql.conf
               awk 'BEGIN { name = ENVIRON["POD_NAME"]; done = 0 }
                 /^[ \t]*systemname[ \t]*=/ { next }
                 { print }
@@ -90,15 +117,17 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.asterisk.ari.passwordSecret }}
                   key: {{ .Values.asterisk.ari.passwordKey }}
-            - name: PG_HOST
-              value: {{ .Values.asterisk.postgres.host }}
-            - name: PG_PORT
-              value: "{{ .Values.asterisk.postgres.port }}"
-            - name: PG_DATABASE
-              value: {{ .Values.asterisk.postgres.database }}
-            - name: PG_USER
-              value: {{ .Values.asterisk.postgres.user }}
-            - name: PG_PASSWORD
+            # Realtime database: the names docker/entrypoint-asterisk.sh reads in the
+            # Docker stacks, rendered into res_pgsql.conf by the command above.
+            - name: PG_REALTIME_HOST
+              value: {{ .Values.asterisk.postgres.host | quote }}
+            - name: PG_REALTIME_PORT
+              value: {{ .Values.asterisk.postgres.port | quote }}
+            - name: PG_REALTIME_DB
+              value: {{ .Values.asterisk.postgres.database | quote }}
+            - name: PG_REALTIME_USER
+              value: {{ .Values.asterisk.postgres.user | quote }}
+            - name: PG_REALTIME_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.asterisk.postgres.passwordSecret }}
@@ -129,6 +158,15 @@ spec:
             - name: config
               mountPath: /etc/asterisk/http.conf
               subPath: http.conf
+            - name: config
+              mountPath: /etc/asterisk/res_pgsql.conf.template
+              subPath: res_pgsql.conf.template
+            - name: config
+              mountPath: /etc/asterisk/extconfig.conf
+              subPath: extconfig.conf
+            - name: config
+              mountPath: /etc/asterisk/sorcery.conf
+              subPath: sorcery.conf
             - name: voicemail
               mountPath: /var/spool/asterisk/voicemail
             - name: recordings

@@ -658,7 +658,9 @@ jobs:
         run: pip install --disable-pip-version-check pyyaml==6.0.2
       # Every compose file under docker/ that builds Asterisk next to a postgres service points Asterisk's realtime
       # (res_pgsql.conf, rendered from PG_REALTIME_* by entrypoint-asterisk.sh) at that Postgres: same database, user
-      # and password, with and without the operator's POSTGRES_* in .env. Found by scanning, not by a list.
+      # and password, with and without the operator's POSTGRES_* in .env. Found by scanning, not by a list. It also
+      # renders the asterisk and platform Helm charts (`helm template`): the chart's Asterisk sets and renders every
+      # PG_REALTIME_* the entrypoint reads, ships the realtime mappings, and uses platform-api's Postgres settings.
       - name: Asterisk realtime database
         run: python3 scripts/check-asterisk-realtime.py
       # No compose file under docker/ (nor the Helm chart) pastes the Postgres password into an Npgsql connection
