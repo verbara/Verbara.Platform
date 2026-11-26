@@ -50,6 +50,22 @@ public sealed partial class ComposeNginxUpstreamTests
     }
 
     [Fact]
+    public void ShippedNginxServices_ShouldIncludeEveryServiceThatRunsAnNginxImage_WhenDiscovered()
+    {
+        var discovered = DiscoverNginxServices().Select(p => (p.Compose, p.Service)).ToHashSet();
+        var nginxServices = ShippedComposeFiles()
+            .SelectMany(compose => ForwardedHeadersTopologyTests.ServiceBlocks(File.ReadAllText(compose))
+                .Where(s => NginxImageLine().IsMatch(s.Value))
+                .Select(s => (ToRepoRelative(compose), s.Key)))
+            .ToList();
+
+        nginxServices.Should().NotBeEmpty("the shipped stacks run nginx proxies");
+        nginxServices.Should().OnlyContain(s => discovered.Contains(s),
+            "a service that runs nginx must mount its configuration as '- ./x.conf:/etc/nginx/...', the form the " +
+            "upstream check reads; any other form would leave that proxy unchecked");
+    }
+
+    [Fact]
     public void UpstreamHosts_ShouldReadUpstreamServersAndDirectProxyPasses_WhenParsed()
     {
         const string config =
@@ -199,11 +215,8 @@ public sealed partial class ComposeNginxUpstreamTests
     /// <summary>Each (compose file, service, configuration) whose service bind-mounts an nginx configuration from this tree.</summary>
     private static List<(string Compose, string Service, string Conf)> DiscoverNginxServices()
     {
-        var composeFiles = Directory.EnumerateFiles(RepoPath(""), "docker-compose*.y*ml")
-            .Concat(Directory.EnumerateFiles(RepoPath("docker"), "docker-compose*.y*ml", SearchOption.AllDirectories));
-
         var found = new List<(string, string, string)>();
-        foreach (var compose in composeFiles)
+        foreach (var compose in ShippedComposeFiles())
         {
             foreach (var (service, block) in ForwardedHeadersTopologyTests.ServiceBlocks(File.ReadAllText(compose)))
             {
@@ -218,6 +231,10 @@ public sealed partial class ComposeNginxUpstreamTests
 
         return found.Order().ToList();
     }
+
+    private static IEnumerable<string> ShippedComposeFiles() =>
+        Directory.EnumerateFiles(RepoPath(""), "docker-compose*.y*ml")
+            .Concat(Directory.EnumerateFiles(RepoPath("docker"), "docker-compose*.y*ml", SearchOption.AllDirectories));
 
     private static string? ContainerName(string serviceBlock)
     {
@@ -260,6 +277,9 @@ public sealed partial class ComposeNginxUpstreamTests
 
     [GeneratedRegex("""^\s*-\s*["']?(?<source>[^\s:"']+\.conf):/etc/nginx/""", RegexOptions.Multiline)]
     private static partial Regex NginxConfMount();
+
+    [GeneratedRegex("""^    image:\s*["']?(?:[^\s"'#]*/)?nginx[^\s"'#/:@]*(?:[:@"'\s]|$)""", RegexOptions.Multiline)]
+    private static partial Regex NginxImageLine();
 
     [GeneratedRegex(@"^(?:https?)://(?<host>[^/:]+)")]
     private static partial Regex ProxyPassHost();

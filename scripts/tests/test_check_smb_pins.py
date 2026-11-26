@@ -247,5 +247,12 @@ class WebFollowerTests(_Fixture):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("docker-compose.production.yml", r.stdout)
 
+    def test_main_ShouldCheckTheProductionStack_WhenTheDefaultComposeIsNamedExplicitly(self):
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        r = subprocess.run([sys.executable, _SCRIPT, "--compose", "docker/docker-compose.reference-smb.yml"],
+                           capture_output=True, text=True, check=False, cwd=root)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("docker-compose.production.yml", r.stdout)
+
 if __name__ == "__main__":
     unittest.main()

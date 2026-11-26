@@ -196,7 +196,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     followers = args.web_follower
     if followers is None:
-        followers = _DEFAULT_WEB_FOLLOWERS if args.compose == _DEFAULT_COMPOSE else []
+        followers = _DEFAULT_WEB_FOLLOWERS if os.path.abspath(args.compose) == _DEFAULT_COMPOSE else []
     followers = [os.path.relpath(f) for f in followers]
     args.compose, args.template = os.path.relpath(args.compose), os.path.relpath(args.template)
     try:
