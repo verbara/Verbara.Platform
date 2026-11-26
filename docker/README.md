@@ -81,7 +81,7 @@ with one of those licences an upgrade needs a current licence from Verbara.
 | `verbara-quickstart.sh` | End-to-end wrapper: lookup -> verify -> generate -> pull -> up. |
 | `docker-compose.verified.yml` | Template — operators substitute their resolved digest. |
 | `docker-compose.full.yml` | Existing dev/demo full-stack compose (Asterisk + API + Web + storage). |
-| `docker-compose.production.yml` | Existing production compose (no dev seeds, external storage assumed). |
+| `docker-compose.production.yml` | Existing production compose (no dev seeds, external storage assumed). Builds the Platform services from this tree and runs the published Web image at `PLATFORM_WEB_TAG` (the reference SMB stack's release). |
 
 ### Operator runbook
 

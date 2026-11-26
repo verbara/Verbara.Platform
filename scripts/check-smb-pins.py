@@ -2,7 +2,7 @@
 """SMB reference stack pin guard (OpenSpec change bump-smb-reference-stack-pins, design Decision 3).
 
 Usage:
-  check-smb-pins.py [--compose PATH] [--template PATH] [--web-changelog PATH]
+  check-smb-pins.py [--compose PATH] [--template PATH] [--web-changelog PATH] [--web-follower PATH ...]
 
 Agreement check (always; offline, deterministic — run by CI):
   Every `ghcr.io/verbara/platform/<image>:` reference in the SMB compose must read
@@ -10,6 +10,11 @@ Agreement check (always; offline, deterministic — run by CI):
   or a variable without a default fails. All API defaults must be equal, and equal to the template's
   `PLATFORM_API_TAG`; the Web default must equal the template's `PLATFORM_WEB_TAG`. Each pin must be a release tag
   (`vX.Y.Z` for the API, `vX.Y.Z-web` for the Web console).
+
+Web follower check (always; offline): a stack that builds the API images from the tree but runs the published Web
+image (docker-compose.production.yml, the default follower when --compose is not given) must read
+`${PLATFORM_WEB_TAG:-X}` with X equal to the template's PLATFORM_WEB_TAG, so the Web pin moves in one step. A
+follower with no `ghcr.io/verbara/platform/web` image fails: its gateway proxies to a `web` service.
 
 Floor check (with --web-changelog; run with the sibling Verbara.Platform.Web checkout whenever the pins move):
   Reads the Web CHANGELOG section for the Web pin (`## [X.Y.Z-web]`, or the pre-suffix `## [X.Y.Z]`) and the
@@ -31,6 +36,7 @@ import sys
 _ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
 _DEFAULT_COMPOSE = os.path.join(_ROOT, "docker", "docker-compose.reference-smb.yml")
 _DEFAULT_TEMPLATE = os.path.join(_ROOT, "docker", ".env.reference-smb.example")
+_DEFAULT_WEB_FOLLOWERS = [os.path.join(_ROOT, "docker", "docker-compose.production.yml")]
 
 _IMAGE_RE = re.compile(r"^\s*image:\s*[\"']?ghcr\.io/verbara/platform/([A-Za-z0-9_.-]+):(\S+?)[\"']?\s*(?:#.*)?$")
 _VAR_DEFAULT_RE = re.compile(r"^\$\{(PLATFORM_API_TAG|PLATFORM_WEB_TAG):-([^}]*)\}$")
@@ -122,6 +128,27 @@ def check_agreement(compose_path, template_path):
     return tmpl.get("PLATFORM_API_TAG"), tmpl.get("PLATFORM_WEB_TAG"), errors
 
 
+def check_web_follower(follower_path, web_pin):
+    """Every Web image in the follower reads ${PLATFORM_WEB_TAG:-<the template's pin>}; at least one exists."""
+    errors = []
+    found = 0
+    for n, line in enumerate(_read(follower_path).splitlines(), 1):
+        m = _IMAGE_RE.match(line)
+        if not m or m.group(1) != "web":
+            continue
+        found += 1
+        tag = m.group(2)
+        v = _VAR_DEFAULT_RE.match(tag)
+        if not v or v.group(1) != "PLATFORM_WEB_TAG" or not v.group(2):
+            errors.append(f"{follower_path}:{n}: image 'web' tag is '{tag}'; expected '${{PLATFORM_WEB_TAG:-{web_pin}}}'")
+        elif web_pin is not None and v.group(2) != web_pin:
+            errors.append(f"PLATFORM_WEB_TAG: {follower_path}:{n} default for 'web' is {v.group(2)} but the template "
+                          f"has {web_pin}")
+    if not found:
+        errors.append(f"{follower_path}: no ghcr.io/verbara/platform/web image (its gateway proxies to a 'web' service)")
+    return errors
+
+
 def find_section(text, web_pin):
     """Returns (heading_looked_for, section_body or None). Only the pinned section, never a neighbour."""
     version = web_pin[1:] if web_pin.startswith("v") else web_pin
@@ -165,10 +192,17 @@ def main(argv=None):
     ap.add_argument("--compose", default=_DEFAULT_COMPOSE)
     ap.add_argument("--template", default=_DEFAULT_TEMPLATE)
     ap.add_argument("--web-changelog", default=None)
+    ap.add_argument("--web-follower", action="append", default=None)
     args = ap.parse_args(argv)
+    followers = args.web_follower
+    if followers is None:
+        followers = _DEFAULT_WEB_FOLLOWERS if args.compose == _DEFAULT_COMPOSE else []
+    followers = [os.path.relpath(f) for f in followers]
     args.compose, args.template = os.path.relpath(args.compose), os.path.relpath(args.template)
     try:
         api_pin, web_pin, errors = check_agreement(args.compose, args.template)
+        for follower in followers:
+            errors += check_web_follower(follower, web_pin)
         if args.web_changelog is not None:
             if web_pin is None:
                 errors.append("floor unknown: the template names no PLATFORM_WEB_TAG")
@@ -182,7 +216,8 @@ def main(argv=None):
             print(f"check-smb-pins: FAIL: {e}", file=sys.stderr)
         return _EXIT_FAIL
     checked = "agreement + Web floor" if args.web_changelog else "agreement"
-    print(f"check-smb-pins: OK ({checked}): PLATFORM_API_TAG={api_pin} PLATFORM_WEB_TAG={web_pin}")
+    also = f"; Web pin followed by {', '.join(followers)}" if followers else ""
+    print(f"check-smb-pins: OK ({checked}): PLATFORM_API_TAG={api_pin} PLATFORM_WEB_TAG={web_pin}{also}")
     return 0
 
 

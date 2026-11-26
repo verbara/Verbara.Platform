@@ -70,12 +70,14 @@ class _Fixture(unittest.TestCase):
             fh.write(text)
         return p
 
-    def run_guard(self, compose=None, template=None, changelog=None):
+    def run_guard(self, compose=None, template=None, changelog=None, follower=None):
         args = [sys.executable, _SCRIPT,
                 "--compose", self._write("compose.yml", compose if compose is not None else _compose()),
                 "--template", self._write("env.example", template if template is not None else _template())]
         if changelog is not None:
             args += ["--web-changelog", self._write("CHANGELOG.md", changelog)]
+        if follower is not None:
+            args += ["--web-follower", self._write("follower.yml", follower)]
         return subprocess.run(args, capture_output=True, text=True, check=False)
 
 
@@ -201,6 +203,49 @@ class InputTests(_Fixture):
         r = subprocess.run(args, capture_output=True, text=True, check=False)
         self.assertNotEqual(r.returncode, 0)
 
+
+
+def _follower(web_line):
+    return f"""services:
+  platform-api:
+    build:
+      context: ..
+  web:
+    {web_line}
+  nginx-gateway:
+    image: nginx:1.27-alpine
+"""
+
+
+class WebFollowerTests(_Fixture):
+    """A stack that builds the API from the tree but runs the published Web image (docker-compose.production.yml)
+    follows the reference stack's Web pin, so moving the pin moves both."""
+
+    def test_main_ShouldExitZero_WhenTheFollowerWebDefaultEqualsTheTemplate(self):
+        r = self.run_guard(follower=_follower(f"image: ghcr.io/verbara/platform/web:${{PLATFORM_WEB_TAG:-{_WEB}}}"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_main_ShouldFailNamingBothValues_WhenTheFollowerWebDefaultDiffers(self):
+        r = self.run_guard(follower=_follower("image: ghcr.io/verbara/platform/web:${PLATFORM_WEB_TAG:-v3.20.0-web}"))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        out = r.stdout + r.stderr
+        self.assertIn("v3.20.0-web", out)
+        self.assertIn(_WEB, out)
+
+    def test_main_ShouldFail_WhenTheFollowerWebTagIsHardCoded(self):
+        r = self.run_guard(follower=_follower(f"image: ghcr.io/verbara/platform/web:{_WEB}"))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("PLATFORM_WEB_TAG", r.stdout + r.stderr)
+
+    def test_main_ShouldFail_WhenTheFollowerRunsNoWebImage(self):
+        r = self.run_guard(follower=_follower("build:\n      context: ../../Verbara.Platform.Web"))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("no ghcr.io/verbara/platform/web image", r.stdout + r.stderr)
+
+    def test_main_ShouldCheckTheProductionStack_WhenRunWithTheDefaults(self):
+        r = subprocess.run([sys.executable, _SCRIPT], capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("docker-compose.production.yml", r.stdout)
 
 if __name__ == "__main__":
     unittest.main()
