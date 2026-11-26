@@ -30,11 +30,11 @@ public sealed class AuditCategoryGuardTests
 
     private static IReadOnlySet<string> Accepted() =>
         AuditCategoryScanner.AcceptedCategories(
-            Directory.EnumerateFiles(Path.Combine(Root, MigrationsDirectory), "*.sql")
+            Directory.EnumerateFiles(Path.Join(Root, MigrationsDirectory), "*.sql")
                 .Select(f => (Path.GetFileName(f), File.ReadAllText(f))));
 
     private static List<AuditCategoryWrite> Writes() =>
-        Directory.EnumerateFiles(Path.Combine(Root, "src"), "*.cs", SearchOption.AllDirectories)
+        Directory.EnumerateFiles(Path.Join(Root, "src"), "*.cs", SearchOption.AllDirectories)
             .Where(f => !f.Split(Path.DirectorySeparatorChar).Any(s => s is "bin" or "obj"))
             .SelectMany(f => AuditCategoryScanner.CategoryWrites(File.ReadAllText(f), Path.GetRelativePath(Root, f).Replace('\\', '/')))
             .ToList();
@@ -85,7 +85,7 @@ public sealed class AuditCategoryGuardTests
     [Fact]
     public void AuditEntryDocumentation_ShouldListExactlyTheAcceptedCategories_WhenEveryMigrationIsApplied()
     {
-        var documented = AuditCategoryScanner.DocumentedCategories(File.ReadAllText(Path.Combine(Root, AuditEntryFile)));
+        var documented = AuditCategoryScanner.DocumentedCategories(File.ReadAllText(Path.Join(Root, AuditEntryFile)));
 
         documented.Should().BeEquivalentTo(Accepted(), "AuditEntry.Category documents the values the constraint accepts");
     }
@@ -93,7 +93,7 @@ public sealed class AuditCategoryGuardTests
     [Fact]
     public void LiveDbTest_ShouldWriteEveryCategoryTheCodeWrites_WhenListingThem()
     {
-        var listed = AuditCategoryScanner.StringArrayField(File.ReadAllText(Path.Combine(Root, LiveDbTestFile)), "CategoriesTheCodeWrites");
+        var listed = AuditCategoryScanner.StringArrayField(File.ReadAllText(Path.Join(Root, LiveDbTestFile)), "CategoriesTheCodeWrites");
         var written = Writes().Where(w => w.Value is not null).Select(w => w.Value!).ToHashSet(StringComparer.Ordinal);
 
         listed.Should().BeEquivalentTo(written,

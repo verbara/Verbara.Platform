@@ -55,12 +55,11 @@ internal static partial class AuditCategoryScanner
         var root = CSharpSyntaxTree.ParseText(source).GetCompilationUnitRoot();
         var constants = Constants(root);
 
-        foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        var recordCalls = root.DescendantNodes().OfType<InvocationExpressionSyntax>()
+            .Where(i => MethodName(i) == "RecordAsync")
+            .Select(i => i.ArgumentList.Arguments);
+        foreach (var arguments in recordCalls)
         {
-            if (MethodName(invocation) != "RecordAsync")
-                continue;
-
-            var arguments = invocation.ArgumentList.Arguments;
             var named = arguments.FirstOrDefault(a => a.NameColon?.Name.Identifier.ValueText == "category");
             if (named is not null)
             {
@@ -74,19 +73,14 @@ internal static partial class AuditCategoryScanner
             }
         }
 
-        foreach (var creation in root.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
+        var categoryAssignments = root.DescendantNodes().OfType<ObjectCreationExpressionSyntax>()
+            .Where(c => TypeName(c.Type) == "AuditEntry" && c.Initializer is not null)
+            .SelectMany(c => c.Initializer!.Expressions.OfType<AssignmentExpressionSyntax>())
+            .Where(a => a.Left is IdentifierNameSyntax { Identifier.ValueText: "Category" });
+        foreach (var assignment in categoryAssignments)
         {
-            if (TypeName(creation.Type) != "AuditEntry" || creation.Initializer is null)
-                continue;
-
-            foreach (var assignment in creation.Initializer.Expressions.OfType<AssignmentExpressionSyntax>())
-            {
-                if (assignment.Left is IdentifierNameSyntax { Identifier.ValueText: "Category" })
-                {
-                    foreach (var write in Resolve(assignment.Right, root, constants, file))
-                        yield return write;
-                }
-            }
+            foreach (var write in Resolve(assignment.Right, root, constants, file))
+                yield return write;
         }
     }
 
@@ -161,28 +155,22 @@ internal static partial class AuditCategoryScanner
             results.Add(body.Expression);
         results.AddRange(method.DescendantNodes().OfType<ReturnStatementSyntax>().Select(r => r.Expression).OfType<ExpressionSyntax>());
 
-        foreach (var result in results)
-        {
-            var leaves = result is SwitchExpressionSyntax @switch
-                ? @switch.Arms.Select(a => a.Expression)
-                : [result];
-            foreach (var leaf in leaves.OfType<LiteralExpressionSyntax>().Where(l => l.IsKind(SyntaxKind.StringLiteralExpression)))
-                yield return leaf;
-        }
+        return results
+            .SelectMany(result => result is SwitchExpressionSyntax @switch ? @switch.Arms.Select(a => a.Expression) : [result])
+            .OfType<LiteralExpressionSyntax>()
+            .Where(l => l.IsKind(SyntaxKind.StringLiteralExpression));
     }
 
     private static Dictionary<string, string> Constants(CompilationUnitSyntax root)
     {
         var constants = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var field in root.DescendantNodes().OfType<FieldDeclarationSyntax>()
-                     .Where(f => f.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword))))
-        {
-            foreach (var variable in field.Declaration.Variables)
-            {
-                if (variable.Initializer?.Value is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.StringLiteralExpression))
-                    constants[variable.Identifier.ValueText] = literal.Token.ValueText;
-            }
-        }
+        var stringConstants = root.DescendantNodes().OfType<FieldDeclarationSyntax>()
+            .Where(f => f.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword)))
+            .SelectMany(f => f.Declaration.Variables)
+            .Select(v => (Name: v.Identifier.ValueText, Literal: v.Initializer?.Value as LiteralExpressionSyntax))
+            .Where(c => c.Literal is not null && c.Literal.IsKind(SyntaxKind.StringLiteralExpression));
+        foreach (var (name, literal) in stringConstants)
+            constants[name] = literal!.Token.ValueText;
 
         return constants;
     }
