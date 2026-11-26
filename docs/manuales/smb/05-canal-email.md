@@ -178,6 +178,8 @@ IMAP_USER=csat@tu-empresa.com
 IMAP_PASSWORD={app-password-del-buzon}
 ```
 
+> ⚠️ Con `IMAP_ENABLED=true`, el servicio mail **no arranca** si falta `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD` o el tenant (`IMAP_TENANT_ID` o `CUSTOMER_TENANT_ID`), y nombra el que falta en su log. Mientras no arranca tampoco sale ningún email (SMTP ni Graph): completalos o volvé a `IMAP_ENABLED=false`.
+
 3. Recrear mail y Api (`CSAT_REPLY_TO_DOMAIN` lo lee el Api): `dc up -d mail platform-api`.
 4. En los logs del mail, cada pasada del poller registra:
 

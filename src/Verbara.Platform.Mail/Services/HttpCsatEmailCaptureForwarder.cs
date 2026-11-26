@@ -29,7 +29,10 @@ public sealed class CsatCaptureForwardOptions
     /// <summary>Base address of the Platform Api host exposing the internal capture endpoint.</summary>
     public required string ApiBaseAddress { get; set; }
 
-    /// <summary>The <c>X-Service-Key</c> shared secret the internal endpoint validates.</summary>
+    /// <summary>
+    /// The <c>X-Service-Key</c> shared secret the internal endpoint validates against the Api's
+    /// <c>Services:ServiceKey</c>; when unset, the mail service's own <c>Services:ServiceKey</c> is sent.
+    /// </summary>
     public required string ServiceKey { get; set; }
 }
 

@@ -18,6 +18,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shell or `docker/.env`; `scripts/check-smb-pins.py` keeps the two stacks on one release). A new governance test
   reads the nginx configuration each compose service mounts and fails when the stack has no service for a host it
   proxies to, or starts that service only under a profile the proxy does not share. (#688)
+- **CSAT email replies reach the Api once the reply mailbox is on.** With `Imap__Enabled=true`, the mail service
+  needs the Api's address (`CsatCapture__ApiBaseAddress`) and the mailbox's tenant, host, user and password to read
+  replies and record their ratings, and `docker/.env.production.example` listed none of them: a stack started from it
+  with the mailbox turned on ran, but failed every poll on the first reply it matched, so no rating was recorded and
+  the only trace was a warning in the mail service's log. The example now lists them, commented, next to
+  `Imap__Enabled`, with what each must hold (`http://platform-api:5000` inside the production stack). The mail
+  service now refuses to start with the mailbox on and one of them missing, naming it in its log. On upgrade, a
+  stack that turned the mailbox on without them (in `docker-compose.reference-smb.yml`, `IMAP_ENABLED=true` with
+  `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD` or the tenant left empty) used to keep sending outbound email while
+  replies failed; its mail service now stops, outbound email included, until you fill them in or set
+  `Imap__Enabled` (`IMAP_ENABLED`) back to `false`. An unset
+  `CsatCapture__ServiceKey` now sends `Services__ServiceKey`, the key the Api checks on that call, so you set the key
+  once. `scripts/check-env-example-startup-settings.py` also reads these settings from the mail service's code and
+  fails when an env file a stack hands the mail service does not list them next to `Imap__Enabled`. (#691)
 - **The production stack starts from its example settings.** `docker/.env.production.example` left out settings the
   services of `docker/docker-compose.production.yml` refuse to start without, so a stack started from a copy of it
   restarted in a loop with the reason only in the logs: the mail service stopped without `Imap__TokenSigningSecret`,
