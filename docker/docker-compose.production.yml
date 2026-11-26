@@ -18,8 +18,8 @@
 # from that file as given. Compose's own ${VAR} substitution reads the shell
 # or .env instead, never .env.production, so the values written as ${VAR}
 # below (MINIO_ROOT_USER and MINIO_ROOT_PASSWORD, VERBARA_GATEWAY_IP,
-# VERBARA_NETWORK_SUBNET) go in the shell or docker/.env. .env.production
-# carries:
+# VERBARA_NETWORK_SUBNET, PLATFORM_WEB_TAG) go in the shell or docker/.env.
+# .env.production carries:
 #   - ConnectionStrings__Postgres with Maximum Pool Size=10 (or
 #     accept the ConnectionStringDefaults fallback in Program.cs)
 #   - POSTGRES_PASSWORD, and PGPASSWORD set to the same value: the services
@@ -146,6 +146,28 @@ services:
       timeout: 10s
       retries: 3
 
+  # The web console (React SPA served by nginx inside the published Web image).
+  # nginx-gateway sends every path that is not /api/, /hubs/, /ws/ or /health
+  # here, and its configuration names this service as `web`: nginx refuses to
+  # start when an upstream host does not resolve, so without it the gateway
+  # restarts in a loop. The image's own nginx resolves platform-api and
+  # realtime by these service names, on this stack's network. Pinned to the
+  # same release as docker-compose.reference-smb.yml (PLATFORM_WEB_TAG in
+  # .env.reference-smb.example; scripts/check-smb-pins.py keeps the two equal);
+  # set PLATFORM_WEB_TAG in the shell or docker/.env to run another release.
+  # Internal only: the gateway owns port 80.
+  web:
+    image: ghcr.io/verbara/platform/web:${PLATFORM_WEB_TAG:-v3.27.1-web}
+    depends_on:
+      platform-api:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
   # Reverse-proxy entrypoint — mirrors the Cilium HTTPRoute topology so the
   # browser SignalR client URL (/hubs/platform) is identical across docker
   # compose and K8s. /api/* fans to platform-api, /hubs/* to realtime, / to web.
@@ -166,6 +188,8 @@ services:
         condition: service_healthy
       realtime:
         condition: service_healthy
+      web:
+        condition: service_started
     restart: unless-stopped
     logging: *default-logging
     deploy:

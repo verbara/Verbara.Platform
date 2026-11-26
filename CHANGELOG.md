@@ -11,6 +11,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The production stack runs the web console.** `docker/docker-compose.production.yml` started a gateway that sends
+  the console's pages to a `web` service, but the stack had none, so the gateway restarted in a loop (`host not found
+  in upstream "web:80"`) and neither the console nor the Api was reachable through it. The stack now runs the
+  published Web image as `web`, at the same release as the reference SMB stack (`PLATFORM_WEB_TAG`, read from the
+  shell or `docker/.env`; `scripts/check-smb-pins.py` keeps the two stacks on one release). A new governance test
+  reads the nginx configuration each compose service mounts and fails when the stack has no service for a host it
+  proxies to, or starts that service only under a profile the proxy does not share. (#688)
 - **CSAT email replies reach the Api once the reply mailbox is on.** With `Imap__Enabled=true`, the mail service
   needs the Api's address (`CsatCapture__ApiBaseAddress`) and the mailbox's tenant, host, user and password to read
   replies and record their ratings, and `docker/.env.production.example` listed none of them: a stack started from it
