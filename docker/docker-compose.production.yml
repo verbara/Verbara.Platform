@@ -12,13 +12,25 @@
 # instance — real demand is 1 × 10 = 10 conns + ancillary. max_connections=200
 # is intentional operator headroom (capacity-planning.md tier minimum is 50).
 #
-# Operators MUST set the following in .env.production:
+# Copy .env.production.example to .env.production and fill in every empty
+# value; the example says what each setting is. The platform services
+# (platform-api, renderer, mail, realtime) and Postgres read their settings
+# from that file as given. Compose's own ${VAR} substitution reads the shell
+# or .env instead, never .env.production, so the values written as ${VAR}
+# below (MINIO_ROOT_USER and MINIO_ROOT_PASSWORD, VERBARA_GATEWAY_IP,
+# VERBARA_NETWORK_SUBNET) go in the shell or docker/.env. .env.production
+# carries:
 #   - ConnectionStrings__Postgres with Maximum Pool Size=10 (or
 #     accept the ConnectionStringDefaults fallback in Program.cs)
-#   - POSTGRES_PASSWORD (rotate from default), and PGPASSWORD set to the
-#     same value: the services read the password from PGPASSWORD, so the
-#     connection string carries no Password=
-#   - SERVICE_KEY (rotate from default)
+#   - POSTGRES_PASSWORD, and PGPASSWORD set to the same value: the services
+#     read the password from PGPASSWORD, so the connection string carries no
+#     Password=
+#   - the settings the services refuse to start without: Services__ServiceKey,
+#     Asterisk__Ami__Username and Asterisk__Ami__Password, CORS_ORIGINS,
+#     Imap__TokenSigningSecret, and Csat__Email__TokenSigningSecret with the
+#     same value (the Api refuses it present but empty)
+#     (scripts/check-env-example-startup-settings.py checks in CI that the
+#     example lists them)
 
 x-logging: &default-logging
   driver: json-file
@@ -176,10 +188,12 @@ services:
       - effective_cache_size=2GB
     volumes:
       - pgdata:/var/lib/postgresql
+    # POSTGRES_PASSWORD comes from .env.production, the file the services take PGPASSWORD from.
+    env_file:
+      - .env.production
     environment:
       POSTGRES_DB: verbara
       POSTGRES_USER: platform
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_secret}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U platform"]
       interval: 10s

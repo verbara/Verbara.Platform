@@ -22,6 +22,12 @@ It requires:
     probe value (an operator's own .env), it equals the `postgres` service's POSTGRES_PASSWORD in the same file,
     or, in an overlay without a `postgres` service, it follows POSTGRES_PASSWORD.
 A connection string that is a single variable (`${PG_CONNECTION_STRING}`) is the operator's own and is skipped.
+A service that takes PGPASSWORD from an `env_file:` (docker-compose.production.yml: .env.production) needs the stack's
+`postgres` service to read POSTGRES_PASSWORD from that same file, and the file (or its `.example`) to set the two
+equal: compose fills `${POSTGRES_PASSWORD}` from the shell and the `.env` next to the compose file, never from an
+env_file, so a postgres service with `POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-...}` is initialised with the default
+while the services send the operator's password. An env_file that is that `.env` is read by both and passes when the
+two values agree.
 A service that runs the realtime image (built from Dockerfile.realtime, or an image named `.../realtime:<tag>`) must
 also have `ConnectionStrings__Cluster` or `ConnectionStrings__Postgres`, in `environment:` or in an `env_file:` (the
 file, or its `.example` copy when the operator's own file is not in the tree; `environment:` wins): the realtime
@@ -39,8 +45,9 @@ Each failure line names the file, the service, the setting and what to change.
 
 Exit codes:
   0  pass
-  1  a stack pastes the password into a connection string, a service lacks or mismatches PGPASSWORD, or a
-     realtime service has no Postgres connection string
+  1  a stack pastes the password into a connection string, a service lacks or mismatches PGPASSWORD, a
+     realtime service has no Postgres connection string, or postgres does not read the env file the services
+     take PGPASSWORD from
   2  usage error, a file that cannot be read, or no Npgsql connection string found to check
 """
 import argparse
@@ -174,12 +181,63 @@ def check_realtime(rel, name, service, compose_dir, root):
             f"stack's Postgres connection string without Password= and PGPASSWORD from POSTGRES_PASSWORD"]
 
 
+def check_env_file_postgres(rel, services, compose_dir, root):
+    """Returns the failure lines for services whose PGPASSWORD comes from an env_file their stack's Postgres never reads.
+
+    Compose fills `${POSTGRES_PASSWORD}` from the shell and the `.env` file next to the compose file, never from an
+    `env_file:` entry. A service that takes PGPASSWORD from `.env.production` therefore uses the operator's password
+    while a postgres service with `POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-...}` is initialised with the default.
+    """
+    postgres = services.get("postgres")
+    if not isinstance(postgres, dict):
+        return []
+    pg_env = _env(postgres)
+    pg_raw = pg_env.get("POSTGRES_PASSWORD")
+    pg_files = {os.path.normpath(os.path.join(compose_dir, e)) for e in _env_file_paths(postgres)}
+    users = {}
+    for name, service in services.items():
+        if name == "postgres" or not isinstance(service, dict) or "PGPASSWORD" in _env(service):
+            continue
+        for entry in _env_file_paths(service):
+            path = os.path.normpath(os.path.join(compose_dir, entry))
+            found = next((p for p in (path, path + ".example") if os.path.isfile(p)), None)
+            if found is not None and "PGPASSWORD" in _read_env_file(found):
+                users.setdefault((path, found, entry), []).append(name)
+    failures = []
+    for (path, found, entry), names in sorted(users.items()):
+        keys = _read_env_file(found)
+        shown = os.path.relpath(found, root)
+        who = ", ".join(names)
+        interpolated = os.path.basename(path) == ".env" and os.path.dirname(path) == os.path.normpath(compose_dir)
+        if pg_raw is not None and not interpolated:
+            failures.append(
+                f"{rel}: {who} take PGPASSWORD from {entry}, and postgres takes POSTGRES_PASSWORD from '{pg_raw}', "
+                f"which compose fills from the shell or .env, never from {entry}, so Postgres is initialised with "
+                f"another password and they cannot connect; give postgres env_file: {entry} and drop "
+                f"POSTGRES_PASSWORD from its environment:")
+            continue
+        if pg_raw is None and path not in pg_files:
+            failures.append(f"{rel}: {who} take PGPASSWORD from {entry}, and postgres does not read {entry}; give "
+                            f"postgres env_file: {entry}")
+            continue
+        try:
+            want = interpolate(pg_raw, keys) if pg_raw is not None else keys.get("POSTGRES_PASSWORD")
+        except Refused:
+            continue
+        if want != keys["PGPASSWORD"]:
+            failures.append(f"{shown}: PGPASSWORD is '{keys['PGPASSWORD']}', and the POSTGRES_PASSWORD postgres "
+                            f"gets from it is '{want}'; keep the two equal")
+    return failures
+
+
 def check_file(rel, services, compose_dir=None, root=None):
     """Returns (connection strings checked, failure lines) for one compose file."""
     failures = []
     checked = 0
     postgres = services.get("postgres")
     pg_pass_raw = _env(postgres).get("POSTGRES_PASSWORD") if isinstance(postgres, dict) else None
+    if compose_dir is not None:
+        failures += check_env_file_postgres(rel, services, compose_dir, root)
     for name, service in services.items():
         if not isinstance(service, dict):
             continue
