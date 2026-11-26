@@ -20,12 +20,13 @@ public sealed class AuditEntry : ITenantScoped
 
     /// <summary>
     /// Audit category. Must be one of the values allowed by the
-    /// audit_entries_category_check constraint (migration 021 + 034 + 029):
+    /// audit_entries_category_check constraint (001_Baseline, widened by 029 and 033):
     /// "auth", "billing", "config", "tenant", "security", "impersonation",
     /// "retention", "data", "rbac", "data_access", "admin", "conversations",
-    /// "queues", "reports", "operational", "license", "contact". A value outside this set
-    /// is rejected by Postgres (23514) — keep the constraint and the call sites
-    /// in sync when adding a new category.
+    /// "queues", "reports", "operational", "license", "contact", "csat". A value outside
+    /// this set is rejected by Postgres (23514) — add a category in a new migration
+    /// before writing it. AuditCategoryGuardTests (Governance.Tests) fails when the
+    /// code, this list and the constraint disagree.
     /// </summary>
     public string Category { get; init; } = "config";
 

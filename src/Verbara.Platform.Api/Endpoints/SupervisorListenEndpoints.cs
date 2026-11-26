@@ -217,7 +217,10 @@ internal static partial class SupervisorListenEndpoints
         return TypedResults.Ok(new ListenPhoneDto(id, number));
     }
 
-    /// <summary>Audits a listen-phone change with only the number's last four digits (design D8); best-effort.</summary>
+    /// <summary>
+    /// Audits a listen-phone change with only the number's last four digits (design D8); best-effort. Category
+    /// <c>auth</c>, the category of every other change an administrator makes to a user (status, role, delete).
+    /// </summary>
     private static async Task AuditPhoneSetAsync(
         HttpContext context, IAuditService audit, TenantId tenantId, string userId, string? number, CancellationToken ct)
     {
@@ -231,7 +234,7 @@ internal static partial class SupervisorListenEndpoints
         {
             await audit.RecordAsync(
                 tenantId,
-                category: "users",
+                category: "auth",
                 action: ListenPhoneSetAction,
                 severity: "info",
                 actorId: CallerIdentity.ResolveUserIdOrSystem(context.User),
