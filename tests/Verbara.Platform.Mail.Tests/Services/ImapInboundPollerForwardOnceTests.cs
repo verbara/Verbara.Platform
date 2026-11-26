@@ -127,8 +127,12 @@ public sealed class ImapInboundPollerForwardOnceTests
         state.Position.Should().Be(new ImapPollPosition(7, 3));
     }
 
-    [Fact]
-    public async Task PollMailboxAsync_ShouldPassAMessageAtOnceAndForwardTheNext_WhenTheApiRefusesItsContent()
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Conflict)]
+    [InlineData(HttpStatusCode.UnprocessableEntity)]
+    public async Task PollMailboxAsync_ShouldPassAMessageAtOnceAndForwardTheNext_WhenTheApiRefusesItsContent(
+        HttpStatusCode status)
     {
         var server = new FakeMailbox(uidValidity: 7);
         var forwarder = new RecordingForwarder();
@@ -138,7 +142,7 @@ public sealed class ImapInboundPollerForwardOnceTests
         server.Deliver(rating: 1);
         server.Deliver(rating: 2);
         server.Deliver(rating: 3);
-        forwarder.FailAlways(rating: 2, HttpStatusCode.BadRequest);
+        forwarder.FailAlways(rating: 2, status);
 
         var first = await poller.PollMailboxAsync(Mailbox, CancellationToken.None);
         var second = await poller.PollMailboxAsync(Mailbox, CancellationToken.None);
@@ -150,12 +154,9 @@ public sealed class ImapInboundPollerForwardOnceTests
     }
 
     [Theory]
-    [InlineData(HttpStatusCode.ServiceUnavailable)]
-    [InlineData(HttpStatusCode.Unauthorized)]
-    [InlineData(HttpStatusCode.NotFound)]
-    [InlineData(HttpStatusCode.TooManyRequests)]
-    public async Task PollMailboxAsync_ShouldRetryAMessageThenPassIt_WhenItKeepsFailingWithAnAnswerARetryCanChange(
-        HttpStatusCode status)
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.UnsupportedMediaType)]
+    public async Task PollMailboxAsync_ShouldRetryAMessageThenPassIt_WhenTheApiKeepsFailingOnIt(HttpStatusCode status)
     {
         var server = new FakeMailbox(uidValidity: 7);
         var forwarder = new RecordingForwarder();
@@ -174,6 +175,41 @@ public sealed class ImapInboundPollerForwardOnceTests
         polls.Should().Equal(1, 0, 2, 0);
         forwarder.Rejected.Should().Equal(2, 2, 2);
         forwarder.Forwarded.Should().Equal(1, 3);
+        state.Position.Should().Be(new ImapPollPosition(7, 3));
+    }
+
+    // The Api is down, not licensed or misconfigured: no failed attempt belongs to the message, so the reply waits for
+    // the Api however long that takes, and nothing behind it is passed or forwarded out of order.
+    public static TheoryData<string> UnavailableAnswers =>
+    [
+        "no-answer", "timeout",
+        nameof(HttpStatusCode.PaymentRequired), nameof(HttpStatusCode.Unauthorized), nameof(HttpStatusCode.Forbidden),
+        nameof(HttpStatusCode.NotFound), nameof(HttpStatusCode.RequestTimeout), nameof(HttpStatusCode.TooManyRequests),
+        nameof(HttpStatusCode.BadGateway), nameof(HttpStatusCode.ServiceUnavailable), nameof(HttpStatusCode.GatewayTimeout),
+    ];
+
+    [Theory]
+    [MemberData(nameof(UnavailableAnswers))]
+    public async Task PollMailboxAsync_ShouldKeepAMessageUntilTheApiAnswers_WhenTheApiIsUnavailable(string answer)
+    {
+        var server = new FakeMailbox(uidValidity: 7);
+        var forwarder = new RecordingForwarder();
+        var state = new InMemoryPositionStore();
+        var poller = NewPoller(forwarder, server, state, maxAttempts: 3);
+        await poller.PollMailboxAsync(Mailbox, CancellationToken.None);
+        server.Deliver(rating: 1);
+        server.Deliver(rating: 2);
+        server.Deliver(rating: 3);
+        forwarder.FailAlways(rating: 2, answer);
+
+        for (var i = 0; i < 10; i++)
+            await poller.PollMailboxAsync(Mailbox, CancellationToken.None);
+        forwarder.Recover(rating: 2);
+        var afterRecovery = await poller.PollMailboxAsync(Mailbox, CancellationToken.None);
+
+        forwarder.Rejected.Should().HaveCount(10);
+        afterRecovery.Should().Be(2);
+        forwarder.Forwarded.Should().Equal(1, 2, 3);
         state.Position.Should().Be(new ImapPollPosition(7, 3));
     }
 
@@ -278,29 +314,45 @@ public sealed class ImapInboundPollerForwardOnceTests
     /// <summary>Records each rating the Api accepted; can answer an error status for a given rating.</summary>
     internal sealed class RecordingForwarder : ICsatEmailCaptureForwarder
     {
-        private readonly Dictionary<int, (HttpStatusCode Status, int Times)> _failures = [];
+        private readonly Dictionary<int, (string Answer, int Times)> _failures = [];
 
         public List<int> Forwarded { get; } = [];
 
         public List<int> Rejected { get; } = [];
 
-        public void FailOnce(int rating, HttpStatusCode status) => _failures[rating] = (status, 1);
+        public void FailOnce(int rating, HttpStatusCode status) => _failures[rating] = (status.ToString(), 1);
 
-        public void FailAlways(int rating, HttpStatusCode status) => _failures[rating] = (status, int.MaxValue);
+        public void FailAlways(int rating, HttpStatusCode status) => _failures[rating] = (status.ToString(), int.MaxValue);
+
+        /// <summary>
+        /// Fails with an HTTP status named as in <see cref="HttpStatusCode"/>, or with no answer at all: <c>no-answer</c>
+        /// (connection refused, as HttpClient throws it) or <c>timeout</c> (the HttpClient timeout).
+        /// </summary>
+        public void FailAlways(int rating, string answer) => _failures[rating] = (answer, int.MaxValue);
+
+        public void Recover(int rating) => _failures.Remove(rating);
 
         public Task ForwardEmailRatingAsync(CsatEmailDispatch dispatch, int rating, DateTimeOffset capturedAt, CancellationToken ct)
         {
             if (_failures.TryGetValue(rating, out var failure) && failure.Times > 0)
             {
-                _failures[rating] = (failure.Status, failure.Times == int.MaxValue ? int.MaxValue : failure.Times - 1);
+                _failures[rating] = (failure.Answer, failure.Times == int.MaxValue ? int.MaxValue : failure.Times - 1);
                 Rejected.Add(rating);
-                throw new HttpRequestException($"Response status code does not indicate success: {(int)failure.Status}.",
-                    inner: null, statusCode: failure.Status);
+                throw failure.Answer switch
+                {
+                    "no-answer" => new HttpRequestException(HttpRequestError.ConnectionError, "Connection refused (api:8080)"),
+                    "timeout" => new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.",
+                        new TimeoutException("The operation was canceled.")),
+                    _ => StatusError(Enum.Parse<HttpStatusCode>(failure.Answer)),
+                };
             }
 
             Forwarded.Add(rating);
             return Task.CompletedTask;
         }
+
+        private static HttpRequestException StatusError(HttpStatusCode status) =>
+            new($"Response status code does not indicate success: {(int)status}.", inner: null, statusCode: status);
     }
 
     private sealed class FailingEmailService : IEmailService

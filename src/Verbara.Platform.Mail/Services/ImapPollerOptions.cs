@@ -25,9 +25,11 @@ public sealed class ImapPollerOptions
     public string TokenSigningSecret { get; set; } = string.Empty;
 
     /// <summary>
-    /// How many polls in a row may fail on the same message (the Api unreachable, a database error) before the
-    /// poller logs it as not recorded and moves past it, so one message cannot hold a mailbox back for good.
-    /// A message the Api refuses for its content is passed at once. Counted in memory; a restart starts again.
+    /// How many polls in a row may fail on the same message (the Api answers 500 for it, the message cannot be
+    /// read) before the poller logs it as not recorded and moves past it, so one message cannot hold a mailbox back
+    /// for good. A poll in which the Api is unavailable (no answer, a timeout, 401, 402, 403, 404, 408, 429, 502,
+    /// 503, 504) is not counted: the message waits for the Api. A message the Api refuses for its content (400,
+    /// 409, 422) is passed at once. Counted in memory; a restart starts again.
     /// </summary>
     public int MaxAttemptsPerMessage { get; set; } = 20;
 

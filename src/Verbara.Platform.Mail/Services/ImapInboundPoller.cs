@@ -103,8 +103,10 @@ public sealed partial class ImapInboundPoller : BackgroundService
     /// <summary>
     /// Drains one mailbox: connects, reads the stored position, hands each message with a UID above it
     /// to the reply handler in UID order, and stores the position after each one. A message that fails
-    /// stops the drain, so the next poll starts at that message; one the Api refuses for its content, or
-    /// one that failed <see cref="ImapPollerOptions.MaxAttemptsPerMessage"/> times, is logged and passed.
+    /// stops the drain, so the next poll starts at that message. While the Api is unavailable (no answer,
+    /// not licensed, a service-key mismatch, 502/503/504 ...) the message waits however long that takes;
+    /// one the Api refuses for its content, or one that failed on its own
+    /// <see cref="ImapPollerOptions.MaxAttemptsPerMessage"/> times, is logged and passed.
     /// Public so a host or an integration test can trigger a single deterministic drain without waiting
     /// on the timer. Returns the number of messages handled.
     /// </summary>
@@ -174,6 +176,12 @@ public sealed partial class ImapInboundPoller : BackgroundService
                 return true;
             }
 
+            if (IsApiUnavailable(ex))
+            {
+                LogApiUnavailable(mailbox.TenantId, uid.Id, ex);
+                return false;
+            }
+
             var attempts = _attempts.AddOrUpdate(attemptKey, 1, (_, n) => n + 1);
             if (attempts >= Math.Max(1, _options.MaxAttemptsPerMessage))
             {
@@ -188,13 +196,25 @@ public sealed partial class ImapInboundPoller : BackgroundService
 #pragma warning restore CA1031
     }
 
-    // The Api answered that this request can never succeed as sent (400, 409, 422 ...). An answer that a
-    // retry or a configuration fix can change (401, 403, 404, 408, 429, 5xx, no answer) is not a refusal.
+    // The Api answered that this request can never succeed as sent: the only answers its capture endpoint gives
+    // for the content of a reply. Every other answer is retried.
     private static bool IsRefusedForItsContent(Exception ex) =>
-        ex is HttpRequestException { StatusCode: { } status }
-        && (int)status is >= 400 and < 500
-        && status is not (HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound
-            or HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests);
+        ex is HttpRequestException { StatusCode: HttpStatusCode.BadRequest or HttpStatusCode.Conflict
+            or HttpStatusCode.UnprocessableEntity };
+
+    // The Api was not reached, or answered for its own state (not licensed, a service-key or routing mismatch,
+    // overloaded, down behind a proxy), never for this message. Such a failure is not counted against the message:
+    // an outage of any length holds the mailbox and then resumes, instead of passing one reply after another.
+    private static bool IsApiUnavailable(Exception ex) => ex switch
+    {
+        HttpRequestException { StatusCode: null } => true,
+        HttpRequestException { StatusCode: { } status } => status is HttpStatusCode.PaymentRequired
+            or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound
+            or HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout,
+        OperationCanceledException { InnerException: TimeoutException } => true, // the HttpClient timeout
+        _ => false,
+    };
 
     private async Task StartFromNewestAsync(
         ImapMailboxOptions mailbox, IMailFolder inbox, uint uidValidity, ImapPollPosition? stored, CancellationToken ct)
@@ -236,6 +256,9 @@ public sealed partial class ImapInboundPoller : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "IMAP message failed, retried on the next poll: tenant={TenantId} uid={Uid} attempt={Attempt}")]
     private partial void LogMessageFailed(string tenantId, uint uid, int attempt, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "IMAP message waits for the Api, retried on the next poll: tenant={TenantId} uid={Uid}")]
+    private partial void LogApiUnavailable(string tenantId, uint uid, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "IMAP message passed after {Attempts} failed attempts, its reply is not recorded: tenant={TenantId} uid={Uid}")]
     private partial void LogMessageGivenUp(string tenantId, uint uid, int attempts, Exception exception);
