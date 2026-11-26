@@ -16,10 +16,11 @@ internal sealed record AuditCategoryWrite(string File, int Line, string Expressi
 /// <list type="bullet">
 ///   <item>The accepted set: the check's list as a fresh database ends up, the last definition in the migrations in the
 ///   order the runner applies them (ordinal file name), SQL comments removed.</item>
-///   <item>The written set: every <c>category:</c> argument of a <c>RecordAsync</c> call, a string literal second
-///   argument of a positional <c>RecordAsync</c> call, and every <c>Category =</c> of a <c>new AuditEntry { }</c>,
-///   resolved through string literals, <c>const string</c> fields, conditionals, <c>??</c> and the returned values of
-///   a method in the same file.</item>
+///   <item>The written set: every <c>category:</c> argument of a <c>RecordAsync</c> call, the second argument of a
+///   positional <c>RecordAsync</c> call, and every <c>Category =</c> of an audit entry creation — <c>new AuditEntry { }</c>,
+///   or a target-typed <c>new() { }</c> declared as <c>AuditEntry</c> or, when its type cannot be read, setting every
+///   required member of <c>AuditEntry</c> — resolved through string literals, <c>const string</c> fields, conditionals
+///   and the returned values of a method in the same file.</item>
 /// </list>
 /// Syntax only: it reads text, so a value it cannot resolve is reported with a null value rather than skipped.
 /// </summary>
@@ -66,17 +67,19 @@ internal static partial class AuditCategoryScanner
                 foreach (var write in Resolve(named.Expression, root, constants, file))
                     yield return write;
             }
-            else if (arguments.Count > 1 && arguments[1].NameColon is null
-                     && arguments[1].Expression is LiteralExpressionSyntax { RawKind: (int)SyntaxKind.StringLiteralExpression } literal)
+            else if (arguments.Count > 1 && arguments[1].NameColon is null)
             {
-                yield return Write(literal, file, literal.Token.ValueText);
+                // Positional: the category is the second argument. A RecordAsync of another shape lands here too and is
+                // reported unresolved, so the guard names it rather than reading past a category it cannot see.
+                foreach (var write in Resolve(arguments[1].Expression, root, constants, file))
+                    yield return write;
             }
         }
 
-        var categoryAssignments = root.DescendantNodes().OfType<ObjectCreationExpressionSyntax>()
-            .Where(c => TypeName(c.Type) == "AuditEntry" && c.Initializer is not null)
+        var categoryAssignments = root.DescendantNodes().OfType<BaseObjectCreationExpressionSyntax>()
+            .Where(c => c.Initializer is not null && CreatesAuditEntry(c))
             .SelectMany(c => c.Initializer!.Expressions.OfType<AssignmentExpressionSyntax>())
-            .Where(a => a.Left is IdentifierNameSyntax { Identifier.ValueText: "Category" });
+            .Where(a => AssignedMember(a) == "Category");
         foreach (var assignment in categoryAssignments)
         {
             foreach (var write in Resolve(assignment.Right, root, constants, file))
@@ -147,6 +150,46 @@ internal static partial class AuditCategoryScanner
         }
     }
 
+    // The members AuditEntry declares required: any initializer that creates one sets them all.
+    private static readonly string[] AuditEntryRequiredMembers = ["EntryId", "TenantId", "Action", "OccurredAt"];
+
+    private static bool CreatesAuditEntry(BaseObjectCreationExpressionSyntax creation) => creation switch
+    {
+        ObjectCreationExpressionSyntax explicitType => TypeName(explicitType.Type) == "AuditEntry",
+        ImplicitObjectCreationExpressionSyntax implicitType => TargetTypeName(implicitType) is { } name
+            ? name == "AuditEntry"
+            : SetsEveryRequiredAuditEntryMember(implicitType.Initializer!),
+        _ => false,
+    };
+
+    // The declared type a target-typed new() takes, when the syntax names it: a typed local or field, a property
+    // initializer, or what a method or property returns. Anything else (an argument, a lambda, a generic) is unknown.
+    private static string? TargetTypeName(ImplicitObjectCreationExpressionSyntax creation) => creation.Parent switch
+    {
+        EqualsValueClauseSyntax { Parent: VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax declaration } }
+            when !declaration.Type.IsVar => TypeName(declaration.Type),
+        EqualsValueClauseSyntax { Parent: PropertyDeclarationSyntax property } => TypeName(property.Type),
+        ArrowExpressionClauseSyntax { Parent: MethodDeclarationSyntax method } => TypeName(method.ReturnType),
+        ArrowExpressionClauseSyntax { Parent: PropertyDeclarationSyntax property } => TypeName(property.Type),
+        ReturnStatementSyntax @return => @return.Ancestors().FirstOrDefault(a => a is AnonymousFunctionExpressionSyntax
+                or LocalFunctionStatementSyntax or MethodDeclarationSyntax) switch
+            {
+                MethodDeclarationSyntax method => TypeName(method.ReturnType),
+                LocalFunctionStatementSyntax local => TypeName(local.ReturnType),
+                _ => null,
+            },
+        _ => null,
+    };
+
+    private static bool SetsEveryRequiredAuditEntryMember(InitializerExpressionSyntax initializer)
+    {
+        var assigned = initializer.Expressions.OfType<AssignmentExpressionSyntax>().Select(AssignedMember).ToHashSet(StringComparer.Ordinal);
+        return AuditEntryRequiredMembers.All(assigned.Contains);
+    }
+
+    private static string? AssignedMember(AssignmentExpressionSyntax assignment) =>
+        assignment.Left is IdentifierNameSyntax identifier ? identifier.Identifier.ValueText : null;
+
     // The string literals a method can return: switch-expression arms, return statements and an expression body.
     private static IEnumerable<LiteralExpressionSyntax> ReturnedStrings(MethodDeclarationSyntax method)
     {
@@ -197,6 +240,8 @@ internal static partial class AuditCategoryScanner
     {
         IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
         QualifiedNameSyntax qualified => qualified.Right.Identifier.ValueText,
+        AliasQualifiedNameSyntax aliased => aliased.Name.Identifier.ValueText,
+        NullableTypeSyntax nullable => TypeName(nullable.ElementType),
         _ => null,
     };
 

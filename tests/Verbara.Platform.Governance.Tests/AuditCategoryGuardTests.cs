@@ -26,6 +26,18 @@ public sealed class AuditCategoryGuardTests
             "maps a stored row back to an entry; it writes nothing"),
     ];
 
+    /// <summary>
+    /// Calls named <c>RecordAsync</c> that are not the audit service's, so their second argument is no category: each is
+    /// checked to still exist, so an entry cannot outlive its code.
+    /// </summary>
+    private static readonly (string File, string Expression, string Reason)[] OtherRecordAsyncCalls =
+    [
+        ("src/Verbara.Platform.Api/Endpoints/ConversationEndpoints.cs", "conversationId.Value",
+            "ITypificationCreditMeter.RecordAsync bills tokens; its second argument is the conversation"),
+        ("src/Verbara.Platform.Api/Endpoints/Shared/UserAdminChange.cs", "user",
+            "a private helper whose second argument is the user; it writes category \"auth\", which is scanned"),
+    ];
+
     private static string Root => TestTreeSource.RepoRoot();
 
     private static IReadOnlySet<string> Accepted() =>
@@ -40,7 +52,7 @@ public sealed class AuditCategoryGuardTests
             .ToList();
 
     private static bool IsPassThrough(AuditCategoryWrite write) =>
-        write.Value is null && PassThroughs.Any(p => p.File == write.File && p.Expression == write.Expression);
+        write.Value is null && PassThroughs.Concat(OtherRecordAsyncCalls).Any(p => p.File == write.File && p.Expression == write.Expression);
 
     [Fact]
     public void CodeWrites_ShouldUseOnlyCategoriesTheConstraintAccepts_WhenEveryMigrationIsApplied()
@@ -77,7 +89,7 @@ public sealed class AuditCategoryGuardTests
     {
         var writes = Writes();
 
-        foreach (var (file, expression, reason) in PassThroughs)
+        foreach (var (file, expression, reason) in PassThroughs.Concat(OtherRecordAsyncCalls))
             writes.Where(w => w.File == file && w.Expression == expression && w.Value == null).Should().NotBeEmpty(
                 "the pass-through '{0}' in {1} ({2}) is listed, so it must still be there", expression, file, reason);
     }
@@ -140,16 +152,26 @@ public sealed class AuditCategoryGuardTests
                     audit.RecordAsync(t, category: b ? "auth" : "rbac");
                     audit.RecordAsync(t, category: Infer(x));
                     audit.RecordAsync(t, category: x);
+                    audit.RecordAsync(t, Cat, "a", "info", "u", "user");
+                    audit.RecordAsync(t, x, "a", "info", "u", "user");
                     meter.RecordAsync(t, x.Value, 1);
                     var e = new AuditEntry { Category = Cat };
                     var f = new Other { Category = "ignored" };
+                    AuditEntry g = new() { EntryId = i, TenantId = t, Action = "a", OccurredAt = n, Category = "typed_cat" };
+                    Other h = new() { EntryId = i, TenantId = t, Action = "a", OccurredAt = n, Category = "ignored" };
+                    Use(new() { EntryId = i, TenantId = t, Action = "a", OccurredAt = n, Category = "untyped_cat" });
+                    Use(new() { Category = "ignored" });
                 }
+                AuditEntry Make() => new() { EntryId = i, TenantId = t, Action = "a", OccurredAt = n, Category = "returned_cat" };
+                Other MakeOther() { return new() { EntryId = i, TenantId = t, Action = "a", OccurredAt = n, Category = "ignored" }; }
                 static string Infer(string a) => a switch { "l" => "login_cat", _ => "config" };
             }
             """;
 
         var writes = AuditCategoryScanner.CategoryWrites(source, "C.cs").Select(w => w.Value).ToList();
 
-        writes.Should().Equal("csat", "users", "auth", "rbac", "login_cat", "config", null, "contact");
+        writes.Should().Equal(
+            "csat", "users", "auth", "rbac", "login_cat", "config", null, "contact", null, null,
+            "contact", "typed_cat", "untyped_cat", "returned_cat");
     }
 }
