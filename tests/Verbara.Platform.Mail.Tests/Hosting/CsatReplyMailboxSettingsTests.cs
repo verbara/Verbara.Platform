@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Verbara.Platform.Mail.Services;
@@ -107,18 +108,25 @@ public sealed class CsatReplyMailboxSettingsTests
         start.Should().NotThrow();
     }
 
-    /// <summary>Starts the host and returns every message of the exception it fails with.</summary>
+    /// <summary>
+    /// Runs the checks the host runs when it starts (<see cref="IStartupValidator"/>, fed by <c>ValidateOnStart</c>)
+    /// over the services <see cref="ServiceCollectionExtensions.AddPlatformMail"/> registers, and returns every
+    /// message of the exception they fail with. Starting a whole test host here raced: a host that fails to start
+    /// is disposed while it starts, so the failure sometimes surfaced as "Cannot access a disposed object".
+    /// </summary>
     private static string StartFailure(Dictionary<string, string?> settings)
     {
-        using var factory = new LogCapturingMailFactory(new LogRecordCapture(), settings);
-        var start = () => factory.Services;
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+        using var provider = new ServiceCollection().AddPlatformMail(configuration).BuildServiceProvider();
+        var start = () => provider.GetRequiredService<IStartupValidator>().Validate();
         var thrown = start.Should().Throw<Exception>(because: "a host that cannot forward replies must not start").Which;
         var messages = new List<string>();
         for (Exception? e = thrown; e is not null; e = e.InnerException)
         {
             messages.Add(e.Message);
             if (e is AggregateException aggregate)
-                messages.AddRange(aggregate.InnerExceptions.Select(inner => inner.Message));
+                messages.AddRange(aggregate.InnerExceptions.SelectMany(inner =>
+                    inner is OptionsValidationException v ? v.Failures.Prepend(inner.Message) : [inner.Message]));
             if (e is OptionsValidationException validation)
                 messages.AddRange(validation.Failures);
         }
