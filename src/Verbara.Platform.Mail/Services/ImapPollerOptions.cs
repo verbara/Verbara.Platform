@@ -3,9 +3,9 @@ namespace Verbara.Platform.Mail.Services;
 /// <summary>
 /// Configuration for the <see cref="ImapInboundPoller"/> (csat-runner Phase C). Binds the
 /// <c>Imap</c> configuration section. Each configured <see cref="ImapMailboxOptions"/> is a
-/// per-tenant <c>csat@…</c> mailbox the poller drains on a fixed interval, tracking the last
-/// processed UID per mailbox so an already-seen message is never double-captured (UID-based
-/// idempotent dedup).
+/// per-tenant <c>csat@…</c> mailbox the poller drains on a fixed interval, storing the last
+/// handled UID per mailbox (<see cref="IImapPollPositionStore"/>) so a message is forwarded once,
+/// across restarts too.
 /// </summary>
 public sealed class ImapPollerOptions
 {
@@ -23,6 +23,13 @@ public sealed class ImapPollerOptions
     /// when <see cref="Enabled"/> is true; the reused <c>HmacCsatReplyTokenSigner</c> throws when empty.
     /// </summary>
     public string TokenSigningSecret { get; set; } = string.Empty;
+
+    /// <summary>
+    /// How many polls in a row may fail on the same message (the Api unreachable, a database error) before the
+    /// poller logs it as not recorded and moves past it, so one message cannot hold a mailbox back for good.
+    /// A message the Api refuses for its content is passed at once. Counted in memory; a restart starts again.
+    /// </summary>
+    public int MaxAttemptsPerMessage { get; set; } = 20;
 
     /// <summary>When true, a captured reply triggers a per-tenant auto-reply acknowledgement email.</summary>
     public bool AutoReplyEnabled { get; set; }

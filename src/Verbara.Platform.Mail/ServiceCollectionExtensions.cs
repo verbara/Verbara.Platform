@@ -44,6 +44,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<ICsatEmailDispatchResolver, PostgresCsatEmailDispatchResolver>();
         services.AddSingleton<ICsatEmailCaptureForwarder, HttpCsatEmailCaptureForwarder>();
+        services.AddSingleton<IImapPollPositionStore, PostgresImapPollPositionStore>();
         services.AddHttpClient(HttpCsatEmailCaptureForwarder.HttpClientName);
 
         services.AddSingleton(sp =>

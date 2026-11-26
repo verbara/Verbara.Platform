@@ -11,6 +11,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **CSAT email replies are recorded once across restarts of the mail service.** The mail service remembered which
+  replies it had read only while it ran, so after each restart it read the reply mailbox from the start and sent every
+  reply still in it to the Api again, adding its rating once more; and when one reply in a poll failed, the next poll
+  sent again the replies before it. It now keeps, per mailbox, the last reply it handled in the database (new
+  migration `034_MailImapPollPositions.sql`, run by the Api at start-up), updated after each reply. A reply that fails
+  is retried on the next poll on its own; one the Api refuses, or one still failing after `Imap__MaxAttemptsPerMessage`
+  polls (default 20), is written to the mail service's log as not recorded and passed, so it cannot hold the mailbox
+  back. An acknowledgement email that fails to send no longer makes the reply count twice. The mailbox is still only
+  read, never changed. On upgrade, the first read of each mailbox starts after its newest message and sends none of the
+  replies already in it, which the previous version had read; a reply that arrived while the mail service was stopped
+  for the upgrade is not recorded. (#696)
 - **CSAT ratings answer success once they are recorded.** Every CSAT capture (webchat, voice, email and SMS) and
   every CSAT template change saved its data and then failed on its audit record, whose category `csat` the audit
   table did not accept, so the call answered 500 for work that was done. The mail service took that answer as a
