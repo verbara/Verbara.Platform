@@ -83,7 +83,10 @@ internal sealed class CsatVoiceCaptureSinkAdapter : ICsatVoiceCaptureSink
             CapturedAt = capture.CapturedAt,
         };
 
-        await _responseStore.SaveAsync(response, cancellationToken).ConfigureAwait(false);
+        // The same contract the HTTP capture endpoint follows (#697): a rating the store did not keep publishes no
+        // event and writes no audit row.
+        if (!await _responseStore.SaveAsync(response, cancellationToken).ConfigureAwait(false))
+            return;
 
         _eventBus.Publish(new CsatResponseRecordedEvent(
             TenantId: tenantId.Value,

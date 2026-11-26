@@ -11,7 +11,10 @@
 --
 -- Upgrade over existing duplicates: of the rows sharing a key, the first
 -- captured (COALESCE(captured_at, submitted_at), then response_id) is kept and
--- the others are deleted, the same rule the store applies to new captures.
+-- the others are deleted, the same rule the store applies to new captures. The
+-- RAISE NOTICE below gives the number removed to a client that shows notices
+-- (psql); the API's migration runner does not log notices. Audit records of the
+-- removed ratings are kept.
 -- Nothing references a survey_responses row by id (no foreign keys). Webchat,
 -- voice and non-CSAT rows are untouched: the index is partial.
 --
@@ -23,6 +26,8 @@
 -- =============================================================================
 
 DO $$
+DECLARE
+    removed integer;
 BEGIN
     LOCK TABLE survey_responses IN SHARE ROW EXCLUSIVE MODE;
 
@@ -35,6 +40,8 @@ BEGIN
       AND keep.channel = r.channel
       AND (COALESCE(keep.captured_at, keep.submitted_at), keep.response_id)
           < (COALESCE(r.captured_at, r.submitted_at), r.response_id);
+    GET DIAGNOSTICS removed = ROW_COUNT;
+    RAISE NOTICE '035_SurveyResponseOnePerDispatch: removed % later email or SMS rating(s)', removed;
 
     CREATE UNIQUE INDEX IF NOT EXISTS ux_survey_resp_one_per_dispatch
         ON survey_responses (tenant_id, conversation_id, survey_id, channel)

@@ -18,7 +18,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   still answers 200 (with `totalResponses` 0) so the mail service and the SMS path do not send it again. A new
   database migration (`035_SurveyResponseOnePerDispatch.sql`) adds that rule to the `survey_responses` table; on a
   database that already holds several ratings for one email or SMS survey it keeps the first one captured and removes
-  the later ones, and it runs at start-up and can run again. Webchat and voice ratings are unchanged. (#697)
+  the later ones (their audit records are kept), and it runs at start-up and can run again. Webchat and voice ratings
+  are unchanged. (#697)
 - **CSAT ratings answer success once they are recorded.** Every CSAT capture (webchat, voice, email and SMS) and
   every CSAT template change saved its data and then failed on its audit record, whose category `csat` the audit
   table did not accept, so the call answered 500 for work that was done. The mail service took that answer as a
