@@ -11,6 +11,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The production stack starts from its example settings.** `docker/.env.production.example` left out settings the
+  services of `docker/docker-compose.production.yml` refuse to start without, so a stack started from a copy of it
+  restarted in a loop with the reason only in the logs: the mail service stopped without `Imap__TokenSigningSecret`,
+  and the Api without `Services__ServiceKey` and the Asterisk manager user and password. The example now lists them,
+  with `Csat__Email__TokenSigningSecret` (the same secret, so the Api and the mail service agree on CSAT email
+  replies), each with a comment on what it is and how to generate it, and leaves them empty, which the services
+  refuse, until you fill them in. Postgres now also reads `POSTGRES_PASSWORD` from `.env.production`: before, compose
+  took it from the shell or `docker/.env`, so a new database was created with the default `platform_secret` while
+  the services sent the password from `.env.production`, and the Api could not connect. The password applies only
+  when Postgres creates its database; an existing data volume keeps its own. A new CI check,
+  `scripts/check-env-example-startup-settings.py`, reads from the code which settings the Api and the mail service
+  refuse to start without and fails when the env file a stack hands them lacks one, and
+  `scripts/check-compose-postgres-password.py` now fails when Postgres does not read the env file the services take
+  `PGPASSWORD` from. (#683)
 - **Asterisk installed with the Kubernetes Helm chart loads its endpoints from the platform's database.** The chart
   passed the database settings under names nothing read, and its start command replaced the image's own, so Asterisk
   kept a sample configuration, never connected to Postgres and loaded no endpoints, queues or trunks from it. The

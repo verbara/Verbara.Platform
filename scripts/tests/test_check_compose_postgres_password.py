@@ -22,6 +22,27 @@ _POSTGRES = (
     "      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_secret}\n"
 )
 
+# The production stack's form: Postgres reads POSTGRES_PASSWORD from the same env file the services read PGPASSWORD from.
+_POSTGRES_FROM_ENV_FILE = (
+    "  postgres:\n"
+    "    image: postgres:18-alpine\n"
+    "    env_file:\n"
+    "      - .env.production\n"
+    "    environment:\n"
+    "      POSTGRES_DB: verbara\n"
+    "      POSTGRES_USER: platform\n"
+)
+
+_ENV_FILE_SERVICE = (
+    "  platform-api:\n"
+    "    image: verbara/api\n"
+    "    env_file:\n"
+    "      - .env.production\n"
+)
+
+_EXAMPLE = ("POSTGRES_PASSWORD=change_me\nPGPASSWORD=change_me\n"
+            "ConnectionStrings__Postgres=Host=postgres;Database=verbara;Username=platform\n")
+
 _GOOD_CONN = "Host=postgres;Database=verbara;Username=platform"
 
 
@@ -306,9 +327,9 @@ class CheckComposePostgresPasswordTests(unittest.TestCase):
         self.assertIn("realtime ConnectionStrings__Cluster", r.stdout)
 
     def test_the_realtime_service_passes_with_an_env_file_that_holds_it(self):
-        self._stack(_api() + _realtime(env_file=".env.production") + _POSTGRES)
+        self._stack(_api() + _realtime(env_file=".env.production") + _POSTGRES_FROM_ENV_FILE)
         self._write("docker/.env.production.example",
-                    "PGPASSWORD=x\nConnectionStrings__Postgres=Host=postgres;Username=platform\n")
+                    "POSTGRES_PASSWORD=x\nPGPASSWORD=x\nConnectionStrings__Postgres=Host=postgres;Username=platform\n")
         r = self._run()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
@@ -328,6 +349,54 @@ class CheckComposePostgresPasswordTests(unittest.TestCase):
     def test_a_realtime_overlay_without_build_or_image_is_left_to_its_base(self):
         self._stack(_api() + _POSTGRES)
         self._write("docker/docker-compose.scale.yml", "services:\n" + _realtime(build=None))
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    # A service that reads PGPASSWORD from an env_file needs a postgres service that reads the same file (#683).
+
+    def test_fails_when_postgres_takes_its_password_from_interpolation_and_the_service_from_an_env_file(self):
+        self._stack(_ENV_FILE_SERVICE + _POSTGRES)
+        self._write("docker/.env.production.example", _EXAMPLE)
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("platform-api take PGPASSWORD from .env.production", r.stdout)
+        self.assertIn("give postgres env_file: .env.production", r.stdout)
+
+    def test_passes_when_postgres_reads_the_same_env_file(self):
+        self._stack(_ENV_FILE_SERVICE + _POSTGRES_FROM_ENV_FILE)
+        self._write("docker/.env.production.example", _EXAMPLE)
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_fails_when_postgres_reads_another_env_file(self):
+        self._stack(_ENV_FILE_SERVICE + _POSTGRES_FROM_ENV_FILE.replace(".env.production", ".env.other"))
+        self._write("docker/.env.production.example", _EXAMPLE)
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("postgres does not read .env.production", r.stdout)
+
+    def test_fails_when_the_env_file_sets_two_different_passwords(self):
+        self._stack(_ENV_FILE_SERVICE + _POSTGRES_FROM_ENV_FILE)
+        self._write("docker/.env.production.example", _EXAMPLE.replace("PGPASSWORD=change_me", "PGPASSWORD=other"))
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("docker/.env.production.example: PGPASSWORD is 'other'", r.stdout)
+
+    def test_the_compose_dotenv_is_read_by_interpolation(self):
+        self._stack(_ENV_FILE_SERVICE.replace(".env.production", ".env") + _POSTGRES)
+        self._write("docker/.env", _EXAMPLE)
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_the_compose_dotenv_with_two_different_passwords_fails(self):
+        self._stack(_ENV_FILE_SERVICE.replace(".env.production", ".env") + _POSTGRES)
+        self._write("docker/.env", _EXAMPLE.replace("PGPASSWORD=change_me", "PGPASSWORD=other"))
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_a_service_with_its_own_pgpassword_is_left_to_the_environment_rule(self):
+        self._stack(_api() + _POSTGRES)
+        self._write("docker/.env.production.example", _EXAMPLE)
         r = self._run()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
