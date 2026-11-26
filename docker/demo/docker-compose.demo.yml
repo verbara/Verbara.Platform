@@ -146,12 +146,20 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:5030
       ASPNETCORE_ENVIRONMENT: Production
+      # Leader election reads Cluster, falling back to Postgres. Without either, startup throws
+      # "ConnectionStrings:Cluster (or :Postgres fallback) is required for leader election" and the
+      # container crash-loops. Same database platform-api uses; the password comes from PGPASSWORD,
+      # as on platform-api above.
+      ConnectionStrings__Postgres: Host=postgres;Database=${POSTGRES_DB:-platform};Username=platform
+      PGPASSWORD: ${POSTGRES_PASSWORD:-platform_demo}
       ConnectionStrings__Redis: redis:6379
       ConnectionStrings__IdentityRedis: redis:6379
       Services__ServiceKey: demo-service-key-2026
       Services__PlatformApi__BaseUrl: http://platform-api:5000
       Asterisk__ClusterNodeId: realtime-demo
     depends_on:
+      postgres:
+        condition: service_healthy
       platform-api:
         condition: service_healthy
       redis:

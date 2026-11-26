@@ -38,6 +38,22 @@ def _api(conn=_GOOD_CONN, pgpassword="${POSTGRES_PASSWORD:-platform_secret}", na
     return text
 
 
+def _realtime(env="", build=True, env_file=None, name="realtime"):
+    text = f"  {name}:\n"
+    if build is True:
+        text += "    build:\n      context: ..\n      dockerfile: src/Verbara.Platform.Realtime/Dockerfile.realtime\n"
+    elif build:
+        text += f"    image: {build}\n"
+    if env_file:
+        text += f"    env_file: {env_file}\n"
+    text += "    environment:\n      ConnectionStrings__Redis: redis:6379\n" + env
+    return text
+
+
+_RT_PG = ("      ConnectionStrings__Postgres: \"Host=postgres;Database=verbara;Username=platform\"\n"
+          "      PGPASSWORD: ${POSTGRES_PASSWORD:-platform_secret}\n")
+
+
 class CheckComposePostgresPasswordTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -218,6 +234,102 @@ class CheckComposePostgresPasswordTests(unittest.TestCase):
         r = self._run()
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("cannot read", r.stderr)
+
+    def test_fails_when_the_realtime_service_has_no_postgres_connection_string(self):
+        self._stack(_api() + _realtime() + _POSTGRES)
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("docker/docker-compose.full.yml: realtime runs the realtime image and has no "
+                      "ConnectionStrings__Cluster or ConnectionStrings__Postgres", r.stdout)
+
+    def test_a_realtime_image_is_recognised_by_its_name(self):
+        self._stack(_api() + _realtime(build="ghcr.io/verbara/platform/realtime:${TAG:-v1}", name="rt") + _POSTGRES)
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("rt runs the realtime image", r.stdout)
+
+    def test_the_realtime_service_passes_with_postgres_or_cluster(self):
+        cluster = _RT_PG.replace("ConnectionStrings__Postgres", "ConnectionStrings__Cluster")
+        for env in (_RT_PG, cluster):
+            with self.subTest(env=env.split(":")[0].strip()):
+                self._stack(_api() + _realtime(env) + _POSTGRES)
+                r = self._run()
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_blank_realtime_connection_string_fails(self):
+        self._stack(_api() + _realtime("      ConnectionStrings__Postgres: \"\"\n") + _POSTGRES)
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("realtime runs the realtime image", r.stdout)
+
+    def test_a_blank_cluster_next_to_postgres_fails(self):
+        # Program.cs reads Cluster ?? Postgres, and an empty Cluster is not null, so it never reaches Postgres.
+        self._stack(_api() + _realtime(_RT_PG + "      ConnectionStrings__Cluster: \"\"\n") + _POSTGRES)
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("realtime ConnectionStrings__Cluster is blank, and realtime runs the realtime image", r.stdout)
+
+    def test_a_realtime_connection_string_that_is_not_npgsql_fails(self):
+        self._stack(_api() + _realtime("      ConnectionStrings__Postgres: redis:6379\n") + _POSTGRES)
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("realtime ConnectionStrings__Postgres", r.stdout)
+
+    def test_an_undefaulted_variable_realtime_connection_string_fails(self):
+        self._stack(_api() + _realtime("      ConnectionStrings__Postgres: ${PG_RT}\n") + _POSTGRES)
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("realtime ConnectionStrings__Postgres is '${PG_RT}', which is blank when no variable is set",
+                      r.stdout)
+
+    def test_a_defaulted_or_required_variable_realtime_connection_string_passes(self):
+        for value in ("${PG_RT:-Host=postgres;Database=verbara;Username=platform}", "${PG_RT:?set PG_RT}"):
+            with self.subTest(value=value):
+                self._stack(_api() + _realtime(f"      ConnectionStrings__Postgres: \"{value}\"\n"
+                                               "      PGPASSWORD: ${POSTGRES_PASSWORD:-platform_secret}\n")
+                            + _POSTGRES)
+                r = self._run()
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_environment_overrides_a_blank_env_file_cluster(self):
+        self._stack(_api() + _realtime(_RT_PG.replace("Postgres:", "Cluster:", 1), env_file=".env.production")
+                    + _POSTGRES)
+        self._write("docker/.env.production.example", "ConnectionStrings__Cluster=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_blank_env_file_cluster_next_to_postgres_fails(self):
+        self._stack(_api() + _realtime(_RT_PG, env_file=".env.production") + _POSTGRES)
+        self._write("docker/.env.production.example", "ConnectionStrings__Cluster=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("realtime ConnectionStrings__Cluster", r.stdout)
+
+    def test_the_realtime_service_passes_with_an_env_file_that_holds_it(self):
+        self._stack(_api() + _realtime(env_file=".env.production") + _POSTGRES)
+        self._write("docker/.env.production.example",
+                    "PGPASSWORD=x\nConnectionStrings__Postgres=Host=postgres;Username=platform\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_the_realtime_service_fails_with_an_env_file_that_lacks_it(self):
+        self._stack(_api() + _realtime(env_file=".env.production") + _POSTGRES)
+        self._write("docker/.env.production.example", "ConnectionStrings__Redis=redis:6379\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("realtime runs the realtime image", r.stdout)
+
+    def test_the_realtime_service_fails_with_an_env_file_not_in_the_tree(self):
+        self._stack(_api() + _realtime(env_file=".env.missing") + _POSTGRES)
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("docker/.env.missing", r.stdout)
+
+    def test_a_realtime_overlay_without_build_or_image_is_left_to_its_base(self):
+        self._stack(_api() + _POSTGRES)
+        self._write("docker/docker-compose.scale.yml", "services:\n" + _realtime(build=None))
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_this_repositorys_stacks_leave_the_password_to_pgpassword(self):
         r = self._run(_REPO)

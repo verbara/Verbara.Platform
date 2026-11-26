@@ -22,6 +22,14 @@ It requires:
     probe value (an operator's own .env), it equals the `postgres` service's POSTGRES_PASSWORD in the same file,
     or, in an overlay without a `postgres` service, it follows POSTGRES_PASSWORD.
 A connection string that is a single variable (`${PG_CONNECTION_STRING}`) is the operator's own and is skipped.
+A service that runs the realtime image (built from Dockerfile.realtime, or an image named `.../realtime:<tag>`) must
+also have `ConnectionStrings__Cluster` or `ConnectionStrings__Postgres`, in `environment:` or in an `env_file:` (the
+file, or its `.example` copy when the operator's own file is not in the tree; `environment:` wins): the realtime
+service's leader election reads Cluster, falling back to Postgres only when Cluster is absent (an empty Cluster is
+not absent), and stops at startup without one. The one it reads must be an Npgsql connection string with no
+variables set: not blank, not a variable with no default, not a non-Postgres value; a `${VAR:?}` compose refuses to
+start without is left to the operator. A
+service with neither `build:` nor `image:` is an overlay and is left to the file it is layered on.
 In the Helm charts under infra/ (templates, helpers and values, read as text) a Password that is a `$(VAR)` or
 `{{ }}` expansion fails the same way, wherever it sits in the string or on its line.
 An env file under docker/ or at the root (`.env*`, the files `env_file:` hands a service as given, such as
@@ -31,7 +39,8 @@ Each failure line names the file, the service, the setting and what to change.
 
 Exit codes:
   0  pass
-  1  a stack pastes the password into a connection string, or a service lacks or mismatches PGPASSWORD
+  1  a stack pastes the password into a connection string, a service lacks or mismatches PGPASSWORD, or a
+     realtime service has no Postgres connection string
   2  usage error, a file that cannot be read, or no Npgsql connection string found to check
 """
 import argparse
@@ -83,7 +92,89 @@ def _is_npgsql(value):
     return bool(_HOST_KEYS & set(_pairs(value)))
 
 
-def check_file(rel, services):
+_REALTIME_KEYS = ("connectionstrings__cluster", "connectionstrings__postgres")
+_REALTIME_IMAGE = re.compile(r"(?:^|/)realtime(?:[:@]|$)")
+
+
+def _is_realtime(service):
+    build = service.get("build")
+    if isinstance(build, dict) and os.path.basename(str(build.get("dockerfile") or "")) == "Dockerfile.realtime":
+        return True
+    return bool(_REALTIME_IMAGE.search(str(service.get("image") or "")))
+
+
+def _env_file_paths(service):
+    entries = service.get("env_file") or []
+    if not isinstance(entries, list):
+        entries = [entries]
+    for entry in entries:
+        yield str(entry.get("path", "")) if isinstance(entry, dict) else str(entry)
+
+
+def _read_env_file(path):
+    keys = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh.read().splitlines():
+                m = _ENV_LINE.match(line)
+                if m:
+                    keys[m.group(1)] = m.group(2).strip()
+    except OSError as e:
+        raise InputError(f"cannot read {path}: {e}") from e
+    return keys
+
+
+def _realtime_value(value):
+    """Returns why a realtime connection string cannot open Postgres, or None when it can (or compose refuses it)."""
+    try:
+        text = interpolate(value, {})
+    except Refused:
+        return None  # compose will not start without it, so the operator has to supply one
+    if not text.strip():
+        return "blank" if not value.strip() else f"'{value.strip()}', which is blank when no variable is set"
+    if not _is_npgsql(text):
+        return f"'{value.strip()}', which is not an Npgsql connection string (it names no Host)"
+    return None
+
+
+def check_realtime(rel, name, service, compose_dir, root):
+    """Returns the failure lines for one realtime service whose Postgres connection string cannot work."""
+    if not _is_realtime(service):
+        return []
+    # What the container sees: the env_file entries in order, then `environment:` over them (compose precedence).
+    # A key with no value passes the host's own variable through, which compose leaves unset, so it is skipped.
+    seen = {}
+    missing = []
+    for entry in _env_file_paths(service):
+        path = os.path.normpath(os.path.join(compose_dir, entry))
+        found = next((p for p in (path, path + ".example") if os.path.isfile(p)), None)
+        if found is None:
+            missing.append(os.path.relpath(path, root))
+            continue
+        for k, v in _read_env_file(found).items():
+            if k.lower() in _REALTIME_KEYS:
+                seen[k.lower()] = (k, v)
+    for k, v in _env(service).items():
+        if str(k).lower() in _REALTIME_KEYS and v is not None:
+            seen[str(k).lower()] = (str(k), str(v))
+    # Program.cs reads GetConnectionString("Cluster") ?? GetConnectionString("Postgres"): only an absent Cluster
+    # falls back to Postgres; an empty one is not null and stops the boot.
+    picked = next((seen[k] for k in _REALTIME_KEYS if k in seen), None)
+    if picked is None:
+        where = f" (env_file {', '.join(missing)} is not in the tree, nor its .example)" if missing else ""
+        return [f"{rel}: {name} runs the realtime image and has no ConnectionStrings__Cluster or "
+                f"ConnectionStrings__Postgres{where}, so its leader election stops the boot; give {name} the stack's "
+                f"Postgres connection string without Password= and PGPASSWORD from POSTGRES_PASSWORD"]
+    key, value = picked
+    why = _realtime_value(value)
+    if why is None:
+        return []
+    return [f"{rel}: {name} {key} is {why}, and {name} runs the realtime image, whose leader election reads it "
+            f"(Cluster first; an empty Cluster does not fall back to Postgres) and stops the boot; give {name} the "
+            f"stack's Postgres connection string without Password= and PGPASSWORD from POSTGRES_PASSWORD"]
+
+
+def check_file(rel, services, compose_dir=None, root=None):
     """Returns (connection strings checked, failure lines) for one compose file."""
     failures = []
     checked = 0
@@ -92,6 +183,8 @@ def check_file(rel, services):
     for name, service in services.items():
         if not isinstance(service, dict):
             continue
+        if compose_dir is not None:
+            failures += check_realtime(rel, name, service, compose_dir, root)
         env = _env(service)
         needs_pgpassword = []
         for key, raw in env.items():
@@ -213,7 +306,7 @@ def main(argv=None):
             + glob.glob(os.path.join(root, "compose*.yaml"))))
         for path in files:
             rel = os.path.relpath(path, root)
-            count, found = check_file(rel, load(path))
+            count, found = check_file(rel, load(path), os.path.dirname(path), root)
             if count:
                 checked.append(rel)
                 total += count
