@@ -147,8 +147,22 @@ public sealed partial class CsatReplyMailHandler
 
         await _forwarder.ForwardEmailRatingAsync(dispatch, rating.Value, now, ct).ConfigureAwait(false);
 
+        // The rating is recorded at this point: an acknowledgement that fails to send is logged, never thrown,
+        // because a thrown error makes the poller read this message again and forward the rating twice (#696).
         if (_autoReplyEnabled && _autoReply is not null)
-            await SendAutoReplyAsync(message, dispatch, ct).ConfigureAwait(false);
+        {
+            try
+            {
+                await SendAutoReplyAsync(message, dispatch, ct).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // see above: the capture already happened; a cancellation still propagates
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                if (_logger is not null)
+                    LogAutoReplyFailed(_logger, dispatch.ConversationId, ex);
+            }
+#pragma warning restore CA1031
+        }
 
         if (_logger is not null)
             LogCaptured(_logger, dispatch.ConversationId, rating.Value);
@@ -224,4 +238,7 @@ public sealed partial class CsatReplyMailHandler
 
     [LoggerMessage(Level = LogLevel.Information, Message = "CSAT email reply captured: conversation={ConversationId} rating={Rating}")]
     private static partial void LogCaptured(ILogger logger, string conversationId, int rating);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "CSAT email acknowledgement not sent, the rating is recorded: conversation={ConversationId}")]
+    private static partial void LogAutoReplyFailed(ILogger logger, string conversationId, Exception exception);
 }

@@ -5,6 +5,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- #696: the poll-position store's live test applies the real migration, not a copy of its DDL. -->
+    <None Include="..\..\src\Verbara.Platform.Storage.Postgres\Migrations\034_MailImapPollPositions.sql"
+          Link="Migrations\034_MailImapPollPositions.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
