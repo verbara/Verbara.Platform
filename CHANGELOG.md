@@ -35,6 +35,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   realtime deployment that expands `$(PG_PASSWORD)` must drop its `Password=` when you upgrade, or it sends that text
   as the password. A new CI check, `scripts/check-compose-postgres-password.py`, fails when a stack, an env file
   under `docker/` or a Helm chart puts the password in a connection string again. (#673)
+- **The demo stack's realtime service starts.** In `docker/demo/docker-compose.demo.yml` the realtime service had no
+  Postgres connection string, so it stopped at startup with "ConnectionStrings:Cluster (or :Postgres fallback) is
+  required for leader election" and restarted in a loop, whatever `POSTGRES_PASSWORD` was set to; the gateway, which
+  waits for it, never started. It now gets the same database as the demo's Api, with the password
+  as `PGPASSWORD`, and waits for Postgres to be healthy. `scripts/check-compose-postgres-password.py` now also fails
+  when a stack under `docker/` runs the realtime image without `ConnectionStrings__Cluster` or
+  `ConnectionStrings__Postgres`, in its `environment:` or its `env_file:`. (#679)
 - **An ended Agent Assist session leaves the Monitor list sooner when the shared store blips.** With Redis, a failed
   removal of a session's Monitor record, when the session ends or its tenants come into conflict, is now retried up
   to four times in about 1.75 s instead of being left until the record expires (last update + 15 s). Until the
