@@ -13,15 +13,20 @@ Password and which compose sets as given, whatever characters it holds.
 
 The script finds every compose file under docker/ and at the repository root (so a new stack or overlay is checked
 without being listed here), and in each service every `ConnectionStrings__*` entry that is an Npgsql connection
-string (it names a `Host` or `Server`). It requires:
+string (it names a `Host` or `Server`). Only `ConnectionStrings__*` keys are read because the Platform, Sdk and Pro
+code open every Postgres connection from `GetConnectionString(...)`; a new setting read another way needs a rule here.
+It requires:
   - no Password (`Password`, `Pwd`, `Psw`) built from a variable; a fixed literal is left alone;
   - a connection string with no Password comes with `PGPASSWORD` on the same service;
   - that `PGPASSWORD` is the stack's Postgres password: with no variables set and with POSTGRES_PASSWORD set to a
     probe value (an operator's own .env), it equals the `postgres` service's POSTGRES_PASSWORD in the same file,
     or, in an overlay without a `postgres` service, it follows POSTGRES_PASSWORD.
 A connection string that is a single variable (`${PG_CONNECTION_STRING}`) is the operator's own and is skipped.
-In the Helm charts under infra/ (Go templates, read as text) a connection string whose Password is a `$(VAR)` or
-`{{ }}` expansion fails the same way.
+In the Helm charts under infra/ (templates, helpers and values, read as text) a Password that is a `$(VAR)` or
+`{{ }}` expansion fails the same way, wherever it sits in the string or on its line.
+An env file under docker/ or at the root (`.env*`, the files `env_file:` hands a service as given, such as
+.env.production.example) fails when a `ConnectionStrings__*` Npgsql string in it holds any Password, since an env
+file pastes the value as given too, or when it has such a string without Password and sets no `PGPASSWORD`.
 Each failure line names the file, the service, the setting and what to change.
 
 Exit codes:
@@ -61,7 +66,8 @@ ENVIRONMENTS = [
 _PASSWORD_KEYS = {"password", "pwd", "psw"}
 _HOST_KEYS = {"host", "server"}
 _WHOLE_VARIABLE = re.compile(r"^\s*\$\{?[A-Za-z_][A-Za-z0-9_]*(?:[:?-][^}]*)?\}?\s*$")
-_HELM_PASSWORD = re.compile(r"Host=[^\"\n]*;\s*(?:Password|Pwd|Psw)\s*=\s*(?:\$\(|\{\{)", re.IGNORECASE)
+_HELM_PASSWORD = re.compile(r"\b(?:Password|Pwd|Psw)\s*=\s*(?:\$\(|\{\{)", re.IGNORECASE)
+_ENV_LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
 
 def _pairs(conn):
@@ -127,9 +133,54 @@ def check_file(rel, services):
     return checked, failures
 
 
+def check_env_files(root):
+    """Returns (connection strings checked, files with one, failure lines) for the env files under docker/ and root."""
+    failures = []
+    checked = 0
+    files = []
+    paths = sorted(set(glob.glob(os.path.join(root, "docker", "**", ".env*"), recursive=True)
+                       + glob.glob(os.path.join(root, ".env*"))))
+    for path in paths:
+        if not os.path.isfile(path):
+            continue
+        rel = os.path.relpath(path, root)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+        except OSError as e:
+            raise InputError(f"cannot read {path}: {e}") from e
+        keys = {}
+        needs_pgpassword = []
+        count = 0
+        for number, line in enumerate(lines, 1):
+            m = _ENV_LINE.match(line)
+            if not m:
+                continue
+            key, value = m.group(1), m.group(2).strip()
+            keys[key] = value
+            if not key.lower().startswith("connectionstrings__") or not _is_npgsql(value):
+                continue
+            count += 1
+            if any(k in _PASSWORD_KEYS for k in _pairs(value)):
+                failures.append(f"{rel}:{number}: {key} holds a Password, which the env file hands Npgsql as given, "
+                                f"so a ; ' \" or space in it breaks the string; drop Password= and set PGPASSWORD")
+            else:
+                needs_pgpassword.append(key)
+        if needs_pgpassword and not keys.get("PGPASSWORD"):
+            failures.append(f"{rel}: {', '.join(needs_pgpassword)} has no Password and the file sets no PGPASSWORD; "
+                            f"set PGPASSWORD to the stack's POSTGRES_PASSWORD")
+        if count:
+            checked += count
+            files.append(rel)
+    return checked, files, failures
+
+
 def check_helm(root):
     failures = []
-    for path in sorted(glob.glob(os.path.join(root, "infra", "**", "templates", "*.yaml"), recursive=True)):
+    paths = set()
+    for pattern in ("*.yaml", "*.yml", "*.tpl"):
+        paths.update(glob.glob(os.path.join(root, "infra", "**", pattern), recursive=True))
+    for path in sorted(paths):
         rel = os.path.relpath(path, root)
         try:
             with open(path, encoding="utf-8") as fh:
@@ -156,7 +207,10 @@ def main(argv=None):
         files = sorted(set(
             glob.glob(os.path.join(root, "docker", "**", "*.yml"), recursive=True)
             + glob.glob(os.path.join(root, "docker", "**", "*.yaml"), recursive=True)
-            + glob.glob(os.path.join(root, "docker-compose*.yml"))))
+            + glob.glob(os.path.join(root, "docker-compose*.yml"))
+            + glob.glob(os.path.join(root, "docker-compose*.yaml"))
+            + glob.glob(os.path.join(root, "compose*.yml"))
+            + glob.glob(os.path.join(root, "compose*.yaml"))))
         for path in files:
             rel = os.path.relpath(path, root)
             count, found = check_file(rel, load(path))
@@ -164,6 +218,10 @@ def main(argv=None):
                 checked.append(rel)
                 total += count
             failures += found
+        count, env_files, found = check_env_files(root)
+        checked += env_files
+        total += count
+        failures += found
         failures += check_helm(root)
     except InputError as e:
         print(f"check-compose-postgres-password: {e}", file=sys.stderr)

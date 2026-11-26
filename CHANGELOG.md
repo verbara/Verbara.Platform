@@ -26,9 +26,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   could not reach Postgres while Asterisk could. Every stack under `docker/` (full, demo, SMB, reference SMB, scale)
   now hands each service the password as `PGPASSWORD`, which the database driver reads as given, and leaves it out of
   the connection string; the Helm chart's Api and realtime do the same with their password secret. The `.env`
-  setting and its defaults are unchanged, and a connection string you set yourself with a `Password=` still wins. A
-  new CI check, `scripts/check-compose-postgres-password.py`, fails when a stack pastes the password into a
-  connection string again. (#673)
+  setting and its defaults are unchanged, and a connection string you set yourself with a `Password=` still wins.
+  `docker/.env.production.example` now shows the same form for the production stack, which reads its settings from
+  `.env.production`: `PGPASSWORD` equal to `POSTGRES_PASSWORD`, and `ConnectionStrings__Postgres` (the key the Api
+  reads; the example named `ConnectionStrings__Platform`) without `Password=`. A `.env.production` that keeps the
+  password in its connection string works as before until the password holds one of those characters. On Helm the
+  secret's variable is now `PGPASSWORD` instead of `PG_PASSWORD`: a `ConnectionStrings__*` you added to the Api or
+  realtime deployment that expands `$(PG_PASSWORD)` must drop its `Password=` when you upgrade, or it sends that text
+  as the password. A new CI check, `scripts/check-compose-postgres-password.py`, fails when a stack, an env file
+  under `docker/` or a Helm chart puts the password in a connection string again. (#673)
 - **An ended Agent Assist session leaves the Monitor list sooner when the shared store blips.** With Redis, a failed
   removal of a session's Monitor record, when the session ends or its tenants come into conflict, is now retried up
   to four times in about 1.75 s instead of being left until the record expires (last update + 15 s). Until the

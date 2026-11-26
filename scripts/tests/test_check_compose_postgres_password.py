@@ -158,6 +158,55 @@ class CheckComposePostgresPasswordTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("infra/k8s/helm/platform/templates/api.yaml:2:", r.stdout)
 
+    def test_a_helm_password_before_the_host_fails(self):
+        self._stack(_api() + _POSTGRES)
+        self._write("infra/k8s/helm/platform/templates/api.yaml",
+                    "              value: \"Password=$(PGPASSWORD);Host={{ .Values.host }}\"\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("infra/k8s/helm/platform/templates/api.yaml:1:", r.stdout)
+
+    def test_a_helm_password_in_a_helper_or_values_file_fails(self):
+        self._stack(_api() + _POSTGRES)
+        self._write("infra/k8s/helm/platform/templates/_helpers.tpl",
+                    "{{- define \"pg\" -}}\nUsername=u;\n  Pwd={{ .Values.pw }}\n{{- end }}\n")
+        self._write("infra/k8s/helm/platform/values.yaml", "conn: \"Host=h;Password={{ .Values.pw }}\"\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("infra/k8s/helm/platform/templates/_helpers.tpl:3:", r.stdout)
+        self.assertIn("infra/k8s/helm/platform/values.yaml:1:", r.stdout)
+
+    def test_a_root_compose_yaml_is_checked(self):
+        self._stack(_api() + _POSTGRES)
+        self._write("compose.yaml", "services:\n" + _api(_GOOD_CONN + ";Password=${POSTGRES_PASSWORD}") + _POSTGRES)
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("compose.yaml: platform-api", r.stdout)
+
+    def test_an_env_file_connection_string_with_a_password_fails(self):
+        self._stack(_api() + _POSTGRES)
+        self._write("docker/.env.production.example",
+                    "POSTGRES_PASSWORD=x\nConnectionStrings__Postgres=Host=postgres;Username=platform;Password=x\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("docker/.env.production.example:2: ConnectionStrings__Postgres holds a Password", r.stdout)
+
+    def test_an_env_file_connection_string_without_pgpassword_fails(self):
+        self._stack(_api() + _POSTGRES)
+        self._write("docker/.env.production.example",
+                    "POSTGRES_PASSWORD=x\nConnectionStrings__Postgres=Host=postgres;Username=platform\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("sets no PGPASSWORD", r.stdout)
+
+    def test_an_env_file_with_pgpassword_passes(self):
+        self._stack(_api() + _POSTGRES)
+        self._write("docker/.env.production.example",
+                    "POSTGRES_PASSWORD=x\nPGPASSWORD=x\nConnectionStrings__Postgres=Host=postgres;Username=platform\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("docker/.env.production.example", r.stdout)
+
     def test_exits_2_when_no_connection_string_is_found(self):
         self._stack("  redis:\n    image: redis:8-alpine\n")
         r = self._run()
@@ -176,6 +225,7 @@ class CheckComposePostgresPasswordTests(unittest.TestCase):
         self.assertIn("docker/docker-compose.full.yml", r.stdout)
         self.assertIn("docker/demo/docker-compose.demo.yml", r.stdout)
         self.assertIn("docker/docker-compose.reference-smb.yml", r.stdout)
+        self.assertIn("docker/.env.production.example", r.stdout)
 
 
 if __name__ == "__main__":
