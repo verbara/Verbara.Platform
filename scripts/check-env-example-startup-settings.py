@@ -31,7 +31,8 @@ default). Only services with an `env_file:` are checked, and a required key pass
 `environment:`, with any value, an empty placeholder included. A setting needed while a switch is true is checked even
 when the file leaves the switch off: the file must carry a line for the switch and one for each such setting, set or
 commented out (`# Key=`), so the operator who turns the switch on finds them next to it; when the file sets the switch
-to true, each setting must be set. A stack that sets everything inline is left to its own defaults. A service with neither `build:` nor `image:` is an overlay and is left to the file it is layered on.
+to true, each setting must have a value (an empty `Key=`, or one that interpolates to empty, fails, as the service
+refuses it). A stack that sets everything inline is left to its own defaults. A service with neither `build:` nor `image:` is an overlay and is left to the file it is layered on.
 Each failure line names the file, the service, the setting, where the code requires it and what to add.
 
 Limits: a key is found only through the `builder.Configuration["Key"]` indexer; a refusal that reads its key with
@@ -351,6 +352,21 @@ def check_service(rel, name, service, compose_dir, root, requirements):
     return True, failures
 
 
+def _has_value(seen, key):
+    """A key with a non-empty value once interpolated. `KEY` with no `=` in `environment:` (None, passed through from
+    the shell) and a `${X:?...}` that compose itself refuses to leave empty both count as set."""
+    if key not in seen:
+        return False
+    raw = seen[key]
+    if raw is None:
+        return True
+    try:
+        value = interpolate(raw, {})
+    except Refused:
+        return True
+    return value.strip().strip("\"'") != ""
+
+
 def _check_switched(rel, name, req, seen, commented, shown, switches_reported):
     """A setting needed while a switch is true: listed (set or commented) next to the switch, set when it is on."""
     switch_env = req.switch.replace(":", "__")
@@ -367,9 +383,9 @@ def _check_switched(rel, name, req, seen, commented, shown, switches_reported):
         out.append(f"{rel}: {name} reads {switch_env}, and {files} has no {switch_env} line; add # {switch_env}=true "
                    f"to it, with the settings it needs (the first: {req.env_name}, {req.where})")
     key = req.env_name.lower()
-    if on and key not in seen:
+    if on and not _has_value(seen, key):
         out.append(f"{rel}: {name} needs {req.env_name} while {switch_env} is true ({req.where}), and {files} sets "
-                   f"{switch_env}=true with no {req.env_name} value; set {req.env_name}= in it")
+                   f"{switch_env}=true with no {req.env_name} value; give {req.env_name} a value in it")
     elif not on and key not in seen and key not in commented:
         out.append(f"{rel}: {name} needs {req.env_name} while {switch_env} is true ({req.where}), and {files} has no "
                    f"{req.env_name} line; add # {req.env_name}= next to {switch_env} with a comment on what it is")

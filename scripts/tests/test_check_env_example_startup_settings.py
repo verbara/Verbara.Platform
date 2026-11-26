@@ -90,6 +90,12 @@ _MAILBOX_LISTED = (
     "# Imap__Mailboxes__0__Host=\n"
 )
 
+_MAILBOX_ON = (
+    "Imap__Enabled=true\n"
+    "CsatCapture__ApiBaseAddress=http://platform-api:5000\n"
+    "Imap__Mailboxes__0__Host=imap.example.test\n"
+)
+
 _COMPLETE = (
     "CORS_ORIGINS=https://your-domain.com\n"
     "Services__ServiceKey=\n"
@@ -323,8 +329,38 @@ class CheckEnvExampleStartupSettingsTests(unittest.TestCase):
 
     def test_passes_when_the_switch_is_on_and_every_setting_is_set(self):
         self._with_validator()
-        example = _COMPLETE + _MAILBOX_LISTED.replace("# ", "")
+        example = _COMPLETE + _MAILBOX_ON
         self._stack(_API + _MAIL_SVC, example=example)
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_fails_when_the_switch_is_on_and_a_setting_is_empty(self):
+        # The service refuses an empty value as it refuses a missing one, so `Key=` with the switch on fails too.
+        self._with_validator()
+        example = _COMPLETE + _MAILBOX_ON.replace("__Host=imap.example.test", "__Host=")
+        self._stack(_API + _MAIL_SVC, example=example)
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("mail needs Imap__Mailboxes__0__Host while Imap__Enabled is true", r.stdout)
+        self.assertIn("give Imap__Mailboxes__0__Host a value", r.stdout)
+        self.assertNotIn("CsatCapture__ApiBaseAddress while", r.stdout)
+
+    def test_fails_when_the_switch_is_on_and_a_setting_interpolates_to_empty(self):
+        self._with_validator()
+        mail = _service("mail", "src/Verbara.Platform.Mail/Dockerfile.mail",
+                        environment=["Imap__Enabled=true", "CsatCapture__ApiBaseAddress=http://platform-api:5000",
+                                     "Imap__Mailboxes__0__Host=${IMAP_HOST:-}"])
+        self._stack(_API + mail)
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("give Imap__Mailboxes__0__Host a value", r.stdout)
+
+    def test_an_empty_setting_is_fine_while_the_switch_is_off(self):
+        self._with_validator()
+        mail = _service("mail", "src/Verbara.Platform.Mail/Dockerfile.mail",
+                        environment=["Imap__Enabled=${IMAP_ENABLED:-false}", "CsatCapture__ApiBaseAddress=",
+                                     "Imap__Mailboxes__0__Host=${IMAP_HOST:-}"])
+        self._stack(_API + mail)
         r = self._run()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 

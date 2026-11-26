@@ -17,7 +17,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with the mailbox turned on ran, but failed every poll on the first reply it matched, so no rating was recorded and
   the only trace was a warning in the mail service's log. The example now lists them, commented, next to
   `Imap__Enabled`, with what each must hold (`http://platform-api:5000` inside the production stack). The mail
-  service now refuses to start with the mailbox on and one of them missing, naming it in its log, and an unset
+  service now refuses to start with the mailbox on and one of them missing, naming it in its log. On upgrade, a
+  stack that turned the mailbox on without them (in `docker-compose.reference-smb.yml`, `IMAP_ENABLED=true` with
+  `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD` or the tenant left empty) used to keep sending outbound email while
+  replies failed; its mail service now stops, outbound email included, until you fill them in or set
+  `Imap__Enabled` (`IMAP_ENABLED`) back to `false`. An unset
   `CsatCapture__ServiceKey` now sends `Services__ServiceKey`, the key the Api checks on that call, so you set the key
   once. `scripts/check-env-example-startup-settings.py` also reads these settings from the mail service's code and
   fails when an env file a stack hands the mail service does not list them next to `Imap__Enabled`. (#691)
