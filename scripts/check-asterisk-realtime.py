@@ -33,7 +33,8 @@ It then renders the Kubernetes charts (`helm template infra/k8s/helm/asterisk` a
     and each endpoint/auth/aor cache before every other mapping of its type: a cache after pjsip.conf's mapping hides
     the realtime endpoints from `pjsip show endpoints`);
   - host, port, database and user equal the platform chart's platform-api ConnectionStrings__Postgres, and the
-    password Secret's value equals platform-api's PG_PASSWORD Secret's (compared when both charts render the Secret).
+    password Secret's value equals platform-api's PGPASSWORD Secret's (platform-api must read PGPASSWORD from a
+    Secret; the values are compared when both charts render the Secret).
 CHECK_ASTERISK_REALTIME_HELM overrides the helm executable (tests).
 
 The interpolation is compose's: ${VAR}, ${VAR:-d}, ${VAR-d}, ${VAR:?m}, ${VAR?m}, $VAR and $$.
@@ -365,8 +366,11 @@ def check_chart(names, ast_where, ast_docs, plat_where, plat_docs):
         if var in env and got != parts.get(part, ""):
             failures.append(f"{where}: {var} is '{got}', platform-api's Postgres {part} is '{parts.get(part, '')}'")
     ast_ref = ((env.get("PG_REALTIME_PASSWORD") or {}).get("valueFrom") or {}).get("secretKeyRef")
-    api_ref = ((api_env.get("PG_PASSWORD") or {}).get("valueFrom") or {}).get("secretKeyRef")
-    if ast_ref and api_ref:
+    api_ref = ((api_env.get("PGPASSWORD") or {}).get("valueFrom") or {}).get("secretKeyRef")
+    if not api_ref:
+        return failures + [f"{plat_where}: platform-api reads no PGPASSWORD from a Secret, so Asterisk's password "
+                           "cannot be compared with its Postgres password"]
+    if ast_ref:
         a, b = _secret_value(ast_docs, ast_ref), _secret_value(plat_docs, api_ref)
         if a is not None and b is not None and a != b:
             failures.append(f"{where}: PG_REALTIME_PASSWORD's Secret {ast_ref.get('name')} holds another password "

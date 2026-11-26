@@ -118,11 +118,11 @@ def _platform_chart():
          "stringData": {"username": "platform", "password": "pg_probe_secret"}},
         {"kind": "Deployment", "metadata": {"name": "platform-api"}, "spec": {"template": {"spec": {
             "containers": [{"name": "api", "env": [
-                {"name": "PG_PASSWORD", "valueFrom": {"secretKeyRef": {
+                {"name": "PGPASSWORD", "valueFrom": {"secretKeyRef": {
                     "name": "platform-pg-credentials", "key": "password"}}},
                 {"name": "ConnectionStrings__Postgres",
                  "value": "Host=postgres-pooler.r55-data.svc.cluster.local;Port=5432;Database=verbara;"
-                          "Username=platform;Password=$(PG_PASSWORD)"},
+                          "Username=platform"},
             ]}]}}}},
     ]
 
@@ -368,6 +368,32 @@ class CheckAsteriskRealtimeTests(unittest.TestCase):
         r = self._chart_run()
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("PG_REALTIME_PASSWORD's Secret asterisk-pg-credentials holds another password", r.stdout)
+
+    def test_chart_fails_when_platform_api_reads_no_password_from_a_secret(self):
+        api = _doc(self.platform_chart, "Deployment")["spec"]["template"]["spec"]["containers"][0]
+        api["env"] = [e for e in api["env"] if e["name"] != "PGPASSWORD"]
+        r = self._chart_run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("platform-api reads no PGPASSWORD from a Secret", r.stdout)
+
+    def test_chart_fails_when_the_rendered_platform_chart_holds_another_password(self):
+        """The real platform render with only its password changed: the comparison must reach it."""
+        text = subprocess.run([os.environ.get("CHECK_ASTERISK_REALTIME_HELM", "helm"), "template",
+                               os.path.join(_REPO, "infra", "k8s", "helm", "platform")],
+                              capture_output=True, text=True, check=True).stdout
+        docs = [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
+        api = next(d for d in docs if d.get("kind") == "Deployment" and d["metadata"]["name"] == "platform-api")
+        env = next(c for c in api["spec"]["template"]["spec"]["containers"] if c["name"] == "api")["env"]
+        ref = next(e for e in env if e["name"] == "PGPASSWORD")["valueFrom"]["secretKeyRef"]
+        secret = next(d for d in docs if d.get("kind") == "Secret" and d["metadata"]["name"] == ref["name"])
+        secret["stringData"][ref["key"]] = "other"
+        path = os.path.join(self.root, "platform.yaml")
+        with open(path, "w", encoding="utf-8") as fh:
+            yaml.safe_dump_all(docs, fh)
+        r = subprocess.run([sys.executable, _SCRIPT, "--root", _REPO, "--rendered-platform", path],
+                           capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("holds another password than platform-api's Secret " + ref["name"], r.stdout)
 
     def test_chart_password_is_not_compared_when_the_operator_creates_the_secret(self):
         self.asterisk_chart = [d for d in self.asterisk_chart if d["kind"] != "Secret"]
