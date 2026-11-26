@@ -16,7 +16,10 @@ log. The settings are not listed here by hand. The script reads them from the co
   - in each service's source folder, an options value handed to a constructor that refuses an empty argument
     (`new HmacCsatReplyTokenSigner(options.TokenSigningSecret, ...)`, with `options` the
     `IOptions<T>` bound by `Configure<T>(configuration.GetSection("Imap"))`), which the mail service builds at start.
-    The constructors live outside this tree (Verbara.Sdk.Pro), so they are the one list kept here: REFUSES_EMPTY.
+    The constructors live outside this tree (Verbara.Sdk.Pro), so they are the one list kept here: REFUSES_EMPTY;
+  - in each service's source folder, a file that names a switch (`const string SwitchKey = "Imap:Enabled"`) and the
+    settings the service refuses to start without while that switch is true (`Require(failures, "Key", value)`, a
+    `{i}` index read as 0; `RequireEither`, a key that falls back to one required elsewhere, is not one of them).
 A required key `A:B` is the environment variable `A__B`.
 
 Every compose file under docker/ and at the repository root is scanned, so a new stack is checked without being listed.
@@ -25,8 +28,10 @@ A service is recognised by what it runs: the Api built from the root Dockerfile 
 production check counts only when the service's ASPNETCORE_ENVIRONMENT is Production or unset (ASP.NET Core's
 default). Only services with an `env_file:` are checked, and a required key passes when it is in one of those files
 (the operator's file, or its `.example` copy when the operator's own is not in the tree) or in the service's
-`environment:`, with any value, an empty placeholder included. A stack that sets everything inline is left to its own
-defaults. A service with neither `build:` nor `image:` is an overlay and is left to the file it is layered on.
+`environment:`, with any value, an empty placeholder included. A setting needed while a switch is true is checked even
+when the file leaves the switch off: the file must carry a line for the switch and one for each such setting, set or
+commented out (`# Key=`), so the operator who turns the switch on finds them next to it; when the file sets the switch
+to true, each setting must be set. A stack that sets everything inline is left to its own defaults. A service with neither `build:` nor `image:` is an overlay and is left to the file it is layered on.
 Each failure line names the file, the service, the setting, where the code requires it and what to add.
 
 Limits: a key is found only through the `builder.Configuration["Key"]` indexer; a refusal that reads its key with
@@ -91,16 +96,22 @@ _TRIGGER_IF = re.compile(r"if\s*\(\s*!\s*string\.IsNullOr(?:Empty|WhiteSpace)\(\
 _IDENT = re.compile(r"\b[A-Za-z_]\w*\b")
 _LINE_COMMENT = re.compile(r"^[ \t]*//.*$", re.MULTILINE)
 _STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+_COMMENTED_ENV_LINE = re.compile(r"^\s*#\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+_SWITCH_KEY = re.compile(r"\bconst\s+string\s+SwitchKey\s*=\s*\"([^\"]+)\"")
+_REQUIRE = re.compile(r"\bRequire\(\s*\w+\s*,\s*\$?\"([^\"]+)\"")
+_INDEX = re.compile(r"\{[^}]*\}")
 
 
 class Requirement:
-    """One setting a service refuses to start without; `when` is a key that must have a value for it to apply."""
+    """One setting a service refuses to start without; `when` is a key that must have a value for it to apply, and
+    `switch` a key whose true value it applies under (the env file must still list it while the switch is off)."""
 
-    def __init__(self, key, where, when=None, production=False):
+    def __init__(self, key, where, when=None, production=False, switch=None):
         self.key = key
         self.where = where
         self.when = when
         self.production = production
+        self.switch = switch
 
     @property
     def env_name(self):
@@ -209,6 +220,28 @@ def refused_empty_requirements(root, folder):
     return out
 
 
+def switch_requirements(root, folder):
+    """Settings a service refuses to start without while a switch is true, as `Section:Property` keys."""
+    out = []
+    files = sorted(glob.glob(os.path.join(root, folder, "**", "*.cs"), recursive=True))
+    files = [f for f in files if os.sep + "obj" + os.sep not in f and os.sep + "bin" + os.sep not in f]
+    for path in files:
+        raw = _read(path)
+        text = _LINE_COMMENT.sub(lambda m: " " * len(m.group(0)), raw)
+        requires = list(_REQUIRE.finditer(text))
+        if not requires:
+            continue
+        rel = os.path.relpath(path, root).replace(os.sep, "/")
+        switch = _SWITCH_KEY.search(text)
+        if switch is None:
+            raise InputError(f"{rel}:{_line_of(text, requires[0].start())}: Require(...) names a setting, and the file "
+                             f"has no `const string SwitchKey` saying which switch it is required under")
+        for rm in requires:
+            key = _INDEX.sub("0", rm.group(1))
+            out.append(Requirement(key, f"{rel}:{_line_of(text, rm.start())}", switch=switch.group(1)))
+    return out
+
+
 def _appsettings_value(root, key):
     try:
         model = json.loads(_read(os.path.join(root, API_APPSETTINGS)))
@@ -258,6 +291,15 @@ def _read_env_file(path):
     return keys
 
 
+def _read_commented_keys(path):
+    keys = set()
+    for line in _read(path).splitlines():
+        m = _COMMENTED_ENV_LINE.match(line)
+        if m:
+            keys.add(m.group(1).lower())
+    return keys
+
+
 def check_service(rel, name, service, compose_dir, root, requirements):
     """Returns (checked, failure lines) for one service."""
     kind = _kind(service, compose_dir, root)
@@ -265,6 +307,7 @@ def check_service(rel, name, service, compose_dir, root, requirements):
     if kind is None or not files:
         return False, []
     seen = {}
+    commented = set()
     shown = []
     missing = []
     for entry in files:
@@ -275,6 +318,7 @@ def check_service(rel, name, service, compose_dir, root, requirements):
             continue
         shown.append(os.path.relpath(found, root).replace(os.sep, "/"))
         seen.update(_read_env_file(found))
+        commented |= _read_commented_keys(found)
     for k, v in _env(service).items():
         seen[str(k).lower()] = None if v is None else str(v)
     if missing and not shown:
@@ -285,7 +329,11 @@ def check_service(rel, name, service, compose_dir, root, requirements):
     except Refused:
         environment = ""
     failures = []
+    switches_reported = set()
     for req in requirements.get(kind, []):
+        if req.switch is not None:
+            failures += _check_switched(rel, name, req, seen, commented, shown, switches_reported)
+            continue
         if req.production and environment not in ("", "Production"):
             continue
         if req.when is not None:
@@ -303,6 +351,31 @@ def check_service(rel, name, service, compose_dir, root, requirements):
     return True, failures
 
 
+def _check_switched(rel, name, req, seen, commented, shown, switches_reported):
+    """A setting needed while a switch is true: listed (set or commented) next to the switch, set when it is on."""
+    switch_env = req.switch.replace(":", "__")
+    files = ", ".join(shown) or "the service's environment"
+    out = []
+    raw = seen.get(switch_env.lower())
+    try:
+        value = interpolate(raw, {}) if raw is not None else None
+    except Refused:
+        value = raw
+    on = value is not None and value.strip().strip("\"'").lower() == "true"
+    if raw is None and switch_env.lower() not in commented and switch_env not in switches_reported:
+        switches_reported.add(switch_env)
+        out.append(f"{rel}: {name} reads {switch_env}, and {files} has no {switch_env} line; add # {switch_env}=true "
+                   f"to it, with the settings it needs (the first: {req.env_name}, {req.where})")
+    key = req.env_name.lower()
+    if on and key not in seen:
+        out.append(f"{rel}: {name} needs {req.env_name} while {switch_env} is true ({req.where}), and {files} sets "
+                   f"{switch_env}=true with no {req.env_name} value; set {req.env_name}= in it")
+    elif not on and key not in seen and key not in commented:
+        out.append(f"{rel}: {name} needs {req.env_name} while {switch_env} is true ({req.where}), and {files} has no "
+                   f"{req.env_name} line; add # {req.env_name}= next to {switch_env} with a comment on what it is")
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--root", default=_ROOT, help="repository root (tests)")
@@ -315,6 +388,7 @@ def main(argv=None):
         for kind, (folder, _, _) in SERVICES.items():
             requirements.setdefault(kind, [])
             requirements[kind] += refused_empty_requirements(root, folder)
+            requirements[kind] += switch_requirements(root, folder)
         files = sorted(set(
             glob.glob(os.path.join(root, "docker", "**", "*.yml"), recursive=True)
             + glob.glob(os.path.join(root, "docker", "**", "*.yaml"), recursive=True)
@@ -343,8 +417,11 @@ def main(argv=None):
         print(line)
     if failures:
         return _EXIT_FAIL
-    keys = sorted({r.env_name + (f" (while {r.when.replace(':', '__')} is set)" if r.when else "")
-                   for reqs in requirements.values() for r in reqs})
+    def label(r):
+        if r.switch:
+            return f" (while {r.switch.replace(':', '__')} is true)"
+        return f" (while {r.when.replace(':', '__')} is set)" if r.when else ""
+    keys = sorted({r.env_name + label(r) for reqs in requirements.values() for r in reqs})
     print(f"check-env-example-startup-settings: {len(checked)} service(s) list every start-up setting ("
           + ", ".join(keys) + "): " + ", ".join(checked))
     return 0
