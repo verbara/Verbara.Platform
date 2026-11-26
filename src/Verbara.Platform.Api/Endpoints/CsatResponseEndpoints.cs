@@ -238,7 +238,19 @@ internal static class CsatResponseEndpoints
             CapturedAt = capturedAt,
         };
 
-        await responseStore.SaveAsync(response, ct).ConfigureAwait(false);
+        // An email or SMS dispatch yields one rating: the first capture is kept (#697). A later or concurrent capture
+        // of the same dispatch stores nothing, publishes nothing and writes no audit row, and still answers 200 with
+        // TotalResponses 0, so the mail poller and the SMS correlator treat it as handled instead of retrying it.
+        if (!await responseStore.SaveAsync(response, ct).ConfigureAwait(false))
+        {
+            return TypedResults.Ok(new CsatResponseDto(
+                QueueName: body.QueueName,
+                Channel: body.Channel,
+                TotalResponses: 0,
+                AverageRating: 0,
+                RangeStart: capturedAt,
+                RangeEnd: capturedAt));
+        }
 
         eventBus.Publish(new CsatResponseRecordedEvent(
             TenantId: tenantId.Value,
