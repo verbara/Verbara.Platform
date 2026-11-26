@@ -5,7 +5,15 @@ namespace Verbara.Platform.Surveys;
 /// <summary>Persistence abstraction for survey responses.</summary>
 public interface ISurveyResponseStore
 {
-    Task SaveAsync(SurveyResponse response, CancellationToken ct);
+    /// <summary>
+    /// Stores <paramref name="response"/> unless it is already stored. An email or SMS capture is keyed by its
+    /// dispatch, <c>(tenant, conversation, survey, channel)</c>: the first capture of a dispatch is kept and a later
+    /// or concurrent one stores nothing (csat-one-rating-per-dispatch, #697). Webchat, voice and non-CSAT responses
+    /// are keyed by their response id only.
+    /// </summary>
+    /// <returns><see langword="true"/> when the response was stored; <see langword="false"/> when its response id,
+    /// or its email/SMS dispatch, already has a stored response.</returns>
+    Task<bool> SaveAsync(SurveyResponse response, CancellationToken ct);
     Task<IReadOnlyList<SurveyResponse>> GetByConversationAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct);
     Task<IReadOnlyList<SurveyResponse>> GetBySurveyAsync(TenantId tenantId, EntityId surveyId, CancellationToken ct);
 

@@ -25,6 +25,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   message and sends none of the replies already in it, which the previous version had read; a reply that arrives
   before the upgraded Api has started and applied the migration (while the mail service is stopped, or already running
   ahead of the Api) is not recorded. (#696)
+- **An email or SMS survey keeps one rating.** Every CSAT capture stored a new rating, so a second reply to the same
+  survey email, or the same reply forwarded again, added a second rating for that survey and conversation and counted
+  twice in the CSAT averages. Now the first rating of an email or SMS survey is kept: a later reply, or two replies
+  arriving at once, stores nothing more, publishes no second update and writes no second audit record, and the capture
+  still answers 200 (with `totalResponses` 0) so the mail service and the SMS path do not send it again. A new
+  database migration (`035_SurveyResponseOnePerDispatch.sql`) adds that rule to the `survey_responses` table; on a
+  database that already holds several ratings for one email or SMS survey it keeps the first one captured and removes
+  the later ones (their audit records are kept), and it runs at start-up and can run again. Webchat and voice ratings
+  are unchanged. (#697)
 - **CSAT ratings answer success once they are recorded.** Every CSAT capture (webchat, voice, email and SMS) and
   every CSAT template change saved its data and then failed on its audit record, whose category `csat` the audit
   table did not accept, so the call answered 500 for work that was done. The mail service took that answer as a
