@@ -23,9 +23,12 @@ It requires:
     or, in an overlay without a `postgres` service, it follows POSTGRES_PASSWORD.
 A connection string that is a single variable (`${PG_CONNECTION_STRING}`) is the operator's own and is skipped.
 A service that runs the realtime image (built from Dockerfile.realtime, or an image named `.../realtime:<tag>`) must
-also have a non-blank `ConnectionStrings__Cluster` or `ConnectionStrings__Postgres`, in `environment:` or in an
-`env_file:` (the file, or its `.example` copy when the operator's own file is not in the tree): the realtime
-service's leader election reads Cluster, falling back to Postgres, and without either it stops at startup. A
+also have `ConnectionStrings__Cluster` or `ConnectionStrings__Postgres`, in `environment:` or in an `env_file:` (the
+file, or its `.example` copy when the operator's own file is not in the tree; `environment:` wins): the realtime
+service's leader election reads Cluster, falling back to Postgres only when Cluster is absent (an empty Cluster is
+not absent), and stops at startup without one. The one it reads must be an Npgsql connection string with no
+variables set: not blank, not a variable with no default, not a non-Postgres value; a `${VAR:?}` compose refuses to
+start without is left to the operator. A
 service with neither `build:` nor `image:` is an overlay and is left to the file it is layered on.
 In the Helm charts under infra/ (templates, helpers and values, read as text) a Password that is a `$(VAR)` or
 `{{ }}` expansion fails the same way, wherever it sits in the string or on its line.
@@ -121,12 +124,26 @@ def _read_env_file(path):
     return keys
 
 
+def _realtime_value(value):
+    """Returns why a realtime connection string cannot open Postgres, or None when it can (or compose refuses it)."""
+    try:
+        text = interpolate(value, {})
+    except Refused:
+        return None  # compose will not start without it, so the operator has to supply one
+    if not text.strip():
+        return "blank" if not value.strip() else f"'{value.strip()}', which is blank when no variable is set"
+    if not _is_npgsql(text):
+        return f"'{value.strip()}', which is not an Npgsql connection string (it names no Host)"
+    return None
+
+
 def check_realtime(rel, name, service, compose_dir, root):
-    """Returns the failure lines for one realtime service that has no Postgres connection string."""
-    if not _is_realtime(service) or any(
-            str(k).lower() in _REALTIME_KEYS and v is not None and str(v).strip()
-            for k, v in _env(service).items()):
+    """Returns the failure lines for one realtime service whose Postgres connection string cannot work."""
+    if not _is_realtime(service):
         return []
+    # What the container sees: the env_file entries in order, then `environment:` over them (compose precedence).
+    # A key with no value passes the host's own variable through, which compose leaves unset, so it is skipped.
+    seen = {}
     missing = []
     for entry in _env_file_paths(service):
         path = os.path.normpath(os.path.join(compose_dir, entry))
@@ -134,12 +151,27 @@ def check_realtime(rel, name, service, compose_dir, root):
         if found is None:
             missing.append(os.path.relpath(path, root))
             continue
-        if any(k.lower() in _REALTIME_KEYS and v for k, v in _read_env_file(found).items()):
-            return []
-    where = f" (env_file {', '.join(missing)} is not in the tree, nor its .example)" if missing else ""
-    return [f"{rel}: {name} runs the realtime image and has no ConnectionStrings__Cluster or "
-            f"ConnectionStrings__Postgres{where}, so its leader election stops the boot; give {name} the stack's "
-            f"Postgres connection string without Password= and PGPASSWORD from POSTGRES_PASSWORD"]
+        for k, v in _read_env_file(found).items():
+            if k.lower() in _REALTIME_KEYS:
+                seen[k.lower()] = (k, v)
+    for k, v in _env(service).items():
+        if str(k).lower() in _REALTIME_KEYS and v is not None:
+            seen[str(k).lower()] = (str(k), str(v))
+    # Program.cs reads GetConnectionString("Cluster") ?? GetConnectionString("Postgres"): only an absent Cluster
+    # falls back to Postgres; an empty one is not null and stops the boot.
+    picked = next((seen[k] for k in _REALTIME_KEYS if k in seen), None)
+    if picked is None:
+        where = f" (env_file {', '.join(missing)} is not in the tree, nor its .example)" if missing else ""
+        return [f"{rel}: {name} runs the realtime image and has no ConnectionStrings__Cluster or "
+                f"ConnectionStrings__Postgres{where}, so its leader election stops the boot; give {name} the stack's "
+                f"Postgres connection string without Password= and PGPASSWORD from POSTGRES_PASSWORD"]
+    key, value = picked
+    why = _realtime_value(value)
+    if why is None:
+        return []
+    return [f"{rel}: {name} {key} is {why}, and {name} runs the realtime image, whose leader election reads it "
+            f"(Cluster first; an empty Cluster does not fall back to Postgres) and stops the boot; give {name} the "
+            f"stack's Postgres connection string without Password= and PGPASSWORD from POSTGRES_PASSWORD"]
 
 
 def check_file(rel, services, compose_dir=None, root=None):
