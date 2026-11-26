@@ -15,7 +15,9 @@
 # Operators MUST set the following in .env.production:
 #   - ConnectionStrings__Postgres with Maximum Pool Size=10 (or
 #     accept the ConnectionStringDefaults fallback in Program.cs)
-#   - POSTGRES_PASSWORD (rotate from default)
+#   - POSTGRES_PASSWORD (rotate from default), and PGPASSWORD set to the
+#     same value: the services read the password from PGPASSWORD, so the
+#     connection string carries no Password=
 #   - SERVICE_KEY (rotate from default)
 
 x-logging: &default-logging
