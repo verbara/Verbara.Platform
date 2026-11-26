@@ -13,18 +13,24 @@
 # is intentional operator headroom (capacity-planning.md tier minimum is 50).
 #
 # Copy .env.production.example to .env.production and fill in every empty
-# value; the example says what each setting is. Every service here, Postgres
-# included, reads its settings from that file as given (compose's own
-# ${VAR} substitution reads the shell or .env instead, never .env.production):
+# value; the example says what each setting is. The platform services
+# (platform-api, renderer, mail, realtime) and Postgres read their settings
+# from that file as given. Compose's own ${VAR} substitution reads the shell
+# or .env instead, never .env.production, so the values written as ${VAR}
+# below (MINIO_ROOT_USER and MINIO_ROOT_PASSWORD, VERBARA_GATEWAY_IP,
+# VERBARA_NETWORK_SUBNET) go in the shell or docker/.env. .env.production
+# carries:
 #   - ConnectionStrings__Postgres with Maximum Pool Size=10 (or
 #     accept the ConnectionStringDefaults fallback in Program.cs)
 #   - POSTGRES_PASSWORD, and PGPASSWORD set to the same value: the services
 #     read the password from PGPASSWORD, so the connection string carries no
 #     Password=
 #   - the settings the services refuse to start without: Services__ServiceKey,
-#     Asterisk__Ami__Username and Asterisk__Ami__Password, CORS_ORIGINS and
-#     Imap__TokenSigningSecret (scripts/check-env-example-startup-settings.py
-#     checks in CI that the example lists them)
+#     Asterisk__Ami__Username and Asterisk__Ami__Password, CORS_ORIGINS,
+#     Imap__TokenSigningSecret, and Csat__Email__TokenSigningSecret with the
+#     same value (the Api refuses it present but empty)
+#     (scripts/check-env-example-startup-settings.py checks in CI that the
+#     example lists them)
 
 x-logging: &default-logging
   driver: json-file

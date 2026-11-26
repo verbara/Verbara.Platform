@@ -29,6 +29,10 @@ default). Only services with an `env_file:` are checked, and a required key pass
 defaults. A service with neither `build:` nor `image:` is an overlay and is left to the file it is layered on.
 Each failure line names the file, the service, the setting, where the code requires it and what to add.
 
+Limits: a key is found only through the `builder.Configuration["Key"]` indexer; a refusal that reads its key with
+GetValue, GetConnectionString or GetSection is not seen. Refusals outside the production block (such as the Api's
+ConnectionStrings:Postgres) are left to scripts/check-compose-postgres-password.py.
+
 Exit codes:
   0  pass
   1  a service's env file lacks a setting the service refuses to start without

@@ -20,7 +20,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refuse, until you fill them in. Postgres now also reads `POSTGRES_PASSWORD` from `.env.production`: before, compose
   took it from the shell or `docker/.env`, so a new database was created with the default `platform_secret` while
   the services sent the password from `.env.production`, and the Api could not connect. The password applies only
-  when Postgres creates its database; an existing data volume keeps its own. A new CI check,
+  when Postgres creates its database; an existing data volume keeps its own. Postgres no longer falls back to
+  `platform_secret` either: a `.env.production` without `POSTGRES_PASSWORD` leaves a new database uninitialised. If
+  you set `POSTGRES_PASSWORD` in the shell or `docker/.env`, move it into `.env.production` (with `PGPASSWORD` at the
+  same value) before Postgres creates a new data volume, such as on a new host or a restore. A new CI check,
   `scripts/check-env-example-startup-settings.py`, reads from the code which settings the Api and the mail service
   refuse to start without and fails when the env file a stack hands them lacks one, and
   `scripts/check-compose-postgres-password.py` now fails when Postgres does not read the env file the services take
