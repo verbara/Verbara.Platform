@@ -11,6 +11,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **CSAT ratings answer success once they are recorded.** Every CSAT capture (webchat, voice, email and SMS) and
+  every CSAT template change saved its data and then failed on its audit record, whose category `csat` the audit
+  table did not accept, so the call answered 500 for work that was done. The mail service took that answer as a
+  failure and sent the same email reply again on every poll, adding the same rating once more each time. A new
+  database migration (`033_AuditCsatCategory.sql`) adds `csat` to the categories the audit table accepts; it runs at
+  start-up and keeps every existing audit record. A change to a user's listen phone, whose audit record was dropped
+  the same way (the change itself was saved), is now recorded under `auth`, with the administrator's other changes
+  to a user. A new governance test reads the categories the code writes and the ones the migrations accept, and fails
+  when they disagree. (#694)
 - **The production stack runs the web console.** `docker/docker-compose.production.yml` started a gateway that sends
   the console's pages to a `web` service, but the stack had none, so the gateway restarted in a loop (`host not found
   in upstream "web:80"`) and neither the console nor the Api was reachable through it. The stack now runs the

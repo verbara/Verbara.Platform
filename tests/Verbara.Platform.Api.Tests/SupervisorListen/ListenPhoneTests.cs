@@ -120,6 +120,7 @@ public sealed class ListenPhoneTests : IClassFixture<AuthenticatedPlatformApiFac
             new TenantId(AuthenticatedPlatformApiFactory.TestTenantId), new AuditQuery(Action: "user.listen_phone_set"),
             CancellationToken.None);
         var entry = audit.Items.Should().ContainSingle(e => e.TargetId == userId).Subject;
+        entry.Category.Should().Be("auth", "a change to a user is audited under auth, a category the audit table accepts (#694)");
         entry.Metadata!["phone_last4"].Should().Be("4567");
         entry.Metadata.Values.Should().NotContain(v => v.Contains("3001234567"), "the full number is never written");
     }
