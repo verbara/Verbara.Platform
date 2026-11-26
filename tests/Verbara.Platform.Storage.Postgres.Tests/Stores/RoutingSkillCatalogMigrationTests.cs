@@ -23,7 +23,8 @@ public sealed class RoutingSkillCatalogMigrationTests : IClassFixture<PinnedPost
             .Where(n => n.StartsWith(Prefix, StringComparison.Ordinal) && n.EndsWith(".sql", StringComparison.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToList();
-        names[^1].Should().Be(Prefix + "032_RoutingSkillCatalog.sql", "032 is the last migration");
+        names.IndexOf(Prefix + "033_AuditCsatCategory.sql")
+            .Should().Be(names.IndexOf(Prefix + "032_RoutingSkillCatalog.sql") + 1, "033 (#694) is the next migration after 032");
         names.IndexOf(Prefix + "032_RoutingSkillCatalog.sql")
             .Should().Be(names.IndexOf(Prefix + "031_AgentAssistSharedState.sql") + 1, "032 runs right after 031");
         names.Should().ContainSingle(n => n.Contains(".032_", StringComparison.Ordinal), "one migration per ordinal");
