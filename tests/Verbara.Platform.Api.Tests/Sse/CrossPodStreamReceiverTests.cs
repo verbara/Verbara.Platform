@@ -264,41 +264,69 @@ public sealed class CrossPodStreamReceiverTests : IClassFixture<CrossPodContentD
     /// <c>WebhookDispatcher</c> and the other in-process subscribers read) and no typed copy on its push bus (which the
     /// relay would send back onto the backplane).
     /// </summary>
+    /// <remarks>
+    /// Both buses belong to the class fixture's host, and the push bus dispatches on its own loop: the copies of the
+    /// stream markers <c>OpenStreamAsync</c> published, or any event the host publishes, can reach the recorders inside
+    /// the window (issue #700). So the recorders keep only the events of the conversation this test sends, which is what a
+    /// copy the receiver put back would carry, and an event of another conversation is published inside the window to show
+    /// that the recorders see such traffic and leave it out.
+    /// </remarks>
     [Fact]
     public async Task CrossPodStreamReceiver_ShouldPublishNothing_WhenItReceivesAnEvent()
     {
         var supervisor = _factory.NewUser(UserRole.Supervisor, "silent-monitor");
         await using var streamS = await _factory.OpenStreamAsync("monitor", supervisor);
         using var counter = new ReceivedCounter(_factory.ReceiverMetrics);
+        var id = $"silent-{Guid.NewGuid():N}";
+        var otherId = $"silent-other-{Guid.NewGuid():N}";
         var onBus = new List<PlatformEvent>();
         var onPushBus = new List<PushEvent>();
+        var otherSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var marker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         const string MarkerType = "test.cross_pod_marker";
         using var busRecorder = _factory.Bus.Events.Subscribe(e =>
         {
-            lock (onBus)
-                onBus.Add(e);
+            if (ConversationIdOf(e) == id)
+                lock (onBus)
+                    onBus.Add(e);
         });
         using var pushRecorder = _factory.PushBus.AsObservable().Subscribe(e =>
         {
             if (e is RemotePushEvent { OriginalEventType: MarkerType })
                 marker.TrySetResult();
-            else if (e is not RemotePushEvent)
+            else if (e is RemotePushEvent)
+                return;
+            else if (ConversationIdOf(e) == id)
                 lock (onPushBus)
                     onPushBus.Add(e);
+            else if (ConversationIdOf(e) == otherId)
+                otherSeen.TrySetResult();
         });
 
-        await ReceiveAsync(counter, [.. AgentAssistEvents("a-1", $"silent-{Guid.NewGuid():N}").Select(e => EnvelopeOf(e))]);
+        // Another conversation's event, published here inside the window: it reaches both buses and is not this test's.
+        _factory.Bus.Publish(AgentAssistEvents("a-1", otherId)[3]);
+        await ReceiveAsync(counter, [.. AgentAssistEvents("a-1", id).Select(e => EnvelopeOf(e))]);
         // The push bus delivers in order: a copy the receiver had put on it would come before this marker.
         await _factory.PushBus.PublishAsync(new RemotePushEvent(MarkerType, "node-a", []) { Metadata = new PushEventMetadata(Tenant, null, DateTimeOffset.UtcNow, null, null, null) });
         await marker.Task.WaitAsync(TimeSpan.FromSeconds(60));
 
         counter.Of(CrossPodStreamMetrics.Delivered).Should().Be(4, "precondition: the stream received them");
+        otherSeen.Task.IsCompleted.Should().BeTrue("precondition: the push bus recorder sees the events published in its window");
         lock (onBus)
             onBus.OfType<IConversationContentEvent>().Should().BeEmpty("delivered more than once: a received event must not reach the event bus or the webhooks");
         lock (onPushBus)
             onPushBus.Should().BeEmpty("a received event must not be put back on the push bus");
     }
+
+    /// <summary>The conversation an <c>agentassist.*</c> event is for, or <see langword="null"/> for any other event.</summary>
+    private static string? ConversationIdOf(PushEvent e) => e switch
+    {
+        AgentAssistSuggestionEvent x => x.ConversationId,
+        AgentAssistSentimentEvent x => x.ConversationId,
+        AgentAssistComplianceAlertEvent x => x.ConversationId,
+        AgentAssistTranscriptEvent x => x.ConversationId,
+        _ => null,
+    };
 }
 
 /// <summary>Counts <see cref="CrossPodStreamMetrics"/>'s measurements, by outcome, from creation on.</summary>
