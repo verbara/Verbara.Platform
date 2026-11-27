@@ -296,6 +296,76 @@ public sealed class CsatResponseEndpointsTests : IDisposable
         resp.StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.ServiceUnavailable);
     }
 
+    // ── One rating per email / sms dispatch (csat-one-rating-per-dispatch, #697) ──
+
+    private const string TestServiceKey = "csat-internal-capture-test-key-0000000000";
+
+    private (WebApplicationFactory<Program> factory, IAuditService audit) BuildInternalCaptureFactory()
+    {
+        var (licensed, audit) = BuildLicensedFactory();
+        return (licensed.WithWebHostBuilder(b => b.UseSetting("Services:ServiceKey", TestServiceKey)), audit);
+    }
+
+    private static HttpClient InternalClient(WebApplicationFactory<Program> factory)
+    {
+        var client = AnonymousClient(factory);
+        client.DefaultRequestHeaders.Add("X-Service-Key", TestServiceKey);
+        return client;
+    }
+
+    [Theory]
+    [InlineData("email")]
+    [InlineData("sms")]
+    public async Task PostInternal_ShouldKeepTheFirstRatingAndAnswerSuccess_WhenTheSameDispatchIsCapturedTwice(string channel)
+    {
+        var (factory, audit) = BuildInternalCaptureFactory();
+        using var client = InternalClient(factory);
+
+        var first = await client.PostAsJsonAsync($"/api/v1/csat/responses/{channel}", WebChatBody(string.Empty, rating: 4, channel: channel));
+        var second = await client.PostAsJsonAsync($"/api/v1/csat/responses/{channel}", WebChatBody(string.Empty, rating: 1, channel: channel));
+
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+        second.StatusCode.Should().Be(HttpStatusCode.OK, "a repeated reply is not an error the sender should retry");
+
+        using var scope = factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<ISurveyResponseStore>();
+        var rows = await store.GetByConversationAsync(
+            new TenantId(AuthenticatedPlatformApiFactory.TestTenantId),
+            EntityId.From("conv-8f2a1c4e"),
+            CancellationToken.None);
+        rows.Should().ContainSingle().Which.Rating.Should().Be(4, "the first reply wins");
+
+        await audit.Received(1).RecordAsync(
+            Arg.Any<TenantId>(),
+            category: "csat",
+            action: Arg.Any<string>(),
+            severity: Arg.Any<string>(),
+            actorId: Arg.Any<string>(),
+            actorType: Arg.Any<string>(),
+            targetId: Arg.Any<string?>(),
+            targetType: Arg.Any<string?>(),
+            correlationId: Arg.Any<Guid?>(),
+            changes: Arg.Any<AuditChanges?>(),
+            metadata: Arg.Any<IReadOnlyDictionary<string, string>?>(),
+            retainUntil: Arg.Any<DateTimeOffset?>(),
+            ct: Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PostInternal_ShouldReportNothingRecorded_WhenTheDispatchWasAlreadyCaptured()
+    {
+        var (factory, _) = BuildInternalCaptureFactory();
+        using var client = InternalClient(factory);
+
+        var first = await client.PostAsJsonAsync("/api/v1/csat/responses/email", WebChatBody(string.Empty, rating: 4, channel: "email"));
+        var second = await client.PostAsJsonAsync("/api/v1/csat/responses/email", WebChatBody(string.Empty, rating: 1, channel: "email"));
+
+        using var firstDoc = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
+        firstDoc.RootElement.GetProperty("totalResponses").GetInt32().Should().Be(1);
+        using var secondDoc = JsonDocument.Parse(await second.Content.ReadAsStringAsync());
+        secondDoc.RootElement.GetProperty("totalResponses").GetInt32().Should().Be(0);
+    }
+
     // ── Analytics read (SupervisorPlus) ────────────────────────────────────────
 
     [Fact]

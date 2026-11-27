@@ -11,7 +11,8 @@ namespace Verbara.Platform.Mail;
 /// <c>Imap</c> + <c>CsatCapture</c> configuration, reuses Pro's HMAC reply-token verifier
 /// (<see cref="ICsatReplyTokenSigner"/>) rather than re-hand-rolling the HMAC (ADR-0022 boundary),
 /// wires the <see cref="CsatReplyMailHandler"/> and its dispatch-resolver / HTTP forwarder seams,
-/// and registers the <see cref="ImapInboundPoller"/> as a hosted service.
+/// registers the <see cref="ImapInboundPoller"/> as a hosted service, and refuses to start with the
+/// reply mailbox on and a setting it needs missing (<see cref="CsatReplyMailboxSettingsValidator"/>).
 /// </summary>
 public static class ServiceCollectionExtensions
 {
@@ -20,6 +21,18 @@ public static class ServiceCollectionExtensions
     {
         services.Configure<ImapPollerOptions>(configuration.GetSection("Imap"));
         services.Configure<CsatCaptureForwardOptions>(configuration.GetSection("CsatCapture"));
+
+        // The Api checks the forwarded reply against its own Services:ServiceKey, which every service of a stack
+        // shares, so an unset CsatCapture:ServiceKey sends that key and the operator sets it once.
+        services.PostConfigure<CsatCaptureForwardOptions>(options =>
+        {
+            if (string.IsNullOrWhiteSpace(options.ServiceKey))
+                options.ServiceKey = configuration["Services:ServiceKey"] ?? string.Empty;
+        });
+
+        // With the reply mailbox on, refuse to start without the settings reading and forwarding replies need.
+        services.AddSingleton<IValidateOptions<ImapPollerOptions>, CsatReplyMailboxSettingsValidator>();
+        services.AddOptions<ImapPollerOptions>().ValidateOnStart();
 
         // Reuse Pro's HMAC-SHA256 reply-token verifier via its (secret, ttl) constructor — the token
         // binding + crypto live in Pro; Platform never re-implements the HMAC (ADR-0022 boundary).
@@ -31,6 +44,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<ICsatEmailDispatchResolver, PostgresCsatEmailDispatchResolver>();
         services.AddSingleton<ICsatEmailCaptureForwarder, HttpCsatEmailCaptureForwarder>();
+        services.AddSingleton<IImapPollPositionStore, PostgresImapPollPositionStore>();
         services.AddHttpClient(HttpCsatEmailCaptureForwarder.HttpClientName);
 
         services.AddSingleton(sp =>

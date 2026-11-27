@@ -79,7 +79,11 @@ services:
       # most. Setting Maximum Pool Size=50 per replica + max_connections=220
       # on Postgres (see service postgres below) gives 4×50=200 + 20 admin
       # headroom. Per ADR-0014 §"Postgres pool tuning".
-      ConnectionStrings__Postgres: "Host=postgres;Database=verbara;Username=platform;Password=${POSTGRES_PASSWORD:-platform_secret};Maximum Pool Size=50;Minimum Pool Size=10;Connection Idle Lifetime=300;Pooling=true"
+      ConnectionStrings__Postgres: "Host=postgres;Database=verbara;Username=platform;Maximum Pool Size=50;Minimum Pool Size=10;Connection Idle Lifetime=300;Pooling=true"
+      # Npgsql reads the password from PGPASSWORD when the connection string has none. Pasted into
+      # Password=, a ; quote or space in POSTGRES_PASSWORD would break the string; compose sets PGPASSWORD
+      # as given. scripts/check-compose-postgres-password.py keeps every stack this way.
+      PGPASSWORD: ${POSTGRES_PASSWORD:-platform_secret}
     depends_on:
       redis:
         condition: service_healthy

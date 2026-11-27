@@ -13,16 +13,19 @@ internal sealed class PostgresSurveyResponseStore : ISurveyResponseStore
 
     public PostgresSurveyResponseStore(NpgsqlDataSource dataSource) => _dataSource = dataSource;
 
-    public async Task SaveAsync(SurveyResponse response, CancellationToken ct)
+    public async Task<bool> SaveAsync(SurveyResponse response, CancellationToken ct)
     {
         var answersJson = JsonSerializer.Serialize(response.Answers, PostgresJson.Ctx.IReadOnlyListSurveyAnswer);
 
-        await _dataSource.ExecuteAsync(
+        // ON CONFLICT without a target covers both the primary key and ux_survey_resp_one_per_dispatch (migration
+        // 035, email/sms only): a second capture of the same dispatch — sequential or concurrent — inserts nothing,
+        // and the first capture stays (#697).
+        var inserted = await _dataSource.ExecuteAsync(
             "INSERT INTO survey_responses (response_id, survey_id, tenant_id, conversation_id, contact_id, " +
             "agent_id, answers, submitted_at, channel, queue_name, rating, comment, captured_at, call_id) " +
             "VALUES (@ResponseId, @SurveyId, @TenantId, @ConversationId, @ContactId, " +
             "@AgentId, @Answers::jsonb, @SubmittedAt, @Channel, @QueueName, @Rating, @Comment, @CapturedAt, @CallId) " +
-            "ON CONFLICT (tenant_id, response_id) DO NOTHING",
+            "ON CONFLICT DO NOTHING",
             p =>
             {
                 p.Add(new NpgsqlParameter("ResponseId", response.ResponseId.Value));
@@ -44,6 +47,7 @@ internal sealed class PostgresSurveyResponseStore : ISurveyResponseStore
                 p.Add(new NpgsqlParameter("CallId", NpgsqlDbType.Text) { Value = (object?)response.CallId?.Value ?? DBNull.Value });
             },
             ct);
+        return inserted == 1;
     }
 
     public async Task<IReadOnlyList<SurveyResponse>> GetByConversationAsync(

@@ -121,13 +121,15 @@ spec:
             {{- end }}
             - name: ASPNETCORE_URLS
               value: "http://+:{{ .Values.api.port }}"
-            - name: PG_PASSWORD
+            # Npgsql reads the password from PGPASSWORD when the connection string has none;
+            # expanded into Password=, a ; quote or space in it would break the string.
+            - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.api.postgres.passwordSecret }}
                   key: {{ .Values.api.postgres.passwordKey }}
             - name: ConnectionStrings__Postgres
-              value: "Host={{ .Values.api.postgres.host }};Port={{ .Values.api.postgres.port }};Database={{ .Values.api.postgres.database }};Username={{ .Values.api.postgres.user }};Password=$(PG_PASSWORD)"
+              value: "Host={{ .Values.api.postgres.host }};Port={{ .Values.api.postgres.port }};Database={{ .Values.api.postgres.database }};Username={{ .Values.api.postgres.user }}"
             - name: ConnectionStrings__Redis
               value: "{{ .Values.api.redis.host }}:{{ .Values.api.redis.port }}"
             # ADR-0012 JWT rotation pool — required for multi-replica deployments.

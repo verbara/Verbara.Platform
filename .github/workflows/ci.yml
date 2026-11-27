@@ -507,14 +507,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      # PyYAML for the Agent Assist Kubernetes guard's tests (scripts/tests/test_check_agentassist_k8s.py).
+      # PyYAML for the Agent Assist Kubernetes guard's tests (scripts/tests/test_check_agentassist_k8s.py)
+      # and the release tag-on-main wiring tests (scripts/tests/test_release_tag_on_main_wiring.py).
       - name: Install diff-cover and PyYAML (pinned)
         run: pip install --disable-pip-version-check diff_cover==10.3.0 pyyaml==6.0.2
       - name: Run coverage-script unit tests
         run: python3 -m unittest discover scripts/tests
       # SMB reference stack pin guard (OpenSpec bump-smb-reference-stack-pins, design Decision 3): every
       # Platform/Web image default in docker/docker-compose.reference-smb.yml must equal the template's
-      # PLATFORM_API_TAG / PLATFORM_WEB_TAG. Agreement only (offline); the Web-floor check needs the sibling
+      # PLATFORM_API_TAG / PLATFORM_WEB_TAG, and docker/docker-compose.production.yml's Web image must follow the
+      # same PLATFORM_WEB_TAG. Agreement only (offline); the Web-floor check needs the sibling
       # Verbara.Platform.Web checkout and runs locally whenever the pins move (--web-changelog).
       - name: SMB stack pin agreement
         run: python3 scripts/check-smb-pins.py
@@ -657,9 +659,22 @@ jobs:
         run: pip install --disable-pip-version-check pyyaml==6.0.2
       # Every compose file under docker/ that builds Asterisk next to a postgres service points Asterisk's realtime
       # (res_pgsql.conf, rendered from PG_REALTIME_* by entrypoint-asterisk.sh) at that Postgres: same database, user
-      # and password, with and without the operator's POSTGRES_* in .env. Found by scanning, not by a list.
+      # and password, with and without the operator's POSTGRES_* in .env. Found by scanning, not by a list. It also
+      # renders the asterisk and platform Helm charts (`helm template`): the chart's Asterisk sets and renders every
+      # PG_REALTIME_* the entrypoint reads, ships the realtime mappings, and uses platform-api's Postgres settings.
       - name: Asterisk realtime database
         run: python3 scripts/check-asterisk-realtime.py
+      # No compose file under docker/ (nor the Helm chart) pastes the Postgres password into an Npgsql connection
+      # string, where a ; quote or space in it breaks the string: each such service gets it as PGPASSWORD, equal to
+      # its stack's POSTGRES_PASSWORD with and without the operator's .env. Found by scanning, not by a list.
+      - name: Postgres password outside connection strings
+        run: python3 scripts/check-compose-postgres-password.py
+      # A stack that hands its services an env file (docker-compose.production.yml: .env.production) lists in that
+      # file, or its .example, every setting the services refuse to start without. The settings are read from the
+      # code (the Api's production check in Program.cs, an options value the mail service hands a constructor that
+      # refuses an empty one), not from a list, so a new refusal is seen. Found by scanning, not by a list.
+      - name: Env example lists start-up settings
+        run: python3 scripts/check-env-example-startup-settings.py
       # Agent Assist audio on Kubernetes: the chart declares and advertises the audio port, every container port
       # name is a valid (<= 15 character) name, the r55-platform NetworkPolicy admits the port from r55-asterisk,
       # and platform-api and realtime render the same ConnectionStrings__Redis (`helm template`).

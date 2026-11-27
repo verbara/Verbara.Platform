@@ -7,12 +7,28 @@ namespace Verbara.Platform.Storage.InMemory;
 internal sealed class InMemorySurveyResponseStore : ISurveyResponseStore
 {
     private readonly ConcurrentDictionary<(TenantId, EntityId), SurveyResponse> _items = new();
+    private readonly Lock _gate = new();
 
-    public Task SaveAsync(SurveyResponse response, CancellationToken ct)
+    public Task<bool> SaveAsync(SurveyResponse response, CancellationToken ct)
     {
-        _items[(response.TenantId, response.ResponseId)] = response;
-        return Task.CompletedTask;
+        // Mirrors PostgresSurveyResponseStore: a stored response id, or a stored capture of the same email/SMS
+        // dispatch (tenant, conversation, survey, channel), is not overwritten (#697).
+        lock (_gate)
+        {
+            if (_items.ContainsKey((response.TenantId, response.ResponseId)))
+                return Task.FromResult(false);
+            if (IsDispatchKeyed(response.Channel) && _items.Values.Any(r => SameDispatch(r, response)))
+                return Task.FromResult(false);
+            _items[(response.TenantId, response.ResponseId)] = response;
+            return Task.FromResult(true);
+        }
     }
+
+    private static bool IsDispatchKeyed(string? channel) => channel is "email" or "sms";
+
+    private static bool SameDispatch(SurveyResponse a, SurveyResponse b) =>
+        a.TenantId == b.TenantId && a.ConversationId == b.ConversationId && a.SurveyId == b.SurveyId &&
+        string.Equals(a.Channel, b.Channel, StringComparison.Ordinal);
 
     public Task<IReadOnlyList<SurveyResponse>> GetByConversationAsync(TenantId tenantId, EntityId conversationId, CancellationToken ct)
     {

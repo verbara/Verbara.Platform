@@ -63,6 +63,7 @@ public sealed class ImapInboundPollerTests
         var poller = new ImapInboundPoller(
             Options.Create(new ImapPollerOptions { Enabled = true }),
             handler,
+            new ImapInboundPollerForwardOnceTests.InMemoryPositionStore { Position = new ImapPollPosition(0, 0) },
             NullLogger<ImapInboundPoller>.Instance,
             _ => Task.FromResult(client));
 
@@ -93,6 +94,7 @@ public sealed class ImapInboundPollerTests
         var poller = new ImapInboundPoller(
             Options.Create(new ImapPollerOptions { Enabled = true }),
             handler,
+            new ImapInboundPollerForwardOnceTests.InMemoryPositionStore { Position = new ImapPollPosition(0, 0) },
             NullLogger<ImapInboundPoller>.Instance,
             _ => Task.FromResult(client));
 

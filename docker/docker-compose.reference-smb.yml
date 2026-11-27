@@ -169,7 +169,11 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5000
       # Postgres on the same docker network → resolves via service DNS.
-      ConnectionStrings__Postgres: "Host=postgres;Database=${POSTGRES_DB:-verbara};Username=${POSTGRES_USER:-platform};Password=${POSTGRES_PASSWORD};Maximum Pool Size=${PG_POOL_MAX:-10};Minimum Pool Size=${PG_POOL_MIN:-2};Connection Idle Lifetime=300;Pooling=true"
+      ConnectionStrings__Postgres: "Host=postgres;Database=${POSTGRES_DB:-verbara};Username=${POSTGRES_USER:-platform};Maximum Pool Size=${PG_POOL_MAX:-10};Minimum Pool Size=${PG_POOL_MIN:-2};Connection Idle Lifetime=300;Pooling=true"
+      # Npgsql reads the password from PGPASSWORD when the connection string has none. Pasted into
+      # Password=, a ; quote or space in POSTGRES_PASSWORD would break the string; compose sets PGPASSWORD
+      # as given. scripts/check-compose-postgres-password.py keeps every stack this way.
+      PGPASSWORD: ${POSTGRES_PASSWORD}
       # Asterisk on host network → reach via host gateway.
       Asterisk__Ami__Hostname: host.docker.internal
       Asterisk__Ami__Port: "5038"
@@ -294,7 +298,8 @@ services:
       Asterisk__ClusterNodeId: ${REALTIME_CLUSTER_NODE_ID:-realtime-1}
       # Postgres-backed leader election (REQUIRED since v2.8.0 — realtime hard-fails
       # at startup without ConnectionStrings:Cluster or :Postgres). Single-host = sole leader.
-      ConnectionStrings__Postgres: "Host=postgres;Database=${POSTGRES_DB:-verbara};Username=${POSTGRES_USER:-platform};Password=${POSTGRES_PASSWORD};Maximum Pool Size=5;Minimum Pool Size=1;Pooling=true"
+      ConnectionStrings__Postgres: "Host=postgres;Database=${POSTGRES_DB:-verbara};Username=${POSTGRES_USER:-platform};Maximum Pool Size=5;Minimum Pool Size=1;Pooling=true"
+      PGPASSWORD: ${POSTGRES_PASSWORD}
       # Live-event backplane + the API's JWT key pool. Required: without the
       # identity Redis, realtime rejects every token the API issues.
       ConnectionStrings__Redis: "redis:6379${REDIS_PASSWORD:+,password=${REDIS_PASSWORD}}"
@@ -506,7 +511,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5020
-      ConnectionStrings__Postgres: "Host=postgres;Database=${POSTGRES_DB:-verbara};Username=${POSTGRES_USER:-platform};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__Postgres: "Host=postgres;Database=${POSTGRES_DB:-verbara};Username=${POSTGRES_USER:-platform}"
+      PGPASSWORD: ${POSTGRES_PASSWORD}
       Smtp__Host: ${SMTP_HOST:-localhost}
       Smtp__Port: ${SMTP_PORT:-587}
       Smtp__UseTls: ${SMTP_USE_TLS:-true}

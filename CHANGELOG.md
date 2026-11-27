@@ -11,6 +11,85 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **CSAT email replies are recorded once across restarts of the mail service.** The mail service remembered which
+  replies it had read only while it ran, so after each restart it read the reply mailbox from the start and sent every
+  reply still in it to the Api again, adding its rating once more; and when one reply in a poll failed, the next poll
+  sent again the replies before it. It now keeps, per mailbox, the last reply it handled in the database (new
+  migration `034_MailImapPollPositions.sql`, run by the Api at start-up), updated after each reply. A reply that fails
+  is retried on the next poll on its own. While the Api cannot take it (not reachable, not licensed for CSAT, a service
+  key that does not match, or answering 502, 503 or 504) the reply waits, however long that lasts, and the replies after
+  it follow once the Api answers. A reply the Api refuses (400, 409 or 422), or one the Api still fails on after
+  `Imap__MaxAttemptsPerMessage` polls (default 20), is written to the mail service's log as not recorded and passed, so
+  it cannot hold the mailbox back. An acknowledgement email that fails to send no longer makes the reply count twice.
+  The mailbox is still only read, never changed. On upgrade, the first read of each mailbox starts after its newest
+  message and sends none of the replies already in it, which the previous version had read; a reply that arrives
+  before the upgraded Api has started and applied the migration (while the mail service is stopped, or already running
+  ahead of the Api) is not recorded. (#696)
+- **An email or SMS survey keeps one rating.** Every CSAT capture stored a new rating, so a second reply to the same
+  survey email, or the same reply forwarded again, added a second rating for that survey and conversation and counted
+  twice in the CSAT averages. Now the first rating of an email or SMS survey is kept: a later reply, or two replies
+  arriving at once, stores nothing more, publishes no second update and writes no second audit record, and the capture
+  still answers 200 (with `totalResponses` 0) so the mail service and the SMS path do not send it again. A new
+  database migration (`035_SurveyResponseOnePerDispatch.sql`) adds that rule to the `survey_responses` table; on a
+  database that already holds several ratings for one email or SMS survey it keeps the first one captured and removes
+  the later ones (their audit records are kept), and it runs at start-up and can run again. Webchat and voice ratings
+  are unchanged. (#697)
+- **CSAT ratings answer success once they are recorded.** Every CSAT capture (webchat, voice, email and SMS) and
+  every CSAT template change saved its data and then failed on its audit record, whose category `csat` the audit
+  table did not accept, so the call answered 500 for work that was done. The mail service took that answer as a
+  failure and sent the same email reply again on every poll, adding the same rating once more each time. A new
+  database migration (`033_AuditCsatCategory.sql`) adds `csat` to the categories the audit table accepts; it runs at
+  start-up and keeps every existing audit record. A change to a user's listen phone, whose audit record was dropped
+  the same way (the change itself was saved), is now recorded under `auth`, with the administrator's other changes
+  to a user. A new governance test reads the categories the code writes and the ones the migrations accept, and fails
+  when they disagree. (#694)
+- **The production stack runs the web console.** `docker/docker-compose.production.yml` started a gateway that sends
+  the console's pages to a `web` service, but the stack had none, so the gateway restarted in a loop (`host not found
+  in upstream "web:80"`) and neither the console nor the Api was reachable through it. The stack now runs the
+  published Web image as `web`, at the same release as the reference SMB stack (`PLATFORM_WEB_TAG`, read from the
+  shell or `docker/.env`; `scripts/check-smb-pins.py` keeps the two stacks on one release). A new governance test
+  reads the nginx configuration each compose service mounts and fails when the stack has no service for a host it
+  proxies to, or starts that service only under a profile the proxy does not share. (#688)
+- **CSAT email replies reach the Api once the reply mailbox is on.** With `Imap__Enabled=true`, the mail service
+  needs the Api's address (`CsatCapture__ApiBaseAddress`) and the mailbox's tenant, host, user and password to read
+  replies and record their ratings, and `docker/.env.production.example` listed none of them: a stack started from it
+  with the mailbox turned on ran, but failed every poll on the first reply it matched, so no rating was recorded and
+  the only trace was a warning in the mail service's log. The example now lists them, commented, next to
+  `Imap__Enabled`, with what each must hold (`http://platform-api:5000` inside the production stack). The mail
+  service now refuses to start with the mailbox on and one of them missing, naming it in its log. On upgrade, a
+  stack that turned the mailbox on without them (in `docker-compose.reference-smb.yml`, `IMAP_ENABLED=true` with
+  `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD` or the tenant left empty) used to keep sending outbound email while
+  replies failed; its mail service now stops, outbound email included, until you fill them in or set
+  `Imap__Enabled` (`IMAP_ENABLED`) back to `false`. An unset
+  `CsatCapture__ServiceKey` now sends `Services__ServiceKey`, the key the Api checks on that call, so you set the key
+  once. `scripts/check-env-example-startup-settings.py` also reads these settings from the mail service's code and
+  fails when an env file a stack hands the mail service does not list them next to `Imap__Enabled`. (#691)
+- **The production stack starts from its example settings.** `docker/.env.production.example` left out settings the
+  services of `docker/docker-compose.production.yml` refuse to start without, so a stack started from a copy of it
+  restarted in a loop with the reason only in the logs: the mail service stopped without `Imap__TokenSigningSecret`,
+  and the Api without `Services__ServiceKey` and the Asterisk manager user and password. The example now lists them,
+  with `Csat__Email__TokenSigningSecret` (the same secret, so the Api and the mail service agree on CSAT email
+  replies), each with a comment on what it is and how to generate it, and leaves them empty, which the services
+  refuse, until you fill them in. Postgres now also reads `POSTGRES_PASSWORD` from `.env.production`: before, compose
+  took it from the shell or `docker/.env`, so a new database was created with the default `platform_secret` while
+  the services sent the password from `.env.production`, and the Api could not connect. The password applies only
+  when Postgres creates its database; an existing data volume keeps its own. Postgres no longer falls back to
+  `platform_secret` either: a `.env.production` without `POSTGRES_PASSWORD` leaves a new database uninitialised. If
+  you set `POSTGRES_PASSWORD` in the shell or `docker/.env`, move it into `.env.production` (with `PGPASSWORD` at the
+  same value) before Postgres creates a new data volume, such as on a new host or a restore. A new CI check,
+  `scripts/check-env-example-startup-settings.py`, reads from the code which settings the Api and the mail service
+  refuse to start without and fails when the env file a stack hands them lacks one, and
+  `scripts/check-compose-postgres-password.py` now fails when Postgres does not read the env file the services take
+  `PGPASSWORD` from. (#683)
+- **Asterisk installed with the Kubernetes Helm chart loads its endpoints from the platform's database.** The chart
+  passed the database settings under names nothing read, and its start command replaced the image's own, so Asterisk
+  kept a sample configuration, never connected to Postgres and loaded no endpoints, queues or trunks from it. The
+  chart now passes `PG_REALTIME_HOST`, `_PORT`, `_DB`, `_USER` and `_PASSWORD`, the names the Docker stacks use, and
+  its start command writes Asterisk's database configuration from them, with a password that holds `;`, a quote, a
+  backslash or a space kept exactly as given. It also ships the realtime mappings, so `pjsip show endpoints` lists the
+  endpoints stored in Postgres next to the chart's own load-test endpoint. Asterisk now refuses to start when one of
+  the five settings is empty. `scripts/check-asterisk-realtime.py` now also checks the chart against the platform
+  chart's database settings. (#682)
 - **Asterisk in the full stack and the demo stack loads its endpoints, queues and trunks again.** Asterisk read its
   configuration from a database the stack does not create (`platform` instead of `verbara` in
   `docker/docker-compose.full.yml`) and with a password the stack does not use (the demo stack's, and any stack started
@@ -19,13 +98,35 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stack already did. Asterisk's container now also writes a database name, user or password that holds `/`, `&`,
   `\`, `;`, a quote or a space exactly as given; before, such a password was dropped or mangled. A new CI check,
   `scripts/check-asterisk-realtime.py`, fails when a stack under `docker/` that builds Asterisk points it at another
-  database, user or password than its Postgres.
+  database, user or password than its Postgres. (#667)
+- **The Docker stacks and the Helm chart accept any Postgres password.** The Api, the realtime service and the mail
+  service built their database connection strings by pasting `POSTGRES_PASSWORD` into `Password=`, so a password
+  with `;`, a quote or a leading or trailing space ended the value early or was read differently, and those services
+  could not reach Postgres while Asterisk could. Every stack under `docker/` (full, demo, SMB, reference SMB, scale)
+  now hands each service the password as `PGPASSWORD`, which the database driver reads as given, and leaves it out of
+  the connection string; the Helm chart's Api and realtime do the same with their password secret. The `.env`
+  setting and its defaults are unchanged, and a connection string you set yourself with a `Password=` still wins.
+  `docker/.env.production.example` now shows the same form for the production stack, which reads its settings from
+  `.env.production`: `PGPASSWORD` equal to `POSTGRES_PASSWORD`, and `ConnectionStrings__Postgres` (the key the Api
+  reads; the example named `ConnectionStrings__Platform`) without `Password=`. A `.env.production` that keeps the
+  password in its connection string works as before until the password holds one of those characters. On Helm the
+  secret's variable is now `PGPASSWORD` instead of `PG_PASSWORD`: a `ConnectionStrings__*` you added to the Api or
+  realtime deployment that expands `$(PG_PASSWORD)` must drop its `Password=` when you upgrade, or it sends that text
+  as the password. A new CI check, `scripts/check-compose-postgres-password.py`, fails when a stack, an env file
+  under `docker/` or a Helm chart puts the password in a connection string again. (#673)
+- **The demo stack's realtime service starts.** In `docker/demo/docker-compose.demo.yml` the realtime service had no
+  Postgres connection string, so it stopped at startup with "ConnectionStrings:Cluster (or :Postgres fallback) is
+  required for leader election" and restarted in a loop, whatever `POSTGRES_PASSWORD` was set to; the gateway, which
+  waits for it, never started. It now gets the same database as the demo's Api, with the password
+  as `PGPASSWORD`, and waits for Postgres to be healthy. `scripts/check-compose-postgres-password.py` now also fails
+  when a stack under `docker/` runs the realtime image without `ConnectionStrings__Cluster` or
+  `ConnectionStrings__Postgres`, in its `environment:` or its `env_file:`. (#679)
 - **An ended Agent Assist session leaves the Monitor list sooner when the shared store blips.** With Redis, a failed
   removal of a session's Monitor record, when the session ends or its tenants come into conflict, is now retried up
   to four times in about 1.75 s instead of being left until the record expires (last update + 15 s). Until the
   removal lands the session can still be listed and whispered to in its own tenant; after the last attempt the
   record's expiry still bounds it. A late retry removes only the record its own session wrote, so a call that is
-  transferred or reconnects and is listed again keeps its new row.
+  transferred or reconnects and is listed again keeps its new row. (#668)
 
 ### Dependencies
 
