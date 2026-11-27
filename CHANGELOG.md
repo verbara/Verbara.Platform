@@ -11,6 +11,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The CSAT reply mailbox reads the folder it is configured with.** A mailbox set to read another folder than INBOX
+  (`Imap__Mailboxes__N__Folder`) was still read from INBOX, so replies filed into that folder were never recorded and
+  replies in INBOX were. The mail service now opens the configured folder, named as the mail server lists it with its
+  own separator (`INBOX.CsatReplies`, `INBOX/CsatReplies`, `CsatReplies`). INBOX stays the default, in any case, and
+  a mailbox with no folder set behaves as before, keeping its place in the mailbox. A folder the server does not have
+  is written to the mail service's log as an error on every poll and nothing is read from that mailbox; the other
+  mailboxes keep being read. The SMB stack takes the folder from `IMAP_FOLDER`. (#705)
 - **CSAT email replies are recorded once across restarts of the mail service.** The mail service remembered which
   replies it had read only while it ran, so after each restart it read the reply mailbox from the start and sent every
   reply still in it to the Api again, adding its rating once more; and when one reply in a poll failed, the next poll

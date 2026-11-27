@@ -12,7 +12,8 @@ namespace Verbara.Platform.Mail.Services;
 /// Background poller that drains each configured per-tenant <c>csat@…</c> IMAP mailbox on a fixed
 /// interval (csat-runner Phase C, spec: "IMAP gap-fill"). Because inbound mail is not reachable
 /// in-process, this service fills the gap: every <see cref="ImapPollerOptions.PollInterval"/> it
-/// connects to each mailbox, fetches messages whose UID is greater than the last one it handled,
+/// connects to each mailbox, opens its <see cref="ImapMailboxOptions.Folder"/> (INBOX by default), fetches
+/// messages whose UID is greater than the last one it handled,
 /// parses each into a MailKit <see cref="MimeKit.MimeMessage"/>, and hands it to
 /// <see cref="CsatReplyMailHandler"/> for token verification, rating extraction, and forwarding.
 /// <para>
@@ -89,6 +90,10 @@ public sealed partial class ImapInboundPoller : BackgroundService
                 {
                     return;
                 }
+                catch (FolderNotFoundException ex)
+                {
+                    LogFolderNotFound(mailbox.TenantId, mailbox.Host, mailbox.Folder, ex);
+                }
 #pragma warning disable CA1031 // one flaky mailbox must not abort the whole poller loop
                 catch (Exception ex)
                 {
@@ -116,26 +121,24 @@ public sealed partial class ImapInboundPoller : BackgroundService
         var client = await ConnectAsync(mailbox, ct).ConfigureAwait(false);
         try
         {
-            var inbox = client.Inbox
-                ?? throw new InvalidOperationException("IMAP client exposed no Inbox folder.");
-            await inbox.OpenAsync(FolderAccess.ReadOnly, ct).ConfigureAwait(false);
+            var folder = await OpenFolderAsync(client, mailbox, ct).ConfigureAwait(false);
 
-            var uidValidity = inbox.UidValidity;
+            var uidValidity = folder.UidValidity;
             var stored = await _positions.GetAsync(mailbox, ct).ConfigureAwait(false);
             if (stored is null || stored.UidValidity != uidValidity)
             {
-                await StartFromNewestAsync(mailbox, inbox, uidValidity, stored, ct).ConfigureAwait(false);
+                await StartFromNewestAsync(mailbox, folder, uidValidity, stored, ct).ConfigureAwait(false);
                 return 0;
             }
 
             var lastUid = stored.LastUid;
             var query = SearchQuery.Uids(new UniqueIdRange(new UniqueId(uidValidity, lastUid + 1), UniqueId.MaxValue));
-            var uids = await inbox.SearchAsync(query, ct).ConfigureAwait(false);
+            var uids = await folder.SearchAsync(query, ct).ConfigureAwait(false);
 
             var processed = 0;
             foreach (var uid in uids.Where(u => u.Id > lastUid).OrderBy(u => u.Id))
             {
-                if (!await HandleOneAsync(mailbox, inbox, uidValidity, uid, ct).ConfigureAwait(false))
+                if (!await HandleOneAsync(mailbox, folder, uidValidity, uid, ct).ConfigureAwait(false))
                     break; // retried from this message on the next poll
 
                 await _positions.SaveAsync(mailbox, new ImapPollPosition(uidValidity, uid.Id), ct).ConfigureAwait(false);
@@ -151,6 +154,22 @@ public sealed partial class ImapInboundPoller : BackgroundService
             client.Dispose();
         }
     }
+
+    // Opens the folder the mailbox names, read-only. INBOX (any case, RFC 3501 5.1) and a blank setting are the
+    // server's inbox, as before #705; any other name is the folder's full name as the server lists it, with the
+    // server's own separator (INBOX.CsatReplies, INBOX/CsatReplies, CsatReplies ...). A folder the server does not
+    // have throws FolderNotFoundException: the poll reads nothing, and ExecuteAsync logs it on every poll.
+    private static async Task<IMailFolder> OpenFolderAsync(IImapClient client, ImapMailboxOptions mailbox, CancellationToken ct)
+    {
+        var folder = IsInbox(mailbox.Folder)
+            ? client.Inbox ?? throw new InvalidOperationException("IMAP client exposed no Inbox folder.")
+            : await client.GetFolderAsync(mailbox.Folder, ct).ConfigureAwait(false);
+        await folder.OpenAsync(FolderAccess.ReadOnly, ct).ConfigureAwait(false);
+        return folder;
+    }
+
+    private static bool IsInbox(string? folder) =>
+        string.IsNullOrWhiteSpace(folder) || folder.Equals("INBOX", StringComparison.OrdinalIgnoreCase);
 
     // True when the message is done with (handled, or passed after a refusal or too many failures);
     // false when it failed and the next poll should try it again.
@@ -244,6 +263,9 @@ public sealed partial class ImapInboundPoller : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "IMAP inbound poller disabled (Imap:Enabled=false)")]
     private partial void LogDisabled();
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "IMAP folder not found, nothing read from this mailbox: tenant={TenantId} host={Host} folder={Folder}. Set Imap:Mailboxes:N:Folder to the folder's full name as the server lists it, or leave it unset for INBOX")]
+    private partial void LogFolderNotFound(string tenantId, string host, string folder, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "IMAP mailbox drained: tenant={TenantId} processed={Processed}")]
     private partial void LogPolled(string tenantId, int processed);
