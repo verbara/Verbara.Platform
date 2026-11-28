@@ -157,7 +157,7 @@ services:
   # set PLATFORM_WEB_TAG in the shell or docker/.env to run another release.
   # Internal only: the gateway owns port 80.
   web:
-    image: ghcr.io/verbara/platform/web:${PLATFORM_WEB_TAG:-v3.27.1-web}
+    image: ghcr.io/verbara/platform/web:${PLATFORM_WEB_TAG:-v3.32.1-web}
     depends_on:
       platform-api:
         condition: service_healthy

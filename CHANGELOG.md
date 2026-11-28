@@ -22,6 +22,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The production stack, the SMB reference stack and the Helm chart run the current console.** They started Web
+  `v3.27.1-web`, five releases behind. The reference stack's pair moves together to API `v2.41.3` and Web
+  `v3.32.1-web` (the compose defaults and `docker/.env.reference-smb.example`): every Web release since `v3.29.0-web`
+  needs a newer Platform than the `v2.34.0` the stack pinned, and `v3.32.x` needs `v2.41.0`. The production stack's
+  Web image and the chart's `web.image.tag` follow (chart `0.2.14`). `scripts/check-smb-pins.py` now also fails in CI
+  when the reference stack's API pin trails `CHANGELOG.md` by more than two releases besides the newest, or when the
+  chart's Web image differs from the template's; with `--web-changelog` it applies the same rule to the Web pin. The
+  SMB manuals name the new pair, note that the `v2.41.3` tag's own defaults still name the old one, and add two upgrade
+  steps for installations older than v2.38.0 and v2.41.3. No new setting is required. (#704)
+
 - **The mail service waits for the database upgrade without logging errors.** On an upgrade the mail service starts
   before the Api has applied migration `034_MailImapPollPositions.sql` (the Api waits for the mail service to be
   healthy), and until then every poll of a CSAT reply mailbox wrote `IMAP poll failed` with a full error to the mail

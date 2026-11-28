@@ -516,8 +516,9 @@ jobs:
       # SMB reference stack pin guard (OpenSpec bump-smb-reference-stack-pins, design Decision 3): every
       # Platform/Web image default in docker/docker-compose.reference-smb.yml must equal the template's
       # PLATFORM_API_TAG / PLATFORM_WEB_TAG, and docker/docker-compose.production.yml's Web image must follow the
-      # same PLATFORM_WEB_TAG. Agreement only (offline); the Web-floor check needs the sibling
-      # Verbara.Platform.Web checkout and runs locally whenever the pins move (--web-changelog).
+      # same PLATFORM_WEB_TAG, and so must the Helm chart's web.image.tag. The API pin may trail CHANGELOG.md by at
+      # most two releases besides the newest (#704). Offline; the Web floor and lag checks need the sibling
+      # Verbara.Platform.Web checkout and run locally whenever the pins move (--web-changelog).
       - name: SMB stack pin agreement
         run: python3 scripts/check-smb-pins.py
       # CodeQL SARIF filter unit tests. The filter runs only inside codeql.yml's Analyze (C#) job, between

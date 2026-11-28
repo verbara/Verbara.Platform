@@ -2,7 +2,8 @@
 """SMB reference stack pin guard (OpenSpec change bump-smb-reference-stack-pins, design Decision 3).
 
 Usage:
-  check-smb-pins.py [--compose PATH] [--template PATH] [--web-changelog PATH] [--web-follower PATH ...]
+  check-smb-pins.py [--compose PATH] [--template PATH] [--changelog PATH] [--max-lag K] [--web-changelog PATH]
+                    [--web-follower PATH ...] [--helm-values PATH]
 
 Agreement check (always; offline, deterministic — run by CI):
   Every `ghcr.io/verbara/platform/<image>:` reference in the SMB compose must read
@@ -14,19 +15,29 @@ Agreement check (always; offline, deterministic — run by CI):
 Web follower check (always; offline): a stack that builds the API images from the tree but runs the published Web
 image (docker-compose.production.yml, the default follower when --compose is not given) must read
 `${PLATFORM_WEB_TAG:-X}` with X equal to the template's PLATFORM_WEB_TAG, so the Web pin moves in one step. A
-follower with no `ghcr.io/verbara/platform/web` image fails: its gateway proxies to a `web` service.
+follower with no `ghcr.io/verbara/platform/web` image fails: its gateway proxies to a `web` service. The Kubernetes
+chart (`infra/k8s/helm/platform/values.yaml`, the default --helm-values when --compose is not given) follows the same
+pin: its `web.image.tag` must equal the template's PLATFORM_WEB_TAG.
+
+API lag check (always; offline, against this repo's CHANGELOG.md or --changelog): the template's PLATFORM_API_TAG must
+have a released `## [X.Y.Z]` heading, and no more than --max-lag K (default 2) released headings may be newer than
+it, the newest heading set aside (on a release bump PR it is the release being cut, whose images do not exist yet).
+So the pin is one of the newest K + 2 releases, sorted by version number; `## [Unreleased]` never counts (#704).
 
 Floor check (with --web-changelog; run with the sibling Verbara.Platform.Web checkout whenever the pins move):
   Reads the Web CHANGELOG section for the Web pin (`## [X.Y.Z-web]`, or the pre-suffix `## [X.Y.Z]`) and the
   "requires Platform ≥ vA.B.C" (or `>=`) statements inside that section only; the highest one is the floor, and it
   must not exceed the API pin. A missing section, or a section with no such statement ("paired with Platform ...",
   or nothing at all), fails with "floor unknown": an unknown floor never counts as compatible and nothing is
-  inherited from an older section. The fix for a missing floor is in the Web CHANGELOG, not here.
+  inherited from an older section. The fix for a missing floor is in the Web CHANGELOG, not here. The same run checks
+  the Web pin's lag with the API rule: no more than K released Web headings (`## [X.Y.Z-web]`, or the pre-suffix
+  `## [X.Y.Z]`), the newest set aside, are newer than the pin.
 
 Exit codes:
   0  pass
-  1  pin drift, a pin that is not a release tag, a Web floor above the API pin, or "floor unknown"
-  2  usage error, or an input file that cannot be read or holds no pins
+  1  pin drift, a pin that is not a release tag or trails the releases by more than K, a Web floor above the API
+     pin, or "floor unknown"
+  2  usage error, or an input file that cannot be read or holds no pins, or a CHANGELOG with no released heading
 """
 import argparse
 import os
@@ -37,6 +48,9 @@ _ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_COMPOSE = os.path.join(_ROOT, "docker", "docker-compose.reference-smb.yml")
 _DEFAULT_TEMPLATE = os.path.join(_ROOT, "docker", ".env.reference-smb.example")
 _DEFAULT_WEB_FOLLOWERS = [os.path.join(_ROOT, "docker", "docker-compose.production.yml")]
+_DEFAULT_HELM_VALUES = os.path.join(_ROOT, "infra", "k8s", "helm", "platform", "values.yaml")
+_DEFAULT_CHANGELOG = os.path.join(_ROOT, "CHANGELOG.md")
+_DEFAULT_MAX_LAG = 2
 
 _IMAGE_RE = re.compile(r"^\s*image:\s*[\"']?ghcr\.io/verbara/platform/([A-Za-z0-9_.-]+):(\S+?)[\"']?\s*(?:#.*)?$")
 _VAR_DEFAULT_RE = re.compile(r"^\$\{(PLATFORM_API_TAG|PLATFORM_WEB_TAG):-([^}]*)\}$")
@@ -44,6 +58,8 @@ _API_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 _WEB_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-web$")
 _FLOOR_RE = re.compile(r"requires\s+Platform\s*(?:≥|>=)\s*v?(\d+)\.(\d+)\.(\d+)", re.IGNORECASE)
 _SECTION_RE = re.compile(r"^##\s+\[([^\]]+)\]")
+_RELEASE_HEADING_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+_WEB_RELEASE_HEADING_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-web)?$")
 
 _EXIT_FAIL = 1
 _EXIT_INPUT = 2
@@ -168,6 +184,68 @@ def find_section(text, web_pin):
     return f"## [{version}]", None
 
 
+def released_versions(changelog_path, heading_re):
+    """Released headings that `heading_re` accepts, as version tuples, newest first by version number."""
+    versions = set()
+    for line in _read(changelog_path).splitlines():
+        m = _SECTION_RE.match(line)
+        if not m:
+            continue
+        # [Unreleased] (and any other heading that is not a version) never counts.
+        v = heading_re.match(m.group(1).strip())
+        if v:
+            versions.add(tuple(int(g) for g in v.groups()))
+    if not versions:
+        raise InputError(f"{changelog_path}: no released version heading")
+    return sorted(versions, reverse=True)
+
+
+def check_lag(changelog_path, pin, tag_re, heading_re, max_lag, what, fmt):
+    """The pin is a released heading with no more than max_lag released headings newer than it, the newest set aside."""
+    m = tag_re.match(pin or "")
+    if not m:
+        return []  # reported by the agreement check
+    version = tuple(int(g) for g in m.groups())
+    headings = released_versions(changelog_path, heading_re)
+    if version not in headings:
+        return [f"{what} pin {pin} has no '## [{fmt.format(*version)}]' heading in {changelog_path} (not a release)"]
+    behind = headings.index(version)
+    if behind - 1 > max_lag:
+        return [f"{what} pin {pin} trails {changelog_path} by {behind} releases (newest released heading "
+                f"## [{fmt.format(*headings[0])}]); allowed: at most {max_lag + 1} behind (--max-lag {max_lag}, plus "
+                f"the newest heading, which may be the release being cut). Move the pin to a newer release"]
+    return []
+
+
+def read_helm_web_tag(values_path):
+    """`web.image.tag` of a Helm values file, read by indentation (stdlib only), or None when it has none."""
+    path = []
+    for line in _read(values_path).splitlines():
+        s = line.split(" #", 1)[0].rstrip()
+        if not s.strip() or s.lstrip().startswith("#"):
+            continue
+        m = re.match(r"^( *)([A-Za-z0-9_.-]+):\s*(.*)$", s)
+        if not m:
+            continue
+        indent, key, value = len(m.group(1)), m.group(2), m.group(3).strip()
+        while path and path[-1][0] >= indent:
+            path.pop()
+        if [k for _, k in path] == ["web", "image"] and key == "tag":
+            return value.strip("\"'")
+        if not value:
+            path.append((indent, key))
+    return None
+
+
+def check_helm_follower(values_path, web_pin):
+    tag = read_helm_web_tag(values_path)
+    if tag is None:
+        return [f"{values_path}: no web.image.tag (the chart's Web image follows PLATFORM_WEB_TAG)"]
+    if web_pin is not None and tag != web_pin:
+        return [f"PLATFORM_WEB_TAG: {values_path} web.image.tag is {tag} but the template has {web_pin}"]
+    return []
+
+
 def check_floor(changelog_path, api_pin, web_pin):
     text = _read(changelog_path)
     heading, body = find_section(text, web_pin)
@@ -193,21 +271,39 @@ def main(argv=None):
     ap.add_argument("--template", default=_DEFAULT_TEMPLATE)
     ap.add_argument("--web-changelog", default=None)
     ap.add_argument("--web-follower", action="append", default=None)
+    ap.add_argument("--helm-values", default=None)
+    ap.add_argument("--changelog", default=_DEFAULT_CHANGELOG)
+    ap.add_argument("--max-lag", type=int, default=_DEFAULT_MAX_LAG)
     args = ap.parse_args(argv)
+    if args.max_lag < 0:
+        ap.error("--max-lag must be 0 or more")
+    is_default = os.path.abspath(args.compose) == _DEFAULT_COMPOSE
     followers = args.web_follower
     if followers is None:
-        followers = _DEFAULT_WEB_FOLLOWERS if os.path.abspath(args.compose) == _DEFAULT_COMPOSE else []
+        followers = _DEFAULT_WEB_FOLLOWERS if is_default else []
     followers = [os.path.relpath(f) for f in followers]
+    helm_values = args.helm_values
+    if helm_values is None and is_default:
+        helm_values = _DEFAULT_HELM_VALUES
+    helm_values = os.path.relpath(helm_values) if helm_values is not None else None
     args.compose, args.template = os.path.relpath(args.compose), os.path.relpath(args.template)
+    changelog = os.path.relpath(args.changelog)
     try:
         api_pin, web_pin, errors = check_agreement(args.compose, args.template)
         for follower in followers:
             errors += check_web_follower(follower, web_pin)
+        if helm_values is not None:
+            errors += check_helm_follower(helm_values, web_pin)
+            followers.append(f"{helm_values} (web.image.tag)")
+        errors += check_lag(changelog, api_pin, _API_TAG_RE, _RELEASE_HEADING_RE, args.max_lag, "PLATFORM_API_TAG",
+                            "{}.{}.{}")
         if args.web_changelog is not None:
             if web_pin is None:
                 errors.append("floor unknown: the template names no PLATFORM_WEB_TAG")
             else:
                 errors += check_floor(args.web_changelog, api_pin, web_pin)
+                errors += check_lag(args.web_changelog, web_pin, _WEB_TAG_RE, _WEB_RELEASE_HEADING_RE, args.max_lag,
+                                    "PLATFORM_WEB_TAG", "{}.{}.{}-web")
     except InputError as e:
         print(f"check-smb-pins: ERROR: {e}", file=sys.stderr)
         return _EXIT_INPUT
@@ -215,7 +311,7 @@ def main(argv=None):
         for e in errors:
             print(f"check-smb-pins: FAIL: {e}", file=sys.stderr)
         return _EXIT_FAIL
-    checked = "agreement + Web floor" if args.web_changelog else "agreement"
+    checked = "agreement + API lag + Web floor and lag" if args.web_changelog else "agreement + API lag"
     also = f"; Web pin followed by {', '.join(followers)}" if followers else ""
     print(f"check-smb-pins: OK ({checked}): PLATFORM_API_TAG={api_pin} PLATFORM_WEB_TAG={web_pin}{also}")
     return 0
