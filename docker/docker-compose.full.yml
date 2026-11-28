@@ -113,7 +113,7 @@ services:
       ForwardedHeaders__TrustedProxies__0: ${VERBARA_GATEWAY_IP:-172.31.250.10}/32
       Services__Renderer__BaseUrl: http://renderer:5010
       Services__Mail__BaseUrl: http://mail:5020
-      Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
+      Services__ServiceKey: ${SERVICE_KEY:?SERVICE_KEY is required - copy docker/.env.full.example to docker/.env and fill it in}
       # Opt-in Redis-backed MFA + password-reset caches. Uncomment to enable —
       # requires the `identity-redis` profile (or `cluster` profile) to start the
       # Redis service. Without this variable the Platform falls back to the
@@ -147,7 +147,7 @@ services:
     logging: *default-logging
     environment:
       ASPNETCORE_URLS: http://+:5010
-      Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
+      Services__ServiceKey: ${SERVICE_KEY:?SERVICE_KEY is required - copy docker/.env.full.example to docker/.env and fill it in}
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:5010/health || exit 1"]
       interval: 30s
@@ -181,7 +181,7 @@ services:
       # depends_on below rather than a profile-gated one.
       ConnectionStrings__Redis: redis:6379
       ConnectionStrings__IdentityRedis: redis:6379
-      Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
+      Services__ServiceKey: ${SERVICE_KEY:?SERVICE_KEY is required - copy docker/.env.full.example to docker/.env and fill it in}
       Services__PlatformApi__BaseUrl: http://platform-api:5000
       Asterisk__ClusterNodeId: ${ASTERISK_CLUSTER_NODE_ID:-realtime-1}
     depends_on:
@@ -213,7 +213,7 @@ services:
       Smtp__UseTls: ${SMTP_USE_TLS:-false}
       Smtp__FromAddress: ${SMTP_FROM:-reports@platform.local}
       Smtp__FromName: ${SMTP_FROM_NAME:-Platform Reports}
-      Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
+      Services__ServiceKey: ${SERVICE_KEY:?SERVICE_KEY is required - copy docker/.env.full.example to docker/.env and fill it in}
       Microsoft__ClientId: ${MS_CLIENT_ID:-}
       Microsoft__TenantId: ${MS_TENANT_ID:-common}
       # Read only with the CSAT reply mailbox on (Imap__Enabled=true, off here): the mail service checks

@@ -22,6 +22,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The full stack starts from its example.** `docker/docker-compose.full.yml` runs the Api in Production and gave it
+  the built-in service key when `SERVICE_KEY` was unset, which `docker/.env.full.example` never set; the Api refuses
+  that key in Production, so it restarted in a loop and realtime, the Web console and the gateway never started.
+  `docker/.env.full.example` now lists `SERVICE_KEY`, empty, with how to generate one, and says to copy it to
+  `docker/.env`; compose no longer starts the stack while `SERVICE_KEY` is empty, naming it, instead of starting an Api
+  that cannot run. `scripts/check-env-example-startup-settings.py` now also checks stacks that pass their settings
+  inline (`environment:` with `${VAR:-default}`) against their `.env.<name>.example`: it fails when a setting the Api
+  refuses to start without falls back to a default the Api refuses, or names a variable the example does not list.
+  `scripts/check-scale-backplane.py` renders the full stack with the values its example leaves to fill.
+  `docs/getting-started.md` shows the copy step. (#689)
 - **The mail service waits for the database upgrade without logging errors.** On an upgrade the mail service starts
   before the Api has applied migration `034_MailImapPollPositions.sql` (the Api waits for the mail service to be
   healthy), and until then every poll of a CSAT reply mailbox wrote `IMAP poll failed` with a full error to the mail
