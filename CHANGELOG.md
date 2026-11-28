@@ -11,6 +11,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The Api log shows what a database upgrade removed.** Some migrations report what they changed, such as
+  `024_UserRolesUserForeignKey.sql` (role assignments of users that no longer exist) and
+  `035_SurveyResponseOnePerDispatch.sql` (repeated email or SMS ratings), but when the Api applied them at start-up
+  that report went nowhere, so an operator could not tell how many rows an upgrade removed. Each message a migration
+  reports is now written to the Api log during start-up, at Information (Warning when the database flags it
+  as a warning), naming the migration, under the category `Verbara.Platform.Api.Services.DatabaseMigrationService`.
+  When a later migration fails and the Api stops, the error names the messages of the migrations it had already
+  applied. (#701)
 - **CSAT email replies are recorded once across restarts of the mail service.** The mail service remembered which
   replies it had read only while it ran, so after each restart it read the reply mailbox from the start and sent every
   reply still in it to the Api again, adding its rating once more; and when one reply in a poll failed, the next poll

@@ -271,13 +271,15 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AuthWriteQueue>())
 var coreConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
     builder.Configuration.GetConnectionString("Postgres"));
 NpgsqlDataSource? sharedCoreDataSource = null;
+IReadOnlyList<Verbara.Platform.Api.Services.MigrationNotice> migrationNotices = [];
 if (!string.IsNullOrEmpty(coreConnectionString))
 {
     sharedCoreDataSource = NamedDataSource.Build(coreConnectionString, "core");
     builder.Services.AddPostgresStorage(sharedCoreDataSource);
 
-    // Apply Platform SQL migrations eagerly (before Pro EnsureSchemaAsync which references Platform tables)
-    Verbara.Platform.Api.Services.DatabaseMigrationService.ApplyMigrations(coreConnectionString);
+    // Apply Platform SQL migrations eagerly (before Pro EnsureSchemaAsync which references Platform tables).
+    // Their notices (e.g. how many rows an upgrade removed) are logged right after builder.Build() (#701).
+    migrationNotices = Verbara.Platform.Api.Services.DatabaseMigrationService.ApplyMigrations(coreConnectionString);
 
     // Override in-memory capacity with persistent version for restart recovery
     builder.Services.AddSingleton<IAgentCapacityService>(sp =>
@@ -1432,6 +1434,7 @@ var openApiEnabled = builder.Environment.IsDevelopment()
 builder.Services.AddVerbaraOpenApi(openApiEnabled);
 
 var app = builder.Build();
+Verbara.Platform.Api.Services.DatabaseMigrationService.LogNotices(app.Services, migrationNotices);
 app.Services.EnsureEmbeddedLicenceTrustAnchor();
 RetentionPurgeModeLog.LogStartupMode(app.Services);
 
