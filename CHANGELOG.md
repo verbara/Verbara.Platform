@@ -9,6 +9,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **CI fails when the Helm chart's images fall behind the releases.** A new check,
+  `scripts/check-helm-image-pins.py`, runs in the `Invariant Gates` job. It fails when the chart's `api` and `realtime`
+  tags differ or are not a `vX.Y.Z` release with its own `CHANGELOG.md` heading, when a digest is missing, malformed or
+  the same for both images, when `Chart.yaml` `appVersion` does not match the tag, or when more than two released
+  headings besides the newest one are newer than the pin. The newest heading is never counted, so the pull request
+  that cuts a release stays green while its images do not exist yet. Run with `--ledger` and verbara-website's
+  `data/authorized-digests.json`, it also checks both digests against the release ledger. The release workflow's
+  digest reminder now also asks for a pull request that moves the chart to the new release. (#468)
+
 ### Fixed
 
 - **The mail service waits for the database upgrade without logging errors.** On an upgrade the mail service starts
@@ -157,6 +168,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   removal lands the session can still be listed and whispered to in its own tenant; after the last attempt the
   record's expiry still bounds it. A late retry removes only the record its own session wrote, so a call that is
   transferred or reconnects and is listed again keeps its new row. (#668)
+- **The Helm chart deploys the current release.** `infra/k8s/helm/platform` still pinned the `api` and `realtime`
+  images to `v2.34.1`, twelve releases back, so a cluster installed from the chart as shipped ran a month-old Platform.
+  Both images now default to `v2.41.3` by tag and manifest-list digest (the digests of the `v2.41.3` GitHub Release
+  and the release ledger, which agree), `appVersion` is `2.41.3` and the chart version is `0.2.13`. The chart needs no
+  other setting for this release. (#468)
 
 ### Dependencies
 

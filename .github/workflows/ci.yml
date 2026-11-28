@@ -680,3 +680,10 @@ jobs:
       # and platform-api and realtime render the same ConnectionStrings__Redis (`helm template`).
       - name: Agent Assist Kubernetes audio path
         run: python3 scripts/check-agentassist-k8s.py
+      # The platform Helm chart's api and realtime images follow the releases (#468): one vX.Y.Z tag for both,
+      # two distinct sha256 digests, Chart.yaml appVersion equal to the tag, a CHANGELOG.md heading for it, and at
+      # most --max-lag (2) released headings newer than it besides the newest one. The newest heading never counts,
+      # so a release bump PR stays green while its images do not exist yet. Offline; the digest-vs-ledger check
+      # (--ledger) runs locally whenever the pins move.
+      - name: Helm chart image pins follow releases
+        run: python3 scripts/check-helm-image-pins.py
