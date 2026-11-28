@@ -99,7 +99,9 @@ public static class PlatformMigrationRunner
                     new NpgsqlParameter("Name", migration.Name));
                 tx.Commit();
             }
-            catch (Exception ex)
+            // NpgsqlException covers every server and connection error (PostgresException derives from it);
+            // InvalidOperationException a connection or command left in a state it cannot run in.
+            catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException)
             {
                 current = null;
                 // Postgres aborts the transaction server-side on SQL error;

@@ -73,7 +73,7 @@ public sealed class CliMigrateFixture : IAsyncLifetime
     /// <summary>Runs <c>Verbara.Platform.Cli</c> with <paramref name="arguments"/> and returns its exit code and output.</summary>
     public static async Task<CliRun> RunCliAsync(params string[] arguments)
     {
-        var cli = Path.Combine(AppContext.BaseDirectory, "Verbara.Platform.Cli.dll");
+        var cli = Path.Join(AppContext.BaseDirectory, "Verbara.Platform.Cli.dll");
         File.Exists(cli).Should().BeTrue("the test project references the CLI, so its build output carries it");
 
         var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet")
