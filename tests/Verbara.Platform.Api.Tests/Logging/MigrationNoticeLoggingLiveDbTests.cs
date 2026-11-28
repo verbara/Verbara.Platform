@@ -72,7 +72,7 @@ public sealed class MigrationNoticeLoggingLiveDbTests
     {
         var connectionString = await EmptyDatabaseAsync();
         DatabaseMigrationService.ApplyMigrations(connectionString, [("900_Raises.sql", "DO $$ BEGIN RAISE NOTICE 'once'; END $$;")])
-            .Should().ContainSingle().Which.Should().Be(new MigrationNotice("900_Raises.sql", "NOTICE", "once"));
+            .Should().ContainSingle().Which.Should().Be(new Storage.Postgres.MigrationNotice("900_Raises.sql", "NOTICE", "once"));
 
         // The second run's CREATE TABLE IF NOT EXISTS _migrations raises "already exists, skipping": not a migration's.
         DatabaseMigrationService.ApplyMigrations(connectionString, [("900_Raises.sql", "DO $$ BEGIN RAISE NOTICE 'once'; END $$;")])
