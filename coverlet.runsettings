@@ -7,6 +7,10 @@
   container-backed (Storage.Postgres, Identity.Redis) — those are excluded from the
   CI unit subset, so counting them at 0% would dilute the number and mask real
   regressions. Their coverage is tracked only if their container tests ever enter CI.
+  The CLI (Verbara.Platform.Cli, a tool outside the shipped images) is excluded for the
+  same reason: its only tests (cli-migrate-prints-migration-notices, #711) run it as a
+  process from Storage.Postgres.Tests, so the unit subset would count it at 0%. It was
+  not in the report before either: no test project referenced it.
   See docs/specs/2026-06-14-coverage-ratchet-pilot.md.
 -->
 <RunSettings>
@@ -16,7 +20,7 @@
         <Configuration>
           <Format>cobertura</Format>
           <ExcludeByAttribute>GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
-          <Exclude>[*.Tests]*,[*.Tests.*]*,[Verbara.Platform.Storage.Postgres]*,[Verbara.Platform.Identity.Redis]*</Exclude>
+          <Exclude>[*.Tests]*,[*.Tests.*]*,[Verbara.Platform.Storage.Postgres]*,[Verbara.Platform.Identity.Redis]*,[Verbara.Platform.Cli]*</Exclude>
           <ExcludeByFile>**/Migrations/*.cs</ExcludeByFile>
           <SkipAutoProps>true</SkipAutoProps>
         </Configuration>

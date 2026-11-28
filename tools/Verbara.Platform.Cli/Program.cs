@@ -1,5 +1,5 @@
-using System.Reflection;
 using Npgsql;
+using Verbara.Platform.Storage.Postgres;
 
 if (args.Length < 1)
 {
@@ -19,7 +19,7 @@ if (connectionString is null)
 
 return command switch
 {
-    "migrate" => await RunMigrateAsync(connectionString),
+    "migrate" => RunMigrate(connectionString),
     "doctor"  => await RunDoctorAsync(connectionString),
     _         => UnknownCommand(command),
 };
@@ -28,70 +28,28 @@ return command switch
 // migrate
 // ---------------------------------------------------------------------------
 
-static async Task<int> RunMigrateAsync(string connectionString)
+static int RunMigrate(string connectionString)
 {
     Console.WriteLine("Verbara.Platform — Database Migration");
     Console.WriteLine("======================================");
 
-    await using var dataSource = NpgsqlDataSource.Create(connectionString);
-
-    // Ensure _migrations tracking table exists
-    await EnsureMigrationsTableAsync(dataSource);
-
-    // Load applied migrations
-    var applied = await GetAppliedMigrationsAsync(dataSource);
-
-    // Discover embedded SQL migrations sorted by filename
-    var migrations = GetEmbeddedMigrations();
-    if (migrations.Count == 0)
+    // The Api's own runner (#711): the same transactions, tracking table and embedded migrations, and every notice
+    // a migration raises is printed under it with its migration's name, as the Api logs it at start-up (#701).
+    var progress = new ConsoleMigrationProgress();
+    try
     {
-        Console.WriteLine("No migration files found.");
-        return 0;
+        PlatformMigrationRunner.Apply(connectionString, progress);
     }
-
-    int appliedCount = 0;
-    foreach (var (name, sql) in migrations)
+    catch (InvalidOperationException) when (progress.FailedMigration is not null)
     {
-        if (applied.Contains(name))
-        {
-            Console.WriteLine($"  {name} ... already applied");
-            continue;
-        }
-
-        Console.Write($"  {name} ... ");
-
-        await using var conn = await dataSource.OpenConnectionAsync();
-        await using var tx = await conn.BeginTransactionAsync();
-        try
-        {
-            await using var execCmd = conn.CreateCommand();
-            execCmd.Transaction = tx;
-            execCmd.CommandText = sql;
-            await execCmd.ExecuteNonQueryAsync();
-
-            await using var trackCmd = conn.CreateCommand();
-            trackCmd.Transaction = tx;
-            trackCmd.CommandText =
-                "INSERT INTO _migrations (name, applied_at) VALUES ($1, NOW())";
-            trackCmd.Parameters.AddWithValue(name);
-            await trackCmd.ExecuteNonQueryAsync();
-
-            await tx.CommitAsync();
-            Console.WriteLine("applied");
-            appliedCount++;
-        }
-        catch (Exception ex)
-        {
-            await tx.RollbackAsync();
-            Console.Error.WriteLine($"FAILED ({ex.Message})");
-            return 1;
-        }
+        // Already printed by the progress: the failed migration and its error.
+        return 1;
     }
 
     Console.WriteLine();
-    Console.WriteLine(appliedCount == 0
+    Console.WriteLine(progress.AppliedCount == 0
         ? "Database is up to date."
-        : $"Applied {appliedCount} migration(s).");
+        : $"Applied {progress.AppliedCount} migration(s).");
     return 0;
 }
 
@@ -239,58 +197,6 @@ static async Task<int> RunDoctorAsync(string connectionString)
 // Helpers
 // ---------------------------------------------------------------------------
 
-static async Task EnsureMigrationsTableAsync(NpgsqlDataSource dataSource)
-{
-    await using var conn = await dataSource.OpenConnectionAsync();
-    await using var cmd = conn.CreateCommand();
-    cmd.CommandText =
-        "CREATE TABLE IF NOT EXISTS _migrations (" +
-        "  name TEXT NOT NULL PRIMARY KEY," +
-        "  applied_at TIMESTAMPTZ NOT NULL" +
-        ")";
-    await cmd.ExecuteNonQueryAsync();
-}
-
-static async Task<HashSet<string>> GetAppliedMigrationsAsync(NpgsqlDataSource dataSource)
-{
-    var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    await using var conn = await dataSource.OpenConnectionAsync();
-    await using var cmd = conn.CreateCommand();
-    cmd.CommandText = "SELECT name FROM _migrations";
-    await using var reader = await cmd.ExecuteReaderAsync();
-    while (await reader.ReadAsync())
-        result.Add(reader.GetString(0));
-    return result;
-}
-
-static List<(string Name, string Sql)> GetEmbeddedMigrations()
-{
-    var assembly = Assembly.GetExecutingAssembly();
-    var names = assembly.GetManifestResourceNames();
-
-    var migrations = new List<(string, string)>();
-    foreach (var resourceName in names)
-    {
-        // Resources are embedded as "Migrations\001_Baseline.sql" (backslash on Windows) or forward slash
-        if (!resourceName.Contains("Migrations") || !resourceName.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
-            continue;
-
-        // Extract the bare filename for tracking
-        string fileName = resourceName
-            .Replace('\\', '/')
-            .Split('/')
-            [^1];
-
-        using var stream = assembly.GetManifestResourceStream(resourceName)!;
-        using var reader = new StreamReader(stream);
-        string sql = reader.ReadToEnd();
-        migrations.Add((fileName, sql));
-    }
-
-    migrations.Sort((a, b) => string.Compare(a.Item1, b.Item1, StringComparison.Ordinal));
-    return migrations;
-}
-
 static string? ParseConnectionString(string[] args)
 {
     for (int i = 0; i < args.Length - 1; i++)
@@ -324,4 +230,28 @@ static void PrintUsage()
           dotnet run --project tools/Verbara.Platform.Cli -- migrate --connection "Host=localhost;Database=platform"
           dotnet run --project tools/Verbara.Platform.Cli -- doctor  --connection "Host=localhost;Database=platform"
         """);
+}
+
+/// <summary>Prints the runner's progress the way <c>migrate</c> always has, plus every notice a migration raised.</summary>
+sealed class ConsoleMigrationProgress : IMigrationProgress
+{
+    public int AppliedCount { get; private set; }
+
+    public string? FailedMigration { get; private set; }
+
+    public void Skipped(string migration) => Console.WriteLine($"  {migration} ... already applied");
+
+    public void Applied(string migration, IReadOnlyList<MigrationNotice> notices)
+    {
+        AppliedCount++;
+        Console.WriteLine($"  {migration} ... applied");
+        foreach (var notice in notices)
+            Console.WriteLine($"    {notice}");
+    }
+
+    public void Failed(string migration, Exception exception)
+    {
+        FailedMigration = migration;
+        Console.Error.WriteLine($"  {migration} ... FAILED ({exception.Message})");
+    }
 }

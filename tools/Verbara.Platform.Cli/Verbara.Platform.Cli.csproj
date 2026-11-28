@@ -15,10 +15,4 @@
     <ProjectReference Include="..\..\src\Verbara.Platform.Storage.Postgres\Verbara.Platform.Storage.Postgres.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="..\..\src\Verbara.Platform.Storage.Postgres\Migrations\*.sql">
-      <LogicalName>Migrations\%(Filename)%(Extension)</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
-
 </Project>
