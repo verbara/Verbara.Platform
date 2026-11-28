@@ -90,7 +90,17 @@ public sealed class CliMigrateFixture : IAsyncLifetime
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        await process.WaitForExitAsync(timeout.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // A hung CLI must not outlive the test run.
+            process.Kill(entireProcessTree: true);
+            throw;
+        }
+
         return new CliRun(process.ExitCode, await stdout, await stderr);
     }
 

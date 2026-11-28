@@ -62,6 +62,25 @@ public sealed class CliMigrateNoticeTests(CliMigrateFixture postgres) : IClassFi
             "nothing was applied, and the runner's own bookkeeping notices are not a migration's; {0}", second);
     }
 
+    [Fact]
+    public async Task Migrate_ShouldExitWithOneAndRecordNothing_WhenAMigrationFails()
+    {
+        var connectionString = await postgres.DatabaseBeforeAsync(Migration035, ApiTrackingTable);
+        // 035 reads survey_responses: without it the migration fails on the server.
+        await CliMigrateFixture.ExecuteAsync(connectionString, "ALTER TABLE survey_responses RENAME TO survey_responses_moved");
+
+        var run = await CliMigrateFixture.RunCliAsync("migrate", "--connection", connectionString);
+
+        run.ExitCode.Should().Be(1, "a failed migration fails the command; {0}", run);
+        run.StandardError.Should().Contain($"{Migration035} ... FAILED (42P01:",
+            "the operator reads which migration failed and why; {0}", run);
+        run.StandardOutput.Should().NotContain("Database is up to date.", "{0}", run);
+        run.StandardOutput.Should().NotContain("Applied ", "{0}", run);
+        (await CliMigrateFixture.CountAsync(connectionString, "SELECT count(*) FROM _migrations WHERE name = @Name",
+                new NpgsqlParameter("Name", NpgsqlDbType.Text) { Value = Migration035 }))
+            .Should().Be(0, "the failed migration is not recorded as applied");
+    }
+
     private static Task InsertRatingAsync(
         string connectionString, string responseId, string conversationId, string channel, DateTimeOffset capturedAt) =>
         CliMigrateFixture.ExecuteAsync(connectionString,

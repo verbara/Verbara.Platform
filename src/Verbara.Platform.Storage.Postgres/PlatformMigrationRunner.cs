@@ -100,7 +100,9 @@ public static class PlatformMigrationRunner
                 tx.Commit();
             }
             // NpgsqlException covers every server and connection error (PostgresException derives from it);
-            // InvalidOperationException a connection or command left in a state it cannot run in.
+            // InvalidOperationException a connection or command left in a state it cannot run in. Npgsql wraps
+            // timeouts and IO errors in NpgsqlException; any other exception propagates as it is, without the
+            // migration's name or the notices of the migrations this run committed before it.
             catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException)
             {
                 current = null;
