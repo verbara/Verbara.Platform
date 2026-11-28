@@ -9,7 +9,8 @@ namespace Verbara.Platform.Mail;
 /// <summary>
 /// DI registration for the CSAT email gap-fill pipeline (csat-runner Phase C). Binds the
 /// <c>Imap</c> + <c>CsatCapture</c> configuration, reuses Pro's HMAC reply-token verifier
-/// (<see cref="ICsatReplyTokenSigner"/>) rather than re-hand-rolling the HMAC (ADR-0022 boundary),
+/// (<see cref="ICsatReplyTokenSigner"/>, built at first use by <see cref="DeferredCsatReplyTokenSigner"/>) rather
+/// than re-hand-rolling the HMAC (ADR-0022 boundary),
 /// wires the <see cref="CsatReplyMailHandler"/> and its dispatch-resolver / HTTP forwarder seams,
 /// registers the <see cref="ImapInboundPoller"/> as a hosted service, and refuses to start with the
 /// reply mailbox on and a setting it needs missing (<see cref="CsatReplyMailboxSettingsValidator"/>).
@@ -34,13 +35,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<ImapPollerOptions>, CsatReplyMailboxSettingsValidator>();
         services.AddOptions<ImapPollerOptions>().ValidateOnStart();
 
-        // Reuse Pro's HMAC-SHA256 reply-token verifier via its (secret, ttl) constructor — the token
-        // binding + crypto live in Pro; Platform never re-implements the HMAC (ADR-0022 boundary).
-        services.AddSingleton<ICsatReplyTokenSigner>(sp =>
-        {
-            var options = sp.GetRequiredService<IOptions<ImapPollerOptions>>().Value;
-            return new HmacCsatReplyTokenSigner(options.TokenSigningSecret, options.TokenTtl);
-        });
+        // Pro's HMAC-SHA256 reply-token verifier, built from Imap:TokenSigningSecret at its first use, so the secret
+        // is needed only by a deployment that reads replies (#690); the validator above requires it while
+        // Imap:Enabled is true.
+        services.AddSingleton<ICsatReplyTokenSigner, DeferredCsatReplyTokenSigner>();
 
         services.AddSingleton<ICsatEmailDispatchResolver, PostgresCsatEmailDispatchResolver>();
         services.AddSingleton<ICsatEmailCaptureForwarder, HttpCsatEmailCaptureForwarder>();

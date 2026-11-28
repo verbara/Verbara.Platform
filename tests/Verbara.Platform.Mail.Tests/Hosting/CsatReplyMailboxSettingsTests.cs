@@ -1,7 +1,10 @@
+using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Verbara.Platform.Core.Email;
 using Verbara.Platform.Mail.Services;
+using Verbara.Sdk.Pro.CsatRunner.Tokens;
 
 namespace Verbara.Platform.Mail.Tests.Hosting;
 
@@ -14,6 +17,7 @@ namespace Verbara.Platform.Mail.Tests.Hosting;
 public sealed class CsatReplyMailboxSettingsTests
 {
     private const string ServiceKey = "mail-host-settings-tests-service-key";
+    private static readonly TimeSpan GuardTimeout = TimeSpan.FromSeconds(30);
 
     private static Dictionary<string, string?> MailboxOn() => new()
     {
@@ -27,6 +31,7 @@ public sealed class CsatReplyMailboxSettingsTests
         ["Imap:Mailboxes:0:UseTls"] = "false",
         ["Imap:Mailboxes:0:Username"] = "csat@example.test",
         ["Imap:Mailboxes:0:Password"] = "mailbox-password",
+        ["Imap:TokenSigningSecret"] = "mail-host-settings-tests-reply-token-secret",
     };
 
     [Fact]
@@ -39,6 +44,54 @@ public sealed class CsatReplyMailboxSettingsTests
 
         message.Should().Contain("CsatCapture__ApiBaseAddress");
         message.Should().Contain("Imap:Enabled");
+    }
+
+    [Fact]
+    public void Start_ShouldRefuseNamingTheReplySecret_WhenTheMailboxIsOnWithoutIt()
+    {
+        var settings = MailboxOn();
+        settings.Remove("Imap:TokenSigningSecret");
+
+        var message = StartFailure(settings);
+
+        message.Should().Contain("Imap__TokenSigningSecret");
+        message.Should().Contain("Imap:Enabled");
+    }
+
+    [Fact]
+    public void Start_ShouldRefuseNamingTheReplySecret_WhenTheMailboxIsOnWithABlankOne()
+    {
+        var settings = MailboxOn();
+        settings["Imap:TokenSigningSecret"] = "   ";
+
+        StartFailure(settings).Should().Contain("Imap__TokenSigningSecret");
+    }
+
+    [Fact]
+    public void Start_ShouldRefuseNothing_WhenTheMailboxIsOnWithEverySetting()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(MailboxOn()).Build();
+        using var provider = new ServiceCollection().AddPlatformMail(configuration).BuildServiceProvider();
+
+        var start = () => provider.GetRequiredService<IStartupValidator>().Validate();
+
+        start.Should().NotThrow();
+    }
+
+    [Fact]
+    public async Task Start_ShouldServeHealthAndSend_WhenTheMailboxIsOffAndNoReplySecretIsSet()
+    {
+        // No Imap:* setting at all, the reply secret included: a deployment that never reads replies.
+        using var factory = new LogCapturingMailFactory(new LogRecordCapture(), new Dictionary<string, string?>());
+        using var client = factory.CreateClient();
+        using var timeout = new CancellationTokenSource(GuardTimeout);
+
+        using var response = await client.GetAsync(new Uri("/health", UriKind.Relative), timeout.Token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, because: "the host started its hosted services, the reply poller included");
+        factory.Services.GetRequiredService<IEmailService>().Should().NotBeNull(because: "sending needs no reply secret");
+        var resolve = () => factory.Services.GetRequiredService<ICsatReplyTokenSigner>();
+        resolve.Should().NotThrow(because: "the signer is built at first use, and nothing uses it with the mailbox off");
     }
 
     [Fact]

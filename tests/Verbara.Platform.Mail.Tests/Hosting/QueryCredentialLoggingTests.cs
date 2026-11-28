@@ -72,10 +72,10 @@ public sealed class QueryCredentialLoggingTests
 
 /// <summary>
 /// The real Mail host with a log capture attached, and optionally extra configuration layered over its
-/// defaults (as an operator's environment variables would be). It gets the two settings the host needs
-/// to start, neither of which these requests use: a Postgres connection string (Program.cs registers the
-/// token store only when one is configured, and the token-refresh worker needs that store) and the CSAT
-/// reply-token secret (the IMAP poller's handler is built at startup even with IMAP disabled).
+/// defaults (as an operator's environment variables would be). It gets the one setting the host needs
+/// to start that these requests do not use: a Postgres connection string (Program.cs registers the
+/// token store only when one is configured, and the token-refresh worker needs that store). It sets no
+/// CSAT reply-token secret: with the reply mailbox off (the default) the host starts without one (#690).
 /// </summary>
 internal sealed class LogCapturingMailFactory(
     LogRecordCapture capture, IReadOnlyDictionary<string, string?>? configuration = null) : WebApplicationFactory<Program>
@@ -94,7 +94,6 @@ internal sealed class LogCapturingMailFactory(
         {
             ["ConnectionStrings:Postgres"] =
                 "Host=127.0.0.1;Port=1;Database=mail_tests;Username=mail_tests;Password=mail_tests;Timeout=1",
-            ["Imap:TokenSigningSecret"] = "mail-host-logging-tests-reply-token-secret",
         }));
         return base.CreateHost(builder);
     }

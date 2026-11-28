@@ -216,9 +216,9 @@ services:
       Services__ServiceKey: ${SERVICE_KEY:-platform_internal_secret}
       Microsoft__ClientId: ${MS_CLIENT_ID:-}
       Microsoft__TenantId: ${MS_TENANT_ID:-common}
-      # AddPlatformMail resolves HmacCsatReplyTokenSigner eagerly, so an empty value throws
-      # "The value cannot be an empty string (Parameter 'signingSecret')" at Host.StartAsync. mail is
-      # a health-gated dependency of platform-api, so that took the whole stack down.
+      # Read only with the CSAT reply mailbox on (Imap__Enabled=true, off here): the mail service checks
+      # each reply with it, so it must then equal the Api's Csat__Email__TokenSigningSecret. With the
+      # mailbox off the mail service starts without it.
       Imap__TokenSigningSecret: ${CSAT_REPLY_TOKEN_SECRET:-local_dev_csat_reply_token_secret}
     depends_on:
       postgres:

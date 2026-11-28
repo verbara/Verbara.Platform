@@ -13,10 +13,6 @@ log. The settings are not listed here by hand. The script reads them from the co
     one, is required; a key read only as the condition of `if (!string.IsNullOrEmpty(x)) { ... }` is not, and makes
     the keys inside that block required only while it has a value (the service's own settings over the Api's
     appsettings.json, which sets Asterisk:Ami:Hostname);
-  - in each service's source folder, an options value handed to a constructor that refuses an empty argument
-    (`new HmacCsatReplyTokenSigner(options.TokenSigningSecret, ...)`, with `options` the
-    `IOptions<T>` bound by `Configure<T>(configuration.GetSection("Imap"))`), which the mail service builds at start.
-    The constructors live outside this tree (Verbara.Sdk.Pro), so they are the one list kept here: REFUSES_EMPTY;
   - in each service's source folder, a file that names a switch (`const string SwitchKey = "Imap:Enabled"`) and the
     settings the service refuses to start without while that switch is true (`Require(failures, "Key", value)`, a
     `{i}` index read as 0; `RequireEither`, a key that falls back to one required elsewhere, is not one of them).
@@ -84,10 +80,6 @@ SERVICES = {
                  os.path.join("src", "Verbara.Platform.Renderer", "Dockerfile.renderer"),
                  re.compile(r"(?:^|[/-])renderer(?:[:@]|$)")),
 }
-
-# Constructors outside this tree that throw on an empty first argument (Verbara.Sdk.Pro.CsatRunner:
-# HmacCsatReplyTokenSigner(string signingSecret, TimeSpan) calls ArgumentException.ThrowIfNullOrEmpty).
-REFUSES_EMPTY = ("HmacCsatReplyTokenSigner",)
 
 _ENV_LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 _PRODUCTION_IF = re.compile(r"if\s*\(\s*app\.Environment\.IsProduction\(\)\s*\)\s*\{")
@@ -192,33 +184,6 @@ def api_production_requirements(root):
         raise InputError(f"{API_PROGRAM}: the production block reads no configuration key")
     return [Requirement(key, f"the production check, {API_PROGRAM.replace(os.sep, '/')}:{line}", when, production=True)
             for key, (when, line) in sorted(found.items())]
-
-
-def refused_empty_requirements(root, folder):
-    """Options values a service hands a constructor that refuses an empty argument, as `Section:Property` keys."""
-    out = []
-    files = sorted(glob.glob(os.path.join(root, folder, "**", "*.cs"), recursive=True))
-    files = [f for f in files if os.sep + "obj" + os.sep not in f and os.sep + "bin" + os.sep not in f]
-    texts = {f: _read(f) for f in files}
-    sections = {}
-    for text in texts.values():
-        for sm in re.finditer(r"Configure<(\w+)>\(\s*\w+\.GetSection\(\"([^\"]+)\"\)\s*\)", text):
-            sections[sm.group(1)] = sm.group(2)
-    for path, text in texts.items():
-        for name in REFUSES_EMPTY:
-            for cm in re.finditer(r"new\s+" + name + r"\(\s*(\w+)\.(\w+)\s*[,)]", text):
-                var, prop = cm.group(1), cm.group(2)
-                bound = None
-                for om in re.finditer(r"\b" + var + r"\s*=\s*\w+\.GetRequiredService<IOptions<(\w+)>>\(\)\.Value",
-                                      text[:cm.start()]):
-                    bound = om.group(1)
-                rel = os.path.relpath(path, root).replace(os.sep, "/")
-                line = _line_of(text, cm.start())
-                if bound is None or bound not in sections:
-                    raise InputError(f"{rel}:{line}: {name} gets {var}.{prop}, and the section {var} is bound "
-                                     f"from was not found")
-                out.append(Requirement(f"{sections[bound]}:{prop}", f"{name} refuses an empty value, {rel}:{line}"))
-    return out
 
 
 def switch_requirements(root, folder):
@@ -403,7 +368,6 @@ def main(argv=None):
         requirements = {"api": api_production_requirements(root)}
         for kind, (folder, _, _) in SERVICES.items():
             requirements.setdefault(kind, [])
-            requirements[kind] += refused_empty_requirements(root, folder)
             requirements[kind] += switch_requirements(root, folder)
         files = sorted(set(
             glob.glob(os.path.join(root, "docker", "**", "*.yml"), recursive=True)

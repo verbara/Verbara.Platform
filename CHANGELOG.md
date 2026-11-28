@@ -18,6 +18,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   upgraded, and keeps polling quietly; once the Api has migrated, reading resumes on its own. A reply that arrives
   while it waits is no longer skipped: it is recorded once, after the migration, unless the mail service restarts
   during the wait. Other database errors are logged as before. (#702)
+
+- **The mail service starts without the CSAT reply secret when the reply mailbox is off.** The mail service refused to
+  start without `Imap__TokenSigningSecret` in every deployment, also those that never read CSAT email replies
+  (`Imap__Enabled=false`, the default), although only the reply mailbox uses it: the survey emails it sends carry a
+  reply address the Api has already signed. The secret is now read the first time a reply is checked. With the reply
+  mailbox off the mail service starts and sends without it; with the mailbox on it refuses to start without it, naming
+  `Imap__TokenSigningSecret` next to the other settings the mailbox needs. `docker/.env.production.example` now lists
+  it, commented, with the reply-mailbox settings. (#690)
 - **The Api log shows what a database upgrade removed.** Some migrations report what they changed, such as
   `024_UserRolesUserForeignKey.sql` (role assignments of users that no longer exist) and
   `035_SurveyResponseOnePerDispatch.sql` (repeated email or SMS ratings), but when the Api applied them at start-up

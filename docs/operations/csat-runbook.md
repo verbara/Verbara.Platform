@@ -104,7 +104,7 @@ endpoint. Config binds the `Imap` section (`ImapPollerOptions`):
   "Enabled": true,                 // false ⇒ poller is a no-op
   "PollInterval": "00:00:30",
   "TokenTtl": "7.00:00:00",        // reply-token TTL, must match Pro's dispatcher
-  "TokenSigningSecret": "…",       // HMAC-SHA256 secret SHARED with Pro's dispatcher
+  "TokenSigningSecret": "…",       // HMAC-SHA256 secret SHARED with Pro's dispatcher; read only while Enabled
   "AutoReplyEnabled": false,
   "Mailboxes": [
     { "TenantId": "…", "Host": "imap.example.com", "Port": 993, "UseTls": true,

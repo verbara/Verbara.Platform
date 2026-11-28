@@ -27,9 +27,9 @@
 #     Password=
 #   - the settings the services refuse to start without: Services__ServiceKey,
 #     Asterisk__Ami__Username and Asterisk__Ami__Password, CORS_ORIGINS,
-#     Imap__TokenSigningSecret, and Csat__Email__TokenSigningSecret with the
-#     same value (the Api refuses it present but empty); and, with the CSAT
-#     reply mailbox on (Imap__Enabled=true), the mailbox and
+#     and Csat__Email__TokenSigningSecret (the Api refuses it present but
+#     empty); and, with the CSAT reply mailbox on (Imap__Enabled=true),
+#     Imap__TokenSigningSecret with the same value, the mailbox and
 #     CsatCapture__ApiBaseAddress settings the example lists next to it
 #     (scripts/check-env-example-startup-settings.py checks in CI that the
 #     example lists them)

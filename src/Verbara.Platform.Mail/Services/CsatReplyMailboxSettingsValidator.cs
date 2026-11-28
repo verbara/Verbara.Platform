@@ -37,6 +37,10 @@ internal sealed class CsatReplyMailboxSettingsValidator(IOptions<CsatCaptureForw
                          $"address of the Api, such as http://platform-api:5000, while {SwitchKey} is true");
         }
 
+        // The secret the Api signs each CSAT email's reply address with: without it no reply can be checked. Only
+        // the reply mailbox needs it (DeferredCsatReplyTokenSigner builds the signer at first use, #690).
+        Require(failures, "Imap:TokenSigningSecret", options.TokenSigningSecret);
+
         // Falls back to Services:ServiceKey (ServiceCollectionExtensions), the key the Api checks on this call.
         RequireEither(failures, "CsatCapture:ServiceKey", "Services:ServiceKey", forward.ServiceKey);
 
