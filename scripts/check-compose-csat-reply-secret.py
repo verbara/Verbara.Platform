@@ -12,13 +12,14 @@ mail client kept the In-Reply-To header still reaches its survey.
 
 The script finds every compose file under docker/ and at the repository root (so a new stack or overlay is checked
 without being listed here). In each file that runs the mail service (built from Dockerfile.mail, or an image named
-`.../mail:<tag>`) with Imap__TokenSigningSecret set, every Api service (built from the repository's Dockerfile, or
-an image named `.../api:<tag>` or `...-api:<tag>`) must set Csat__Email__TokenSigningSecret (or
-Csat__WebChatTokenSecret, the Api's fallback) to the same value: with no variables set, and with each variable the
+`.../mail:<tag>` or `...-mail:<tag>`) with Imap__TokenSigningSecret set, every Api service (built from the
+repository's Dockerfile, or an image named `.../api:<tag>` or `...-api:<tag>`) must set
+Csat__Email__TokenSigningSecret (or Csat__WebChatTokenSecret, the Api's fallback) to the same value: with no variables set, and with each variable the
 two settings name set to a probe value (an operator's own .env). A value comes from `environment:`, else from an
 `env_file:` (the file, or its `.example` copy when the operator's own file is not in the tree); a `${VAR:?}` compose
 refuses to start without is left to the operator in that case. A file with a mail service and no Api service is an
-overlay and is left to the stack it is layered on.
+overlay and is left to the stack it is layered on. A failure names each value by a short sha256, never by the value,
+since it may come from an operator's own env file.
 
 Exit codes:
   0  pass
@@ -27,6 +28,7 @@ Exit codes:
 """
 import argparse
 import glob
+import hashlib
 import importlib.util
 import os
 import re
@@ -53,7 +55,7 @@ _MAIL_KEY = "Imap__TokenSigningSecret"
 _API_KEYS = ("Csat__Email__TokenSigningSecret", "Csat__WebChatTokenSecret")
 _PROBE = "probe-csat-reply-secret-0123456789abcdef"
 
-_MAIL_IMAGE = re.compile(r"(?:^|/)mail(?:[:@]|$)")
+_MAIL_IMAGE = re.compile(r"(?:^|[/-])mail(?:[:@]|$)")
 _API_IMAGE = re.compile(r"(?:^|[/-])api(?:[:@]|$)")
 _VAR_NAME = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
 _ENV_LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
@@ -138,6 +140,11 @@ def _environments(*raws):
         yield f"{name} set in .env", {name: _PROBE}
 
 
+def _digest(value):
+    # A value may come from an operator's own env file: a failure shows a short hash, never the value.
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
 def _value(raw, from_file, env):
     # An env file hands the value to the container as given: compose does not interpolate it.
     return raw if from_file else interpolate(raw, env)
@@ -164,7 +171,7 @@ def check_file(rel, services, compose_dir, root):
             found = setting(api, _API_KEYS, compose_dir)
             if found is None:
                 failures.append(
-                    f"{rel}: {mail_name} checks CSAT replies with {_MAIL_KEY} ({mail_where}: '{mail_raw}'), and "
+                    f"{rel}: {mail_name} checks CSAT replies with {_MAIL_KEY} ({mail_where}), and "
                     f"{api_name} sets no Csat__Email__TokenSigningSecret, so the Api signs the reply addresses with "
                     f"a value of its own and the mail service rejects every reply's token; set "
                     f"Csat__Email__TokenSigningSecret on {api_name} from the same variable")
@@ -178,9 +185,9 @@ def check_file(rel, services, compose_dir, root):
                     continue  # compose will not start without it, so the operator has to supply one
                 if got != want:
                     failures.append(
-                        f"{rel} ({env_name}): {api_name} {api_key} ({api_where}) is '{got}' and {mail_name} "
-                        f"{_MAIL_KEY} ({mail_where}) is '{want}', so the mail service rejects the token of every "
-                        f"CSAT reply; give both the same variable")
+                        f"{rel} ({env_name}): {api_name} {api_key} ({api_where}) is {_digest(got)} and "
+                        f"{mail_name} {_MAIL_KEY} ({mail_where}) is {_digest(want)}, so the mail service rejects the "
+                        f"token of every CSAT reply; give both the same variable")
                     break
     return checked, failures
 

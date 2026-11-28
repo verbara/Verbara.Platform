@@ -119,6 +119,39 @@ class CheckComposeCsatReplySecretTests(unittest.TestCase):
         r = self._run(self._env_file_stack("Csat__Email__TokenSigningSecret=abc\nImap__TokenSigningSecret=xyz\n"))
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
 
+    def test_failure_does_not_print_the_values(self):
+        # An operator's own .env.production is read before its .example: a failure names the key, where it came
+        # from and a short hash of each value, never the value itself.
+        api_value = "api-value-from-an-operator-file-0001"
+        mail_value = "mail-value-from-an-operator-file-0002"
+        r = self._run(self._env_file_stack(f"Csat__Email__TokenSigningSecret={api_value}\n"
+                                           f"Imap__TokenSigningSecret={mail_value}\n"))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn(api_value, r.stdout + r.stderr)
+        self.assertNotIn(mail_value, r.stdout + r.stderr)
+        self.assertIn("sha256:", r.stdout)
+
+    def test_missing_api_secret_does_not_print_the_mail_value(self):
+        mail_value = "mail-value-from-an-operator-file-0003"
+        files = self._env_file_stack(f"Imap__TokenSigningSecret={mail_value}\n")
+        r = self._run(files)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("platform-api sets no Csat__Email__TokenSigningSecret", r.stdout)
+        self.assertNotIn(mail_value, r.stdout + r.stderr)
+
+    def test_dash_named_mail_image_is_recognised(self):
+        mail = ("  mail:\n    image: verbara-platform-mail:local\n"
+                f"    environment:\n      Imap__TokenSigningSecret: {_SHARED}\n")
+        r = self._run(self._stack(_api(secret=None, build=False), mail))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_other_mail_image_is_not_the_mail_service(self):
+        # Only a name part that is exactly `mail` counts: a webmail client is not the mail service.
+        other = ("  webmail:\n    image: registry.example/webmail:1.0\n"
+                 f"    environment:\n      Imap__TokenSigningSecret: {_SHARED}\n")
+        r = self._run(self._stack(_api(secret=None, build=False), other))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
     def test_environment_wins_over_env_file(self):
         files = self._env_file_stack("Csat__Email__TokenSigningSecret=abc\nImap__TokenSigningSecret=abc\n")
         files["docker/docker-compose.production.yml"] += "    environment:\n      Imap__TokenSigningSecret: xyz\n"

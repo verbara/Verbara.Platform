@@ -27,7 +27,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   but the Api set no `Csat__Email__TokenSigningSecret` and signed the reply address of each survey email with a value
   of its own. With the reply mailbox turned on (`Imap__Enabled=true`), the mail service then rejected every reply to a
   survey email. The Api now reads `Csat__Email__TokenSigningSecret` from the same `CSAT_REPLY_TOKEN_SECRET`, with the
-  same default, and `docker/.env.full.example` lists the variable, commented. A new check in the `Invariant Gates`
+  same default, and `docker/.env.full.example` lists the variable, commented. That value takes precedence over a
+  `Csat__WebChatTokenSecret` set on the Api, so a stack that matched the two services by hand through a compose
+  override sets `CSAT_REPLY_TOKEN_SECRET` instead. A new check in the `Invariant Gates`
   job, `scripts/check-compose-csat-reply-secret.py`, fails when a compose file under `docker/` that runs both
   services gives them different values, with or without the operator's `.env`. (#718)
 
