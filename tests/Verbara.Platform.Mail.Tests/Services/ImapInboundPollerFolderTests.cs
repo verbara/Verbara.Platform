@@ -124,7 +124,7 @@ public sealed class ImapInboundPollerFolderTests(GreenMailFixture server)
         await poller.StartAsync(CancellationToken.None);
         var deadline = DateTime.UtcNow.AddSeconds(30);
         while (FolderErrors(capture).Count < 2 && DateTime.UtcNow < deadline)
-            await Task.Delay(100);
+            await Task.Delay(100); // fence-allow: LOOP-DRIVER — bounded poll on the captured log, which raises no signal of its own
         await poller.StopAsync(CancellationToken.None);
 
         var errors = FolderErrors(capture);

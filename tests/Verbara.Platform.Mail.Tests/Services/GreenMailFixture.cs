@@ -40,7 +40,7 @@ public sealed class GreenMailFixture : IAsyncLifetime
             }
             catch (Exception) when (DateTime.UtcNow < deadline)
             {
-                await Task.Delay(500);
+                await Task.Delay(500); // fence-allow: GUARD-TIMEOUT — backoff between login retries while the GreenMail container comes up, bounded by the 60 s deadline
             }
         }
     }
