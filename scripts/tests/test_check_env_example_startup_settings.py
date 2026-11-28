@@ -452,11 +452,57 @@ class CheckEnvExampleStartupSettingsTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_an_inline_empty_value_fails_unless_the_example_lists_its_variable(self):
-        self._inline(["Services__ServiceKey=${SERVICE_KEY:-}"], example="POSTGRES_PASSWORD=x\n")
+        # CORS_ORIGINS is read by the production check but not refused empty, so a listed variable is the operator's.
+        self._inline(["CORS_ORIGINS=${CORS_ORIGINS:-}"], example="POSTGRES_PASSWORD=x\n")
         r = self._run()
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("has no SERVICE_KEY line", r.stdout)
-        self._write("docker/.env.full.example", "SERVICE_KEY=\n")
+        self.assertIn("has no CORS_ORIGINS line", r.stdout)
+        self._write("docker/.env.full.example", "CORS_ORIGINS=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_an_inline_key_refused_empty_fails_when_the_example_leaves_its_variable_empty(self):
+        # The example copied unchanged starts the Api with an empty service key, which the production check refuses,
+        # unless compose itself refuses to start without the variable (`${VAR:?...}`). `${VAR?...}` does not: it
+        # refuses only an unset variable, and the example sets it, empty.
+        for raw in ("${SERVICE_KEY:-}", "${SERVICE_KEY}", "$SERVICE_KEY", "${SERVICE_KEY-platform_internal_secret}",
+                    "${SERVICE_KEY?set SERVICE_KEY}"):
+            with self.subTest(raw=raw):
+                self._inline(["Services__ServiceKey=" + raw], example="# the service key\nSERVICE_KEY=\n")
+                r = self._run()
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("platform-api refuses to start with Services__ServiceKey empty", r.stdout)
+                self.assertIn("docker/.env.full.example leaves SERVICE_KEY empty", r.stdout)
+                self.assertIn("${SERVICE_KEY:?...}", r.stdout)
+
+    def test_an_inline_key_refused_empty_passes_when_compose_refuses_the_empty_variable(self):
+        self._inline(["Services__ServiceKey=${SERVICE_KEY:?set SERVICE_KEY}"], example="SERVICE_KEY=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_an_inline_key_checked_only_when_set_is_not_refused_empty(self):
+        # `!string.IsNullOrEmpty(x) && ...` checks x only while it has a value, so an empty x starts the service.
+        program = _PROGRAM.replace(
+            "    if (corsOrigins.Contains(\"*\"))",
+            "    var prefix = builder.Configuration[\"Routing:Prefix\"];\n"
+            "    if (!string.IsNullOrEmpty(prefix) && prefix.Length > 8)\n"
+            "        configErrors.Add(\"Routing:Prefix too long\");\n\n"
+            "    if (corsOrigins.Contains(\"*\"))")
+        self.assertNotEqual(program, _PROGRAM)
+        self._write("src/Verbara.Platform.Api/Program.cs", program)
+        self._inline(["Routing__Prefix=${ROUTING_PREFIX:-}"], example="ROUTING_PREFIX=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Routing__Prefix", r.stdout)
+
+    def test_an_inline_ami_password_refused_empty_fails_when_the_example_leaves_it_empty(self):
+        self._inline(["Asterisk__Ami__Hostname=asterisk", "Asterisk__Ami__Username=platform",
+                      "Asterisk__Ami__Password=${AMI_PASSWORD:-}"], example="AMI_PASSWORD=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("refuses to start with Asterisk__Ami__Password empty", r.stdout)
+        self._inline(["Asterisk__Ami__Hostname=asterisk", "Asterisk__Ami__Username=platform",
+                      "Asterisk__Ami__Password=${AMI_PASSWORD:-}"], example="AMI_PASSWORD=set-by-the-operator\n")
         r = self._run()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 

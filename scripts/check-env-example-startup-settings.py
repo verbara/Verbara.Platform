@@ -37,8 +37,11 @@ that example as given. It fails when the value is a default the check refuses be
 "value"` in the production block, such as the built-in service key: `${VAR:-default}` falls back to it also when the
 example leaves VAR empty, so the stack must refuse to start without VAR, `${VAR:?...}`, instead); when compose refuses
 to start without a variable (`${VAR:?...}`) the example has no line for; or when the value is empty and the example
-has no line for its variable. A variable the example lists, set, empty or commented out, is the operator's to fill,
-as an empty `Key=` in an env_file is. A required key the service does not set inline, and the switch settings, are
+has no line for its variable; or when the value is empty, the check refuses an empty value of that key
+(`string.IsNullOrEmpty(x)` in the production block, not as a condition) and only `${VAR:?...}` makes compose refuse
+it first (`${VAR}`, `${VAR:-}` and `${VAR?...}` start the service empty when the example leaves VAR empty). Otherwise
+a variable the example lists, set, empty or commented out, is the operator's to fill, as an empty `Key=` in an
+env_file is. A required key the service does not set inline, and the switch settings, are
 left to the service's own defaults. A service with neither `build:` nor `image:` is an overlay and is left to the file
 it is layered on.
 Each failure line names the file, the service, the setting, where the code requires it and what to add.
@@ -106,6 +109,7 @@ _SWITCH_KEY = re.compile(r"\bconst\s+string\s+SwitchKey\s*=\s*\"([^\"]+)\"")
 _REQUIRE = re.compile(r"\bRequire\(\s*\w+\s*,\s*\$?\"([^\"]+)\"")
 _INDEX = re.compile(r"\{[^}]*\}")
 _REFUSED_LITERAL = re.compile(r"\b(\w+)\s*==\s*\"([^\"]*)\"")
+_REFUSED_EMPTY = re.compile(r"(!\s*)?\bstring\.IsNullOr(?:Empty|WhiteSpace)\(\s*(\w+)\s*\)")
 _VARIABLE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))")
 
 
@@ -113,13 +117,14 @@ class Requirement:
     """One setting a service refuses to start without; `when` is a key that must have a value for it to apply, and
     `switch` a key whose true value it applies under (the env file must still list it while the switch is off)."""
 
-    def __init__(self, key, where, when=None, production=False, switch=None, refused=()):
+    def __init__(self, key, where, when=None, production=False, switch=None, refused=(), refuses_empty=False):
         self.key = key
         self.where = where
         self.when = when
         self.production = production
         self.switch = switch
         self.refused = frozenset(refused)  # values the check refuses besides an empty one (a built-in default)
+        self.refuses_empty = refuses_empty  # the check tests it with string.IsNullOrEmpty (not as a condition)
 
     @property
     def env_name(self):
@@ -202,8 +207,11 @@ def api_production_requirements(root):
     for lm in _REFUSED_LITERAL.finditer(body):
         if lm.group(1) in var_keys:
             refused.setdefault(var_keys[lm.group(1)][0], set()).add(lm.group(2))
+    # `string.IsNullOrEmpty(x)` (not negated, so not a condition): the check refuses an empty value of x's key.
+    refuses_empty = {var_keys[em.group(2)][0] for em in _REFUSED_EMPTY.finditer(body)
+                     if not em.group(1) and em.group(2) in var_keys}
     return [Requirement(key, f"the production check, {API_PROGRAM.replace(os.sep, '/')}:{line}", when, production=True,
-                        refused=refused.get(key, ()))
+                        refused=refused.get(key, ()), refuses_empty=key in refuses_empty)
             for key, (when, line) in sorted(found.items())]
 
 
@@ -369,6 +377,13 @@ def check_inline(rel, name, kind, service, root, requirements, example):
                 else f"set {req.env_name} from a variable the stack's .env example names"
             failures.append(f"{rel}: {name} refuses to start with {req.env_name} at the built-in default "
                             f"({req.where}), and {rel} sets it to that default from {where}; {fix}")
+        elif not value.strip().strip("\"'") and names and not unlisted and req.refuses_empty:
+            # The example lists the variable and leaves it empty: copied unchanged, it starts the service with the
+            # setting empty, which the check refuses. Only `${VAR:?...}` makes compose refuse an empty VAR first.
+            empty = ", ".join(names)
+            failures.append(f"{rel}: {name} refuses to start with {req.env_name} empty ({req.where}), and {where} "
+                            f"leaves {empty} empty, so the example copied unchanged starts it empty; make compose "
+                            f"refuse to start without {names[0]} (${{{names[0]}:?...}})")
         elif not value.strip().strip("\"'") and (not names or unlisted):
             missing = ", ".join(unlisted) or req.env_name
             failures.append(f"{rel}: {name} refuses to start without {req.env_name} ({req.where}), {rel} sets it "
