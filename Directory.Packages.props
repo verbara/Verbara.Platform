@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Npgsql" Version="10.0.3" />
+    <PackageVersion Include="Npgsql" Version="10.0.4" />
     <PackageVersion Include="Verbara.Sdk.Data.Npgsql" Version="2.10.1" />
     <PackageVersion Include="Verbara.Sdk.Cluster.Primitives" Version="2.10.1" />
     <PackageVersion Include="Verbara.Sdk.Cluster.Postgres" Version="2.10.1" />
