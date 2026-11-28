@@ -92,6 +92,10 @@ services:
       Asterisk__Ari__Application: verbara
       Asterisk__Ari__NodeApplication: verbara-node
       Recordings__BasePath: /recordings
+      # Signs the reply address of each CSAT email (csat+<token>@...). The mail service checks the replies
+      # with Imap__TokenSigningSecret, so both read CSAT_REPLY_TOKEN_SECRET
+      # (scripts/check-compose-csat-reply-secret.py keeps every stack this way).
+      Csat__Email__TokenSigningSecret: ${CSAT_REPLY_TOKEN_SECRET:-local_dev_csat_reply_token_secret}
       # Pro v2.5.0-pro: Licensing__EnforcementMode is GONE (ADR-0012). License
       # presence drives behaviour — set Licensing__LicenseFilePath to a mounted
       # .lic to enable Pro features; leave empty/unset for community / OSS mode
@@ -217,7 +221,7 @@ services:
       Microsoft__ClientId: ${MS_CLIENT_ID:-}
       Microsoft__TenantId: ${MS_TENANT_ID:-common}
       # Read only with the CSAT reply mailbox on (Imap__Enabled=true, off here): the mail service checks
-      # each reply with it, so it must then equal the Api's Csat__Email__TokenSigningSecret. With the
+      # each reply with it. The Api's Csat__Email__TokenSigningSecret reads the same variable. With the
       # mailbox off the mail service starts without it.
       Imap__TokenSigningSecret: ${CSAT_REPLY_TOKEN_SECRET:-local_dev_csat_reply_token_secret}
     depends_on:

@@ -22,6 +22,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The full stack's Api and mail service sign and check CSAT email replies with the same value.** In
+  `docker/docker-compose.full.yml` the mail service read `Imap__TokenSigningSecret` from `CSAT_REPLY_TOKEN_SECRET`,
+  but the Api set no `Csat__Email__TokenSigningSecret` and signed the reply address of each survey email with a value
+  of its own. With the reply mailbox turned on (`Imap__Enabled=true`), the mail service then rejected every reply to a
+  survey email. The Api now reads `Csat__Email__TokenSigningSecret` from the same `CSAT_REPLY_TOKEN_SECRET`, with the
+  same default, and `docker/.env.full.example` lists the variable, commented. That value takes precedence over a
+  `Csat__WebChatTokenSecret` set on the Api, so a stack that matched the two services by hand through a compose
+  override sets `CSAT_REPLY_TOKEN_SECRET` instead. A new check in the `Invariant Gates`
+  job, `scripts/check-compose-csat-reply-secret.py`, fails when a compose file under `docker/` that runs both
+  services gives them different values, with or without the operator's `.env`. (#718)
+
 - **The mail service waits for the database upgrade without logging errors.** On an upgrade the mail service starts
   before the Api has applied migration `034_MailImapPollPositions.sql` (the Api waits for the mail service to be
   healthy), and until then every poll of a CSAT reply mailbox wrote `IMAP poll failed` with a full error to the mail
