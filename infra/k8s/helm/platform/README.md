@@ -10,7 +10,7 @@ helm install platform infra/k8s/helm/platform/
 ```
 
 The chart's defaults pin the current release (`api` and `realtime`
-`v2.34.1` by tag and manifest-list digest, `web` `v3.27.1-web`). To deploy
+`v2.41.3` by tag and manifest-list digest, `web` `v3.27.1-web`). To deploy
 another release, override the tag **and** the digest of each image you
 change, for example
 `--set api.image.tag=vX.Y.Z --set api.image.digest=sha256:...`; when a
@@ -78,7 +78,7 @@ admission webhook "validate.kyverno.svc-fail" denied the request:
 cosign verify \
   --key infra/k8s/helm/platform/files/cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/verbara/platform/api:v2.34.1
+  ghcr.io/verbara/platform/api:v2.41.3
 ```
 
 This is the same check the admission webhook runs internally. The

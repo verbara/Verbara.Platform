@@ -461,6 +461,7 @@ jobs:
           echo "[${IMAGE_KIND}]   released_at          = ${RELEASED_AT}"
           echo "[${IMAGE_KIND}] (see docs/operations/2026-05-10-update-authorized-digests-after-release.md)"
           echo "[${IMAGE_KIND}] Operator deploy: Helm --set ${IMAGE_KIND}.image.digest=${DIGEST}"
+          echo "[${IMAGE_KIND}] Chart default: open a PR moving infra/k8s/helm/platform/values.yaml ${IMAGE_KIND}.image.tag/digest and Chart.yaml appVersion to ${RELEASE_TAG}; scripts/check-helm-image-pins.py fails CI once the chart trails by more than its --max-lag releases."
           if [ "${IMAGE_KIND}" = "api" ]; then
             echo "[api] Compose: IMAGE_DIGEST=${DIGEST} — the api Deployment/compose service also"
             echo "[api] injects IMAGE_DIGEST at runtime; realtime is digest-pinned only."

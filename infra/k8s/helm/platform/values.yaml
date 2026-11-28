@@ -12,7 +12,7 @@ api:
     # the maintainer's k3s/Talos lab:
     #   --set api.image.repository=192.168.122.1:5050/verbara-platform/api
     repository: ghcr.io/verbara/platform/api
-    tag: "v2.34.1"
+    tag: "v2.41.3"
     # Manifest-list digest of the `repository:tag` image. When set, the
     # Deployment pulls `repository@digest` (the kubelet pulls those exact bytes)
     # and injects it as the IMAGE_DIGEST env var. Licences issued since
@@ -21,11 +21,15 @@ api:
     # entry in verbara-website/data/authorized-digests.json (the release
     # ledger). Leave empty to deploy by tag (dev / local registry).
     #
-    # v2.34.1 — `crane digest ghcr.io/verbara/platform/api:v2.34.1` matches the
-    # ledger entry, and `cosign verify` with files/cosign.pub passes (2026-10-29).
+    # v2.41.3 — the digest in the v2.41.3 GitHub Release digest table and the
+    # `current` entry in verbara-website/data/authorized-digests.json agree, and
+    # `crane digest ghcr.io/verbara/platform/api:v2.41.3` returns it; `cosign
+    # verify --insecure-ignore-tlog` with files/cosign.pub passes (2026-11-28).
+    # scripts/check-helm-image-pins.py fails CI when this pin trails the
+    # releases (see its docstring).
     # Capture with `crane digest <ref:tag>` (NOT `docker manifest inspect | jq
     # .config.digest`, which returns the config digest — the v2.5.3 mistake).
-    digest: "sha256:f3e692d7ce0f3c087240ae434fcd7048af3d401f16a2212535ccb022fc34c15d"
+    digest: "sha256:7776a30404b8c2b00f5e9ac9d459c43462f092a474f4d9a69df2eb8fbe448715"
   replicas: 2
   port: 5000
   resources:
@@ -216,16 +220,17 @@ realtime:
     # registry when validating against the maintainer's k3s/Talos lab:
     #   --set realtime.image.repository=192.168.122.1:5050/verbara-platform/realtime
     repository: ghcr.io/verbara/platform/realtime
-    tag: "v2.34.1"
+    tag: "v2.41.3"
     # Manifest-list digest pin: when set, the Deployment pulls `repository@digest`.
     # Realtime does not get IMAGE_DIGEST, and licences carry no image digests
     # (verbara-meta/PDR-0003, amendment of 2026-10-03). Source: the release
     # notes of the tag, or its entry in verbara-website/data/authorized-digests.json.
     # Leave empty for tag-only references (dev / local registry).
     #
-    # v2.34.1 — `crane digest ghcr.io/verbara/platform/realtime:v2.34.1` matches
-    # the ledger entry, and `cosign verify` with files/cosign.pub passes (2026-10-29).
-    digest: "sha256:da3f3023e1704ddd26a54a0ef501610f60517190c3082294955b2b776d01a8f3"
+    # v2.41.3 — the GitHub Release digest table and the ledger's `current` entry
+    # agree, `crane digest ghcr.io/verbara/platform/realtime:v2.41.3` returns it,
+    # and `cosign verify --insecure-ignore-tlog` with files/cosign.pub passes (2026-11-28).
+    digest: "sha256:d39a8745efc451fb91be891793ea3d7b62edabbd064dca6dbab189655a8e4745"
   replicas: 1
   port: 5030
   resources:
