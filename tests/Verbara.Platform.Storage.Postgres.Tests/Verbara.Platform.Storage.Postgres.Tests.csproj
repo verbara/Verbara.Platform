@@ -6,6 +6,8 @@
     <ProjectReference Include="..\..\src\Verbara.Platform.Channels.Core\Verbara.Platform.Channels.Core.csproj" />
     <!-- An agent-started conversation leaves the licensed-agent ledger untouched (AgentStartedConversationLedgerTests). -->
     <ProjectReference Include="..\..\src\Verbara.Platform.Switchboard\Verbara.Platform.Switchboard.csproj" />
+    <!-- cli-migrate-prints-migration-notices (#711): CliMigrateNoticeTests run the built CLI as its own process. -->
+    <ProjectReference Include="..\..\tools\Verbara.Platform.Cli\Verbara.Platform.Cli.csproj" />
   </ItemGroup>
 
   <ItemGroup>
