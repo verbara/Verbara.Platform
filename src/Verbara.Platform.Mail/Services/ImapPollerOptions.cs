@@ -19,8 +19,10 @@ public sealed class ImapPollerOptions
     public TimeSpan TokenTtl { get; set; } = TimeSpan.FromDays(7);
 
     /// <summary>
-    /// HMAC-SHA256 signing secret for the CSAT reply token, shared with Pro's dispatcher. Required
-    /// when <see cref="Enabled"/> is true; the reused <c>HmacCsatReplyTokenSigner</c> throws when empty.
+    /// HMAC-SHA256 signing secret for the CSAT reply token, the same value as the Api's
+    /// <c>Csat:Email:TokenSigningSecret</c>. Required only when <see cref="Enabled"/> is true: the service refuses to
+    /// start without it then (<see cref="CsatReplyMailboxSettingsValidator"/>), and with the mailbox off it is never
+    /// read (<see cref="DeferredCsatReplyTokenSigner"/>).
     /// </summary>
     public string TokenSigningSecret { get; set; } = string.Empty;
 

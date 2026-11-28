@@ -253,8 +253,8 @@ jobs:
   # This is NOT "the container lane" — container-backed tests are not confined to it.
   # FOUR test projects start real containers: Storage.Postgres.Tests (17 Postgres
   # fixtures), Identity.Redis.Tests (1 Redis fixture), Channels.Sms.Tests (1 Postgres
-  # fixture) and Mail.Tests (1 MailHog, 1 GreenMail fixture). Only the first two are excluded from
-  # build-and-test; the other two run inside the REQUIRED fast lane. So a fixture-level
+  # fixture) and Mail.Tests (1 MailHog, 1 GreenMail and 2 Postgres fixtures). Only the first two
+  # are excluded from build-and-test; the other two run inside the REQUIRED fast lane. So a fixture-level
   # change made "for this lane" must be applied everywhere or the required lane keeps
   # the defect (fix-testcontainers-tcp-readiness, design D6).
   #

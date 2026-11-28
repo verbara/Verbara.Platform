@@ -47,22 +47,6 @@ if (app.Environment.IsProduction())
 
 _APPSETTINGS = '{ "Asterisk": { "Ami": { "Hostname": "localhost", "Port": 5038 } } }\n'
 
-_MAIL = """
-public static class ServiceCollectionExtensions
-{
-    public static IServiceCollection AddPlatformMail(this IServiceCollection services, IConfiguration configuration)
-    {
-        services.Configure<ImapPollerOptions>(configuration.GetSection("Imap"));
-        services.AddSingleton<ICsatReplyTokenSigner>(sp =>
-        {
-            var options = sp.GetRequiredService<IOptions<ImapPollerOptions>>().Value;
-            return new HmacCsatReplyTokenSigner(options.TokenSigningSecret, options.TokenTtl);
-        });
-        return services;
-    }
-}
-"""
-
 # The shape of the mail service's reply-mailbox check: a switch, settings required while it is on (one per mailbox,
 # by index) and one that falls back to a setting required elsewhere.
 _SWITCH_VALIDATOR = """
@@ -101,7 +85,6 @@ _COMPLETE = (
     "Services__ServiceKey=\n"
     "Asterisk__Ami__Username=\n"
     "Asterisk__Ami__Password=\n"
-    "Imap__TokenSigningSecret=\n"
 )
 
 
@@ -125,7 +108,6 @@ class CheckEnvExampleStartupSettingsTests(unittest.TestCase):
         self.root = self._tmp.name
         self._write("src/Verbara.Platform.Api/Program.cs", _PROGRAM)
         self._write("src/Verbara.Platform.Api/appsettings.json", _APPSETTINGS)
-        self._write("src/Verbara.Platform.Mail/ServiceCollectionExtensions.cs", _MAIL)
 
     def _write(self, rel, text):
         path = os.path.join(self.root, rel)
@@ -149,8 +131,7 @@ class CheckEnvExampleStartupSettingsTests(unittest.TestCase):
         self._stack(_API + _MAIL_SVC)
         r = self._run()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        for key in ("Services__ServiceKey", "CORS_ORIGINS", "Asterisk__Ami__Username", "Asterisk__Ami__Password",
-                    "Imap__TokenSigningSecret"):
+        for key in ("Services__ServiceKey", "CORS_ORIGINS", "Asterisk__Ami__Username", "Asterisk__Ami__Password"):
             self.assertIn(key, r.stdout)
         self.assertIn("docker/docker-compose.production.yml:platform-api", r.stdout)
         self.assertIn("docker/docker-compose.production.yml:mail", r.stdout)
@@ -165,12 +146,18 @@ class CheckEnvExampleStartupSettingsTests(unittest.TestCase):
                 self.assertIn("docker/.env.production.example has no", r.stdout)
                 self.assertIn("src/Verbara.Platform.Api/Program.cs:", r.stdout)
 
-    def test_fails_when_the_mail_signing_secret_is_missing(self):
-        self._stack(_API + _MAIL_SVC, example=self._drop("Imap__TokenSigningSecret"))
+    def test_a_secret_the_mail_service_reads_at_first_use_is_not_required_at_start(self):
+        # The reply-token signer is built the first time a reply is checked (#690), so only the reply-mailbox switch
+        # makes its secret a start-up setting; building it from a field read at first use is no start-up refusal.
+        self._write("src/Verbara.Platform.Mail/ServiceCollectionExtensions.cs",
+                    'services.Configure<ImapPollerOptions>(configuration.GetSection("Imap"));\n'
+                    "services.AddSingleton<ICsatReplyTokenSigner, DeferredCsatReplyTokenSigner>();\n")
+        self._write("src/Verbara.Platform.Mail/Services/DeferredCsatReplyTokenSigner.cs",
+                    "return new HmacCsatReplyTokenSigner(options.TokenSigningSecret, options.TokenTtl);\n")
+        self._stack(_API + _MAIL_SVC)
         r = self._run()
-        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("mail refuses to start without Imap__TokenSigningSecret", r.stdout)
-        self.assertIn("src/Verbara.Platform.Mail/ServiceCollectionExtensions.cs:", r.stdout)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("Imap__TokenSigningSecret", r.stdout)
 
     def test_a_key_in_the_service_environment_counts(self):
         api = _service("platform-api", "Dockerfile",
@@ -231,9 +218,11 @@ class CheckEnvExampleStartupSettingsTests(unittest.TestCase):
 
     def test_a_mail_image_is_recognised(self):
         mail = "  mail:\n    image: ghcr.io/verbara/platform/mail:v2.40.0\n    env_file: [.env.production]\n"
-        self._stack(_API + mail, example=self._drop("Imap__TokenSigningSecret"))
+        self._with_validator()
+        self._stack(_API + mail)
         r = self._run()
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("mail reads Imap__Enabled", r.stdout)
 
     def test_a_stack_without_env_file_is_left_to_its_defaults(self):
         api = _service("platform-api", "Dockerfile", env_file=None, environment=["ASPNETCORE_ENVIRONMENT=Production"])
@@ -273,13 +262,6 @@ class CheckEnvExampleStartupSettingsTests(unittest.TestCase):
         r = self._run()
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("IsProduction", r.stderr)
-
-    def test_exits_2_when_the_signer_section_cannot_be_found(self):
-        self._write("src/Verbara.Platform.Mail/ServiceCollectionExtensions.cs",
-                    _MAIL.replace('services.Configure<ImapPollerOptions>(configuration.GetSection("Imap"));', ""))
-        self._stack(_API + _MAIL_SVC)
-        r = self._run()
-        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
 
     def test_exits_2_when_no_service_reads_an_env_file(self):
         api = _service("platform-api", "Dockerfile", env_file=None)
@@ -402,6 +384,9 @@ class CheckEnvExampleStartupSettingsTests(unittest.TestCase):
         self.assertIn("docker/docker-compose.production.yml:mail", r.stdout)
         # The mail service's reply-mailbox check is read from the code, so the repository run covers it.
         self.assertIn("CsatCapture__ApiBaseAddress (while Imap__Enabled is true)", r.stdout)
+        # The reply-token secret is required only with the reply mailbox on (#690).
+        self.assertIn("Imap__TokenSigningSecret (while Imap__Enabled is true)", r.stdout)
+        self.assertNotIn("Imap__TokenSigningSecret,", r.stdout)
 
 
 if __name__ == "__main__":
