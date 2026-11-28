@@ -14,7 +14,8 @@
 -- so the database refuses an orphan from here on (23503), and deleting a user
 -- removes that user's role assignments in the same transaction. No manual step.
 -- The removed rows are not kept. The RAISE NOTICE below gives the number removed
--- to an operator applying the file with psql; the runner does not log notices.
+-- to an operator applying the file with psql, and the API writes it to its log
+-- when it applies this file at start-up.
 --
 -- Locking (design D3): users and user_roles are locked SHARE ROW EXCLUSIVE for
 -- the whole file — reads continue, writes wait — so no orphan can appear between
