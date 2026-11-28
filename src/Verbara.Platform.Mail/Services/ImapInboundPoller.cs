@@ -25,6 +25,12 @@ namespace Verbara.Platform.Mail.Services;
 /// upgrade or on a new deployment) or a new UIDVALIDITY, the newest message becomes the starting point
 /// and no older message is forwarded.
 /// </para>
+/// <para>
+/// After an upgrade the service can start before the Api has created that table (migration 034). The poller then
+/// logs once per mailbox that it waits for the database to be upgraded, notes the newest message in the mailbox at
+/// that moment, and keeps polling quietly; once the table exists it reads every message that arrived after that
+/// point, so a reply that comes in while it waits is forwarded once (#702).
+/// </para>
 /// </summary>
 public sealed partial class ImapInboundPoller : BackgroundService
 {
@@ -37,6 +43,10 @@ public sealed partial class ImapInboundPoller : BackgroundService
     // Failed attempts of the message at the head of each mailbox (keyed by mailbox + UIDVALIDITY + UID).
     // Kept in memory: a restart gives a failing message a fresh count, which stays bounded.
     private readonly ConcurrentDictionary<string, int> _attempts = new(StringComparer.Ordinal);
+
+    // Mailboxes waiting for the poll-position table (#702), keyed by mailbox: where the mailbox stood when the wait
+    // began. Kept in memory; a restart during the wait starts that mailbox from its newest message, as a first read.
+    private readonly ConcurrentDictionary<string, ImapPollPosition> _waitingForTable = new(StringComparer.Ordinal);
 
     public ImapInboundPoller(
         IOptions<ImapPollerOptions> options,
@@ -94,6 +104,10 @@ public sealed partial class ImapInboundPoller : BackgroundService
                 {
                     LogFolderNotFound(mailbox.TenantId, mailbox.Host, mailbox.Folder, ex);
                 }
+                catch (ImapPollPositionTableMissingException) when (_waitingForTable.ContainsKey(MailboxKey(mailbox)))
+                {
+                    // Logged once when the wait began (PollMailboxAsync); the next poll looks again.
+                }
 #pragma warning disable CA1031 // one flaky mailbox must not abort the whole poller loop
                 catch (Exception ex)
                 {
@@ -124,7 +138,27 @@ public sealed partial class ImapInboundPoller : BackgroundService
             var folder = await OpenFolderAsync(client, mailbox, ct).ConfigureAwait(false);
 
             var uidValidity = folder.UidValidity;
-            var stored = await _positions.GetAsync(mailbox, ct).ConfigureAwait(false);
+            ImapPollPosition? stored;
+            try
+            {
+                stored = await _positions.GetAsync(mailbox, ct).ConfigureAwait(false);
+            }
+            catch (ImapPollPositionTableMissingException)
+            {
+                await WaitForTableAsync(mailbox, folder, uidValidity, ct).ConfigureAwait(false);
+                throw;
+            }
+
+            if (stored is null && _waitingForTable.TryGetValue(MailboxKey(mailbox), out var waitedAt)
+                && waitedAt.UidValidity == uidValidity)
+            {
+                // The table now exists: read on from where the mailbox stood when the wait began.
+                await _positions.SaveAsync(mailbox, waitedAt, ct).ConfigureAwait(false);
+                LogTableReady(mailbox.TenantId, waitedAt.LastUid);
+                stored = waitedAt;
+            }
+
+            _waitingForTable.TryRemove(MailboxKey(mailbox), out _);
             if (stored is null || stored.UidValidity != uidValidity)
             {
                 await StartFromNewestAsync(mailbox, folder, uidValidity, stored, ct).ConfigureAwait(false);
@@ -235,6 +269,22 @@ public sealed partial class ImapInboundPoller : BackgroundService
         _ => false,
     };
 
+    // The first poll that finds no table notes the newest message and logs the wait once; later polls change nothing,
+    // unless the server renumbered the mailbox meanwhile (a new UIDVALIDITY makes the noted UID meaningless).
+    private async Task WaitForTableAsync(ImapMailboxOptions mailbox, IMailFolder folder, uint uidValidity, CancellationToken ct)
+    {
+        var key = MailboxKey(mailbox);
+        if (_waitingForTable.TryGetValue(key, out var waitedAt) && waitedAt.UidValidity == uidValidity)
+            return;
+
+        var all = await folder.SearchAsync(SearchQuery.All, ct).ConfigureAwait(false);
+        var newest = all.Count == 0 ? 0u : all.Max(u => u.Id);
+        if (_waitingForTable.TryAdd(key, new ImapPollPosition(uidValidity, newest)))
+            LogWaitingForTable(mailbox.TenantId, newest);
+        else
+            _waitingForTable[key] = new ImapPollPosition(uidValidity, newest);
+    }
+
     private async Task StartFromNewestAsync(
         ImapMailboxOptions mailbox, IMailFolder inbox, uint uidValidity, ImapPollPosition? stored, CancellationToken ct)
     {
@@ -287,6 +337,12 @@ public sealed partial class ImapInboundPoller : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Error, Message = "IMAP message refused by the Api and passed, its reply is not recorded: tenant={TenantId} uid={Uid}")]
     private partial void LogMessageRefused(string tenantId, uint uid, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "IMAP mailbox waiting for the database to be upgraded (the Api applies its migrations): tenant={TenantId}; messages after uid={NewestUid} are read once it is")]
+    private partial void LogWaitingForTable(string tenantId, uint newestUid);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "IMAP mailbox read again, the database is upgraded: tenant={TenantId} reads the messages after uid={NewestUid}")]
+    private partial void LogTableReady(string tenantId, uint newestUid);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "IMAP mailbox read for the first time: tenant={TenantId} starts after uid={NewestUid}, {Skipped} message(s) already in the mailbox not forwarded")]
     private partial void LogStartedFromNewest(string tenantId, int skipped, uint newestUid);

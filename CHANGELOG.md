@@ -11,6 +11,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The mail service waits for the database upgrade without logging errors.** On an upgrade the mail service starts
+  before the Api has applied migration `034_MailImapPollPositions.sql` (the Api waits for the mail service to be
+  healthy), and until then every poll of a CSAT reply mailbox wrote `IMAP poll failed` with a full error to the mail
+  service's log. It now writes one line per mailbox, at Information, saying it is waiting for the database to be
+  upgraded, and keeps polling quietly; once the Api has migrated, reading resumes on its own. A reply that arrives
+  while it waits is no longer skipped: it is recorded once, after the migration, unless the mail service restarts
+  during the wait. Other database errors are logged as before. (#702)
+
 - **The mail service starts without the CSAT reply secret when the reply mailbox is off.** The mail service refused to
   start without `Imap__TokenSigningSecret` in every deployment, also those that never read CSAT email replies
   (`Imap__Enabled=false`, the default), although only the reply mailbox uses it: the survey emails it sends carry a
