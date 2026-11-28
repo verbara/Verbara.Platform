@@ -271,7 +271,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<AuthWriteQueue>())
 var coreConnectionString = ConnectionStringDefaults.ApplyPoolDefaults(
     builder.Configuration.GetConnectionString("Postgres"));
 NpgsqlDataSource? sharedCoreDataSource = null;
-IReadOnlyList<Verbara.Platform.Api.Services.MigrationNotice> migrationNotices = [];
+IReadOnlyList<Verbara.Platform.Storage.Postgres.MigrationNotice> migrationNotices = [];
 if (!string.IsNullOrEmpty(coreConnectionString))
 {
     sharedCoreDataSource = NamedDataSource.Build(coreConnectionString, "core");

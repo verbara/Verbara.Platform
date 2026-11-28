@@ -19,6 +19,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as a warning), naming the migration, under the category `Verbara.Platform.Api.Services.DatabaseMigrationService`.
   When a later migration fails and the Api stops, the error names the messages of the migrations it had already
   applied. (#701)
+- **The CLI's `migrate` command shows what a database upgrade removed.** `migrate`
+  (`tools/Verbara.Platform.Cli`) applied the same migrations as the Api but printed nothing of what they report, so an
+  operator who upgraded with it could not see how many role assignments `024_UserRolesUserForeignKey.sql` or how many
+  repeated email or SMS ratings `035_SurveyResponseOnePerDispatch.sql` removed. It now prints each message under the
+  migration that reported it, in the same words as the Api log
+  (`Migration 035_SurveyResponseOnePerDispatch.sql reported (NOTICE): ...`); a message the database flags as a warning
+  reads `(WARNING)`. A migration that fails prints
+  its error and none of its messages, since nothing it did is kept. `migrate` and the Api now apply migrations with
+  the same code, so a database first migrated with an older `migrate` no longer stops the Api at start-up when it
+  applies a later migration. (#711)
 - **The CSAT reply mailbox reads the folder it is configured with.** A mailbox set to read another folder than INBOX
   (`Imap__Mailboxes__N__Folder`) was still read from INBOX, so replies filed into that folder were never recorded and
   replies in INBOX were. The mail service now opens the configured folder, named as the mail server lists it with its
