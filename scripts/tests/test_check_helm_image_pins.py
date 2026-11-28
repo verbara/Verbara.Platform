@@ -211,6 +211,15 @@ class InputErrorTests(_Fixture):
                 self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
                 self.assertIn(".image mapping", r.stderr)
 
+    def test_main_ShouldExitTwo_WhenAnInputIsNotUtf8(self):
+        bad = os.path.join(self.dir, "not-utf8-CHANGELOG.md")
+        with open(bad, "wb") as fh:
+            fh.write(b"\xff\xfe## [2.41.3]\n")
+        r = self.run_guard(changelog_path=bad)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("cannot read", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
     def test_main_ShouldExitTwo_WhenTheChangelogHasNoReleasedHeading(self):
         r = self.run_guard(changelog=_changelog([]))
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)

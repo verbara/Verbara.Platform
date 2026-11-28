@@ -64,7 +64,7 @@ def _read(p):
     try:
         with open(p, encoding="utf-8") as fh:
             return fh.read()
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
         raise InputError(f"cannot read {p}: {e}") from e
 
 
@@ -101,8 +101,7 @@ def released_headings(changelog_path):
         if not m:
             continue
         name = m.group(1).strip()
-        if name.lower() == "unreleased":
-            continue
+        # [Unreleased] (and any other non-X.Y.Z heading) never counts: _VERSION_RE accepts only X.Y.Z.
         v = _VERSION_RE.match(name)
         if v:
             versions.append(tuple(int(g) for g in v.groups()))
