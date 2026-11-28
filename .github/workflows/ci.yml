@@ -669,6 +669,11 @@ jobs:
       # its stack's POSTGRES_PASSWORD with and without the operator's .env. Found by scanning, not by a list.
       - name: Postgres password outside connection strings
         run: python3 scripts/check-compose-postgres-password.py
+      # The Api signs each CSAT email's reply address with Csat__Email__TokenSigningSecret and the mail service
+      # checks the replies with Imap__TokenSigningSecret: in every compose file under docker/ that runs both, the
+      # two are equal, with and without the operator's .env. Found by scanning, not by a list.
+      - name: One CSAT reply secret for Api and mail
+        run: python3 scripts/check-compose-csat-reply-secret.py
       # A stack that hands its services an env file (docker-compose.production.yml: .env.production) lists in that
       # file, or its .example, every setting the services refuse to start without. The settings are read from the
       # code (the Api's production check in Program.cs, an options value the mail service hands a constructor that
