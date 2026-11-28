@@ -141,6 +141,7 @@ IMAP_PORT=993
 IMAP_USE_TLS=true
 IMAP_USER=tu-cuenta@gmail.com
 IMAP_PASSWORD={mismo-app-password}
+# IMAP_FOLDER=INBOX                       # sin definir = INBOX; otra carpeta = su nombre completo en el servidor (p. ej. INBOX.CsatReplies)
 ```
 
 > Gmail con OAuth2 (no App Password) requiere setup adicional — ver [05](05-canal-email.md).

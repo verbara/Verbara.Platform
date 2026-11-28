@@ -61,6 +61,12 @@ public sealed class ImapMailboxOptions
     /// <summary>Mailbox login password / app-password.</summary>
     public required string Password { get; set; }
 
-    /// <summary>The folder to poll (defaults to INBOX).</summary>
+    /// <summary>
+    /// The folder to poll: INBOX (the default; any case) or another folder's full name as the server lists it, with
+    /// the server's own separator, such as <c>INBOX.CsatReplies</c> or <c>CsatReplies</c>. A folder the server does
+    /// not have is logged as an error on every poll and nothing is read from this mailbox. Part of the mailbox's
+    /// stored poll position (<c>mail.imap_poll_positions</c>), so changing it starts that folder from its newest
+    /// message.
+    /// </summary>
     public string Folder { get; set; } = "INBOX";
 }

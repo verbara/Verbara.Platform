@@ -13,8 +13,8 @@
 -- captured (COALESCE(captured_at, submitted_at), then response_id) is kept and
 -- the others are deleted, the same rule the store applies to new captures. The
 -- RAISE NOTICE below gives the number removed to a client that shows notices
--- (psql); the API's migration runner does not log notices. Audit records of the
--- removed ratings are kept.
+-- (psql), and the API writes it to its log when it applies this file at
+-- start-up. Audit records of the removed ratings are kept.
 -- Nothing references a survey_responses row by id (no foreign keys). Webchat,
 -- voice and non-CSAT rows are untouched: the index is partial.
 --
