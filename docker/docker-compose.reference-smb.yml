@@ -538,6 +538,8 @@ services:
       Imap__Mailboxes__0__UseTls: ${IMAP_USE_TLS:-true}
       Imap__Mailboxes__0__Username: ${IMAP_USER:-}
       Imap__Mailboxes__0__Password: ${IMAP_PASSWORD:-}
+      # The folder the replies land in (INBOX unless IMAP_FOLDER names another).
+      Imap__Mailboxes__0__Folder: ${IMAP_FOLDER:-INBOX}
       # Where the poller forwards captured replies, authorized by the same
       # service key the API checks (Services__ServiceKey on platform-api).
       CsatCapture__ApiBaseAddress: http://platform-api:5000
