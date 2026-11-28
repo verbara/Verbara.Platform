@@ -18,6 +18,10 @@ For each pair in PAIRS the script renders the merge with `docker compose -f <bas
   - the `redis` service has no `profiles` (it runs whenever the overlay is applied).
 Each failure line names the file pair and the key.
 
+The render runs as an operator's does after filling the base's example (docker-compose.<name>.yml reads
+.env.<name>.example): each variable the example leaves empty, such as SERVICE_KEY, which the base refuses to start
+without, is given a placeholder unless the environment already sets it.
+
 --rendered FILE reads an already rendered model (JSON) for the single pair instead of running docker (tests).
 CHECK_SCALE_BACKPLANE_DOCKER overrides the docker executable (tests).
 
@@ -29,6 +33,7 @@ Exit codes:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -48,12 +53,30 @@ class InputError(Exception):
     pass
 
 
+_EMPTY_ENV_LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*$")
+
+
+def _render_env(base):
+    """The environment for rendering `base`: the variables its example leaves for the operator to fill get a
+    placeholder, so a `${VAR:?...}` the operator fills does not stop the render."""
+    env = dict(os.environ)
+    m = re.match(r"^docker-compose\.(.+)\.ya?ml$", os.path.basename(base))
+    example = os.path.join(_ROOT, os.path.dirname(base), f".env.{m.group(1)}.example") if m else None
+    if example and os.path.isfile(example):
+        with open(example, encoding="utf-8") as fh:
+            for line in fh:
+                em = _EMPTY_ENV_LINE.match(line)
+                if em and not env.get(em.group(1)):
+                    env[em.group(1)] = "filled-by-check-scale-backplane"
+    return env
+
+
 def render(base, overlay):
     docker = os.environ.get("CHECK_SCALE_BACKPLANE_DOCKER", "docker")
     cmd = [docker, "compose", "-f", os.path.join(_ROOT, base), "-f", os.path.join(_ROOT, overlay),
            "config", "--format", "json"]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, cwd=_ROOT, check=False)
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=_ROOT, env=_render_env(base), check=False)
     except OSError as e:
         raise InputError(f"{base} + {overlay}: cannot run '{docker} compose' to render the pair: {e}") from e
     if r.returncode != 0:

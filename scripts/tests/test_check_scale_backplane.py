@@ -130,6 +130,24 @@ class CheckScaleBackplaneTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("render", r.stderr)
 
+    def test_the_render_fills_the_variables_the_base_example_leaves_empty(self):
+        # docker/docker-compose.full.yml refuses to render without SERVICE_KEY, which docker/.env.full.example leaves
+        # for the operator to fill (#689): a stand-in docker that renders only with SERVICE_KEY set.
+        fake = os.path.join(self._tmp.name, "docker")
+        with open(fake, "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\n"
+                     "[ -n \"$SERVICE_KEY\" ] || { echo 'required variable SERVICE_KEY is missing a value' >&2; exit 1; }\n"
+                     f"cat <<'JSON'\n{json.dumps(_PASSING)}\nJSON\n")
+        os.chmod(fake, 0o755)
+        env = {"CHECK_SCALE_BACKPLANE_DOCKER": fake}
+        saved = os.environ.pop("SERVICE_KEY", None)
+        try:
+            r = self._run(env=env)
+        finally:
+            if saved is not None:
+                os.environ["SERVICE_KEY"] = saved
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def test_exits_2_when_docker_is_missing(self):
         missing = os.path.join(self._tmp.name, "no-such-docker")
         r = self._run(env={"CHECK_SCALE_BACKPLANE_DOCKER": missing})

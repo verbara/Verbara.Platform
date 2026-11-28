@@ -46,8 +46,16 @@ Renderer (`:5010`, internal), Mail (`:5020`, internal), Web UI, and Postgres.
 The Web UI is built from the sibling `Verbara.Platform.Web` repo, so this
 expects it cloned next to `Verbara.Platform/` (`../Verbara.Platform.Web`).
 
+The stack reads its settings from `docker/.env`. Copy the example there and
+fill in every empty value it lists: `SERVICE_KEY`, the key the services check on
+each other's calls (generate one with `openssl rand -hex 32`). Compose does not
+start the stack while it is empty.
+
 ```bash
 git clone https://github.com/verbara/Verbara.Platform.Web.git ../Verbara.Platform.Web
+
+cp docker/.env.full.example docker/.env
+# edit docker/.env: SERVICE_KEY=<the output of openssl rand -hex 32>
 
 docker compose -f docker/docker-compose.full.yml up -d
 ```

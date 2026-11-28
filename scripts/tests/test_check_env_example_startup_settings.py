@@ -377,11 +377,161 @@ class CheckEnvExampleStartupSettingsTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("SwitchKey", r.stderr)
 
+    # A stack that passes its settings inline (#689): docker/docker-compose.full.yml sets Services__ServiceKey from
+    # ${SERVICE_KEY:-<the default the Api refuses>}, and an operator copies docker/.env.full.example to run it.
+    def _inline(self, environment, example=None, rel="docker/docker-compose.full.yml",
+                example_rel="docker/.env.full.example"):
+        api = _service("platform-api", "Dockerfile", env_file=None,
+                       environment=["ASPNETCORE_ENVIRONMENT=Production"] + environment)
+        self._write(rel, "services:\n" + api)
+        if example is not None:
+            self._write(example_rel, example)
+
+    def test_an_inline_default_the_api_refuses_fails(self):
+        self._inline(["Services__ServiceKey=${SERVICE_KEY:-platform_internal_secret}"], example="POSTGRES_PASSWORD=x\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("docker/docker-compose.full.yml: platform-api refuses to start with Services__ServiceKey at the "
+                      "built-in default", r.stdout)
+        self.assertIn("from docker/.env.full.example", r.stdout)
+        self.assertIn("${SERVICE_KEY:?...}", r.stdout)
+        self.assertNotIn("platform_internal_secret", r.stdout)
+
+    def test_an_inline_default_fails_when_the_example_leaves_its_variable_empty(self):
+        # `${VAR:-default}` falls back on an empty value too, so an empty `VAR=` in the example still starts the
+        # service with the refused default.
+        self._inline(["Services__ServiceKey=${SERVICE_KEY:-platform_internal_secret}"], example="SERVICE_KEY=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("at the built-in default", r.stdout)
+
+    def test_an_inline_default_passes_when_the_example_sets_another_value(self):
+        self._inline(["Services__ServiceKey=${SERVICE_KEY:-platform_internal_secret}"],
+                     example="SERVICE_KEY=generated-by-the-operator\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_an_inline_literal_default_fails(self):
+        self._inline(["Services__ServiceKey=platform_internal_secret"])
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("at the built-in default", r.stdout)
+
+    def test_the_refused_default_is_read_from_the_code(self):
+        self._write("src/Verbara.Platform.Api/Program.cs", _PROGRAM.replace('"platform_internal_secret"', '"other"'))
+        self._inline(["Services__ServiceKey=${SERVICE_KEY:-platform_internal_secret}"])
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_an_inline_required_variable_passes_when_the_example_lists_it(self):
+        self._inline(["Services__ServiceKey=${SERVICE_KEY:?set SERVICE_KEY}"], example="# a comment\nSERVICE_KEY=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("docker/docker-compose.full.yml:platform-api", r.stdout)
+
+    def test_an_inline_required_variable_fails_when_the_example_lacks_it(self):
+        self._inline(["Services__ServiceKey=${SERVICE_KEY:?set SERVICE_KEY}"], example="POSTGRES_PASSWORD=x\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("compose refuses to start without SERVICE_KEY, and docker/.env.full.example has no SERVICE_KEY "
+                      "line", r.stdout)
+
+    def test_an_inline_required_variable_fails_without_an_example(self):
+        self._inline(["Services__ServiceKey=${SERVICE_KEY:?set SERVICE_KEY}"])
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("no .env example next to docker/docker-compose.full.yml", r.stdout)
+
+    def test_the_example_is_found_by_the_stack_name(self):
+        self._inline(["Services__ServiceKey=${SERVICE_KEY:?set}"], example="SERVICE_KEY=\n",
+                     rel="docker/docker-compose.demo.yml", example_rel="docker/.env.full.example")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self._write("docker/.env.demo.example", "SERVICE_KEY=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_an_inline_empty_value_fails_unless_the_example_lists_its_variable(self):
+        # CORS_ORIGINS is read by the production check but not refused empty, so a listed variable is the operator's.
+        self._inline(["CORS_ORIGINS=${CORS_ORIGINS:-}"], example="POSTGRES_PASSWORD=x\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("has no CORS_ORIGINS line", r.stdout)
+        self._write("docker/.env.full.example", "CORS_ORIGINS=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_an_inline_key_refused_empty_fails_when_the_example_leaves_its_variable_empty(self):
+        # The example copied unchanged starts the Api with an empty service key, which the production check refuses,
+        # unless compose itself refuses to start without the variable (`${VAR:?...}`). `${VAR?...}` does not: it
+        # refuses only an unset variable, and the example sets it, empty.
+        for raw in ("${SERVICE_KEY:-}", "${SERVICE_KEY}", "$SERVICE_KEY", "${SERVICE_KEY-platform_internal_secret}",
+                    "${SERVICE_KEY?set SERVICE_KEY}"):
+            with self.subTest(raw=raw):
+                self._inline(["Services__ServiceKey=" + raw], example="# the service key\nSERVICE_KEY=\n")
+                r = self._run()
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("platform-api refuses to start with Services__ServiceKey empty", r.stdout)
+                self.assertIn("docker/.env.full.example leaves SERVICE_KEY empty", r.stdout)
+                self.assertIn("${SERVICE_KEY:?...}", r.stdout)
+
+    def test_an_inline_key_refused_empty_passes_when_compose_refuses_the_empty_variable(self):
+        self._inline(["Services__ServiceKey=${SERVICE_KEY:?set SERVICE_KEY}"], example="SERVICE_KEY=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_an_inline_key_checked_only_when_set_is_not_refused_empty(self):
+        # `!string.IsNullOrEmpty(x) && ...` checks x only while it has a value, so an empty x starts the service.
+        program = _PROGRAM.replace(
+            "    if (corsOrigins.Contains(\"*\"))",
+            "    var prefix = builder.Configuration[\"Routing:Prefix\"];\n"
+            "    if (!string.IsNullOrEmpty(prefix) && prefix.Length > 8)\n"
+            "        configErrors.Add(\"Routing:Prefix too long\");\n\n"
+            "    if (corsOrigins.Contains(\"*\"))")
+        self.assertNotEqual(program, _PROGRAM)
+        self._write("src/Verbara.Platform.Api/Program.cs", program)
+        self._inline(["Routing__Prefix=${ROUTING_PREFIX:-}"], example="ROUTING_PREFIX=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Routing__Prefix", r.stdout)
+
+    def test_an_inline_ami_password_refused_empty_fails_when_the_example_leaves_it_empty(self):
+        self._inline(["Asterisk__Ami__Hostname=asterisk", "Asterisk__Ami__Username=platform",
+                      "Asterisk__Ami__Password=${AMI_PASSWORD:-}"], example="AMI_PASSWORD=\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("refuses to start with Asterisk__Ami__Password empty", r.stdout)
+        self._inline(["Asterisk__Ami__Hostname=asterisk", "Asterisk__Ami__Username=platform",
+                      "Asterisk__Ami__Password=${AMI_PASSWORD:-}"], example="AMI_PASSWORD=set-by-the-operator\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_inline_settings_outside_production_are_not_checked(self):
+        api = _service("platform-api", "Dockerfile", env_file=None,
+                       environment=["ASPNETCORE_ENVIRONMENT=Development",
+                                    "Services__ServiceKey=${SERVICE_KEY:-platform_internal_secret}"])
+        self._write("docker/docker-compose.full.yml", "services:\n" + api)
+        r = self._run()
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+    def test_an_inline_ami_pair_is_checked_while_its_hostname_is_set(self):
+        self._inline(["Asterisk__Ami__Hostname=asterisk", "Asterisk__Ami__Password=${AMI_PASSWORD:-}"],
+                     example="POSTGRES_PASSWORD=x\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("refuses to start without Asterisk__Ami__Password", r.stdout)
+        self._inline(["Asterisk__Ami__Hostname=", "Asterisk__Ami__Password=${AMI_PASSWORD:-}"],
+                     example="POSTGRES_PASSWORD=x\n")
+        r = self._run()
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
     def test_the_repository_passes(self):
         r = self._run(_REPO)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("docker/docker-compose.production.yml:platform-api", r.stdout)
         self.assertIn("docker/docker-compose.production.yml:mail", r.stdout)
+        # The full stack passes its settings inline, read with docker/.env.full.example (#689).
+        self.assertIn("docker/docker-compose.full.yml:platform-api", r.stdout)
         # The mail service's reply-mailbox check is read from the code, so the repository run covers it.
         self.assertIn("CsatCapture__ApiBaseAddress (while Imap__Enabled is true)", r.stdout)
         # The reply-token secret is required only with the reply mailbox on (#690).
