@@ -16,8 +16,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   healthy), and until then every poll of a CSAT reply mailbox wrote `IMAP poll failed` with a full error to the mail
   service's log. It now writes one line per mailbox, at Information, saying it is waiting for the database to be
   upgraded, and keeps polling quietly; once the Api has migrated, reading resumes on its own. A reply that arrives
-  while it waits is no longer skipped: it is recorded once, after the migration. Other database errors are logged as
-  before. (#702)
+  while it waits is no longer skipped: it is recorded once, after the migration, unless the mail service restarts
+  during the wait. Other database errors are logged as before. (#702)
 - **The Api log shows what a database upgrade removed.** Some migrations report what they changed, such as
   `024_UserRolesUserForeignKey.sql` (role assignments of users that no longer exist) and
   `035_SurveyResponseOnePerDispatch.sql` (repeated email or SMS ratings), but when the Api applied them at start-up

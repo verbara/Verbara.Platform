@@ -113,6 +113,46 @@ public sealed class ImapInboundPollerDatabaseUpgradeTests : IClassFixture<Upgrad
         PollerRecords(capture).Should().NotContain(r => r.Message.Contains(WaitingLine, StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task PollMailboxAsync_ShouldReadOnFromTheRenumberedMailbox_WhenUidValidityChangedWhileItWaited()
+    {
+        await using var db = await _fixture.CreateDatabaseAsync(withMailSchema: true);
+        using var factory = LoggerFactory.Create(_ => { });
+        var server = new ImapInboundPollerForwardOnceTests.FakeMailbox(uidValidity: 7);
+        server.Deliver(rating: 1);
+        var forwarder = new ImapInboundPollerForwardOnceTests.RecordingForwarder();
+        var poller = NewPoller(forwarder, server, db.DataSource, factory, () => { });
+
+        await poller.Awaiting(p => p.PollMailboxAsync(Mailbox, CancellationToken.None))
+            .Should().ThrowAsync<ImapPollPositionTableMissingException>("the wait begins at uid 1 of UIDVALIDITY 7");
+
+        server.UidValidity = 8; // the server renumbered the mailbox during the wait
+        server.Deliver(rating: 2);
+        server.Deliver(rating: 3);
+        await poller.Awaiting(p => p.PollMailboxAsync(Mailbox, CancellationToken.None))
+            .Should().ThrowAsync<ImapPollPositionTableMissingException>("the wait now begins at uid 3 of UIDVALIDITY 8");
+
+        server.Deliver(rating: 4); // arrives after the renumbered point, while it still waits
+        await db.ApplyMigration034Async();
+        (await poller.PollMailboxAsync(Mailbox, CancellationToken.None)).Should().Be(1);
+
+        forwarder.Forwarded.Should().Equal([4], "only the reply after the point noted under the new UIDVALIDITY is read");
+        (await new PostgresImapPollPositionStore(db.DataSource).GetAsync(Mailbox, CancellationToken.None))
+            .Should().Be(new ImapPollPosition(8, 4));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SaveAsync_ShouldThrowTableMissing_WhenThePollPositionTableIsMissing(bool withMailSchema)
+    {
+        await using var db = await _fixture.CreateDatabaseAsync(withMailSchema);
+        var store = new PostgresImapPollPositionStore(db.DataSource);
+
+        await store.Awaiting(s => s.SaveAsync(Mailbox, new ImapPollPosition(7, 1), CancellationToken.None))
+            .Should().ThrowAsync<ImapPollPositionTableMissingException>("a save that races the upgrade is a wait, not a failure");
+    }
+
     private ImapInboundPoller NewPoller(
         ImapInboundPollerForwardOnceTests.RecordingForwarder forwarder, ImapInboundPollerForwardOnceTests.FakeMailbox server,
         NpgsqlDataSource dataSource, ILoggerFactory factory, Action onConnect)
