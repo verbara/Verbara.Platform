@@ -10,7 +10,7 @@ helm install platform infra/k8s/helm/platform/
 ```
 
 The chart's defaults pin the current release (`api` and `realtime`
-`v2.41.3` by tag and manifest-list digest, `web` `v3.27.1-web`). To deploy
+`v2.41.3` by tag and manifest-list digest, `web` `v3.32.1-web`). To deploy
 another release, override the tag **and** the digest of each image you
 change, for example
 `--set api.image.tag=vX.Y.Z --set api.image.digest=sha256:...`; when a

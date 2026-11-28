@@ -66,7 +66,7 @@ Verbara incluye una suite de tests E2E que valida el setup wizard + los 3 canale
 # Desde una máquina con acceso al server (puede ser el mismo host)
 $ git clone https://github.com/verbara/platform-web.git
 $ cd platform-web
-$ git checkout v3.27.1-web     # la consola del par que fija el compose
+$ git checkout v3.32.1-web     # la consola del par que fija el compose
 
 $ npm install
 $ npx playwright install --with-deps chromium
@@ -216,10 +216,10 @@ $ npx playwright test --grep @reference-deployment --reporter=html
 # Sign de las 5 imágenes (proof de imagen no-tampered, ADR-0023) — cosign v3+
 $ for img in api realtime renderer mail; do
     cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-        ghcr.io/verbara/platform/$img:v2.34.0 > /tmp/sig-$img.txt 2>&1
+        ghcr.io/verbara/platform/$img:v2.41.3 > /tmp/sig-$img.txt 2>&1
   done
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-    ghcr.io/verbara/platform/web:v3.27.1-web > /tmp/sig-web.txt 2>&1
+    ghcr.io/verbara/platform/web:v3.32.1-web > /tmp/sig-web.txt 2>&1
 
 # Bundle todo
 $ tar czf /tmp/verbara-install-report-$(date +%F).tar.gz \

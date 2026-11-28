@@ -413,12 +413,14 @@ El script ya existe en `scripts/backup-pg.sh` con rotación a 30 días.
    El procedimiento de corrección de ambos está en `docs/operations/licensed-agent-metering-upgrade.md`.
 4. **Si venís de una versión anterior a v2.27.0 — zona del día de medición.** Elegí `LICENSE_DAY_ZONE` (zona IANA, ej. `America/Bogota`; default `UTC`) **antes** del primer arranque: ese arranque la fija en la base y cambiarla después detiene el cierre diario de agentes licenciados hasta que se restaure.
 5. **Si venís de una versión anterior a v2.28.0 — sin vuelta atrás.** El primer arranque de v2.28.0 o posterior cifra los secretos de los canales en la base. Es de un solo sentido: una versión anterior ya no los puede leer. Desde ahí, volver atrás = restaurar el backup del paso 1.
+6. **Si venís de una versión anterior a v2.38.0 — conversaciones inactivas.** El primer arranque de v2.38.0 o posterior cierra, sin encuesta CSAT, toda conversación de WhatsApp o WebChat abierta sin mensajes hace más de 72 horas. Corré antes los conteos de sólo lectura de `docs/operations/upgrade-2.38.0.md`; para no cerrarlas, poné `INACTIVITY_CLOSE_ENABLED=false` en el `.env` antes de arrancar.
+7. **Si venís de una versión anterior a v2.41.3 — leé los cambios que rompen compatibilidad.** Las secciones **Changed — BREAKING** y **Upgrading** de `CHANGELOG.md` de v2.39.0, v2.40.0 y v2.41.0 dicen qué cambia para integraciones y scripts (permisos, rutas de retención, el susurro del supervisor). La consola `v3.32.1-web` necesita Platform v2.41.0 o posterior: actualizá Api y Web juntos, nunca sólo uno.
 
 ### 9.2 Cambios del `.env` (comparalo con el `.env.reference-smb.example` del tag nuevo)
 
 ```bash
 $ git fetch --tags
-$ git checkout v2.34.0
+$ git checkout v2.41.3
 $ diff <(command grep -oE '^[A-Z_]+=' docker/.env.reference-smb.example | sort) \
        <(command grep -oE '^[A-Z_]+=' docker/.env.reference-smb | sort)
 ```
@@ -434,13 +436,13 @@ $ diff <(command grep -oE '^[A-Z_]+=' docker/.env.reference-smb.example | sort) 
 Actualizá los tags:
 ```bash
 $ ${EDITOR:-nano} docker/.env.reference-smb
-# PLATFORM_API_TAG=v2.34.0         (aplica a api+realtime+renderer+mail; comparten tag)
-# PLATFORM_WEB_TAG=v3.27.1-web     (web tiene su propio tren de release)
+# PLATFORM_API_TAG=v2.41.3         (aplica a api+realtime+renderer+mail; comparten tag)
+# PLATFORM_WEB_TAG=v3.32.1-web     (web tiene su propio tren de release)
 ```
 
 ### 9.3 Instalaciones con licencia Pro
 
-Cada release del api tiene un digest nuevo; poné el de `ghcr.io/verbara/platform/api:v2.34.0` en `IMAGE_DIGEST` (está en las notas de la release). Las licencias emitidas desde el 2026-10-03 no llevan digests de imagen (verbara-meta/PDR-0003), así que actualizar no exige licencia nueva. Si tu `.lic` es anterior y lista digests (Pro/ADR-0011), pedí a Verbara una licencia actual **antes** de arrancar; si no, el api responde `License '…' is not authorised for the running container image.` (ver §1).
+Cada release del api tiene un digest nuevo; poné el de `ghcr.io/verbara/platform/api:v2.41.3` en `IMAGE_DIGEST` (está en las notas de la release). Las licencias emitidas desde el 2026-10-03 no llevan digests de imagen (verbara-meta/PDR-0003), así que actualizar no exige licencia nueva. Si tu `.lic` es anterior y lista digests (Pro/ADR-0011), pedí a Verbara una licencia actual **antes** de arrancar; si no, el api responde `License '…' is not authorised for the running container image.` (ver §1).
 
 ### 9.4 Verificar, construir y arrancar
 
@@ -448,10 +450,10 @@ Cada release del api tiene un digest nuevo; poné el de `ghcr.io/verbara/platfor
 # Firmas (5 imágenes, ADR-0023) — cosign v3+ con --insecure-ignore-tlog
 $ for img in api realtime renderer mail; do
     cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-        ghcr.io/verbara/platform/$img:v2.34.0
+        ghcr.io/verbara/platform/$img:v2.41.3
   done
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-    ghcr.io/verbara/platform/web:v3.27.1-web
+    ghcr.io/verbara/platform/web:v3.32.1-web
 
 # Asterisk se construye localmente: reconstruirlo con el Dockerfile del tag nuevo
 $ dc build asterisk

@@ -125,12 +125,12 @@ Verbara SMB se distribuye en **3 tiers** que comparten el mismo binario. Pasás 
 
 ## Versionado y soporte
 
-Esta guía aplica a la release **Platform `v2.34.0`** con la consola **Web `v3.27.1-web`** — el par que fijan los defaults de `docker/docker-compose.reference-smb.yml` y `docker/.env.reference-smb.example` (CI verifica que coincidan):
-- **Verbara.Platform.Api** `v2.34.0` (imagen `ghcr.io/verbara/platform/api:v2.34.0`, Native AOT)
-- **Verbara.Platform.Realtime** `v2.34.0` (imagen `ghcr.io/verbara/platform/realtime:v2.34.0`) — microservicio SignalR Hub (ADR-0022 Phase A)
-- **Verbara.Platform.Renderer** `v2.34.0` (imagen `ghcr.io/verbara/platform/renderer:v2.34.0`, Native AOT)
-- **Verbara.Platform.Mail** `v2.34.0` (imagen `ghcr.io/verbara/platform/mail:v2.34.0`, Native AOT)
-- **Verbara.Platform.Web** `v3.27.1-web` (imagen `ghcr.io/verbara/platform/web:v3.27.1-web`)
+Esta guía aplica a la release **Platform `v2.41.3`** con la consola **Web `v3.32.1-web`** — el par que fijan los defaults de `docker/docker-compose.reference-smb.yml` y `docker/.env.reference-smb.example` (CI verifica que coincidan):
+- **Verbara.Platform.Api** `v2.41.3` (imagen `ghcr.io/verbara/platform/api:v2.41.3`, Native AOT)
+- **Verbara.Platform.Realtime** `v2.41.3` (imagen `ghcr.io/verbara/platform/realtime:v2.41.3`) — microservicio SignalR Hub (ADR-0022 Phase A)
+- **Verbara.Platform.Renderer** `v2.41.3` (imagen `ghcr.io/verbara/platform/renderer:v2.41.3`, Native AOT)
+- **Verbara.Platform.Mail** `v2.41.3` (imagen `ghcr.io/verbara/platform/mail:v2.41.3`, Native AOT)
+- **Verbara.Platform.Web** `v3.32.1-web` (imagen `ghcr.io/verbara/platform/web:v3.32.1-web`)
 - **nginx** `1.27-alpine` — actúa de gateway frente a Web + Api + Realtime, sirviendo el host port 80 (refleja la topología K8s Cilium HTTPRoute)
 - **Asterisk** 22 (build local desde `docker/Dockerfile.asterisk`)
 - **Postgres** 18-alpine
@@ -140,10 +140,10 @@ Las cinco imágenes Verbara están **firmadas con cosign** (ADR-0023) — antes 
 ```bash
 $ for img in api realtime renderer mail; do \
     cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-        ghcr.io/verbara/platform/$img:v2.34.0; \
+        ghcr.io/verbara/platform/$img:v2.41.3; \
   done
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-    ghcr.io/verbara/platform/web:v3.27.1-web
+    ghcr.io/verbara/platform/web:v3.32.1-web
 ```
 > `--insecure-ignore-tlog` es **obligatorio**: el workflow de release firma con `--signing-config` + `tlog-upload=false`, así que la firma es válida offline pero no está en la transparency log de Sigstore. La clave pública `docker/cosign.pub` sigue siendo el root of trust.
 

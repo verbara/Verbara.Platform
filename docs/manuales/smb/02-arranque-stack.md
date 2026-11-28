@@ -14,7 +14,7 @@ $ sudo mkdir -p /opt/verbara && sudo chown $USER:$USER /opt/verbara
 $ cd /opt/verbara
 $ git clone https://github.com/verbara/platform.git
 $ cd platform
-$ git checkout v2.34.0     # el tag de la release a deployar
+$ git checkout v2.41.3     # el tag de la release a deployar
 ```
 
 > 💡 Si querés un workdir distinto (ej. `/srv/verbara` o `/home/operator/verbara`), reemplazá `/opt/verbara` por lo que prefieras — el manual asume `/opt/verbara/platform` de aquí en adelante.
@@ -28,9 +28,11 @@ docker/docker-compose.reference-smb.yml
 scripts/quickstart-smb.sh
 ```
 
-Si alguno no aparece, estás en un commit/tag viejo — re-checkout a `v2.34.0` o superior.
+Si alguno no aparece, estás en un commit/tag viejo — re-checkout a `v2.41.3` o superior.
 
-> ⚠️ **El tag que hacés checkout decide qué corrés**: el compose y el `.env` de ejemplo de ese tag fijan el par de imágenes (`PLATFORM_API_TAG=v2.34.0` para api/realtime/renderer/mail, `PLATFORM_WEB_TAG=v3.27.1-web` para la consola). No mezcles el compose de un tag con imágenes de otro.
+> ⚠️ **El tag que hacés checkout decide qué corrés**: el compose y el `.env` de ejemplo de ese tag fijan el par de imágenes (`PLATFORM_API_TAG=v2.41.3` para api/realtime/renderer/mail, `PLATFORM_WEB_TAG=v3.32.1-web` para la consola). No mezcles el compose de un tag con imágenes de otro.
+>
+> En el tag `v2.41.3` los defaults del compose y del `.env` de ejemplo todavía nombran el par anterior (`v2.34.0` y `v3.27.1-web`); desde la release siguiente nombran `v2.41.3` y `v3.32.1-web`. Si hacés checkout de `v2.41.3`, poné esos dos valores en `PLATFORM_API_TAG` y `PLATFORM_WEB_TAG` de tu `.env` (sección 3).
 
 ## 2. Verificar firmas de las imágenes (opcional pero recomendado)
 
@@ -51,16 +53,16 @@ Verificar las cinco imágenes:
 $ cd /opt/verbara/platform
 $ for img in api realtime renderer mail; do
     cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-        ghcr.io/verbara/platform/$img:v2.34.0
+        ghcr.io/verbara/platform/$img:v2.41.3
   done
 
 $ cosign verify --key docker/cosign.pub --insecure-ignore-tlog \
-    ghcr.io/verbara/platform/web:v3.27.1-web
+    ghcr.io/verbara/platform/web:v3.32.1-web
 ```
 
 Esperado en cada caso:
 ```
-Verification for ghcr.io/verbara/platform/api:v2.34.0 --
+Verification for ghcr.io/verbara/platform/api:v2.41.3 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - The signatures were verified against the specified public key

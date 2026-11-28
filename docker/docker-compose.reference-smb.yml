@@ -150,7 +150,7 @@ services:
   # Platform.Api — composition root. Pinned to this file's release (see 5) above).
   # ──────────────────────────────────────────────────────────────────────
   platform-api:
-    image: ghcr.io/verbara/platform/api:${PLATFORM_API_TAG:-v2.34.0}
+    image: ghcr.io/verbara/platform/api:${PLATFORM_API_TAG:-v2.41.3}
     container_name: verbara-platform-api
     logging: *default-logging
     # Open files. Docker's default soft limit is 1024, and the native-AOT Api does not raise it
@@ -287,7 +287,7 @@ services:
   # validates the console's tokens against the API's key pool in Redis.
   # ──────────────────────────────────────────────────────────────────────
   realtime:
-    image: ghcr.io/verbara/platform/realtime:${PLATFORM_API_TAG:-v2.34.0}
+    image: ghcr.io/verbara/platform/realtime:${PLATFORM_API_TAG:-v2.41.3}
     container_name: verbara-realtime
     logging: *default-logging
     environment:
@@ -333,7 +333,7 @@ services:
   # web + api + realtime under one hostname (ADR-0022 Phase A).
   # ──────────────────────────────────────────────────────────────────────
   web:
-    image: ghcr.io/verbara/platform/web:${PLATFORM_WEB_TAG:-v3.27.1-web}
+    image: ghcr.io/verbara/platform/web:${PLATFORM_WEB_TAG:-v3.32.1-web}
     container_name: verbara-web
     logging: *default-logging
     expose:
@@ -479,7 +479,7 @@ services:
   # Pinned to this file's release on ghcr.io (ADR-0023, Native AOT).
   # ──────────────────────────────────────────────────────────────────────
   renderer:
-    image: ghcr.io/verbara/platform/renderer:${PLATFORM_API_TAG:-v2.34.0}
+    image: ghcr.io/verbara/platform/renderer:${PLATFORM_API_TAG:-v2.41.3}
     container_name: verbara-renderer
     logging: *default-logging
     environment:
@@ -505,7 +505,7 @@ services:
   # Pinned to this file's release on ghcr.io (ADR-0023, Native AOT).
   # ──────────────────────────────────────────────────────────────────────
   mail:
-    image: ghcr.io/verbara/platform/mail:${PLATFORM_API_TAG:-v2.34.0}
+    image: ghcr.io/verbara/platform/mail:${PLATFORM_API_TAG:-v2.41.3}
     container_name: verbara-mail
     logging: *default-logging
     environment:

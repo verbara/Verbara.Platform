@@ -45,6 +45,27 @@ ASTERISK_VERSION=22
 """
 
 
+def _platform_changelog(versions=("2.33.1", "2.33.0", "2.32.0")):
+    out = "# Changelog\n\n## [Unreleased]\n\n- Something unreleased.\n\n"
+    for v in versions:
+        out += f"## [{v}] - 2026-10-28\n\n- A release.\n\n"
+    return out
+
+
+def _helm_values(web=_WEB):
+    return f"""api:
+  image:
+    repository: ghcr.io/verbara/platform/api
+    tag: "v2.33.1"
+web:
+  image:
+    # The Web pin the SMB reference stack pairs with this API line.
+    repository: ghcr.io/verbara/platform/web
+    tag: "{web}"
+  replicas: 1
+"""
+
+
 def _changelog(sections):
     out = "# Changelog\n\n## [Unreleased]\n\n- **Something unreleased (requires Platform ≥ v9.9.9).**\n\n"
     for heading, body in sections:
@@ -70,10 +91,16 @@ class _Fixture(unittest.TestCase):
             fh.write(text)
         return p
 
-    def run_guard(self, compose=None, template=None, changelog=None, follower=None):
+    def run_guard(self, compose=None, template=None, changelog=None, follower=None, platform_changelog=None,
+                  helm_values=None, extra=()):
         args = [sys.executable, _SCRIPT,
                 "--compose", self._write("compose.yml", compose if compose is not None else _compose()),
-                "--template", self._write("env.example", template if template is not None else _template())]
+                "--template", self._write("env.example", template if template is not None else _template()),
+                "--changelog", self._write("PLATFORM-CHANGELOG.md", platform_changelog if platform_changelog is not None
+                                           else _platform_changelog())]
+        if helm_values is not None:
+            args += ["--helm-values", self._write("values.yaml", helm_values)]
+        args += list(extra)
         if changelog is not None:
             args += ["--web-changelog", self._write("CHANGELOG.md", changelog)]
         if follower is not None:
@@ -199,6 +226,7 @@ class InputTests(_Fixture):
         args = [sys.executable, _SCRIPT,
                 "--compose", self._write("compose.yml", _compose()),
                 "--template", self._write("env.example", _template()),
+                "--changelog", self._write("PLATFORM-CHANGELOG.md", _platform_changelog()),
                 "--web-changelog", os.path.join(self.dir, "nope.md")]
         r = subprocess.run(args, capture_output=True, text=True, check=False)
         self.assertNotEqual(r.returncode, 0)
@@ -253,6 +281,111 @@ class WebFollowerTests(_Fixture):
                            capture_output=True, text=True, check=False, cwd=root)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("docker-compose.production.yml", r.stdout)
+
+class ApiLagTests(_Fixture):
+    """The reference stack's API pin is a Platform release no more than --max-lag releases behind the newest released
+    CHANGELOG heading, the newest one set aside (it may be the release being cut) — issue #704: the stack ran v2.34.0
+    while v2.41.3 was out, so its Web pin could not move either."""
+
+    def test_main_ShouldExitZero_WhenTheApiPinIsTheNewestRelease(self):
+        r = self.run_guard()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_main_ShouldExitZero_WhenTheBumpPrAddsTheNextHeading(self):
+        r = self.run_guard(platform_changelog=_platform_changelog(("2.34.0", "2.33.1", "2.33.0")),
+                           extra=("--max-lag", "0"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_main_ShouldExitZero_WhenTheApiPinTrailsByMaxLag(self):
+        log = _platform_changelog(("2.36.0", "2.35.0", "2.34.0", "2.33.1"))
+        r = self.run_guard(platform_changelog=log)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_main_ShouldFailNamingThePinAndTheNewest_WhenTheApiPinTrailsByMoreThanMaxLag(self):
+        log = _platform_changelog(("2.37.0", "2.36.0", "2.35.0", "2.34.0", "2.33.1"))
+        r = self.run_guard(platform_changelog=log)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        out = r.stdout + r.stderr
+        self.assertIn(_API, out)
+        self.assertIn("2.37.0", out)
+
+    def test_main_ShouldSortBySemver_WhenHeadingsAreOutOfOrder(self):
+        log = _platform_changelog(("2.33.1", "2.10.0", "2.9.0", "2.8.0", "2.37.0", "2.36.0", "2.35.0", "2.34.0"))
+        r = self.run_guard(platform_changelog=log)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_main_ShouldIgnoreUnreleased_WhenCountingTheLag(self):
+        log = _platform_changelog(("2.35.0", "2.34.0", "2.33.1")).replace("## [Unreleased]", "## [Unreleased]\n\n## [Unreleased]")
+        r = self.run_guard(platform_changelog=log, extra=("--max-lag", "0"))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        r = self.run_guard(platform_changelog=_platform_changelog(("2.34.0", "2.33.1")), extra=("--max-lag", "0"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_main_ShouldFail_WhenTheApiPinIsNotAReleasedHeading(self):
+        r = self.run_guard(platform_changelog=_platform_changelog(("2.34.0", "2.33.0")))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("not a release", r.stdout + r.stderr)
+
+    def test_main_ShouldFailWithInputError_WhenTheChangelogHasNoReleasedHeading(self):
+        r = self.run_guard(platform_changelog="# Changelog\n\n## [Unreleased]\n")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+
+def _web_changelog(versions, floor="v2.33.0"):
+    return _changelog([(v, f"**Requires Platform ≥ {floor}**.") for v in versions])
+
+
+class WebLagTests(_Fixture):
+    """With --web-changelog, the Web pin is a Web release no more than --max-lag releases behind the newest released
+    `X.Y.Z-web` heading (issue #704: v3.27.1-web while v3.32.1-web was out)."""
+
+    def test_main_ShouldExitZero_WhenTheWebPinTrailsByMaxLag(self):
+        log = _web_changelog(("3.30.0-web", "3.29.0-web", "3.28.0-web", "3.27.1-web"))
+        r = self.run_guard(changelog=log)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_main_ShouldFailNamingThePinAndTheNewest_WhenTheWebPinTrailsByMoreThanMaxLag(self):
+        log = _web_changelog(("3.32.1-web", "3.32.0-web", "3.31.0-web", "3.30.0-web", "3.29.0-web", "3.28.0-web",
+                              "3.27.1-web"))
+        r = self.run_guard(changelog=log)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        out = r.stdout + r.stderr
+        self.assertIn(_WEB, out)
+        self.assertIn("3.32.1-web", out)
+
+    def test_main_ShouldReadPreSuffixHeadings_WhenCountingTheWebLag(self):
+        # Before the -web suffix the Web CHANGELOG headed its releases `## [X.Y.Z]`; they count as releases too.
+        log = _web_changelog(("3.27.0", "3.26.0"))
+        r = self.run_guard(compose=_compose(web="v3.26.0-web"), template=_template(web="v3.26.0-web"), changelog=log,
+                           extra=("--max-lag", "0"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
+class HelmWebFollowerTests(_Fixture):
+    """The Kubernetes chart's Web image follows the reference stack's Web pin (infra/k8s/helm/platform/values.yaml)."""
+
+    def test_main_ShouldExitZero_WhenTheChartWebTagEqualsTheTemplate(self):
+        r = self.run_guard(helm_values=_helm_values())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_main_ShouldFailNamingBothValues_WhenTheChartWebTagDiffers(self):
+        r = self.run_guard(helm_values=_helm_values(web="v3.20.0-web"))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        out = r.stdout + r.stderr
+        self.assertIn("v3.20.0-web", out)
+        self.assertIn(_WEB, out)
+
+    def test_main_ShouldNotReadTheApiTag_WhenLookingForTheChartWebTag(self):
+        values = _helm_values().replace(f'    tag: "{_WEB}"\n', "")
+        r = self.run_guard(helm_values=values)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("web.image.tag", r.stdout + r.stderr)
+
+    def test_main_ShouldCheckTheChart_WhenRunWithTheDefaults(self):
+        r = subprocess.run([sys.executable, _SCRIPT], capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("values.yaml", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
